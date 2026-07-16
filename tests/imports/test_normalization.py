@@ -202,3 +202,70 @@ def test_validation_error_uses_physical_export_row_number() -> None:
 
     with pytest.raises(LangfuseImportError, match="row 3"):
         normalize_langfuse_observations(rows, project_id="project-1")
+
+
+def test_duplicate_rows_with_nan_like_strings_deduplicate_cleanly() -> None:
+    # "NaN" is not decodable as strict JSON, so the payload stays a plain
+    # string and two identical duplicate rows compare equal instead of
+    # tripping the conflicting-rows check (NaN != NaN would abort the import).
+    row = {
+        "id": "span-1",
+        "traceId": "trace-1",
+        "type": "SPAN",
+        "name": "span",
+        "startTime": "2026-07-15T10:00:00Z",
+        "endTime": "2026-07-15T10:00:01Z",
+        "input": "NaN",
+    }
+
+    trace = normalize_langfuse_observations([row, dict(row)], project_id="project-1")[0]
+
+    assert len(trace.observations) == 1
+    assert trace.observations[0].input == "NaN"
+
+
+def test_non_finite_numbers_are_dropped_from_usage_and_cost() -> None:
+    trace = normalize_langfuse_observations(
+        [
+            {
+                "id": "generation-1",
+                "traceId": "trace-1",
+                "type": "GENERATION",
+                "name": "answer",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:01Z",
+                "latencyMs": "Infinity",
+                "calculatedTotalCost": float("inf"),
+                "usageDetails": {"input": float("nan"), "unit": "tokens"},
+            }
+        ],
+        project_id="project-1",
+    )[0]
+    observation = trace.observations[0]
+
+    assert observation.latency_ms is None
+    assert observation.cost is None
+    assert observation.usage is not None
+    assert observation.usage.input is None
+
+
+def test_deeply_nested_payload_fails_as_import_error() -> None:
+    nested: object = "leaf"
+    for _ in range(5_000):
+        nested = [nested]
+
+    with pytest.raises(LangfuseImportError):
+        normalize_langfuse_observations(
+            [
+                {
+                    "id": "span-1",
+                    "traceId": "trace-nested",
+                    "type": "SPAN",
+                    "name": "span",
+                    "startTime": "2026-07-15T10:00:00Z",
+                    "endTime": "2026-07-15T10:00:01Z",
+                    "input": nested,
+                }
+            ],
+            project_id="project-1",
+        )

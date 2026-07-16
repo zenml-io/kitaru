@@ -51,6 +51,7 @@ from kitaru._config._active_context import (
 )
 from kitaru._config._stacks import MODAL_ORCHESTRATOR_FLAVOR
 from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV, _temporary_env
+from kitaru._import_contract import raise_if_imported_execution
 from kitaru._interface_deployments import (
     Deployment,
     ensure_stack_is_server_runnable,
@@ -2313,6 +2314,7 @@ class _FlowDefinition:
                     hydrate=True,
                     project=_connection_project(validated_connection),
                 )
+                raise_if_imported_execution(original_run, "replayed")
                 original_id = str(original_run.id)
                 if resolved_on_error == "collect":
                     at_status = replay_at_status(run=original_run, at=at)

@@ -8,10 +8,12 @@ from zenml.client import Client
 
 import kitaru.imports._writer as imported_trace_writer
 from kitaru.client import KitaruClient
+from kitaru.errors import KitaruStateError
 from kitaru.imports import normalize_langfuse_observations, read_langfuse_jsonl
 from kitaru.imports._writer import (
     ImportedTraceConflictError,
     ImportedTracePersistenceError,
+    ImportedTraceWriteError,
     persist_imported_trace,
 )
 
@@ -307,13 +309,20 @@ def test_interrupted_import_resumes_missing_steps(
         return create_run_step(self, request)
 
     monkeypatch.setattr(store_type, "create_run_step", interrupt_second_step)
-    with pytest.raises(RuntimeError, match="synthetic interruption"):
+    with pytest.raises(ImportedTraceWriteError, match="synthetic interruption") as exc:
         persist_imported_trace(trace, agent_name="support-agent")
+
+    # The interrupted attempt must not orphan a forever-RUNNING execution:
+    # the created run is reported and left in a terminal failed state.
+    orphan_id = exc.value.execution_id
+    interrupted = KitaruClient().executions.get(orphan_id)
+    assert interrupted.status.value == "failed"
 
     monkeypatch.setattr(store_type, "create_run_step", create_run_step)
     resumed = persist_imported_trace(trace, agent_name="support-agent")
     execution = KitaruClient().executions.get(resumed.execution_id)
 
+    assert resumed.execution_id == orphan_id
     assert resumed.created is False
     assert resumed.resumed is True
     assert execution.status.value == "completed"
@@ -357,3 +366,32 @@ def test_interrupted_metadata_write_is_repaired_on_resume(
     assert resumed.resumed is True
     assert generation.adapter == "langfuse_import"
     assert generation.llm_usage_records[0]["usage"]["total_tokens"] == 16
+
+
+def test_failed_imported_execution_cannot_be_retried(primed_zenml: None) -> None:
+    del primed_zenml
+    root_error = normalize_langfuse_observations(
+        [
+            {
+                "id": "agent-error",
+                "traceId": "trace-retry-guard",
+                "type": "AGENT",
+                "name": "agent",
+                "startTime": "2026-07-15T10:00:00Z",
+                "endTime": "2026-07-15T10:00:01Z",
+                "level": "ERROR",
+                "statusMessage": "Synthetic root failure",
+            }
+        ],
+        project_id="project-1",
+    )[0]
+    result = persist_imported_trace(root_error, agent_name="support-agent")
+    client = KitaruClient()
+
+    with pytest.raises(KitaruStateError, match="imported from an external trace"):
+        client.executions.retry(result.execution_id)
+
+    # The guard fires before any state transition, so the imported record
+    # never leaves its terminal status.
+    execution = client.executions.get(result.execution_id)
+    assert execution.status.value == "failed"

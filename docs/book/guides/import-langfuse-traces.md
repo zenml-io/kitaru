@@ -16,9 +16,9 @@ SDK, and execution CLI.
 
 {% hint style="warning" %}
 Imported executions are historical synthetic records. They are not executable
-flow snapshots and cannot currently be replayed, resumed, or retried. Import is
-the inspection foundation for external traces, not yet a reconstruction or
-re-execution mechanism.
+flow snapshots, and Kitaru refuses to replay, resume, retry, or cancel them
+with a clear read-only error. Import is the inspection foundation for external
+traces, not yet a reconstruction or re-execution mechanism.
 {% endhint %}
 
 ## What Kitaru stores

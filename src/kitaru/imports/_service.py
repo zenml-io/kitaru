@@ -23,6 +23,7 @@ from kitaru.imports._writer import (
     ImportedTraceConflictError,
     ImportedTracePersistenceError,
     ImportedTracePlan,
+    ImportedTraceWriteError,
     imported_flow_name,
     persist_imported_trace,
     plan_imported_trace,
@@ -190,6 +191,13 @@ def import_langfuse_jsonl(
                 existing_execution_id=exc.existing_execution_id,
                 reason=str(exc),
                 resolution=exc.resolution,
+            )
+        except ImportedTraceWriteError as exc:
+            return _outcome(
+                trace,
+                ImportOutcomeStatus.FAILED,
+                execution_id=exc.execution_id,
+                reason=str(exc),
             )
         except ImportedTracePersistenceError as exc:
             return _outcome(trace, ImportOutcomeStatus.REJECTED, reason=str(exc))

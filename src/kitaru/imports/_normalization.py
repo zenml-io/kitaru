@@ -3,6 +3,7 @@
 import hashlib
 import heapq
 import json
+import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -10,7 +11,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from kitaru.imports._langfuse import LangfuseImportError
+from kitaru.imports._langfuse import LangfuseImportError, strict_json_loads
 from kitaru.imports._models import (
     ImportedObservation,
     ImportedTrace,
@@ -70,10 +71,20 @@ def _normalize_grouped_traces(
     *,
     project_id: str,
 ) -> list[ImportedTrace]:
-    traces = [
-        _normalize_trace(trace_id, trace_rows, project_id=project_id)
-        for trace_id, trace_rows in grouped.items()
-    ]
+    traces = []
+    for trace_id, trace_rows in grouped.items():
+        try:
+            traces.append(_normalize_trace(trace_id, trace_rows, project_id=project_id))
+        except LangfuseImportError:
+            raise
+        # Payload trees below json.loads's depth limit can still overflow
+        # Python-level normalization: digesting raises RecursionError, and
+        # pydantic serialization raises ValueError ("depth exceeded").
+        # Surface both as a clean import error, not an unhandled traceback.
+        except (RecursionError, ValueError) as exc:
+            raise LangfuseImportError(
+                f"Trace {trace_id!r} could not be normalized: {exc}"
+            ) from exc
     return sorted(
         traces,
         key=lambda trace: (
@@ -215,9 +226,9 @@ def _normalize_observation(
             cost=_cost(row),
             latency_ms=_optional_number(_first(row, "latencyMs", "latency_ms")),
         )
+    except LangfuseImportError:
+        raise
     except (TypeError, ValidationError, ValueError) as exc:
-        if isinstance(exc, LangfuseImportError):
-            raise
         raise LangfuseImportError(
             f"Invalid Langfuse observation in row {row_number}: {exc}"
         ) from exc
@@ -374,8 +385,10 @@ def _parse_json_string(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     try:
-        return json.loads(value)
-    except json.JSONDecodeError:
+        return strict_json_loads(value)
+    # Values that are not valid JSON (including NaN/Infinity extensions and
+    # payloads too deep to decode) stay as opaque strings.
+    except (RecursionError, ValueError):
         return value
 
 
@@ -420,14 +433,16 @@ def _optional_string(value: Any) -> str | None:
 def _optional_number(value: Any) -> float | int | None:
     if value is None or isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
-        return value
     if isinstance(value, str):
         try:
             parsed = float(value)
         except ValueError:
             return None
-        return int(parsed) if parsed.is_integer() else parsed
+        value = int(parsed) if parsed.is_integer() else parsed
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, (int, float)):
+        return value
     return None
 
 

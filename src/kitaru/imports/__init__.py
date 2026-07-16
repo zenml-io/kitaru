@@ -23,6 +23,7 @@ from kitaru.imports._writer import (
     ImportedExecutionResult,
     ImportedTraceConflictError,
     ImportedTracePersistenceError,
+    ImportedTraceWriteError,
 )
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "ImportedTrace",
     "ImportedTraceConflictError",
     "ImportedTracePersistenceError",
+    "ImportedTraceWriteError",
     "LangfuseImportError",
     "LangfuseImportResult",
     "ObservationKind",

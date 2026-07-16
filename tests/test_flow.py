@@ -273,6 +273,7 @@ class _DummyRun:
         self.end_time = end_time
         self.status_reason = status_reason
         self.run_metadata: dict[str, object] = {}
+        self.orchestrator_environment: dict[str, object] = {}
         if parameters is not None:
             self.config = SimpleNamespace(parameters=dict(parameters))
         self.exception_info = (
@@ -7250,6 +7251,7 @@ def test_unified_replay_single_defaults_to_wait_and_fail() -> None:
     run = SimpleNamespace(
         id="run-1",
         steps={"write": _replay_many_step(name="write", invocation_id="write")},
+        orchestrator_environment={},
     )
     handle = MagicMock(exec_id="replay-1")
     plan = ReplayPlan(
@@ -7278,10 +7280,12 @@ def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None
     run_with_at = SimpleNamespace(
         id="run-with",
         steps={"write": _replay_many_step(name="write", invocation_id="write")},
+        orchestrator_environment={},
     )
     run_without_at = SimpleNamespace(
         id="run-without",
         steps={"fetch": _replay_many_step(name="fetch", invocation_id="fetch")},
+        orchestrator_environment={},
     )
     handle = MagicMock(exec_id="replay-1")
     plan = ReplayPlan(
@@ -7317,3 +7321,24 @@ def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None
     assert len(submission.results) == 1
     assert len(submission.skipped) == 1
     assert submission.skipped[0].original_exec_ref == "exec-without"
+
+
+def test_unified_replay_rejects_imported_execution() -> None:
+    from kitaru._import_contract import IMPORTED_EXECUTION_ENVIRONMENT_KEY
+    from kitaru.errors import KitaruStateError
+
+    imported_run = SimpleNamespace(
+        id="run-imported",
+        steps={"write": _replay_many_step(name="write", invocation_id="write")},
+        orchestrator_environment={IMPORTED_EXECUTION_ENVIRONMENT_KEY: True},
+    )
+    wrapped = kitaru.flow(lambda topic: topic)
+    with (
+        patch("kitaru.flow.Client") as client_cls,
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = imported_run
+
+        with pytest.raises(KitaruStateError, match="imported from an external trace"):
+            wrapped.replay("run-imported", at="write")

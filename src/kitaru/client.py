@@ -129,6 +129,7 @@ from kitaru._client._statistics import (
     normalize_execution_statistics_groupings,
     normalize_execution_statistics_metrics,
 )
+from kitaru._import_contract import raise_if_imported_execution
 from kitaru._interface_deployments import (
     Deployment,
     DeploymentSelectorSource,
@@ -1490,6 +1491,7 @@ class _ExecutionsAPI:
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "retried")
         run_status_value = _run_status_value(run)
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
@@ -1511,6 +1513,7 @@ class _ExecutionsAPI:
     def resume(self, exec_id: str) -> Execution:
         """Resume a paused execution after all waits are resolved."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "resumed")
         pending_conditions = _list_pending_wait_conditions(
             run=run,
             client=self._client_ref,
@@ -1614,6 +1617,7 @@ class _ExecutionsAPI:
             raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
 
         first_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
+        raise_if_imported_execution(first_run, "replayed")
         _raise_if_running_source(first_run, exec_ids[0])
 
         replay_flow: _ReplayFlowLike | None = None
@@ -1717,6 +1721,7 @@ class _ExecutionsAPI:
                     source_run = self._client_ref._get_pipeline_run(
                         exec_ref, hydrate=True
                     )
+                raise_if_imported_execution(source_run, "replayed")
                 _raise_if_running_source(source_run, exec_ref)
                 original_id = str(source_run.id)
                 if on_error == "collect":
@@ -2183,6 +2188,7 @@ class _ExecutionsAPI:
     def cancel(self, exec_id: str) -> Execution:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "cancelled")
         stop_run(run=run, graceful=False)
         track(AnalyticsEvent.EXECUTION_CANCELLED, {})
         return self.get(exec_id)

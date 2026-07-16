@@ -11,9 +11,13 @@ from kitaru.errors import KitaruUsageError
 from kitaru.imports import (
     ImportedExecutionResult,
     ImportedTraceConflictError,
+    ImportedTraceWriteError,
     ImportOutcomeStatus,
     import_langfuse_jsonl,
 )
+
+# Captured before the autouse fixture stubs it out on the module.
+from kitaru.imports._service import _load_artifact_store as _real_load_artifact_store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "langfuse_observations.jsonl"
 
@@ -385,3 +389,122 @@ def test_rejects_invalid_options() -> None:
             agent_name=" ",
             client=_client(),
         )
+
+
+def test_backend_failure_is_isolated_to_one_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def persist(trace, *, agent_name, client, stack_id, artifact_store):
+        del agent_name, client, stack_id, artifact_store
+        if trace.source.trace_id == "trace-root-omitted":
+            raise RuntimeError("synthetic backend timeout")
+        return ImportedExecutionResult(
+            execution_id="execution-created",
+            created=True,
+            resumed=False,
+            observation_count=len(trace.observations),
+        )
+
+    monkeypatch.setattr("kitaru.imports._service.persist_imported_trace", persist)
+
+    result = import_langfuse_jsonl(
+        FIXTURE,
+        source_project_id="source-project",
+        agent_name="support-agent",
+        dry_run=False,
+        confirm_data_storage=True,
+        allow_fragmented=True,
+        client=_client(),
+    )
+
+    outcomes = {outcome.trace_id: outcome for outcome in result.outcomes}
+    failed = outcomes["trace-root-omitted"]
+    assert failed.status is ImportOutcomeStatus.FAILED
+    assert failed.reason == "synthetic backend timeout"
+    assert failed.execution_id is None
+    assert all(
+        outcome.status is ImportOutcomeStatus.CREATED
+        for trace_id, outcome in outcomes.items()
+        if trace_id != "trace-root-omitted"
+    )
+
+
+def test_interrupted_write_reports_the_execution_it_left_behind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def persist(*args, **kwargs):
+        del args, kwargs
+        raise ImportedTraceWriteError(
+            "synthetic mid-write failure",
+            execution_id="execution-orphan",
+        )
+
+    monkeypatch.setattr("kitaru.imports._service.persist_imported_trace", persist)
+
+    result = import_langfuse_jsonl(
+        FIXTURE,
+        source_project_id="source-project",
+        agent_name="support-agent",
+        trace_ids=["trace-complete"],
+        dry_run=False,
+        confirm_data_storage=True,
+        client=_client(),
+    )
+
+    outcome = result.outcomes[0]
+    assert outcome.status is ImportOutcomeStatus.FAILED
+    assert outcome.execution_id == "execution-orphan"
+    assert "synthetic mid-write failure" in (outcome.reason or "")
+
+
+def test_stack_must_contain_exactly_one_artifact_store() -> None:
+    client = _client()
+    client.active_stack_model.components["artifact_store"] = []
+
+    with pytest.raises(KitaruUsageError, match="exactly one artifact store"):
+        import_langfuse_jsonl(
+            FIXTURE,
+            source_project_id="source-project",
+            agent_name="support-agent",
+            client=client,
+        )
+
+
+def test_blank_stack_name_is_rejected() -> None:
+    with pytest.raises(KitaruUsageError, match="non-empty name or ID"):
+        import_langfuse_jsonl(
+            FIXTURE,
+            source_project_id="source-project",
+            agent_name="support-agent",
+            stack="   ",
+            client=_client(),
+        )
+
+
+def test_unresolvable_stack_is_rejected() -> None:
+    client = _client()
+    client.get_stack.side_effect = RuntimeError("stack lookup exploded")
+
+    with pytest.raises(KitaruUsageError, match="Could not resolve stack"):
+        import_langfuse_jsonl(
+            FIXTURE,
+            source_project_id="source-project",
+            agent_name="support-agent",
+            stack="missing-stack",
+            client=client,
+        )
+
+
+def test_failed_artifact_store_load_is_a_usage_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "kitaru.imports._service.StackComponent",
+        SimpleNamespace(
+            from_model=MagicMock(side_effect=RuntimeError("flavor not installed"))
+        ),
+    )
+    component = SimpleNamespace(flavor_name="s3", name="artifacts")
+
+    with pytest.raises(KitaruUsageError, match="Could not load artifact store"):
+        _real_load_artifact_store(component)

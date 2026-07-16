@@ -1,6 +1,7 @@
 """Persist imported traces as synthetic ZenML executions."""
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -38,6 +39,7 @@ from zenml.utils import source_utils
 
 from kitaru._checkpoint_metadata import adapter_checkpoint_metadata
 from kitaru._import_contract import (
+    IMPORTED_EXECUTION_ENVIRONMENT_KEY,
     IMPORTED_OBSERVATION_ID_METADATA_KEY,
     IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY,
 )
@@ -55,6 +57,8 @@ from kitaru.imports._models import (
     SourceObservationType,
     TraceIntegrity,
 )
+
+logger = logging.getLogger(__name__)
 
 _IMPORT_SCHEMA_VERSION = 4
 _IMPORT_TAG = "kitaru-imported"
@@ -84,6 +88,18 @@ class ImportedTraceConflictError(ImportedTracePersistenceError):
         super().__init__(message)
         self.existing_execution_id = existing_execution_id
         self.resolution = resolution
+
+
+class ImportedTraceWriteError(ImportedTracePersistenceError):
+    """Raised when persistence fails after the synthetic run already exists.
+
+    Carries the execution ID so callers can report which run was left behind
+    in a failed state instead of silently orphaning it.
+    """
+
+    def __init__(self, message: str, *, execution_id: str) -> None:
+        super().__init__(message)
+        self.execution_id = execution_id
 
 
 class ImportedTracePlan(StrEnum):
@@ -129,9 +145,9 @@ def plan_imported_trace(
         agent_name=normalized_agent_name,
         stack_id=selected_stack_id,
     )
-    if existing_run.status.is_finished:
-        return ImportedTracePlan.UNCHANGED
-    return ImportedTracePlan.RESUME
+    if _needs_import_write(existing_run):
+        return ImportedTracePlan.RESUME
+    return ImportedTracePlan.UNCHANGED
 
 
 def _imported_observation_placeholder() -> None:
@@ -185,7 +201,7 @@ def persist_imported_trace(
             agent_name=normalized_agent_name,
             stack_id=selected_stack_id,
         )
-        if existing_run.status.is_finished:
+        if not _needs_import_write(existing_run):
             if existing_run.run_metadata.get(_IMPORT_STATUS_KEY) != "complete":
                 _write_run_metadata(
                     client=zenml_client,
@@ -272,15 +288,73 @@ def persist_imported_trace(
         run = existing_run
         created = False
 
+    try:
+        _write_imported_run(
+            client=zenml_client,
+            run=run,
+            project_id=project_id,
+            trace=trace,
+            agent_name=normalized_agent_name,
+            stack_id=selected_stack_id,
+            artifact_store=selected_artifact_store,
+            step_name_by_observation=step_name_by_observation,
+            step_metadata_by_observation=step_metadata_by_observation,
+            step_config_by_observation=step_config_by_observation,
+        )
+    except Exception as exc:
+        _mark_import_write_failed(
+            client=zenml_client,
+            run_id=run.id,
+            trace=trace,
+            agent_name=normalized_agent_name,
+            stack_id=selected_stack_id,
+            reason=str(exc),
+        )
+        raise ImportedTraceWriteError(
+            f"Importing trace {trace.source.trace_id!r} failed after execution "
+            f"{run.id} was created; the execution was marked failed and "
+            f"re-importing the same export will resume it. Cause: {exc}",
+            execution_id=str(run.id),
+        ) from exc
+    return ImportedExecutionResult(
+        execution_id=str(run.id),
+        created=created,
+        resumed=not created,
+        observation_count=len(trace.observations),
+    )
+
+
+def _write_imported_run(
+    *,
+    client: Client,
+    run: PipelineRunResponse,
+    project_id: UUID,
+    trace: ImportedTrace,
+    agent_name: str,
+    stack_id: UUID,
+    artifact_store: Any,
+    step_name_by_observation: dict[str, str],
+    step_metadata_by_observation: dict[str, dict[str, Any]],
+    step_config_by_observation: dict[str, Step],
+) -> None:
+    """Reopen the run if needed, write all observations, finalize status."""
+    run_id = run.id
+    if run.status == ExecutionStatus.FAILED:
+        # A previous import attempt died mid-write and left the run failed.
+        # FAILED -> RESUMING is the only transition ZenML allows out of a
+        # finished run, so reopen it before writing.
+        client.zen_store.update_run(
+            run_id, PipelineRunUpdate(status=ExecutionStatus.RESUMING)
+        )
     _write_run_metadata(
-        client=zenml_client,
-        run_id=run.id,
+        client=client,
+        run_id=run_id,
         trace=trace,
-        agent_name=normalized_agent_name,
-        stack_id=selected_stack_id,
+        agent_name=agent_name,
+        stack_id=stack_id,
         status="importing",
     )
-    existing_steps = _steps_by_name(zenml_client, run_id=run.id)
+    existing_steps = _steps_by_name(client, run_id=run_id)
     step_ids_by_observation: dict[str, UUID] = {}
     output_ids_by_observation: dict[str, UUID] = {}
     for observation in trace.observations:
@@ -293,7 +367,7 @@ def persist_imported_trace(
             if output_artifacts:
                 output_ids_by_observation[observation.id] = output_artifacts[0].id
             _write_step_metadata(
-                client=zenml_client,
+                client=client,
                 step_id=existing_step.id,
                 metadata=metadata,
             )
@@ -306,7 +380,7 @@ def persist_imported_trace(
             observation=observation,
             step_name=step_name,
             role="input",
-            artifact_store=selected_artifact_store,
+            artifact_store=artifact_store,
         )
         output_artifact = _save_observation_artifact(
             observation.output,
@@ -314,7 +388,7 @@ def persist_imported_trace(
             observation=observation,
             step_name=step_name,
             role="output",
-            artifact_store=selected_artifact_store,
+            artifact_store=artifact_store,
         )
         parent_ids = []
         if observation.parent_id in step_ids_by_observation:
@@ -322,7 +396,7 @@ def persist_imported_trace(
             assert parent_id is not None
             parent_ids.append(step_ids_by_observation[parent_id])
         failed = observation.status is ObservationStatus.ERROR
-        step = zenml_client.zen_store.create_run_step(
+        step = client.zen_store.create_run_step(
             StepRunRequest(
                 project=project_id,
                 name=step_name,
@@ -331,7 +405,7 @@ def persist_imported_trace(
                 status=(
                     ExecutionStatus.FAILED if failed else ExecutionStatus.COMPLETED
                 ),
-                pipeline_run_id=run.id,
+                pipeline_run_id=run_id,
                 parent_step_ids=parent_ids,
                 inputs={input_name: [input_artifact.id]},
                 outputs={"output": [output_artifact.id]},
@@ -360,7 +434,7 @@ def persist_imported_trace(
         )
         step_ids_by_observation[observation.id] = step.id
         output_ids_by_observation[observation.id] = output_artifact.id
-        _write_step_metadata(client=zenml_client, step_id=step.id, metadata=metadata)
+        _write_step_metadata(client=client, step_id=step.id, metadata=metadata)
 
     root = _root_observation(trace)
     run_failed = _trace_failed(trace)
@@ -374,8 +448,8 @@ def persist_imported_trace(
     root_output_id = output_ids_by_observation.get(root.id)
     if root_output_id is not None:
         run_outputs["output"] = root_output_id
-    zenml_client.zen_store.update_run(
-        run.id,
+    client.zen_store.update_run(
+        run_id,
         PipelineRunUpdate(
             status=final_status,
             status_reason=final_reason,
@@ -392,19 +466,73 @@ def persist_imported_trace(
         ),
     )
     _write_run_metadata(
-        client=zenml_client,
-        run_id=run.id,
+        client=client,
+        run_id=run_id,
         trace=trace,
-        agent_name=normalized_agent_name,
-        stack_id=selected_stack_id,
+        agent_name=agent_name,
+        stack_id=stack_id,
         status="complete",
     )
-    return ImportedExecutionResult(
-        execution_id=str(run.id),
-        created=created,
-        resumed=not created,
-        observation_count=len(trace.observations),
+
+
+def _needs_import_write(run: PipelineRunResponse) -> bool:
+    """Whether a previously found synthetic run still needs observations.
+
+    A run left FAILED by an interrupted import (its import metadata never
+    reached "complete") is resumable. Any other finished run is fully
+    written: legitimately failed traces finish with "complete" metadata.
+    """
+    if not run.status.is_finished:
+        return True
+    return (
+        run.status == ExecutionStatus.FAILED
+        and run.run_metadata.get(_IMPORT_STATUS_KEY) != "complete"
     )
+
+
+def _mark_import_write_failed(
+    *,
+    client: Client,
+    run_id: UUID,
+    trace: ImportedTrace,
+    agent_name: str,
+    stack_id: UUID,
+    reason: str,
+) -> None:
+    """Best-effort: leave an interrupted import FAILED instead of RUNNING.
+
+    Both writes may hit the same backend outage that interrupted the import,
+    so failures here are logged and swallowed; the original error is what the
+    caller reports.
+    """
+    attempts = (
+        (
+            "mark interrupted import run as failed",
+            lambda: client.zen_store.update_run(
+                run_id,
+                PipelineRunUpdate(
+                    status=ExecutionStatus.FAILED,
+                    status_reason=f"Trace import was interrupted: {reason}",
+                ),
+            ),
+        ),
+        (
+            "record failed import status metadata",
+            lambda: _write_run_metadata(
+                client=client,
+                run_id=run_id,
+                trace=trace,
+                agent_name=agent_name,
+                stack_id=stack_id,
+                status="failed",
+            ),
+        ),
+    )
+    for description, attempt in attempts:
+        try:
+            attempt()
+        except Exception:
+            logger.debug("Failed to %s for run %s.", description, run_id, exc_info=True)
 
 
 def _validate_import(trace: ImportedTrace, *, agent_name: str) -> str:
@@ -824,7 +952,7 @@ def _import_environment(
     trace: ImportedTrace, *, agent_name: str, stack_id: UUID
 ) -> dict[str, Any]:
     return {
-        "kitaru_synthetic_import": True,
+        IMPORTED_EXECUTION_ENVIRONMENT_KEY: True,
         "kitaru_import_schema_version": _IMPORT_SCHEMA_VERSION,
         _SOURCE_PROVIDER_KEY: trace.source.provider,
         _SOURCE_PROJECT_KEY: trace.source.project_id,

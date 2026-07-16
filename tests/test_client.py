@@ -235,6 +235,7 @@ class _DummyRun:
         exception_traceback: str | None = None,
         active_wait_condition: Any = None,
         parameters: Mapping[str, Any] | None = None,
+        orchestrator_environment: Mapping[str, Any] | None = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
@@ -242,6 +243,7 @@ class _DummyRun:
         self.start_time = None
         self.end_time = None
         self.run_metadata = run_metadata or {}
+        self.orchestrator_environment = dict(orchestrator_environment or {})
         if parameters is not None:
             self.config = SimpleNamespace(parameters=dict(parameters))
         self.pipeline = SimpleNamespace(name=flow_name, id=flow_id or uuid4())
@@ -4672,6 +4674,57 @@ def test_retry_rejects_non_failed_execution() -> None:
         client = KitaruClient()
         with pytest.raises(RuntimeError, match="Only failed executions can be retried"):
             client.executions.retry(str(run.id))
+
+
+def _imported_dummy_run(*, status: Any) -> _DummyRun:
+    from kitaru._import_contract import IMPORTED_EXECUTION_ENVIRONMENT_KEY
+
+    return _DummyRun(
+        status=status,
+        flow_name="imported_flow",
+        orchestrator_environment={IMPORTED_EXECUTION_ENVIRONMENT_KEY: True},
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "status"),
+    [
+        ("retry", ZenMLExecutionStatus.FAILED),
+        ("resume", ZenMLExecutionStatus.PAUSED),
+        ("replay", ZenMLExecutionStatus.COMPLETED),
+        ("cancel", ZenMLExecutionStatus.RUNNING),
+    ],
+)
+def test_lifecycle_operations_reject_imported_executions(
+    operation: str, status: Any
+) -> None:
+    run = _imported_dummy_run(status=status)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.stop_run") as stop_run_mock,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(RuntimeError, match="imported from an external trace"):
+            if operation == "retry":
+                client.executions.retry(str(run.id))
+            elif operation == "resume":
+                client.executions.resume(str(run.id))
+            elif operation == "cancel":
+                client.executions.cancel(str(run.id))
+            else:
+                client.executions.replay(str(run.id), at="checkpoint_a")
+
+        # The guard must fire before any state mutation is attempted.
+        client_mock.zen_store.update_run.assert_not_called()
+        stop_run_mock.assert_not_called()
 
 
 def test_retry_rejects_missing_snapshot_stack_id_before_reopening() -> None:
