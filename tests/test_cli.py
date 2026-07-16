@@ -10332,6 +10332,34 @@ class TestCleanProject:
         assert "Would delete" in output
         assert ".kitaru" in output
 
+    def test_dry_run_shows_zero_byte_entry_sizes(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        tmp_path: Path,
+    ) -> None:
+        """Dry-run preview should show 0 B for empty files & directories."""
+        project_dir = tmp_path / ".kitaru"
+        project_dir.mkdir()
+        (project_dir / "config.yaml").write_text("active_stack: default\n")
+
+        empty_dir = project_dir / "empty_dir"
+        empty_dir.mkdir()
+
+        (project_dir / "empty_file.txt").touch()
+
+        with (
+            patch(
+                "kitaru._cleanup._resolve_repo_root",
+                return_value=tmp_path,
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            app(["clean", "project", "--dry-run"])
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "empty_dir (0 B)" in output
+        assert "empty_file.txt (0 B)" in output
+
     def test_dry_run_json_output(
         self,
         capsys: pytest.CaptureFixture[str],

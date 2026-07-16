@@ -47,7 +47,9 @@ def _render_preview_entry(
     prefix = " " * indent
     lines: list[str] = []
 
-    size_str = f" ({format_size(entry.size_bytes)})" if entry.size_bytes else ""
+    size_str = (
+        f" ({format_size(entry.size_bytes)})" if entry.size_bytes is not None else ""
+    )
     note_str = f" — {entry.note}" if entry.note else ""
 
     if entry.entry_type == PreviewEntryType.BACKUP:
