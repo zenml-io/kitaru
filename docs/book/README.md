@@ -22,12 +22,8 @@ call as a checkpoint, and self-hosts on your own infrastructure. For a natively
 recorded agent, Kitaru is the runtime the agent runs on; the replay-and-eval loop
 that turns production traffic into tests runs off to the side of the hot path.
 
-## Run, replay, improve
+## Replay, improve, run
 
-* **Run (durable).** Every `@checkpoint` is a durable unit of work; its output is
-  persisted automatically, and every model and tool call is recorded. If a flow
-  fails partway, replaying it reuses recorded results instead of re-running
-  expensive work.
 * **Replay (the verb).** Re-execute a recorded run from any checkpoint. A plain
   rerun with no change reproduces the original — that is your baseline. Replay
   again with one input overridden and diff the two. This re-executes the real run
@@ -35,6 +31,10 @@ that turns production traffic into tests runs off to the side of the hot path.
 * **Improve.** Apply the same change across a cohort of recent runs, measure
   cost, latency, and quality, and keep the winner. The cohort is a regression
   test you never had to write.
+* **Run (durable).** The beat that mints the recording: every model and tool
+  call lands as a durable checkpoint, persisted automatically. Recording a run
+  means surviving one — if a flow fails partway, the retry reuses recorded
+  results instead of re-running expensive work.
 
 Kitaru is self-host-first: a single-service server on your own Kubernetes,
 artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in the
@@ -43,42 +43,53 @@ how a run is recorded and where Kitaru sits in an agent stack.
 
 ## The replay loop
 
+No decorators, no graph, no rewrite. Wrap the agent you already have — Kitaru
+opens a flow around the call and records every model and tool call as a
+checkpoint:
+
 ```python
-import kitaru
-from kitaru import checkpoint, flow
+from pydantic_ai import Agent
+from kitaru.adapters.pydantic_ai import KitaruAgent
 
-@checkpoint
-def research(topic: str, model: str) -> str:
-    return kitaru.llm(f"Summarize {topic} in two sentences.", model=model)
+agent = Agent("openai:gpt-5-nano", name="support-agent",
+              system_prompt="You resolve support tickets.")
 
-@checkpoint
-def draft_report(summary: str, model: str) -> str:
-    return kitaru.llm(f"Write a short report based on: {summary}", model=model)
+@agent.tool_plain
+def refund_payment(order_id: str) -> str:
+    return payments.refund(order_id)  # your real API
 
-@flow
-def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
-    summary = research(topic, model)
-    return draft_report(summary, model)
-
-if __name__ == "__main__":
-    # Run, then replay from a checkpoint with one input changed.
-    handle = research_agent.run(topic="Why do agents need durable execution?")
-    handle.wait()
-
-    baseline = research_agent.replay(handle.exec_id, at="draft_report")
-    variant = research_agent.replay(
-        handle.exec_id,
-        at="draft_report",
-        flow_overrides={"model": "openai/gpt-5"},
-    )
-    # baseline reproduces the original; diff variant against it to isolate your change.
+support = KitaruAgent(agent)
+support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-`run(...)` returns a `FlowHandle` carrying `.exec_id`; `.wait()` blocks for the
-result. `replay(exec_id, at="<checkpoint>", flow_overrides={...})` re-executes
-from that checkpoint, overriding flow inputs such as the model. The same loop is
-available over the [CLI](https://sdkdocs.kitaru.ai) and the
-[MCP server](agent-native/mcp-server.md) so a coding agent can drive it.
+Every run is now an execution you can replay:
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+trace = client.executions.latest()
+
+# Reproduce: your real code runs again against the recorded world.
+# Unchanged, it matches the original exactly. That's your baseline.
+baseline = client.executions.replay(trace.exec_id, at="support-agent_model_request")
+
+# Fork: same execution, one thing changed — patch the recorded tool output.
+# What would the agent have done if the refund had succeeded?
+fork = client.executions.replay(
+    trace.exec_id,
+    at="refund_payment_tool",
+    checkpoint_overrides={
+        "refund_payment_tool": {"output": "refund issued: $129.00"},
+    },
+)
+```
+
+The same loop is available over the [CLI](https://sdkdocs.kitaru.ai) and the
+[MCP server](agent-native/mcp-server.md) so a coding agent can drive it. When
+you want named replay boundaries or multi-turn workflows without an adapter,
+the explicit [`@flow` and `@checkpoint`](concepts/checkpoints.md) decorators
+give raw Python the same recording.
 
 See the [Quickstart](getting-started/quickstart.md) to install and run this
 yourself.
