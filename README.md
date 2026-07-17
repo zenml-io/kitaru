@@ -28,7 +28,7 @@
 ---
 
 <p align="center">
-  <img src="assets/replay-loop.png" alt="The replay loop: import a failing trace, score it, replay it against your real code, fork the failing step, and verify the fix on every failure like it — the complaint becomes a regression test" width="720">
+  <img src="assets/dashboard.png" alt="The replay loop: import a failing trace, score it, replay it against your real code, fork the failing step, and verify the fix on every failure like it — the complaint becomes a regression test" width="720">
 </p>
 
 ## 🎯 Why Kitaru?
