@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">Traces you can run, not just read.</h3>
+<h3 align="center">Debug your agents where they failed: in production.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") records every agent run as a full trace — every model call, tool call, and decision — and replays it against your real code. Reproduce the trace exactly. Fork it with one thing changed. Trust the diff. It works underneath whatever framework you already use, self-hosted on your own infrastructure, and it can deploy and run your agents too.
+  Kitaru (来る, "to arrive") is a debugger for production AI agents. Take a run your agent already did — in your stack, on your framework — and re-run it against your real code: reproduce it exactly, fork it at the step that broke with one thing changed, and diff what happens. Your agent doesn't have to run on Kitaru first: wrap the harness you already use, or bring the runs your observability stack already captured. Self-hosted on your own infrastructure — and it can deploy and run your agents too.
 </p>
 
 <p align="center">
@@ -33,26 +33,29 @@
 
 ## 🎯 Why Kitaru?
 
-Most traces are transcripts — you read them. A Kitaru trace re-executes:
-your actual code runs again, with the trace answering for everything the
-original run saw. Kitaru is a debugger with a memory, sitting beside your
-observability stack — it tells you what happened; Kitaru re-runs it. That
-turns production traffic into the eval suite you never had to write: every
-incident is a reproducible test case, and "would the cheaper model have
-held?" is an experiment over real traces instead of a guess. What arrives
-as a complaint leaves as a regression test.
+Observability tells you what your agent did. Kitaru is what lets you do
+something about it — a debugger with a memory. Your actual code runs
+again, with the recording answering for everything the original run saw,
+so a failure reproduces on your desk instead of in a dashboard. Every
+incident becomes a reproducible test case, and "would the cheaper model
+have held?" becomes an experiment over real runs instead of a guess. What
+arrives as a complaint leaves as a regression test.
 
-- **Every trace is a recording.** Each checkpoint output — model call, tool
+- **Every run is a recording.** Each checkpoint output — model call, tool
   call, decision — is written to your object store as a typed, versioned
-  artifact. Step through it, diff it against other runs, trace a bad output
+  artifact. Step through it, diff it against other runs, walk a bad output
   back to the step that produced it.
 - **Replay is re-execution, not re-scoring.** An unchanged replay reproduces
   the original exactly — and that faithful baseline is what lets you fork
   from any checkpoint with one thing changed and trust that the diff is your
   change, not replay noise.
-- **Decide with evidence.** Every trace includes the model traffic — prompt,
-  response, tokens, latency, estimated cost — recorded automatically by the
-  framework adapters, or by `kitaru.llm()` in raw Python.
+- **You don't have to run on Kitaru to use it.** Wrap your existing agent
+  for native recording, or import the runs your observability stack already
+  captured — either way they land as executions you can replay. Kitaru
+  needs your code and a recording, not a migration.
+- **Decide with evidence.** Every recording includes the model traffic —
+  prompt, response, tokens, latency, estimated cost — captured automatically
+  by the framework adapters, or by `kitaru.llm()` in raw Python.
 
 <a id="quick-start"></a>
 
@@ -94,31 +97,31 @@ client.executions.import_traces("support-traces.jsonl", format="otel")
 client.executions.import_traces("langfuse://trace/8f3a91c2", name="ticket-48211")
 ```
 
-Every run is now a trace you can replay:
+Every run is now an execution you can replay:
 
 ```python
-trace = client.executions.latest()
+execution = client.executions.latest()
 
 # Replay — start from the agent's first model call, and your real code
 # runs again against the recorded world. Unchanged, it reproduces the
 # original exactly. That's your baseline.
-client.executions.replay(trace.exec_id, at="support-agent_model_request")
+client.executions.replay(execution.exec_id, at="support-agent_model_request")
 
-# Fork — same trace, one thing changed: patch the recorded tool output.
+# Fork — same execution, one thing changed: patch the recorded tool output.
 # What would the agent have done if the refund had succeeded?
 client.executions.replay(
-    trace.exec_id,
+    execution.exec_id,
     at="refund_payment_tool",
     checkpoint_overrides={
         "refund_payment_tool": {"output": "refund issued: $129.00"},
     },
 )
 
-# Widen — the same call takes a list. Replay last week's traces against
+# Widen — the same call takes a list. Replay last week's runs against
 # the code in your working tree, and the cohort is a regression test.
-traces = client.executions.list(limit=20)
+recent = client.executions.list(limit=20)
 client.executions.replay(
-    [t.exec_id for t in traces],
+    [e.exec_id for e in recent],
     at="support-agent_model_request",
     tag="pr-1234-check",
 )
@@ -163,7 +166,7 @@ framework — Kitaru wraps them, not the other way around.
 
 Everything in the loop is scriptable: each step has a CLI command
 (`kitaru executions list / logs / replay`) and an MCP tool, so Claude Code,
-Codex, or any MCP-capable agent can inspect traces, replay them, and read
+Codex, or any MCP-capable agent can inspect executions, replay them, and read
 back the diff. Hook up the MCP server:
 
 ```bash
