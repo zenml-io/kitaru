@@ -5,7 +5,7 @@ icon: puzzle-piece
 
 # Adapters
 
-Adapters let Kitaru record and replay an agent you built with another framework, without rewriting it. Your framework still runs the agent — it decides how the agent thinks, calls tools, streams, pauses, and resumes — while the adapter wraps the durable seams so each model call, tool call, or graph invocation lands as a checkpoint you can replay later.
+Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second way in — importing traces you already collect — is covered in [Executions — the recording](../concepts/executions.md).) Adapters let Kitaru record and replay an agent you built with another framework, without rewriting it. Your framework still runs the agent — it decides how the agent thinks, calls tools, streams, pauses, and resumes — while the adapter wraps the durable seams so each model call, tool call, or graph invocation lands as a checkpoint you can replay later.
 
 That boundary is deliberate. Kitaru records what passes through the seam the framework exposes safely; it does not claim to replay work it never saw. That honesty is what makes a replay faithful: a rerun with no change reproduces the original run, so when you replay again with one input changed, the diff is your change and not replay noise.
 

@@ -209,6 +209,11 @@ your working tree and see what moved. Ranking the results by cost or a quality
 judge is the subject of
 [Build a regression suite from production](../guides/regression-suite.md).
 
+Already collecting traces elsewhere? You don't have to run the agent through
+Kitaru to get a recording — imported traces land as executions too. See
+[Executions — the recording](../concepts/executions.md) for how imports work and
+what they can and can't do yet.
+
 ## Where to go next
 
 <table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Debug and test on real runs</strong></td><td>Every override level, selector rules, side-effect guards, and reading a diff.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite from production</strong></td><td>Batch replay a cohort, tag it, and rank the results.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Track cost and model usage</strong></td><td>What every model call records, and how to total it.</td><td><a href="../guides/llm-calls.md">../guides/llm-calls.md</a></td></tr><tr><td><strong>Drive it from your coding agent</strong></td><td>Run the whole loop from Claude Code, Codex, or Cursor over MCP.</td><td><a href="../agent-native/mcp-server.md">../agent-native/mcp-server.md</a></td></tr><tr><td><strong>Deploy &#x26; Invoke</strong></td><td>Move from local runs to a versioned, remotely invocable deployment.</td><td><a href="../guides/deployments.md">../guides/deployments.md</a></td></tr><tr><td><strong>Agents Guide</strong></td><td>The end-to-end narrative tour in the ZenML Learn section.</td><td><a href="https://docs.zenml.io/user-guides/agents-guide">https://docs.zenml.io/user-guides/agents-guide</a></td></tr></tbody></table>

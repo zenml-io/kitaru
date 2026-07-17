@@ -18,11 +18,13 @@ execution, and one thing you do to it. The loop that closes: a failing run
 becomes a reproducible case, the fix is verified on every run like it, and
 what arrived as a complaint leaves as a regression test.
 
-Kitaru wraps the agent framework you already use (PydanticAI, OpenAI Agents SDK,
-LangGraph, Claude Agent SDK, Gemini, raw Python), records every model and tool
-call as a checkpoint, and self-hosts on your own infrastructure. For a natively
-recorded agent, Kitaru is the runtime the agent runs on; the replay-and-eval loop
-that turns production traffic into tests runs off to the side of the hot path.
+There are two ways in, and no rewrite either way: wrap the agent you already
+have (PydanticAI, OpenAI Agents SDK, Claude Agent SDK, LangGraph, Gemini, Google
+ADK, or raw Python) and every model and tool call is recorded natively — or
+import the traces you already collect, and they land as executions too. Kitaru
+self-hosts on your own infrastructure. For a natively recorded agent, Kitaru is
+the runtime the agent runs on; the replay-and-eval loop that turns production
+traffic into tests runs off to the side of the hot path.
 
 ## Replay, improve, run
 
