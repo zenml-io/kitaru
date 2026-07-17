@@ -33,13 +33,14 @@
 
 ## 🎯 Why Kitaru?
 
-Observability tells you what your agent did. Kitaru is what lets you do
-something about it — a debugger with a memory. Your actual code runs
-again, with the recording answering for everything the original run saw,
-so a failure reproduces on your desk instead of in a dashboard. Every
-incident becomes a reproducible test case, and "would the cheaper model
-have held?" becomes an experiment over real runs instead of a guess. What
-arrives as a complaint leaves as a regression test.
+Observability tells you what your agent did. Kitaru lets you do something
+about it — a debugger with a memory. Import the runs your observability
+stack already captured, or record natively, and your actual code runs
+again with the recording answering for everything the original run saw:
+the failure reproduces on your desk instead of in a dashboard. Every
+incident becomes a reproducible test case, "would the cheaper model have
+held?" becomes an experiment over real runs, and what arrives as a
+complaint leaves as a regression test.
 
 - **Every run is a recording.** Each checkpoint output — model call, tool
   call, decision — is written to your object store as a typed, versioned
@@ -49,13 +50,13 @@ arrives as a complaint leaves as a regression test.
   the original exactly — and that faithful baseline is what lets you fork
   from any checkpoint with one thing changed and trust that the diff is your
   change, not replay noise.
-- **You don't have to run on Kitaru to use it.** Wrap your existing agent
-  for native recording, or import the runs your observability stack already
-  captured — either way they land as executions you can replay. Kitaru
-  needs your code and a recording, not a migration.
+- **Bring runs from anywhere.** Wrap your existing agent for native
+  recording, or import what your observability stack already captured —
+  either way it lands as an execution you can replay. Kitaru needs your
+  code and a recording, not a migration.
 - **Decide with evidence.** Every recording includes the model traffic —
-  prompt, response, tokens, latency, estimated cost — captured automatically
-  by the framework adapters, or by `kitaru.llm()` in raw Python.
+  prompt, response, tokens, latency, estimated cost — so model and cost
+  decisions are read off what actually happened.
 
 <a id="quick-start"></a>
 
