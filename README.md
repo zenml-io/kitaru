@@ -90,7 +90,11 @@ from kitaru import KitaruClient
 
 client = KitaruClient()
 client.executions.import_traces("support-traces.jsonl", format="otel")
-client.executions.import_traces("langfuse://trace/8f3a91c2", name="ticket-48211")
+client.imports.langfuse(
+    "langfuse-observations.jsonl",
+    source_project_id="prod",
+    agent_name="support-agent",
+)
 ```
 
 Every run is now a trace you can replay:
