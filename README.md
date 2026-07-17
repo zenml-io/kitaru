@@ -7,7 +7,7 @@
 <h3 align="center">Debug your agents where they failed: in production.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is a debugger for production AI agents. Take a run your agent already did — in your stack, on your framework — and re-run it against your real code: reproduce it exactly, fork it at the step that broke with one thing changed, and diff what happens. Your agent doesn't have to run on Kitaru first: wrap the harness you already use, or bring the runs your observability stack already captured. Self-hosted on your own infrastructure — and it can deploy and run your agents too.
+  Kitaru (来る, "to arrive") is a debugger for production AI agents: re-run what your agent already did against your real code — reproduce it exactly, fork it at the step that broke, diff what happens. No migration: wrap the harness you already use, or import runs your observability stack already captured. Self-hosted on your own infrastructure.
 </p>
 
 <p align="center">
