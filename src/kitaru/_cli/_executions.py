@@ -43,10 +43,12 @@ from kitaru.inspection import (
 from . import executions_app
 from ._dependencies import cli_dependencies
 from ._helpers import (
+    _ACTIVE_EXECUTION_DELETE_WARNING,
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
     OutputFormatOption,
     SnapshotSection,
+    _confirm_delete,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
@@ -1792,6 +1794,48 @@ def resume_(
         f"Resumed execution: {execution.exec_id}",
         detail=f"Status: {execution.status.value}",
     )
+
+
+@executions_app.command
+def delete_(
+    exec_id: Annotated[
+        str,
+        Parameter(help="Execution ID."),
+    ],
+    *,
+    yes: Annotated[
+        bool,
+        Parameter(
+            alias=["-y"],
+            help="Skip confirmation prompt. Required with --output json.",
+        ),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Delete an execution."""
+    command = "executions.delete"
+    output_format = _resolve_output_format(output)
+    _confirm_delete(
+        command=command,
+        output=output_format,
+        yes=yes,
+        description=f"execution `{exec_id}`",
+        warning=_ACTIVE_EXECUTION_DELETE_WARNING,
+    )
+
+    run_with_cli_error_boundary(
+        lambda: cli_dependencies().kitaru_client().executions.delete(exec_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+    item = {"exec_id": exec_id, "deleted": True}
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, item, output=output_format)
+        return
+
+    _print_success(f"Deleted execution: {exec_id}")
 
 
 @executions_app.command

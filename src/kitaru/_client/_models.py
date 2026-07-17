@@ -594,6 +594,13 @@ class Execution:
         """Cancel this execution."""
         return self._client.executions.cancel(self.exec_id)
 
+    def delete(self) -> None:
+        """Delete this execution.
+
+        This frozen object is a snapshot and is not changed after deletion.
+        """
+        self._client.executions.delete(self.exec_id)
+
     def replay(
         self,
         *,

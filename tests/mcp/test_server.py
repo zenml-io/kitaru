@@ -51,6 +51,7 @@ from kitaru.mcp.server import (
     kitaru_deployments_untag,
     kitaru_executions_abort_wait,
     kitaru_executions_cancel,
+    kitaru_executions_delete,
     kitaru_executions_diff,
     kitaru_executions_diff_matrix,
     kitaru_executions_get,
@@ -62,6 +63,7 @@ from kitaru.mcp.server import (
     kitaru_executions_retry,
     kitaru_executions_run,
     kitaru_executions_statistics,
+    kitaru_flows_delete,
     kitaru_info,
     kitaru_projects_current,
     kitaru_projects_list,
@@ -83,6 +85,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_executions_list,
     kitaru_executions_statistics,
     kitaru_executions_get,
+    kitaru_executions_delete,
     kitaru_executions_latest,
     get_execution_logs,
     kitaru_executions_run,
@@ -91,6 +94,7 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_deployments_list,
     kitaru_deployments_get,
     kitaru_deployments_delete,
+    kitaru_flows_delete,
     kitaru_deployments_tag,
     kitaru_deployments_untag,
     kitaru_executions_abort_wait,
@@ -145,6 +149,17 @@ def _mcp_tool_schemas_by_name() -> dict[str, dict[str, Any]]:
     return {tool.name: tool.inputSchema for tool in tools}
 
 
+def test_delete_tool_descriptions_warn_about_active_workloads() -> None:
+    """Destructive MCP tools should expose the active-workload warning."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    for tool_name in ("kitaru_executions_delete", "kitaru_flows_delete"):
+        description = tools[tool_name].description or ""
+        assert "does not stop" in description
+        assert "continue consuming compute" in description
+        assert "wait for termination" in description
+
+
 def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     tool_schemas = _mcp_tool_schemas_by_name()
     expected_names = {func.__name__ for func in _REGISTERED_MCP_TOOL_FUNCTIONS}
@@ -163,6 +178,17 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     abort_wait_schema = tool_schemas["kitaru_executions_abort_wait"]
     assert set(abort_wait_schema["properties"]) == {"exec_id", "wait"}
     assert abort_wait_schema["required"] == ["exec_id", "wait"]
+
+    flow_delete_schema = tool_schemas["kitaru_flows_delete"]
+    assert set(flow_delete_schema["properties"]) == {"flow"}
+    assert flow_delete_schema["required"] == ["flow"]
+
+    execution_delete_schema = tool_schemas["kitaru_executions_delete"]
+    assert set(execution_delete_schema["properties"]) == {"exec_id"}
+    assert execution_delete_schema["required"] == ["exec_id"]
+
+    for schema in (flow_delete_schema, execution_delete_schema):
+        assert not {"yes", "confirm", "force"} & set(schema["properties"])
 
     invoke_schema = tool_schemas["kitaru_deployments_invoke"]
     assert set(invoke_schema["properties"]) == {
@@ -1087,6 +1113,28 @@ def test_deployments_delete_delegates_by_version(
         version=2,
     )
     assert payload == {"flow": "content_pipeline", "version": 2, "deleted": True}
+
+
+def test_flows_delete_delegates_and_acknowledges(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """kitaru_flows_delete should delegate the cascade to the SDK."""
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_flows_delete("content_pipeline")
+
+    mock_kitaru_client.flows.delete.assert_called_once_with("content_pipeline")
+    assert payload == {"flow": "content_pipeline", "deleted": True}
+
+
+def test_executions_delete_delegates_and_acknowledges(
+    mock_kitaru_client: MagicMock,
+) -> None:
+    """kitaru_executions_delete should delegate directly to the SDK."""
+    with patch("kitaru.client.KitaruClient", return_value=mock_kitaru_client):
+        payload = kitaru_executions_delete("kr-123")
+
+    mock_kitaru_client.executions.delete.assert_called_once_with("kr-123")
+    assert payload == {"exec_id": "kr-123", "deleted": True}
 
 
 def test_deployments_tag_delegates_and_serializes(

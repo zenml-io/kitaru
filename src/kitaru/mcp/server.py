@@ -160,6 +160,22 @@ def kitaru_executions_get(exec_id: str) -> dict[str, Any]:
 
 
 @tracked_mcp_tool
+def kitaru_executions_delete(exec_id: str) -> dict[str, Any]:
+    """Delete one execution.
+
+    Deleting an active execution does not stop its workload. The workload can
+    continue consuming compute and later fail when it updates deleted metadata.
+    Cancel the execution and wait for termination before calling this tool.
+    """
+
+    def _delete() -> dict[str, Any]:
+        client_api.KitaruClient().executions.delete(exec_id)
+        return {"exec_id": exec_id, "deleted": True}
+
+    return run_with_mcp_error_boundary(_delete)
+
+
+@tracked_mcp_tool
 def kitaru_executions_latest(
     status: str | None = None,
     flow: str | None = None,
@@ -348,6 +364,22 @@ def kitaru_deployments_get(
         return inspection.serialize_deployment(deployment)
 
     return run_with_mcp_error_boundary(_get)
+
+
+@tracked_mcp_tool
+def kitaru_flows_delete(flow: str) -> dict[str, Any]:
+    """Delete a flow and all its saved deployment versions and executions.
+
+    Deleting active execution metadata does not stop the underlying workloads.
+    They can continue consuming compute and later fail when they update deleted
+    metadata. Cancel active executions and wait for termination first.
+    """
+
+    def _delete() -> dict[str, Any]:
+        client_api.KitaruClient().flows.delete(flow)
+        return {"flow": flow, "deleted": True}
+
+    return run_with_mcp_error_boundary(_delete)
 
 
 @tracked_mcp_tool

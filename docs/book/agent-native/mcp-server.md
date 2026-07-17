@@ -129,6 +129,7 @@ Execution tools:
 
 - `kitaru_executions_list`
 - `kitaru_executions_get`
+- `kitaru_executions_delete`
 - `kitaru_executions_latest`
 - `kitaru_executions_statistics`
 - `get_execution_logs`
@@ -142,6 +143,10 @@ Execution tools:
 - `kitaru_executions_cohort`
 - `kitaru_executions_diff`
 - `kitaru_executions_diff_matrix`
+
+Flow tools:
+
+- `kitaru_flows_delete`
 
 Deployment tools:
 
@@ -385,6 +390,43 @@ Pass flow inputs as `args` (a JSON object) and optionally specify a `stack`:
 
 When `stack` is provided, the tool passes it to `.run(stack=...)` so the
 execution targets that stack.
+
+## Deletion tools
+
+The MCP server exposes two direct lifecycle mutations:
+
+| Tool | Argument | Successful acknowledgement |
+|---|---|---|
+| `kitaru_executions_delete` | `exec_id: str` | `{"exec_id": "<exec-id>", "deleted": true}` |
+| `kitaru_flows_delete` | `flow: str` | `{"flow": "<flow>", "deleted": true}` |
+
+`kitaru_executions_delete` removes one execution. If that execution is active,
+the tool removes its stored metadata without stopping the underlying workload.
+The workload can continue consuming compute and may later fail when it tries to
+update metadata that no longer exists.
+
+`kitaru_flows_delete` removes the whole flow, including its saved deployment
+versions and executions. It has the same behavior for every active execution in
+the flow: their workloads are not stopped when their metadata is deleted. Shared
+artifacts are not deleted. To remove only one saved version, use
+`kitaru_deployments_delete(flow=..., version=...)` instead.
+
+Cancel active executions and wait for them to terminate before calling either
+deletion tool.
+
+These tools mutate stored state as soon as the MCP call is authorized. They do
+not prompt and their schemas do not accept `yes`, `confirm`, or `force`. An MCP
+client must obtain any required user approval before it calls either tool.
+
+Example calls:
+
+```json
+{"exec_id": "kr-a8f3c2"}
+```
+
+```json
+{"flow": "research_agent"}
+```
 
 ## Deployment tools
 

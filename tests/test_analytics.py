@@ -150,6 +150,7 @@ def test_flow_lifecycle_event_canonical_strings() -> None:
     assert AnalyticsEvent.FLOW_ATTEMPTED == "Kitaru flow attempted"
     assert AnalyticsEvent.FLOW_SUBMITTED == "Kitaru flow submitted"
     assert AnalyticsEvent.FLOW_FAILED == "Kitaru flow failed"
+    assert AnalyticsEvent.FLOW_DELETED == "Kitaru flow deleted"
     assert AnalyticsEvent.REPLAY_REQUESTED == "Kitaru flow replay requested"
     assert AnalyticsEvent.REPLAY_FAILED == "Kitaru flow replay failed"
 
@@ -167,6 +168,7 @@ def test_core_funnel_event_canonical_strings() -> None:
     assert AnalyticsEvent.EXECUTION_RETRIED == "Kitaru execution retried"
     assert AnalyticsEvent.EXECUTION_RESUMED == "Kitaru execution resumed"
     assert AnalyticsEvent.EXECUTION_CANCELLED == "Kitaru execution cancelled"
+    assert AnalyticsEvent.EXECUTION_DELETED == "Kitaru execution deleted"
     assert (
         AnalyticsEvent.EXECUTION_STATISTICS_QUERIED
         == "Kitaru execution statistics queried"

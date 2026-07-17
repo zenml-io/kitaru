@@ -1020,6 +1020,7 @@ def test_auth_delete_requires_yes_in_non_interactive_mode(
 
     with (
         patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=False),
         pytest.raises(SystemExit) as exc_info,
     ):
         app(["auth", "service-accounts", "delete", "ci-runner"])
@@ -1029,6 +1030,61 @@ def test_auth_delete_requires_yes_in_non_interactive_mode(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --yes" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("args", "delete_namespace", "command"),
+    [
+        (
+            ["auth", "service-accounts", "delete", "ci-runner", "-o", "json"],
+            "service_accounts",
+            "auth.service-accounts.delete",
+        ),
+        (
+            [
+                "auth",
+                "api-keys",
+                "delete",
+                "ci-runner",
+                "default",
+                "-o",
+                "json",
+            ],
+            "api_keys",
+            "auth.api-keys.delete",
+        ),
+    ],
+)
+def test_auth_delete_json_requires_yes_without_prompt(
+    args: list[str],
+    delete_namespace: str,
+    command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON deletion should refuse with one error document instead of prompting."""
+    service_accounts = Mock()
+    api_keys = Mock()
+    fake_client = _auth_management_client_stub(
+        service_accounts=service_accounts,
+        api_keys=api_keys,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient.for_auth_management", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=True),
+        patch("builtins.input", return_value="yes") as input_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    input_mock.assert_not_called()
+    getattr(fake_client.auth, delete_namespace).delete.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["command"] == command
+    assert payload["error"]["message"].startswith("JSON output requires --yes")
 
 
 def test_auth_delete_with_yes_runs_and_returns_json(
@@ -1047,7 +1103,9 @@ def test_auth_delete_with_yes_runs_and_returns_json(
 
     assert exc_info.value.code == 0
     service_accounts.delete.assert_called_once_with("ci-runner")
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
     assert payload == {
         "command": "auth.service-accounts.delete",
         "item": {"name_or_id": "ci-runner", "deleted": True},
@@ -1081,7 +1139,9 @@ def test_auth_api_key_delete_with_yes_runs_and_returns_json(
 
     assert exc_info.value.code == 0
     api_keys.delete.assert_called_once_with("ci-runner", "default")
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    payload = json.loads(captured.out)
     assert payload == {
         "command": "auth.api-keys.delete",
         "item": {
@@ -2131,6 +2191,205 @@ def test_flow_list_json_groups_deployment_backed_flows(
     assert payload["count"] == 2
     assert payload["items"][0]["flow"] == "alpha"
     assert payload["items"][0]["latest_version"] == 2
+
+
+def test_flow_delete_with_yes_delegates_and_prints_success(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--yes` should delete through the flow namespace without a prompt."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "delete", "demo_flow", "--yes"])
+
+    assert exc_info.value.code == 0
+    fake_client.flows.delete.assert_called_once_with("demo_flow")
+    fake_client.deployments.delete.assert_not_called()
+    assert capsys.readouterr().out == "Deleted flow: demo_flow\n"
+
+
+def test_flow_delete_interactive_acceptance_warns_about_cascade(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Interactive confirmation should describe and then perform the cascade."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=True),
+        patch("builtins.input", return_value="YeS") as input_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["flow", "delete", "demo_flow"])
+
+    assert exc_info.value.code == 0
+    input_mock.assert_called_once_with()
+    fake_client.flows.delete.assert_called_once_with("demo_flow")
+    captured = capsys.readouterr()
+    assert "Deleted flow: demo_flow" in captured.out
+    assert "does not stop their workloads" in captured.err
+    assert captured.err.endswith(
+        "Delete flow `demo_flow` and its saved deployment versions and "
+        "executions? [y/N] "
+    )
+
+
+@pytest.mark.parametrize(
+    ("args", "delete_namespace", "command"),
+    [
+        (
+            ["flow", "delete", "demo_flow", "-o", "json"],
+            "flows",
+            "flow.delete",
+        ),
+        (
+            ["executions", "delete", "kr-123", "-o", "json"],
+            "executions",
+            "executions.delete",
+        ),
+    ],
+)
+def test_cli_delete_json_requires_yes_without_prompt(
+    args: list[str],
+    delete_namespace: str,
+    command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """JSON deletion should refuse with one error document instead of prompting."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=True),
+        patch("builtins.input", return_value="yes") as input_mock,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    input_mock.assert_not_called()
+    getattr(fake_client, delete_namespace).delete.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["command"] == command
+    assert payload["error"]["message"].startswith("JSON output requires --yes")
+
+
+@pytest.mark.parametrize(
+    ("args", "delete_namespace", "expected"),
+    [
+        (
+            ["flow", "delete", "demo_flow", "--yes", "-o", "json"],
+            "flows",
+            {
+                "command": "flow.delete",
+                "item": {"flow": "demo_flow", "deleted": True},
+            },
+        ),
+        (
+            ["executions", "delete", "kr-123", "--yes", "-o", "json"],
+            "executions",
+            {
+                "command": "executions.delete",
+                "item": {"exec_id": "kr-123", "deleted": True},
+            },
+        ),
+    ],
+)
+def test_cli_delete_json_with_yes_emits_json_only(
+    args: list[str],
+    delete_namespace: str,
+    expected: dict[str, Any],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Confirmed JSON deletion should emit one document and no prompt text."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 0
+    getattr(fake_client, delete_namespace).delete.assert_called_once()
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == expected
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["flow", "delete", "demo_flow"],
+        ["executions", "delete", "kr-123"],
+    ],
+)
+def test_cli_delete_requires_yes_in_non_interactive_mode(
+    args: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """New destructive commands should fail before SDK mutation without --yes."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=False),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    assert fake_client.method_calls == []
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --yes" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("args", "delete_namespace", "command"),
+    [
+        (
+            ["flow", "delete", "demo_flow", "--yes", "-o", "json"],
+            "flows",
+            "flow.delete",
+        ),
+        (
+            ["executions", "delete", "kr-123", "--yes", "-o", "json"],
+            "executions",
+            "executions.delete",
+        ),
+    ],
+)
+def test_cli_delete_serializes_sdk_errors(
+    args: list[str],
+    delete_namespace: str,
+    command: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """SDK deletion failures should use the structured CLI error contract."""
+    fake_client = Mock()
+    getattr(fake_client, delete_namespace).delete.side_effect = KitaruBackendError(
+        "backend unavailable"
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(args)
+
+    assert exc_info.value.code == 1
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["command"] == command
+    assert payload["error"] == {
+        "type": "KitaruBackendError",
+        "message": "backend unavailable",
+    }
 
 
 def test_flow_deployments_logs_explicit_exec_id_skips_deployment_resolution(
@@ -5305,6 +5564,48 @@ def test_executions_cancel_reports_success(
     output = capsys.readouterr().out
     assert "Cancelled execution: kr-123" in output
     assert "Status: cancelled" in output
+
+
+def test_executions_delete_short_yes_returns_json(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`-y` should bypass confirmation and emit the execution acknowledgement."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "delete", "kr-123", "-y", "-o", "json"])
+
+    assert exc_info.value.code == 0
+    fake_client.executions.delete.assert_called_once_with("kr-123")
+    fake_client.flows.delete.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert json.loads(captured.out) == {
+        "command": "executions.delete",
+        "item": {"exec_id": "kr-123", "deleted": True},
+    }
+
+
+def test_executions_delete_interactive_refusal_aborts_before_mutation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An interactive refusal should not call the SDK."""
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        patch("kitaru._cli._helpers._is_input_interactive", return_value=True),
+        patch("builtins.input", return_value="no"),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "delete", "kr-123"])
+
+    assert exc_info.value.code == 1
+    fake_client.executions.delete.assert_not_called()
+    assert "Deletion aborted." in capsys.readouterr().err
 
 
 def test_login_delegates_to_remote_connect(
