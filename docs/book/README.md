@@ -14,7 +14,9 @@ A recorded or imported trace lands as an execution. From there the verb is
 **replay**: rerun it unchanged for a faithful baseline, then rerun it with a
 different model, prompt, or tool result — and the difference you see is your
 change, not replay noise. Below the fold there is one noun to learn, the
-execution, and one thing you do to it.
+execution, and one thing you do to it. The loop that closes: a failing run
+becomes a reproducible case, the fix is verified on every run like it, and
+what arrived as a complaint leaves as a regression test.
 
 Kitaru wraps the agent framework you already use (PydanticAI, OpenAI Agents SDK,
 LangGraph, Claude Agent SDK, Gemini, raw Python), records every model and tool
