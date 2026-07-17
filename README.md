@@ -76,7 +76,7 @@ tool call as a checkpoint:
 from pydantic_ai import Agent
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-5.4", name="support-agent",
+agent = Agent("openai:gpt-5.6", name="support-agent",
               system_prompt="You resolve support tickets.")
 
 @agent.tool_plain
@@ -87,7 +87,10 @@ support = KitaruAgent(agent)
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-Traces recorded elsewhere land the same way — import them, and they become
+#### Already have traces? Import them
+
+You don't need to run the agent through Kitaru to get a recording. Traces
+recorded elsewhere land the same way — import them, and they become
 executions like any other:
 
 ```python
