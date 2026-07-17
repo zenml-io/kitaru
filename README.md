@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">Every agent run, recorded and replayable.</h3>
+<h3 align="center">Traces you can run, not just read.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is a self-hosted, framework-agnostic runtime for autonomous agents — underneath the harness your team already picked. You keep your agent SDK, your prompts, your tools, your model. Kitaru records every step of every run — each model call, tool call, and decision — as a replayable checkpoint, so you can diagnose failures, replay runs with a different model or input, and ship agent updates with confidence. All on your own infrastructure.
+  Kitaru (来る, "to arrive") records every agent run as a full trace — every model call, tool call, and decision — and replays it against your real code. Reproduce the trace exactly. Fork it with one thing changed. Trust the diff. It works underneath whatever framework you already use, self-hosted on your own infrastructure, and it can deploy and run your agents too.
 </p>
 
 <p align="center">
@@ -31,250 +31,161 @@
   <img src="assets/dashboard.png" alt="Kitaru Dashboard" width="720">
 </p>
 
-## 🧩 Where Kitaru fits
-
-Agent stacks break cleanly into four layers. Kitaru is exactly one of them.
-
-| Layer | What it does | Examples |
-|---|---|---|
-| **Model** | The LLM itself — a compute unit over a context window | OpenAI, Anthropic, Google, open-weights, fine-tuned in-house |
-| **Harness** | The *loop around the model* — prompts, tools, model loop, framework choice | Pydantic AI / Pydantic AI Harness, LangGraph, Claude Agent SDK, OpenAI Agents SDK, raw Python |
-| **Runtime (Kitaru)** | How the agent's runs are *recorded, replayed, and improved over time* — checkpoints, replay, resume, `wait()`, versioned deployments, isolated runtimes | `@flow`, `@checkpoint`, `flow.deploy()`, `kitaru.wait()` |
-| **Platform** | How your org *governs* — auth, entitlements, interceptors, observability, product UI, policy | Your existing stack |
-
-Kitaru lives in the middle row. Harnesses define behavior, your stack defines
-policy, and Kitaru gives you the execution record — and the replay loop — in
-between.
-
-If you're *buying* an agent platform, Kitaru may feel low-level. If you're
-*building* one, that's the point.
-
-Platform teams get the execution layer they'd otherwise build themselves —
-run lifecycle, checkpoint recording, replay, invocation routing, and
-self-hosted execution — without mandating which harness application teams
-use on top.
-
 ## 🎯 Why Kitaru?
 
-### Record, replay, improve
+Most traces are transcripts — you read them. A Kitaru trace re-executes:
+your actual code runs again, with the trace answering for everything the
+original run saw. Kitaru is a debugger with a memory, sitting beside your
+observability stack — it tells you what happened; Kitaru re-runs it. That
+turns production traffic into the eval suite you never had to write: every
+incident is a reproducible test case, and "would the cheaper model have
+held?" is an experiment over real traces instead of a guess.
 
-- **Every step recorded.** Each checkpoint output — model call, tool call,
-  decision — is written to your object store as a typed, versioned artifact.
-  Step through any run, diff artifacts across runs, and trace a bad output
-  back to the exact step that produced it.
-- **Replay with overrides.** Re-run any execution from any checkpoint, and
-  override what you want to test: swap the model, change a parameter, inject
-  a different tool output — and see what would have happened before you ship
-  the change.
-- **Compare and decide.** `kitaru.llm()` tracks prompt, response, tokens, and
-  latency per call, so comparing runs answers questions like "would a smaller
-  model have done this cheaper?" with evidence instead of vibes.
-
-### Production mechanics
-
-- **Crash recovery.** A crash, pod eviction, or timeout doesn't send the run
-  back to zero. Fix the bug, replay, and the completed checkpoints return cached
-  output instead of re-burning tokens.
-- **Pause and resume.** `kitaru.wait()` suspends a flow, releases compute, and
-  resumes minutes, hours, or days later when input lands from a human, another
-  agent, a webhook, or a CLI call.
-- **Versioned deployments.** `flow.deploy()` freezes a flow as an immutable
-  snapshot consumers invoke by name. Tag to roll out, re-tag to roll back.
-  Nothing that *calls* the agent redeploys when a new version ships.
-- **Isolated execution.** `@checkpoint(runtime="isolated")` runs a specific
-  step in its own pod or job on Kubernetes, AWS, GCP, or Azure. Heavy or risky
-  steps stay isolated; orchestration stays inline.
-
-### Python-first, no graph DSL
-
-Write normal Python. Use `if`, `for`, `try/except` — whatever your agent needs.
-Kitaru gives you two decorators (`@flow` and `@checkpoint`) and a handful of
-utility functions. That's all you need.
-
-```python
-from kitaru import checkpoint, flow
-
-@checkpoint
-def research(topic: str) -> str:
-    return do_research(topic)
-
-@checkpoint
-def write_draft(research: str) -> str:
-    return generate_draft(research)
-
-@flow
-def writing_agent(topic: str) -> str:
-    data = research(topic)
-    return write_draft(data)
-
-result = writing_agent.run("quantum computing").wait()
-```
-
-### Deploy on your cloud
-
-A single self-hosted server, your own infra. Flows run on whichever **stack**
-you pick — local, Kubernetes, GCP, AWS, or Azure — with artifacts in your own
-S3/GCS/Azure Blob bucket. No mandatory SaaS control plane.
-
-### Built-in UI
-
-Every execution is observable from day one. See your agent runs, inspect
-checkpoint outputs, and approve human-in-the-loop wait steps, all from a UI
-that ships with the Kitaru server.
-
-To start the server locally, run `kitaru login` after installing `kitaru[local]`.
-To connect to an existing remote server, run `kitaru login <server>`.
-
-### Works with your agent SDK
-
-Wrap an existing PydanticAI agent with `KitaruAgent` — no rewrite. For agents
-built on the OpenAI Agents SDK, Anthropic Agent SDK, or raw Python, use `@flow`
-and `@checkpoint` around your calls. Your model, your tools, your framework —
-Kitaru wraps them, not the other way around.
-
-```python
-from kitaru import flow
-from kitaru.adapters.pydantic_ai import KitaruAgent
-from pydantic_ai import Agent
-
-researcher = KitaruAgent(
-    Agent("openai:gpt-5.4", system_prompt="You summarize research topics.")
-)
-
-@flow
-def research_flow(topic: str) -> str:
-    return researcher.run_sync(topic).output
-```
+- **Every trace is a recording.** Each checkpoint output — model call, tool
+  call, decision — is written to your object store as a typed, versioned
+  artifact. Step through it, diff it against other runs, trace a bad output
+  back to the step that produced it.
+- **Replay is re-execution, not re-scoring.** An unchanged replay reproduces
+  the original exactly — and that faithful baseline is what lets you fork
+  from any checkpoint with one thing changed and trust that the diff is your
+  change, not replay noise.
+- **Decide with evidence.** Every trace includes the model traffic — prompt,
+  response, tokens, latency, estimated cost — recorded automatically by the
+  framework adapters, or by `kitaru.llm()` in raw Python.
 
 <a id="quick-start"></a>
 
-## 🚀 Quick Start
-
-### Install
+## 🔁 The loop
 
 ```bash
-pip install kitaru
-```
-
-Or with [uv](https://docs.astral.sh/uv/) (recommended):
-
-```bash
-uv pip install kitaru
-```
-
-To wrap a PydanticAI agent, install the adapter extra:
-
-```bash
-uv pip install "kitaru[pydantic-ai]"
-```
-
-### Optional: start a local Kitaru server
-
-Flows run locally by default with the base install. If you also want the local
-dashboard and REST API, install the local extra and then run bare `kitaru login`:
-
-```bash
-uv pip install "kitaru[local]"
-kitaru login
-kitaru status
-```
-
-### Optional: connect to an existing remote Kitaru server
-
-If you already have a deployed Kitaru server, connect to it explicitly and choose
-the project you want later commands to use:
-
-```bash
-kitaru login https://my-server.example.com --project production
-kitaru project list
-kitaru project use production
-kitaru status
-```
-
-For CI, Docker, and other headless environments, set `KITARU_PROJECT` alongside
-`KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` instead of relying on persisted local
-state.
-
-### Initialize your project
-
-```bash
+uv add "kitaru[pydantic-ai]"   # plain `kitaru` for the raw @flow/@checkpoint path
 kitaru init
 ```
 
-### Write your first flow
+No decorators, no graph, no rewrite. Wrap the agent you already have and run
+it — Kitaru opens a flow around the call and records every model request and
+tool call as a checkpoint:
 
 ```python
 # agent.py
-from kitaru import checkpoint, flow
+from pydantic_ai import Agent
+from kitaru.adapters.pydantic_ai import KitaruAgent
 
-@checkpoint
-def fetch_data(url: str) -> str:
-    return "some data"
+agent = Agent("openai:gpt-5.4", name="support-agent",
+              system_prompt="You resolve support tickets.")
 
-@checkpoint
-def process_data(data: str) -> str:
-    return data.upper()
+@agent.tool_plain
+def refund_payment(order_id: str) -> str:
+    return payments.refund(order_id)  # your real API
 
-@flow
-def my_agent(url: str) -> str:
-    data = fetch_data(url)
-    return process_data(data)
-
-result = my_agent.run("https://example.com").wait()
-print(result)  # SOME DATA
+support = KitaruAgent(agent)
+support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-### Run it
-
-```bash
-python agent.py
-```
-
-Every step is recorded automatically. Inspect any run, then replay it from a
-checkpoint — a faithful rerun, or a fork with one input changed (a different
-model or parameter) so you can see what *would* have happened before you ship
-the change:
-
-```bash
-kitaru executions list
-kitaru executions get <EXECUTION_ID>
-kitaru executions logs <EXECUTION_ID>
-
-# Reproduce a run faithfully from a checkpoint
-kitaru executions replay <EXECUTION_ID> --at process_data
-
-# Fork the same run with one input changed
-kitaru executions replay <EXECUTION_ID> --at fetch_data \
-  --flow-overrides '{"url": "https://other.example.com"}'
-```
-
-See [Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides)
-for the full reproduce → fork → diff loop.
-
-### Deploy it
-
-When the flow is ready, deploy it as a versioned snapshot and invoke it by
-name — no redeploy of whatever *calls* the agent.
+Traces recorded elsewhere land the same way — import them, and they become
+executions like any other:
 
 ```python
-# Freeze the current code + dependencies as a versioned snapshot.
-# Parameterized flows take representative deployment-time inputs;
-# consumers can override them at invocation time.
-my_agent.deploy(url="https://example.com")
-
-# Consumers invoke by name — from Python, CLI, MCP, or HTTP.
 from kitaru import KitaruClient
-KitaruClient().deployments.invoke(
-    flow="my_agent",
-    inputs={"url": "https://example.com"},
+
+client = KitaruClient()
+client.executions.import_traces("support-traces.jsonl", format="otel")
+client.executions.import_traces("langfuse://trace/8f3a91c2", name="ticket-48211")
+```
+
+Every run is now a trace you can replay:
+
+```python
+trace = client.executions.latest()
+
+# Replay — start from the agent's first model call, and your real code
+# runs again against the recorded world. Unchanged, it reproduces the
+# original exactly. That's your baseline.
+client.executions.replay(trace.exec_id, at="support-agent_model_request")
+
+# Fork — same trace, one thing changed: patch the recorded tool output.
+# What would the agent have done if the refund had succeeded?
+client.executions.replay(
+    trace.exec_id,
+    at="refund_payment_tool",
+    checkpoint_overrides={
+        "refund_payment_tool": {"output": "refund issued: $129.00"},
+    },
+)
+
+# Widen — the same call takes a list. Replay last week's traces against
+# the code in your working tree, and the cohort is a regression test.
+traces = client.executions.list(limit=20)
+client.executions.replay(
+    [t.exec_id for t in traces],
+    at="support-agent_model_request",
+    tag="pr-1234-check",
 )
 ```
 
+Overrides can also swap the model on an LLM call, edit tool arguments, or
+swap a checkpoint's code — see
+[Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides).
+Explicit `@flow`/`@checkpoint` decorators are there when you want named
+replay boundaries or multi-turn workflows, and `flow.deploy()` ships a winner
+as a versioned deployment invoked by name — optional; stopping at the
+regression test is a fine place to stop.
+
+### Durable execution (the plumbing)
+
+Recording a run means surviving one. Checkpoints double as crash recovery — a
+crash or pod eviction resumes from cached outputs instead of re-burning
+tokens. `kitaru.wait()` pauses a flow for hours or days until a human or
+webhook responds. `flow.deploy()` freezes versioned snapshots that consumers
+invoke by name, and `@checkpoint(runtime="isolated")` runs heavy steps in
+their own pod on Kubernetes, AWS, GCP, or Azure. This is how a faithful
+recording gets minted — not the reason you reach for Kitaru.
+
+### Works with your agent SDK
+
+Adapters for six agent frameworks — wrap your existing agent, no rewrite:
+
+| Framework | Adapter |
+|---|---|
+| PydanticAI | `kitaru.adapters.pydantic_ai.KitaruAgent` |
+| OpenAI Agents SDK | `kitaru.adapters.openai_agents.KitaruRunner` |
+| Claude Agent SDK | `kitaru.adapters.claude_agent_sdk.KitaruClaudeRunner` |
+| LangGraph | `kitaru.adapters.langgraph.KitaruGraphRunner` |
+| Gemini | `kitaru.adapters.gemini.KitaruGeminiInteractionsRunner` |
+| Google ADK | `kitaru.adapters.google_adk.KitaruADKRunner` |
+
+For raw-Python agents, `@flow` and `@checkpoint` around your calls give you
+the same recording without an adapter. Your model, your tools, your
+framework — Kitaru wraps them, not the other way around.
+
+### Drive it from your coding agent
+
+Everything in the loop is scriptable: each step has a CLI command
+(`kitaru executions list / logs / replay`) and an MCP tool, so Claude Code,
+Codex, or any MCP-capable agent can inspect traces, replay them, and read
+back the diff. Hook up the MCP server:
+
 ```bash
-# Tag a version into a stage; re-tag to roll back.
-kitaru flow tag my_agent latest --stage=prod
-kitaru flow tag my_agent v2     --stage=prod   # rollback
+uv add "kitaru[mcp]"
+claude mcp add kitaru -- kitaru-mcp   # or point any agent's MCP config at `kitaru-mcp`
 ```
+
+Claude Code users can also install the
+[kitaru-skills](https://github.com/zenml-io/kitaru-skills) plugin —
+quickstart, workflow authoring, and adapter-migration skills:
+
+```
+/plugin marketplace add zenml-io/kitaru-skills
+/plugin install kitaru@kitaru
+```
+
+### Self-hosted, batteries included
+
+A single server on your own infra. Flows run on whichever **stack** you
+pick — local, Kubernetes, GCP, AWS, or Azure — with artifacts in your own
+S3/GCS/Azure Blob bucket, and a built-in UI to step through executions, diff
+replays, and approve human-in-the-loop wait steps. No mandatory SaaS control
+plane.
 
 ## 📚 Learn more
 
@@ -285,6 +196,7 @@ kitaru flow tag my_agent v2     --stage=prod   # rollback
 | [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
+| [MCP server](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Query, replay, and manage executions from any MCP-capable agent |
 
 ## 🌱 Origins
 
@@ -309,5 +221,3 @@ all PRs should target it.
 ## 📄 License
 
 [Apache 2.0](LICENSE)
-
-<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=633f1c0b-9a82-47af-8a6c-251a150bcc16" alt="" />
