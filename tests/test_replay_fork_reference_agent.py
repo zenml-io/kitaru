@@ -39,9 +39,7 @@ def test_scenarios_and_variants_load() -> None:
 
 
 def test_checked_in_trace_fixture_contains_complete_agent_runs() -> None:
-    observations = [
-        json.loads(line) for line in TRACE_FIXTURE.read_text().splitlines()
-    ]
+    observations = [json.loads(line) for line in TRACE_FIXTURE.read_text().splitlines()]
     trace_ids = {observation["traceId"] for observation in observations}
 
     assert len(observations) == 46
