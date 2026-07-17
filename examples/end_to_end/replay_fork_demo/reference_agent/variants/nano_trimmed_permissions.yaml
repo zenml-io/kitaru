@@ -1,5 +1,5 @@
 name: nano_trimmed_permissions
-model: gpt-5-nano
+model: openai:gpt-5-nano
 prompt_profile: trimmed_permissions
 tool_policy_name: weakened-permission-policy
 max_tool_calls: 6

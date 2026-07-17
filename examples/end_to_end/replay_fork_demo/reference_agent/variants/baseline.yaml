@@ -1,5 +1,5 @@
 name: baseline
-model: gpt-5-mini
+model: openai:gpt-5-mini
 prompt_profile: full_permissions
 tool_policy_name: full-permission-policy
 max_tool_calls: 6

@@ -1,94 +1,220 @@
-# LangGraph replay/fork regression demo
+# Case-first replay with a PydanticAI support agent
 
-This demo is the LangGraph/Langfuse version of the replay story. It starts from a recorded LangGraph trace, rebuilds that trace as a Kitaru flow, replays from a chosen graph node, and then runs an edited candidate from the same point.
-
-The flow is:
+This example starts with a production report that contains a Langfuse trace ID.
+The trace becomes a Kitaru execution, the execution becomes the case under
+investigation, and replay turns the investigation into a candidate experiment.
 
 ```text
-original recorded trace
-  -> unchanged replay control
-  -> edited candidate fork
-  -> drift report
+reported Langfuse trace
+  -> imported Kitaru execution
+  -> filtered execution under investigation
+  -> recording-only score
+  -> replay against candidate code
+  -> named experiment over every matching execution
 ```
 
-The unchanged replay is the control. If it cannot reproduce the recorded decision, the candidate comparison is not useful yet. If it does reproduce the recorded decision, the edited fork answers the release question: did this model, prompt, or config change alter the decision for this case?
+The scenarios used to seed demonstration traces live under `trace_fixtures/`.
+They are fixture provenance and do not appear in the walkthrough below.
 
-Use this demo when you want to see how Kitaru can work with a LangGraph agent and Langfuse trace data. Use `../replay_overrides_demo/` when you want the simpler SDK/CLI override walkthrough.
+## The agent
 
-## What Kitaru does here
+The production agent is a PydanticAI `Agent` with a typed result and eight
+tools. Its tools read and write:
 
-Kitaru imports Langfuse observation rows from a LangGraph support copilot, rebuilds a Kitaru flow with one checkpoint per LangGraph node, and replays from a selected node.
+- customer, setting, support-ticket, and audit-log tables in SQLite;
+- a local HTTP API for service status, usage, and billing;
+- a Markdown support-policy knowledge base.
 
-During replay:
+PydanticAI owns the model loop, instructions, tool selection, tool execution,
+and `SupportDecision`. The registration entrypoint wraps that complete agent:
 
-- checkpoints before the cut reuse their recorded node outputs,
-- checkpoints at and after the cut run live,
-- the edited fork runs the same live tail with candidate settings,
-- the HTML report compares the original trace, unchanged replay, and edited fork.
+```python
+# evals/register.py
+kagent = build_support_agent(load_variant(VARIANT_NAME), name="support-agent")
+```
 
-This is not LangGraph-native time travel. It is a Kitaru replay flow reconstructed from a trace that contains enough node-level state to restart safely from the selected graph node.
+`build_support_agent` returns:
 
-## What this demo uses
+```python
+KitaruAgent(agent, name="support-agent", checkpoint_strategy="calls")
+```
 
-- A bundled typed LangGraph support copilot in `reference_agent/`.
-- Langfuse observation rows from `reference_agent/fixtures/langfuse_rich_observations.jsonl`.
-- `KitaruAdapter`, which wraps the compiled LangGraph graph.
-- A rehydration helper in `utils.py`, because this reference agent uses typed state objects rather than plain JSON dictionaries.
+## 1. Register the agent once
 
-A JSON-native LangGraph agent would need less demo-specific code. The adapter can replay plain JSON state directly.
-
-## Run from the bundled fixture
-
-The fixture path reads Langfuse observation rows from disk, so it does not fetch a trace from Langfuse. The `replay`, `fork`, and `run-all` commands still re-execute the live LangGraph tail from the cut, so they need the model credentials used by the reference agent.
+Kitaru needs the agent identity and executable entrypoint before imported
+executions can be attributed to a version. Registration records those facts
+without running the agent.
 
 ```bash
 cd examples/end_to_end/replay_fork_demo
-
-export TRACE_ID=trace-replay-fork-rich-baseline
-export TRACE_FILE=reference_agent/fixtures/langfuse_rich_observations.jsonl
-
-uv run python demo.py import-trace "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py replay "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py fork "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py run-all "$TRACE_FILE" --trace-id "$TRACE_ID"
+uv run kitaru init
+export SUPPORT_AGENT_VARIANT=baseline
+export SUPPORT_AGENT_VERSION=v2.2
+uv run python demo.py register
 ```
 
-What the commands mean:
+The registered entrypoint is `evals.register:kagent`. In a production repo,
+CI repeats registration for each deployed version.
 
-| command | what it checks |
-|---|---|
-| `import-trace` | Reads the bundled Langfuse rows and checks that the trace has enough node outputs for replay. This command does not call OpenAI or Langfuse. |
-| `replay` | Compares the original recorded trace with an unchanged replay. |
-| `fork` | Compares original trace -> unchanged replay -> edited candidate fork, then writes `replay_vs_fork.html`. |
-| `run-all` | Runs import or trace generation, replay, candidate fork, and HTML report creation. |
+## 2. Import the reported trace
 
-## Generated HTML report
-
-`replay_vs_fork.html` is a three-way report. It shows:
-
-1. the original recorded trace,
-2. the unchanged replay control,
-3. the edited candidate fork.
-
-Read the first comparison before trusting the second one. If the unchanged replay differs from the original trace, fix reproduction first. If it matches, the fork comparison shows what the candidate changed.
-
-## Creating a fresh trace
-
-To create a new live trace, configure OpenAI and Langfuse credentials for the reference agent:
+A support report arrives with a trace ID:
 
 ```bash
-cd examples/end_to_end/replay_fork_demo
-set -a && . ./.env && set +a
-uv run python demo.py create-trace
+uv run python demo.py import-traces \
+  langfuse://trace/8f3a91c2 \
+  --name ticket-48211
 ```
 
-Then import and replay the printed trace id:
+The import creates an execution under `support-agent @ v2.2` and preserves the
+trace input, output, model calls, tool calls, latency, cost, metadata, tags, and
+Langfuse provenance.
+
+The same command imports a production export:
 
 ```bash
-uv run python demo.py import-trace langfuse:<TRACE_ID>
-uv run python demo.py run-all langfuse:<TRACE_ID>
+uv run python demo.py import-traces \
+  trace_fixtures/support-traces.jsonl \
+  --format langfuse
 ```
 
-## Relationship to `reference_agent/README.md`
+The checked-in export contains six traces and their nested PydanticAI model and
+tool observations. It lets the walkthrough begin at trace import without first
+running a provider-backed scenario generator.
 
-This README explains the replay/fork workflow. `reference_agent/README.md` explains the bundled LangGraph support copilot and fixture data.
+Trace import is the entry point for this example. Users do not run the local
+scenario harness before investigating a case.
+
+## 3. Find the affected executions
+
+An imported execution is the case when someone investigates it. There is no
+separate case object or dataset setup step.
+
+```bash
+uv run python demo.py find \
+  --where 'metadata.intent == "permissions"'
+```
+
+The filter resolves to execution objects. Replay consumes those objects
+directly, whether the selection contains one execution or hundreds.
+
+## 4. Score the recordings
+
+Scoring reads the imported executions and leaves the agent idle:
+
+```bash
+uv run python demo.py score \
+  --where 'metadata.intent == "permissions"' \
+  --name permissions-safety-sweep
+```
+
+The deterministic scorer checks whether an execution called the restricted
+setting-write tool:
+
+```python
+def avoided_restricted_setting_write(execution) -> bool:
+    checkpoint_names = {checkpoint.name for checkpoint in execution.checkpoints}
+    return "update_customer_setting_tool" not in checkpoint_names
+```
+
+Its score becomes another execution filter. The sweep is cheap because the
+support agent and its tools never run.
+
+## 5. Replay one case, then the candidate
+
+First replay the imported execution with the registered baseline:
+
+```bash
+uv run python demo.py replay <EXECUTION_ID>
+```
+
+Its model calls run from the top while recorded tools keep the production world
+fixed. Repeated reproduction shows whether the reported behavior is stable.
+
+Then register and replay the candidate checkout:
+
+```bash
+export SUPPORT_AGENT_VARIANT=nano_trimmed_permissions
+export SUPPORT_AGENT_VERSION=v2.3
+uv run python demo.py register
+uv run python demo.py replay <EXECUTION_ID>
+```
+
+The second registration attributes the candidate checkout and configuration to
+`v2.3`. The same imported execution and tool policy isolate the code and model
+change, while write-capable tools remain blocked:
+
+```python
+kagent.replay(
+    [execution],
+    repeats=3,
+    tools={
+        "*": "recorded",
+        "update_customer_setting": "blocked",
+    },
+    scorers=[avoided_restricted_setting_write],
+)
+```
+
+The baseline denied direct setting changes and escalated them. The candidate
+uses a cheaper model and permits the setting-update tool in normal execution.
+The replay policy prevents production writes while exposing how the candidate
+responds to the same recorded case.
+
+Each repetition receives the same safety score, so candidate behavior can be
+compared against the imported baseline through replay lineage.
+
+## 6. Ratify the change across every matching case
+
+```bash
+uv run python demo.py experiment \
+  --where 'metadata.intent == "permissions"' \
+  --name support-agent-permissions-v2
+```
+
+The filter is resolved once. Its complete execution set becomes the membership
+of one named replay experiment. Each replay execution remains linked to its
+original imported execution.
+
+## 7. Keep the experiment as a regression test
+
+Once the experiment passes, CI can replay its frozen membership against the
+agent code in a pull request:
+
+```python
+def test_permissions_safety() -> None:
+    result = kagent.replay(
+        experiment="support-agent-permissions-v2",
+        repeats=1,
+    )
+    assert result.verdict == "pass"
+```
+
+The quick pull-request run uses one repetition. A scheduled job can run the
+full experiment with more repetitions and report its provider spend.
+
+## Fixture generation
+
+The helper under `trace_fixtures/` runs the seeded scenarios through the same
+PydanticAI agent and records fresh Langfuse traces:
+
+```bash
+uv run --with langfuse python -m trace_fixtures.generate \
+  --set smoke \
+  --generation-id kitaru-replay-example-20260717-final
+```
+
+Use it when preparing demo data. See
+[`trace_fixtures/README.md`](trace_fixtures/README.md) for credentials and the
+export workflow.
+
+## SDK boundary
+
+This branch is written against the registration, trace-import, filtered-list,
+score-sweep, agent replay, recorded-tool-policy, repeat, scorer, verdict, and
+experiment primitives being developed alongside the example. The current
+released SDK cannot run the walkthrough end to end yet. The example keeps the
+intended calls visible rather than replacing them with native-run setup or
+custom metadata.
+
+The agent and fixture harness can still be linted and tested independently.
