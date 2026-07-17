@@ -6,8 +6,8 @@ from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Annotated, Any, Literal
-from unittest.mock import Mock
+from typing import Annotated, Any, Literal, cast
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from pydantic_ai import Agent
@@ -38,6 +38,7 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.flow import flow
+from kitaru.replay import ExperimentReplayContext
 
 REGISTERABLE_AGENT: KitaruAgent[Any, str] | None = None
 
@@ -1492,6 +1493,98 @@ def test_replay_static_drift_fails_before_loading_any_child(
     child_client.assert_not_called()
 
 
+def test_registered_agent_replay_builds_one_durable_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    durable_agent = KitaruAgent(
+        Agent(TestModel(), name="registered-agent", output_type=str)
+    )
+    binding = RegisteredAgentVersionBinding(
+        project_id="project-id",
+        manifest=_manifest(),
+    )
+    durable_agent._registered_state = cast(Any, SimpleNamespace(binding=binding))
+    flow_definition = MagicMock()
+    flow_definition._registered_preflight_scope.side_effect = lambda _callback: (
+        nullcontext()
+    )
+    monkeypatch.setattr(durable_agent, "_registered_flow", lambda: flow_definition)
+    preflight = Mock()
+    monkeypatch.setattr(durable_agent, "_preflight_registered_identity", preflight)
+    client = object()
+    monkeypatch.setattr(agent_module, "Client", lambda: client)
+    monkeypatch.setattr(
+        agent_module,
+        "_temporary_active_project",
+        lambda _project: nullcontext(),
+    )
+    draft = object()
+    plan = SimpleNamespace(spec=SimpleNamespace(experiment_id="exp-1"))
+    preplan = Mock(return_value=draft)
+    freeze = Mock(return_value=plan)
+    monkeypatch.setattr(agent_module, "preplan_replay_attempt", preplan)
+    monkeypatch.setattr(agent_module, "freeze_replay_attempt", freeze)
+    result = object()
+
+    def execute(
+        received_plan: Any,
+        *,
+        submit_trial: Any,
+        tag: str | None,
+        client_factory: Any,
+    ) -> Any:
+        assert received_plan is plan
+        assert tag == "review"
+        assert client_factory() is client
+        submitted = submit_trial(
+            trial=SimpleNamespace(
+                target_execution_id="target-1",
+                repeat_index=1,
+                parent_execution_id="target-1",
+                root_execution_id="root-1",
+            ),
+            replay_plan=SimpleNamespace(document=object()),
+            submission_id="rs-exp-1",
+        )
+        assert submitted == "child-projection"
+        return result
+
+    monkeypatch.setattr(agent_module, "execute_replay_attempt", execute)
+    flow_definition.replay.return_value = "child-projection"
+
+    actual = durable_agent.replay(
+        ["target-1", "target-2"],
+        at="checkpoint",
+        on_error="collect",
+        uncovered_policy="top",
+        idempotency_key="request-1",
+        name="candidate",
+        repeats=2,
+        tag="review",
+    )
+
+    assert actual is result
+    preflight.assert_called_once_with()
+    preplan_call = preplan.call_args.kwargs
+    assert preplan_call["binding"] == binding
+    assert preplan_call["on_error"] == "collect"
+    assert preplan_call["uncovered_policy"] == "top"
+    assert preplan_call["repeats"] == 2
+    assert preplan_call["wait"] is False
+    freeze.assert_called_once_with(draft, client=client)
+    replay_call = flow_definition.replay.call_args
+    assert replay_call.args == ("target-1",)
+    assert replay_call.kwargs["on_error"] == "collect"
+    assert replay_call.kwargs["experiment_context"] == ExperimentReplayContext(
+        experiment_id="exp-1",
+        target_execution_id="target-1",
+        repeat_index=1,
+        parent_execution_id="target-1",
+        root_execution_id="root-1",
+    )
+    assert replay_call.kwargs["replay_submission_id"] == "rs-exp-1"
+
+
 def test_unregistered_direct_native_and_replay_paths_fail_before_body() -> None:
     durable_agent = KitaruAgent(
         Agent(TestModel(), name="unregistered-agent", output_type=str)
@@ -1501,6 +1594,12 @@ def test_unregistered_direct_native_and_replay_paths_fail_before_body() -> None:
     with pytest.raises(KitaruStateError, match="not registered"):
         durable_agent._invoke_in_auto_flow(body)
     with pytest.raises(KitaruStateError, match="not registered"):
-        durable_agent.replay("run-id", at="checkpoint")
+        durable_agent.replay(
+            "run-id",
+            at="checkpoint",
+            on_error="fail",
+            uncovered_policy="fail",
+            idempotency_key="request-1",
+        )
 
     body.assert_not_called()

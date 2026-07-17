@@ -22,6 +22,8 @@ from kitaru._client._models import (
     LogEntry,
     PendingWait,
 )
+from kitaru._experiments._models import ExperimentRecord
+from kitaru._experiments._views import Experiment, ExperimentReplayResult
 from kitaru._inspection_runtime import RuntimeSnapshot
 from kitaru.config import (
     ActiveStackLogStore,
@@ -231,6 +233,7 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
             fallback_repr=True,
         ),
         "original_exec_id": execution.original_exec_id,
+        "root_exec_id": getattr(execution, "root_exec_id", None),
         "llm_usage_records": to_jsonable(
             execution.llm_usage_records,
             fallback_repr=True,
@@ -334,9 +337,50 @@ def serialize_agent_version(version: AgentVersionInfo) -> dict[str, Any]:
     }
 
 
+def serialize_experiment(
+    experiment: Experiment | ExperimentRecord,
+) -> dict[str, Any]:
+    """Serialize the stable read-only frontend experiment contract."""
+    record = experiment.record if isinstance(experiment, Experiment) else experiment
+    spec = record.spec
+    return {
+        "schema_version": record.schema_version,
+        "experiment_id": spec.experiment_id,
+        "kind": spec.kind,
+        "name": spec.name,
+        "display_name": spec.display_name,
+        "suite_key": spec.suite_key,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "candidate_agent_version_id": spec.candidate_agent_version_id,
+        "coverage": spec.coverage.model_dump(mode="json"),
+        "target_membership": spec.target_membership.model_dump(mode="json"),
+        "counts": record.counts.model_dump(mode="json"),
+        "errors": [issue.model_dump(mode="json") for issue in record.errors],
+        "skips": [issue.model_dump(mode="json") for issue in record.skips],
+        "unverified_children": [
+            issue.model_dump(mode="json") for issue in record.unverified_children
+        ],
+    }
+
+
+def serialize_experiment_replay_result(
+    result: ExperimentReplayResult,
+) -> dict[str, Any]:
+    """Serialize one durable replay result without duplicating its spec."""
+    return {
+        "record": result.record.model_dump(mode="json"),
+        "submission": result.submission.to_json(),
+    }
+
+
 def serialize_agent(agent: AgentInfo) -> dict[str, Any]:
     """Serialize a Project-backed Agent projection."""
     executable = agent.default_executable
+    experiments = getattr(agent, "experiments", [])
     return {
         "agent_id": agent.agent_id,
         "name": agent.name,
@@ -358,6 +402,8 @@ def serialize_agent(agent: AgentInfo) -> dict[str, Any]:
             serialize_agent_version(version) for version in agent.agent_versions
         ],
         "version_count": agent.version_count,
+        "experiments": [serialize_experiment(experiment) for experiment in experiments],
+        "experiment_count": getattr(agent, "experiment_count", len(experiments)),
     }
 
 

@@ -9,6 +9,7 @@ import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -65,6 +66,7 @@ from kitaru.client import (
     AuthAPIKey,
     AuthAPIKeyWithValue,
     AuthServiceAccount,
+    Execution,
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
@@ -94,6 +96,11 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
     KitaruWaitValidationError,
+)
+from kitaru.replay import (
+    EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
 )
 
 
@@ -847,6 +854,94 @@ def test_agents_api_delegates_to_shared_helpers() -> None:
         client_factory=client._client,
     )
     delete.assert_called_once_with("staging", client_factory=client._client)
+
+
+def test_agent_experiment_reads_are_typed_lazy_and_exactly_tag_filtered() -> None:
+    record = SimpleNamespace(spec=SimpleNamespace(experiment_id="exp-1"))
+    agent = SimpleNamespace(
+        agent_id="project-id",
+        list_experiments=lambda: [record],
+        get_experiment=lambda selector: record,
+    )
+    zenml_client = MagicMock()
+    zenml_client.list_pipeline_runs.return_value = SimpleNamespace(items=[])
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-id"),
+        ),
+        patch("kitaru.client.Client", return_value=zenml_client),
+        patch("kitaru.client._current_agent", return_value=agent),
+    ):
+        client = KitaruClient()
+        listed = client.agents.experiments.list()
+        fetched = client.agents.experiments.get("exp-1")
+        page = fetched.runs.list(page=3, size=20)
+
+    assert len(listed) == 1
+    assert listed[0].experiment_id == "exp-1"
+    assert fetched.experiment_id == "exp-1"
+    assert page.items == []
+    zenml_client.list_pipeline_runs.assert_called_once_with(
+        sort_by="asc:created",
+        page=3,
+        size=20,
+        project="project-id",
+        hydrate=False,
+        tags=["kitaru-experiment:exp-1"],
+    )
+
+
+def test_execution_experiment_relationships_preserve_unknown_legacy_roots() -> None:
+    client = MagicMock()
+    client.agents.experiments.list_for_execution.return_value = ["experiment"]
+    client.executions._list_experiment_replays.return_value = ["replay"]
+    client.executions.get.side_effect = lambda exec_id: f"execution:{exec_id}"
+    execution = Execution(
+        exec_id="child",
+        flow_id=None,
+        flow_name=None,
+        status=ExecutionStatus.COMPLETED,
+        started_at=None,
+        ended_at=None,
+        stack_name=None,
+        metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+        status_reason=None,
+        failure=None,
+        pending_wait=None,
+        frozen_execution_spec=None,
+        original_exec_id="parent",
+        checkpoints=[],
+        artifacts=[],
+        _client=client,
+        project_id="project-id",
+    )
+
+    assert execution.experiments == ["experiment"]
+    assert execution.replays == ["replay"]
+    assert execution.original == "execution:parent"
+    assert execution.root_exec_id == "root"
+    assert execution.root == "execution:root"
+
+    legacy = dataclass_replace(
+        execution,
+        metadata={},
+    )
+    mismatched = dataclass_replace(
+        execution,
+        metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "other",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+    )
+    assert legacy.root is None
+    assert mismatched.root is None
 
 
 def test_project_management_constructor_delegates_to_agent_management() -> None:

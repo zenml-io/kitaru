@@ -115,6 +115,9 @@ from kitaru.errors import (
     traceback_last_line,
 )
 from kitaru.replay import (
+    ExperimentMemberVerification,
+    ExperimentReplayContext,
+    ExperimentReplayOutcome,
     ReplayFailureRow,
     ReplayPlan,
     ReplayResultRow,
@@ -123,6 +126,7 @@ from kitaru.replay import (
     build_replay_plan,
     build_replay_request_document,
     new_replay_submission_id,
+    persist_and_verify_experiment_membership,
     replay_at_skip_reason,
     replay_at_status,
     safe_compare_url_for_executions,
@@ -149,7 +153,11 @@ def _connection_project(resolved_connection: Any) -> str | None:
 
 
 @contextmanager
-def _temporary_active_project(project_name_or_id: str | None) -> Iterator[None]:
+def _temporary_active_project(
+    project_name_or_id: str | None,
+    *,
+    restore_warnings: list[str] | None = None,
+) -> Iterator[None]:
     """Temporarily activate a project for one ZenML write operation.
 
     ZenML writes runs and snapshots into its active project. Kitaru resolves a
@@ -159,6 +167,9 @@ def _temporary_active_project(project_name_or_id: str | None) -> Iterator[None]:
     Args:
         project_name_or_id: Optional project name or ID. When ``None`` or blank,
             the currently active ZenML project is used unchanged.
+        restore_warnings: Optional collector that turns a post-body restoration
+            failure into a warning. This is used only after an experiment child
+            has already been submitted, so its ID is not hidden from the caller.
     """
     with _ACTIVE_ZENML_STATE_LOCK:
         if not project_name_or_id or not str(project_name_or_id).strip():
@@ -215,10 +226,17 @@ def _temporary_active_project(project_name_or_id: str | None) -> Iterator[None]:
                     )
 
                 if restore_error is not None and body_error is None:
-                    raise KitaruBackendError(
+                    message = (
                         "Failed to restore the previous active project after "
-                        f"the Kitaru write: {restore_error}"
-                    ) from restore_error
+                        "the replay child was submitted."
+                    )
+                    if restore_warnings is not None:
+                        restore_warnings.append(message)
+                    else:
+                        raise KitaruBackendError(
+                            "Failed to restore the previous active project after "
+                            f"the Kitaru write: {restore_error}"
+                        ) from restore_error
 
 
 @contextmanager
@@ -1854,6 +1872,15 @@ class FlowHandle:
         return self._run
 
 
+@dataclass(frozen=True)
+class _ReplayHandleOutcome:
+    handle: FlowHandle
+    original_run: PipelineRunResponse
+    replay_plan: ReplayPlan
+    membership_verification: ExperimentMemberVerification | None
+    post_submit_warnings: tuple[str, ...] = ()
+
+
 class _FlowDefinition:
     """Flow wrapper returned by `@flow`."""
 
@@ -2185,7 +2212,9 @@ class _FlowDefinition:
         original_run: PipelineRunResponse | None = None,
         replay_submission_id: str | None = None,
         replay_tag: str | None = None,
-    ) -> tuple[FlowHandle, PipelineRunResponse, ReplayPlan]:
+        preplanned_replay_plan: ReplayPlan | None = None,
+        experiment_context: ExperimentReplayContext | None = None,
+    ) -> _ReplayHandleOutcome:
         """Submit one replay child and return the live handle plus its plan."""
         raw_active_stack_provenance = _capture_active_stack_provenance_for_guard()
         if resolved_connection is None:
@@ -2204,7 +2233,7 @@ class _FlowDefinition:
                     f"Failed to load source execution '{execution}' for replay: {exc}"
                 ) from exc
 
-        replay_plan = build_replay_plan(
+        replay_plan = preplanned_replay_plan or build_replay_plan(
             run=original_run,
             at=at,
             flow_overrides=flow_overrides,
@@ -2235,9 +2264,18 @@ class _FlowDefinition:
             replay_context_json=replay_plan.runtime_context.to_json(),
         )
         resolved_project = self._submission_project(resolved_connection)
+        post_submit_warnings: list[str] = []
+        project_context = (
+            _temporary_active_project(resolved_project)
+            if experiment_context is None
+            else _temporary_active_project(
+                resolved_project,
+                restore_warnings=post_submit_warnings,
+            )
+        )
 
         with (
-            _temporary_active_project(resolved_project),
+            project_context,
             _temporary_active_stack(resolved_execution.stack),
         ):
             _preflight_active_stack_implementation_hydration()
@@ -2307,7 +2345,11 @@ class _FlowDefinition:
                     f"Failed to replay execution '{execution}': {exc}"
                 ) from exc
 
-            if replayed_run is not None and self._registered_binding is not None:
+            if (
+                replayed_run is not None
+                and self._registered_binding is not None
+                and experiment_context is None
+            ):
                 verify_submitted_run_binding(
                     Client(), run=replayed_run, binding=self._registered_binding
                 )
@@ -2322,10 +2364,24 @@ class _FlowDefinition:
                     },
                 )
                 raise KitaruRuntimeError("Replay did not produce a pipeline run.")
-            persist_frozen_execution_spec(
-                run_id=replayed_run.id,
-                frozen_execution_spec=frozen_execution_spec,
-            )
+            try:
+                persist_frozen_execution_spec(
+                    run_id=replayed_run.id,
+                    frozen_execution_spec=frozen_execution_spec,
+                )
+            except Exception:
+                if experiment_context is None:
+                    raise
+                post_submit_warnings.append(
+                    "Failed to persist the frozen execution spec after the replay "
+                    "child was submitted."
+                )
+                logger.debug(
+                    "Failed to persist the frozen execution spec for experiment "
+                    "child %s; continuing to durable membership verification.",
+                    replayed_run.id,
+                    exc_info=True,
+                )
             safe_persist_replay_submission_metadata(
                 replay_exec_id=str(replayed_run.id),
                 original_exec_id=str(original_run.id),
@@ -2334,6 +2390,15 @@ class _FlowDefinition:
                 steps_to_skip=replay_plan.steps_to_skip,
                 replay_plan=replay_plan.document,
             )
+            membership_verification: ExperimentMemberVerification | None = None
+            if experiment_context is not None:
+                assert self._registered_binding is not None
+                membership_verification = persist_and_verify_experiment_membership(
+                    replay_exec_id=str(replayed_run.id),
+                    context=experiment_context,
+                    binding=self._registered_binding,
+                    client=Client(),
+                )
 
         _emit_kitaru_execution_url(replayed_run)
 
@@ -2348,7 +2413,13 @@ class _FlowDefinition:
             analytics_metadata=deployment_metadata,
             track_terminal_if_finished=True,
         )
-        return handle, original_run, replay_plan
+        return _ReplayHandleOutcome(
+            handle=handle,
+            original_run=original_run,
+            replay_plan=replay_plan,
+            membership_verification=membership_verification,
+            post_submit_warnings=tuple(post_submit_warnings),
+        )
 
     def replay(
         self,
@@ -2366,6 +2437,9 @@ class _FlowDefinition:
         image: ImageSetting | None = None,
         cache: bool | None = None,
         retries: int | None = None,
+        replay_submission_id: str | None = None,
+        preplanned_replay_plan: ReplayPlan | None = None,
+        experiment_context: ExperimentReplayContext | None = None,
     ) -> ReplaySubmission:
         """Replay one or more explicit executions with unified overrides."""
         from kitaru.cohort import coerce_exec_ids
@@ -2375,6 +2449,19 @@ class _FlowDefinition:
         )
         if not exec_ids:
             raise KitaruUsageError("Pass at least one execution ID to replay.")
+        if experiment_context is not None:
+            if len(exec_ids) != 1:
+                raise KitaruUsageError(
+                    "Experiment replay identity applies to exactly one child trial."
+                )
+            if self._registered_binding is None:
+                raise KitaruUsageError(
+                    "Durable experiment replay requires a registered AgentVersion."
+                )
+        if preplanned_replay_plan is not None and experiment_context is None:
+            raise KitaruUsageError(
+                "Preplanned replay plans are reserved for durable experiments."
+            )
         resolved_wait = (len(exec_ids) == 1) if wait is None else wait
         resolved_on_error = on_error or ("fail" if len(exec_ids) == 1 else "collect")
         if resolved_on_error not in {"collect", "fail"}:
@@ -2385,14 +2472,18 @@ class _FlowDefinition:
             with _temporary_active_project(resolved_project):
                 self._preflight_registered_submission(verify_pipeline=False)
 
-        submission_id = new_replay_submission_id()
+        submission_id = replay_submission_id or new_replay_submission_id()
         request_document = build_replay_request_document(
             flow_overrides=flow_overrides,
             checkpoint_overrides=checkpoint_overrides,
             invocation_overrides=invocation_overrides,
             skip=skip,
         )
-        plan_document = request_document
+        plan_document = (
+            preplanned_replay_plan.document
+            if preplanned_replay_plan is not None
+            else request_document
+        )
         results: list[ReplayResultRow] = []
         failures: list[ReplayFailureRow] = []
         skipped_rows: list[ReplaySkippedRow] = []
@@ -2410,7 +2501,7 @@ class _FlowDefinition:
                 )
                 raise_if_imported_execution(original_run, "replayed")
                 original_id = str(original_run.id)
-                if resolved_on_error == "collect":
+                if resolved_on_error == "collect" and preplanned_replay_plan is None:
                     at_status = replay_at_status(run=original_run, at=at)
                     if at_status in {"missing", "no_checkpoints"}:
                         skipped_rows.append(
@@ -2431,7 +2522,7 @@ class _FlowDefinition:
                         )
                         continue
 
-                handle, loaded_original_run, replay_plan = self._replay_one_handle(
+                replay_outcome = self._replay_one_handle(
                     exec_ref,
                     at=at,
                     flow_overrides=flow_overrides,
@@ -2446,14 +2537,24 @@ class _FlowDefinition:
                     original_run=original_run,
                     replay_submission_id=submission_id,
                     replay_tag=tag,
+                    preplanned_replay_plan=preplanned_replay_plan,
+                    experiment_context=experiment_context,
                 )
-                original_id = str(loaded_original_run.id)
-                plan_document = replay_plan.document
+                handle = replay_outcome.handle
+                original_id = str(replay_outcome.original_run.id)
+                plan_document = replay_outcome.replay_plan.document
                 replay_exec_id = str(handle.exec_id)
                 row_status: Literal["submitted", "completed", "failed"] = "submitted"
                 if resolved_wait:
-                    handle.wait()
-                    row_status = "completed"
+                    try:
+                        handle.wait()
+                        row_status = "completed"
+                    except Exception:
+                        if experiment_context is None:
+                            raise
+                        # The run already exists and its membership was verified.
+                        # Preserve its ID even when waiting reports run failure.
+                        row_status = "failed"
                 row_compare_url = safe_compare_url_for_executions(
                     [original_id, replay_exec_id]
                 )
@@ -2466,6 +2567,16 @@ class _FlowDefinition:
                         status=row_status,
                         compare_url=row_compare_url,
                         handle=None if resolved_wait else handle,
+                        experiment=(
+                            ExperimentReplayOutcome(
+                                context=experiment_context,
+                                verification=replay_outcome.membership_verification,
+                                warnings=replay_outcome.post_submit_warnings,
+                            )
+                            if experiment_context is not None
+                            and replay_outcome.membership_verification is not None
+                            else None
+                        ),
                     )
                 )
             except Exception as exc:

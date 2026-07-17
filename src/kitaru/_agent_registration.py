@@ -586,11 +586,23 @@ def verify_submitted_run_binding(
             "Unable to verify the registered execution attribution."
         ) from exc
 
-    if _resource_project_id(hydrated_run) != binding.project_id:
+    return verify_hydrated_submitted_run_binding(
+        hydrated_run,
+        binding=binding,
+    )
+
+
+def verify_hydrated_submitted_run_binding(
+    run: Any,
+    *,
+    binding: RegisteredAgentVersionBinding,
+) -> Any:
+    """Validate one already-hydrated run against its registered binding."""
+    if _resource_project_id(run) != binding.project_id:
         raise KitaruStateError(
             "The registered execution belongs to a different Agent Project."
         )
-    snapshot = _run_snapshot(hydrated_run)
+    snapshot = _run_snapshot(run)
     if snapshot is None:
         raise KitaruStateError(
             "The registered execution has no hydrated Pipeline snapshot."
@@ -604,7 +616,7 @@ def verify_submitted_run_binding(
             "The execution snapshot references a different Pipeline UUID. "
             "The registered Pipeline may have been deleted and recreated."
         )
-    return hydrated_run
+    return run
 
 
 def identity_drift_categories(

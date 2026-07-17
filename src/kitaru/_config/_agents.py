@@ -26,6 +26,10 @@ from kitaru._config._projects import (
     _get_project_by_exact_selector,
     _project_info_from_model,
 )
+from kitaru._experiments import (
+    ExperimentRecord,
+    validate_experiment_record_transition,
+)
 from kitaru.errors import (
     KitaruBackendError,
     KitaruMetadataConflictError,
@@ -45,6 +49,8 @@ _OWNED_ENVELOPE_KEYS = frozenset(
         "agent_version_order",
         "agent_version_aliases",
         "agent_versions",
+        "experiments",
+        "experiment_idempotency_index",
     }
 )
 
@@ -162,8 +168,10 @@ class _AgentMetadataEnvelope(BaseModel):
     agent_version_order: list[str] | None = None
     agent_version_aliases: dict[str, str] = Field(default_factory=dict)
     agent_versions: dict[str, _AgentVersionManifest] = Field(default_factory=dict)
+    experiments: dict[str, ExperimentRecord] = Field(default_factory=dict)
+    experiment_idempotency_index: dict[str, str] = Field(default_factory=dict)
 
-    # Later-stage keys such as experiments remain opaque and are retained.
+    # Unknown later-stage keys remain opaque and are retained.
     model_config = ConfigDict(extra="allow", strict=True)
 
     @field_validator("agent_version_order")
@@ -238,6 +246,42 @@ class _AgentMetadataEnvelope(BaseModel):
             raise ValueError(
                 "The default executable must match the default AgentVersion entrypoint."
             )
+
+        expected_index: dict[str, str] = {}
+        for experiment_id, record in self.experiments.items():
+            spec = record.spec
+            if experiment_id != spec.experiment_id:
+                raise ValueError(
+                    "Experiment map keys must match immutable experiment IDs."
+                )
+            if spec.candidate_project_id != self.agent.agent_id:
+                raise ValueError(
+                    "Experiment candidates must belong to the Agent Project."
+                )
+            if spec.candidate_agent_version_id not in version_ids:
+                raise ValueError(
+                    "Experiment candidates must target a registered AgentVersion."
+                )
+            manifest = self.agent_versions[spec.candidate_agent_version_id]
+            if spec.candidate_pipeline_id != manifest.pipeline_id:
+                raise ValueError(
+                    "Experiment candidate Pipeline IDs must match AgentVersion IDs."
+                )
+            if spec.executable.entrypoint != manifest.entrypoint:
+                raise ValueError(
+                    "Experiment executables must match the AgentVersion manifest."
+                )
+            key = spec.idempotency_key
+            if key in expected_index and expected_index[key] != experiment_id:
+                raise ValueError(
+                    "Experiment idempotency keys must identify exactly one attempt."
+                )
+            expected_index[key] = experiment_id
+
+        if self.experiment_idempotency_index != expected_index:
+            raise ValueError(
+                "The experiment idempotency index must exactly match the catalog."
+            )
         return self
 
 
@@ -259,6 +303,7 @@ class AgentInfo(BaseModel):
     default_executable: _AgentExecutable | None
     agent_version_aliases: dict[str, str]
     agent_versions: list[AgentVersionInfo]
+    experiments: list[ExperimentRecord] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -267,6 +312,44 @@ class AgentInfo(BaseModel):
     def version_count(self) -> int:
         """Return the number of versions in the canonical projection."""
         return len(self.agent_versions)
+
+    @computed_field(return_type=int)
+    @property
+    def experiment_count(self) -> int:
+        """Return the number of durable experiment attempts."""
+        return len(self.experiments)
+
+    def list_experiments(self) -> list[ExperimentRecord]:
+        """Return experiment records in deterministic newest-first order."""
+        return list(self.experiments)
+
+    def get_experiment(self, name_or_id: str) -> ExperimentRecord:
+        """Resolve an exact attempt ID or an unambiguous suite/name."""
+        selector = _non_empty_string(
+            name_or_id,
+            field_name="Experiment selector",
+        )
+        by_id = [
+            record
+            for record in self.experiments
+            if record.spec.experiment_id == selector
+        ]
+        if by_id:
+            return by_id[0]
+
+        matches = [
+            record
+            for record in self.experiments
+            if record.spec.suite_key == selector or record.spec.name == selector
+        ]
+        if not matches:
+            raise KitaruStateError(f"Experiment '{selector}' was not found.")
+        if len(matches) > 1:
+            raise KitaruUsageError(
+                f"Experiment selector '{selector}' is ambiguous. "
+                "Select the attempt by experiment ID."
+            )
+        return matches[0]
 
 
 class AgentRegistrationResult(BaseModel):
@@ -372,6 +455,20 @@ def _ordered_version_ids(envelope: _AgentMetadataEnvelope) -> list[str]:
     return ordered_ids
 
 
+def _ordered_experiment_records(
+    envelope: _AgentMetadataEnvelope,
+) -> list[ExperimentRecord]:
+    """Return durable experiment records in deterministic newest-first order."""
+    return sorted(
+        envelope.experiments.values(),
+        key=lambda record: (
+            datetime.fromisoformat(record.spec.created_at.replace("Z", "+00:00")),
+            record.spec.experiment_id,
+        ),
+        reverse=True,
+    )
+
+
 def _manifest_for_fingerprint(
     envelope: _AgentMetadataEnvelope | None,
     fingerprint: str,
@@ -445,6 +542,7 @@ def _agent_info_from_project_model(
         default_executable=envelope.agent.default_executable,
         agent_version_aliases=dict(sorted(envelope.agent_version_aliases.items())),
         agent_versions=versions,
+        experiments=_ordered_experiment_records(envelope),
     )
 
 
@@ -481,6 +579,19 @@ def _validate_monotonic_mutation(
             raise KitaruMetadataConflictError(
                 "Agent metadata reconciliation cannot move or remove an "
                 "existing AgentVersion alias."
+            )
+    for experiment_id, record in previous.experiments.items():
+        updated = desired.experiments.get(experiment_id)
+        if updated is None:
+            raise KitaruMetadataConflictError(
+                "Agent metadata reconciliation cannot remove an experiment."
+            )
+        validate_experiment_record_transition(record, updated)
+    for key, experiment_id in previous.experiment_idempotency_index.items():
+        if desired.experiment_idempotency_index.get(key) != experiment_id:
+            raise KitaruMetadataConflictError(
+                "Agent metadata reconciliation cannot move or remove an "
+                "experiment idempotency key."
             )
 
 
@@ -585,10 +696,16 @@ def _contains_desired_owned_state(
     for alias, version_id in desired.agent_version_aliases.items():
         if actual.agent_version_aliases.get(alias) != version_id:
             return False
+    for experiment_id, record in desired.experiments.items():
+        if actual.experiments.get(experiment_id) != record:
+            return False
+    for key, experiment_id in desired.experiment_idempotency_index.items():
+        if actual.experiment_idempotency_index.get(key) != experiment_id:
+            return False
     return True
 
 
-def _reconcile_project_agent_metadata(
+def reconcile_kitaru_metadata(
     project_id: str,
     mutation: _AgentMetadataMutation,
     verify: _AgentMetadataVerification,
@@ -659,6 +776,22 @@ def _reconcile_project_agent_metadata(
         "Unable to verify the Project metadata update after "
         f"{_PROJECT_METADATA_RECONCILIATION_MAX_ATTEMPTS} attempts."
     ) from None
+
+
+def _reconcile_project_agent_metadata(
+    project_id: str,
+    mutation: _AgentMetadataMutation,
+    verify: _AgentMetadataVerification,
+    *,
+    client_factory: Callable[[], Any] = Client,
+) -> _AgentMetadataEnvelope:
+    """Backward-compatible delegate to the shared Kitaru reconciler."""
+    return reconcile_kitaru_metadata(
+        project_id,
+        mutation,
+        verify,
+        client_factory=client_factory,
+    )
 
 
 def _reconcile_agent_version_registration(
@@ -746,7 +879,7 @@ def _reconcile_agent_version_registration(
             deep=True,
         )
 
-    return _reconcile_project_agent_metadata(
+    return reconcile_kitaru_metadata(
         project_id,
         add_manifest,
         lambda actual: (
@@ -776,7 +909,7 @@ def _reconcile_active_project_agent_metadata(
         raise KitaruStateError(
             "Unable to resolve the active Project for Agent metadata."
         )
-    return _reconcile_project_agent_metadata(
+    return reconcile_kitaru_metadata(
         project_id,
         mutation,
         verify,
@@ -1059,7 +1192,7 @@ def create_agent(
             ),
         )
 
-    _reconcile_project_agent_metadata(
+    reconcile_kitaru_metadata(
         project.id,
         initialize,
         lambda actual: (

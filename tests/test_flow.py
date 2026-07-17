@@ -77,6 +77,7 @@ from kitaru.flow import (
     _is_flow_result_candidate_step,
     _is_multiple_terminal_steps_output_error,
     _preflight_active_stack_implementation_hydration,
+    _ReplayHandleOutcome,
     _suspend_flow_return_coercion,
     _temporary_active_project,
     _temporary_active_stack,
@@ -84,7 +85,12 @@ from kitaru.flow import (
     flow,
 )
 from kitaru.inspection import ActiveConfigSelectionProvenance
-from kitaru.replay import ReplayPlan, ReplayPlanDocument
+from kitaru.replay import (
+    ExperimentMemberVerification,
+    ExperimentReplayContext,
+    ReplayPlan,
+    ReplayPlanDocument,
+)
 from kitaru.replay_context import (
     KITARU_REPLAY_CONTEXT_ENV,
     ReplayRuntimeContext,
@@ -5066,6 +5072,42 @@ def test_temporary_active_project_sets_env_and_restores_previous_project(
     assert activation_order == ["prod-project-id", "old-project-id"]
 
 
+def test_temporary_active_project_preserves_submitted_child_on_restore_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-submit restore failure must not hide an experiment child ID."""
+    monkeypatch.setenv(ZENML_ACTIVE_PROJECT_ID_ENV, "previous-env-project")
+    previous = SimpleNamespace(id="old-project-id", name="default")
+    production = SimpleNamespace(id="prod-project-id", name="production")
+
+    class _ProjectClient:
+        active_project = previous
+
+        def get_project(self, *_args: Any, **_kwargs: Any) -> object:
+            return production
+
+        def set_active_project(self, project_id: str) -> object:
+            if project_id == "old-project-id":
+                raise RuntimeError("restore failed")
+            self.active_project = production
+            return production
+
+    warnings: list[str] = []
+    child_id: str | None = None
+    with (
+        patch("kitaru.flow.Client", return_value=_ProjectClient()),
+        _temporary_active_project("production", restore_warnings=warnings),
+    ):
+        child_id = "child-1"
+
+    assert child_id == "child-1"
+    assert warnings == [
+        "Failed to restore the previous active project after the replay child was "
+        "submitted."
+    ]
+    assert os.environ[ZENML_ACTIVE_PROJECT_ID_ENV] == "previous-env-project"
+
+
 def test_temporary_active_stack_serializes_concurrent_bindings() -> None:
     """Concurrent temporary stack bindings should not interleave within one process."""
     first_entered = threading.Event()
@@ -7438,7 +7480,16 @@ def test_unified_replay_single_defaults_to_wait_and_fail() -> None:
     wrapped = kitaru.flow(lambda topic: topic)
     with (
         patch("kitaru.flow.Client") as client_cls,
-        patch.object(wrapped, "_replay_one_handle", return_value=(handle, run, plan)),
+        patch.object(
+            wrapped,
+            "_replay_one_handle",
+            return_value=_ReplayHandleOutcome(
+                handle=handle,
+                original_run=cast(PipelineRunResponse, run),
+                replay_plan=plan,
+                membership_verification=None,
+            ),
+        ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.safe_persist_replay_submission_metadata"),
     ):
@@ -7475,7 +7526,12 @@ def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None
         patch.object(
             wrapped,
             "_replay_one_handle",
-            return_value=(handle, run_with_at, plan),
+            return_value=_ReplayHandleOutcome(
+                handle=handle,
+                original_run=cast(PipelineRunResponse, run_with_at),
+                replay_plan=plan,
+                membership_verification=None,
+            ),
         ),
         patch("kitaru.flow.resolve_connection_config", return_value=object()),
         patch("kitaru.flow.safe_persist_replay_submission_metadata"),
@@ -7495,6 +7551,146 @@ def test_unified_replay_batch_defaults_to_collect_and_skips_missing_at() -> None
     assert len(submission.results) == 1
     assert len(submission.skipped) == 1
     assert submission.skipped[0].original_exec_ref == "exec-without"
+
+
+def test_experiment_replay_preserves_child_when_frozen_spec_persistence_fails() -> None:
+    source_run = _DummyRun(status=ExecutionStatus.COMPLETED)
+    replayed_run = _DummyRun(status=ExecutionStatus.RUNNING)
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.return_value = replayed_run
+    base_pipeline = MagicMock()
+    base_pipeline.name = "registered-pipeline"
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_run.id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+    verification = ExperimentMemberVerification(verified=True)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config",
+            return_value=_resolved_execution(),
+        ),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch(
+            "kitaru.flow.persist_frozen_execution_spec",
+            side_effect=RuntimeError("persistence failed"),
+        ),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+        patch(
+            "kitaru.flow.persist_and_verify_experiment_membership",
+            return_value=verification,
+        ),
+        patch("kitaru.flow._temporary_active_project", return_value=nullcontext()),
+        patch("kitaru.flow._preflight_active_stack_implementation_hydration"),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = source_run
+        wrapped = flow(lambda topic: topic)
+        wrapped._bind_registered_version(_registered_binding("registered-pipeline"))
+        with patch.object(wrapped, "_preflight_registered_submission"):
+            submission = wrapped.replay(
+                str(source_run.id),
+                at="write",
+                wait=False,
+                on_error="collect",
+                replay_submission_id="rs-exp-1",
+                preplanned_replay_plan=replay_plan,
+                experiment_context=ExperimentReplayContext(
+                    experiment_id="exp-1",
+                    target_execution_id=str(source_run.id),
+                    repeat_index=0,
+                    parent_execution_id=str(source_run.id),
+                    root_execution_id=str(source_run.id),
+                ),
+            )
+
+    row = submission.results[0]
+    assert row.replay_exec_id == str(replayed_run.id)
+    assert row.membership_verified is True
+    assert row.post_submit_warnings == (
+        "Failed to persist the frozen execution spec after the replay child was "
+        "submitted.",
+    )
+
+
+def test_registered_replay_threads_preplanned_experiment_identity() -> None:
+    run = SimpleNamespace(
+        id="target-1",
+        steps={"write": _replay_many_step(name="write", invocation_id="write")},
+        orchestrator_environment={},
+    )
+    handle = MagicMock(exec_id="child-1")
+    handle.wait.side_effect = RuntimeError("child execution failed")
+    replay_plan = ReplayPlan(
+        original_run_id="target-1",
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+    wrapped = kitaru.flow(lambda topic: topic)
+    wrapped._bind_registered_version(_registered_binding("registered-pipeline"))
+    verification = ExperimentMemberVerification(verified=True)
+
+    with (
+        patch("kitaru.flow.Client") as client_cls,
+        patch.object(
+            wrapped,
+            "_replay_one_handle",
+            return_value=_ReplayHandleOutcome(
+                handle=handle,
+                original_run=cast(PipelineRunResponse, run),
+                replay_plan=replay_plan,
+                membership_verification=verification,
+                post_submit_warnings=("Frozen execution spec was not persisted.",),
+            ),
+        ) as replay_one,
+        patch.object(wrapped, "_preflight_registered_submission"),
+        patch("kitaru.flow.resolve_connection_config", return_value=object()),
+    ):
+        client_cls.return_value.get_pipeline_run.return_value = run
+        submission = wrapped.replay(
+            "target-1",
+            at="write",
+            wait=True,
+            on_error="collect",
+            replay_submission_id="rs-exp-1",
+            preplanned_replay_plan=replay_plan,
+            experiment_context=ExperimentReplayContext(
+                experiment_id="exp-1",
+                target_execution_id="target-1",
+                repeat_index=3,
+                parent_execution_id="target-1",
+                root_execution_id="root-1",
+            ),
+        )
+
+    replay_call = replay_one.call_args.kwargs
+    assert replay_call["preplanned_replay_plan"] is replay_plan
+    assert replay_call["replay_submission_id"] == "rs-exp-1"
+    assert replay_call["experiment_context"] == ExperimentReplayContext(
+        experiment_id="exp-1",
+        target_execution_id="target-1",
+        repeat_index=3,
+        parent_execution_id="target-1",
+        root_execution_id="root-1",
+    )
+    row = submission.results[0]
+    assert row.replay_exec_id == "child-1"
+    assert row.status == "failed"
+    assert row.membership_verified is True
+    assert row.parent_execution_id == "target-1"
+    assert row.root_execution_id == "root-1"
+    assert row.post_submit_warnings == ("Frozen execution spec was not persisted.",)
+    assert row.to_json()["warnings"] == ["Frozen execution spec was not persisted."]
 
 
 def test_unified_replay_rejects_imported_execution() -> None:

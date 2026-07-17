@@ -52,54 +52,48 @@ def test_import_command_starts_from_langfuse_trace(monkeypatch: Any) -> None:
     assert '"exec-imported"' in result.output
 
 
-def test_experiment_replays_complete_filtered_set(monkeypatch: Any) -> None:
+def test_experiment_replays_explicit_native_set(monkeypatch: Any) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     demo = _load_demo_module()
-    executions = [object(), object(), object()]
     calls: list[dict[str, Any]] = []
 
-    monkeypatch.setattr(demo, "_find_cases", lambda where: executions)
-
-    def fake_replay(selected: list[Any], *, name: str) -> Any:
-        calls.append({"executions": selected, "name": name})
+    def fake_replay(
+        selected: list[str],
+        *,
+        name: str,
+        at: str,
+        idempotency_key: str,
+    ) -> Any:
+        calls.append(
+            {
+                "execution_ids": selected,
+                "name": name,
+                "at": at,
+                "idempotency_key": idempotency_key,
+            }
+        )
         return {"target_count": len(selected)}
 
     monkeypatch.setattr(demo, "_replay_cases", fake_replay)
     result = CliRunner().invoke(
         demo.cli,
-        ["experiment", "--where", "metadata.intent == 'permissions'"],
+        [
+            "experiment",
+            "run-a",
+            "run-b",
+            "run-c",
+            "--idempotency-key",
+            "permissions-v2-attempt-1",
+        ],
     )
 
     assert result.exit_code == 0, result.output
     assert calls == [
         {
-            "executions": executions,
+            "execution_ids": ["run-a", "run-b", "run-c"],
             "name": demo.DEFAULT_EXPERIMENT,
+            "at": demo.DEFAULT_AT,
+            "idempotency_key": "permissions-v2-attempt-1",
         }
     ]
     assert '"target_count": 3' in result.output
-
-
-def test_score_sweep_reads_complete_filtered_set(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    demo = _load_demo_module()
-    executions = [object(), object()]
-    calls: list[dict[str, Any]] = []
-
-    monkeypatch.setattr(demo, "_find_cases", lambda where: executions)
-
-    def fake_score(selected: list[Any], *, name: str) -> Any:
-        calls.append({"executions": selected, "name": name})
-        return {"target_count": len(selected), "kind": "score"}
-
-    monkeypatch.setattr(demo, "_score_cases", fake_score)
-    result = CliRunner().invoke(demo.cli, ["score"])
-
-    assert result.exit_code == 0, result.output
-    assert calls == [
-        {
-            "executions": executions,
-            "name": demo.DEFAULT_SCORE_SWEEP,
-        }
-    ]
-    assert '"kind": "score"' in result.output

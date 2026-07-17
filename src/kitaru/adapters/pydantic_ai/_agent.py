@@ -25,7 +25,7 @@ from contextlib import (
     contextmanager,
 )
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import kitaru
@@ -54,6 +54,15 @@ from kitaru._config._agents import (
     _parse_agent_metadata,
     _reconcile_agent_version_registration,
 )
+from kitaru.cohort import CohortResult
+from kitaru.config import ImageInput
+from kitaru._experiments import (
+    ExperimentReplayResult,
+    ReplayTrialPlan,
+    execute_replay_attempt,
+    freeze_replay_attempt,
+    preplan_replay_attempt,
+)
 from kitaru._config._projects import (
     _active_project_id,
     _active_project_model,
@@ -61,6 +70,7 @@ from kitaru._config._projects import (
     _get_project_by_exact_selector,
 )
 from kitaru._repository import find_repository_root
+from kitaru.replay import ExperimentReplayContext
 from kitaru._source_aliases import build_pipeline_registration_name
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import (
@@ -1312,7 +1322,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 "kind": type_import_path(wrapped_model),
                 "name": model_name,
                 "provider": {
-                    "kind": type_import_path(provider) if provider is not None else None,
+                    "kind": type_import_path(provider)
+                    if provider is not None
+                    else None,
                     "name": provider_name,
                     "behavior": (
                         _provider_behavior_identity(provider)
@@ -1692,13 +1704,110 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 created=created,
             )
 
-    def replay(self, execution: str | Sequence[str], **kwargs: Any) -> Any:
-        """Replay through this wrapper's immutable registered AgentVersion."""
+    def replay(
+        self,
+        execution: str | CohortResult | Sequence[str],
+        *,
+        at: str,
+        on_error: Literal["collect", "fail"],
+        uncovered_policy: Literal["fail", "skip", "top"],
+        idempotency_key: str,
+        name: str | None = None,
+        suite_key: str | None = None,
+        repeats: int = 1,
+        acknowledge_partial_cohort: bool = False,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        stack: str | None = None,
+        image: ImageInput | None = None,
+        cache: bool | None = None,
+        retries: int | None = None,
+    ) -> ExperimentReplayResult:
+        """Create one durable replay attempt through the registered AgentVersion."""
         flow_definition = self._registered_flow()
-        with flow_definition._registered_preflight_scope(
-            self._preflight_registered_identity
-        ):
-            return flow_definition.replay(execution, **kwargs)
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            binding = state.binding
+
+        if isinstance(execution, CohortResult):
+            target_count = len(execution.exec_ids)
+        elif isinstance(execution, str):
+            target_count = 1
+        else:
+            target_count = len(execution)
+        resolved_wait = target_count * repeats == 1 if wait is None else wait
+
+        client = Client()
+        self._preflight_registered_identity()
+        draft = preplan_replay_attempt(
+            execution,
+            binding=binding,
+            at=at,
+            on_error=on_error,
+            uncovered_policy=uncovered_policy,
+            idempotency_key=idempotency_key,
+            repeats=repeats,
+            wait=resolved_wait,
+            name=name,
+            suite_key=suite_key,
+            acknowledge_partial_cohort=acknowledge_partial_cohort,
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+            client=client,
+        )
+        with _temporary_active_project(binding.project_id):
+            plan = freeze_replay_attempt(draft, client=client)
+
+        def submit_trial(
+            *,
+            trial: ReplayTrialPlan,
+            replay_plan: Any,
+            submission_id: str,
+        ) -> Any:
+            with flow_definition._registered_preflight_scope(
+                self._preflight_registered_identity
+            ):
+                return flow_definition.replay(
+                    trial.target_execution_id,
+                    at=at,
+                    flow_overrides=flow_overrides,
+                    checkpoint_overrides=checkpoint_overrides,
+                    invocation_overrides=invocation_overrides,
+                    skip=skip,
+                    tag=tag,
+                    wait=resolved_wait,
+                    on_error="collect",
+                    stack=stack,
+                    image=image,
+                    cache=cache,
+                    retries=retries,
+                    replay_submission_id=submission_id,
+                    preplanned_replay_plan=replay_plan,
+                    experiment_context=ExperimentReplayContext(
+                        experiment_id=plan.spec.experiment_id,
+                        target_execution_id=trial.target_execution_id,
+                        repeat_index=trial.repeat_index,
+                        parent_execution_id=trial.parent_execution_id,
+                        root_execution_id=trial.root_execution_id,
+                    ),
+                )
+
+        return execute_replay_attempt(
+            plan,
+            submit_trial=submit_trial,
+            tag=tag,
+            client_factory=lambda: client,
+        )
 
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:

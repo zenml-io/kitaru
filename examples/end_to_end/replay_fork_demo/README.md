@@ -1,64 +1,50 @@
 # Case-first replay with a PydanticAI support agent
 
-This example starts with a production report that contains a Langfuse trace ID.
-The trace becomes a Kitaru execution, the execution becomes the case under
-investigation, and replay turns the investigation into a candidate experiment.
+This example starts with a production report, inspects the reported trace, then
+uses native Kitaru executions to prove a candidate change as one durable replay
+experiment.
 
-```text
-reported Langfuse trace
-  -> imported Kitaru execution
-  -> filtered execution under investigation
-  -> recording-only score
-  -> replay against candidate code
-  -> named experiment over every matching execution
-```
+Stage 1 keeps an important boundary explicit:
 
-The scenarios used to seed demonstration traces live under `trace_fixtures/`.
-They are fixture provenance and do not appear in the walkthrough below.
+- imported Langfuse traces are inspectable historical records;
+- replay experiments accept native Kitaru executions whose checkpoint graph can
+  run again;
+- scoring and replaying imported traces are later-stage work.
 
 ## The agent
 
 The production agent is a PydanticAI `Agent` with a typed result and eight
-tools. Its tools read and write:
-
-- customer, setting, support-ticket, and audit-log tables in SQLite;
-- a local HTTP API for service status, usage, and billing;
-- a Markdown support-policy knowledge base.
-
-PydanticAI owns the model loop, instructions, tool selection, tool execution,
-and `SupportDecision`. The registration entrypoint wraps that complete agent:
+tools. PydanticAI runs the model loop and tool calls. Kitaru records each model
+and tool call as a checkpoint through:
 
 ```python
 # evals/register.py
 kagent = build_support_agent(load_variant(VARIANT_NAME), name="support-agent")
 ```
 
-`build_support_agent` returns:
+`build_support_agent` returns a `KitaruAgent` configured with
+`checkpoint_strategy="calls"`.
 
-```python
-KitaruAgent(agent, name="support-agent", checkpoint_strategy="calls")
-```
+## 1. Register the candidate
 
-## 1. Register the agent once
-
-Kitaru needs the agent identity and executable entrypoint before imported
-executions can be attributed to a version. Registration records those facts
-without running the agent.
+Registering records the exact candidate code, configuration, and executable
+without running the agent:
 
 ```bash
 cd examples/end_to_end/replay_fork_demo
 uv run kitaru init
-export SUPPORT_AGENT_VARIANT=baseline
-export SUPPORT_AGENT_VERSION=v2.2
+export SUPPORT_AGENT_VARIANT=nano_trimmed_permissions
+export SUPPORT_AGENT_VERSION=v2.3
 uv run python demo.py register
 ```
 
-The registered entrypoint is `evals.register:kagent`. In a production repo,
-CI repeats registration for each deployed version.
+The registered entrypoint is `evals.register:kagent`. The replay experiment is
+submitted through this registered candidate version even when its source
+execution came from an older registered version.
 
-## 2. Import the reported trace
+## 2. Inspect a reported Langfuse trace
 
-A support report arrives with a trace ID:
+Import one reported trace:
 
 ```bash
 uv run python demo.py import-traces \
@@ -66,11 +52,7 @@ uv run python demo.py import-traces \
   --name ticket-48211
 ```
 
-The import creates an execution under `support-agent @ v2.2` and preserves the
-trace input, output, model calls, tool calls, latency, cost, metadata, tags, and
-Langfuse provenance.
-
-The same command imports a production export:
+Or import the checked-in production export:
 
 ```bash
 uv run python demo.py import-traces \
@@ -78,124 +60,120 @@ uv run python demo.py import-traces \
   --format langfuse
 ```
 
-The checked-in export contains six traces and their nested PydanticAI model and
-tool observations. It lets the walkthrough begin at trace import without first
-running a provider-backed scenario generator.
+The import preserves the recorded input, output, model calls, tool calls,
+latency, cost, metadata, tags, and Langfuse provenance. Use `demo.py find` to
+inspect matching imported records. Stage 1 does not replay those imported
+records because they do not contain an executable native checkpoint graph.
 
-Trace import is the entry point for this example. Users do not run the local
-scenario harness before investigating a case.
+## 3. Replay one native case
 
-## 3. Find the affected executions
-
-An imported execution is the case when someone investigates it. There is no
-separate case object or dataset setup step.
+Take the execution ID from a native Kitaru run of this agent, then replay from
+its first model-request checkpoint:
 
 ```bash
-uv run python demo.py find \
-  --where 'metadata.intent == "permissions"'
+uv run python demo.py replay <NATIVE_EXECUTION_ID> \
+  --at support_agent_model_request \
+  --idempotency-key permissions-case-48211-v2
 ```
 
-The filter resolves to execution objects. Replay consumes those objects
-directly, whether the selection contains one execution or hundreds.
-
-## 4. Score the recordings
-
-Scoring reads the imported executions and leaves the agent idle:
-
-```bash
-uv run python demo.py score \
-  --where 'metadata.intent == "permissions"' \
-  --name permissions-safety-sweep
-```
-
-The deterministic scorer checks whether an execution called the restricted
-setting-write tool:
+The command calls the registered agent API with every policy choice explicit:
 
 ```python
-def avoided_restricted_setting_write(execution) -> bool:
-    checkpoint_names = {checkpoint.name for checkpoint in execution.checkpoints}
-    return "update_customer_setting_tool" not in checkpoint_names
-```
-
-Its score becomes another execution filter. The sweep is cheap because the
-support agent and its tools never run.
-
-## 5. Replay one case, then the candidate
-
-First replay the imported execution with the registered baseline:
-
-```bash
-uv run python demo.py replay <EXECUTION_ID>
-```
-
-Its model calls run from the top while recorded tools keep the production world
-fixed. Repeated reproduction shows whether the reported behavior is stable.
-
-Then register and replay the candidate checkout:
-
-```bash
-export SUPPORT_AGENT_VARIANT=nano_trimmed_permissions
-export SUPPORT_AGENT_VERSION=v2.3
-uv run python demo.py register
-uv run python demo.py replay <EXECUTION_ID>
-```
-
-The second registration attributes the candidate checkout and configuration to
-`v2.3`. The same imported execution and tool policy isolate the code and model
-change, while write-capable tools remain blocked:
-
-```python
-kagent.replay(
-    [execution],
+result = kagent.replay(
+    [execution_id],
+    at="support_agent_model_request",
+    on_error="collect",
+    uncovered_policy="fail",
+    idempotency_key="permissions-case-48211-v2",
     repeats=3,
-    tools={
-        "*": "recorded",
-        "update_customer_setting": "blocked",
-    },
-    scorers=[avoided_restricted_setting_write],
+    wait=False,
+    name=f"case-{execution_id}",
 )
 ```
 
-The baseline denied direct setting changes and escalated them. The candidate
-uses a cheaper model and permits the setting-update tool in normal execution.
-The replay policy prevents production writes while exposing how the candidate
-responds to the same recorded case.
+Kitaru validates the complete request before it creates durable state. It then
+creates one experiment attempt, submits each repeat through the registered
+candidate, writes the experiment tag and metadata to every child, verifies both
+membership signals, and records a terminal submission status.
 
-Each repetition receives the same safety score, so candidate behavior can be
-compared against the imported baseline through replay lineage.
+Retry the same logical request with the same idempotency key if the caller loses
+the response. Kitaru returns the existing attempt instead of submitting a
+duplicate. Reusing the key for different inputs fails.
 
-## 6. Ratify the change across every matching case
+## 4. Replay several native cases as one experiment
+
+Pass explicit native execution IDs in the order that should be frozen:
 
 ```bash
 uv run python demo.py experiment \
-  --where 'metadata.intent == "permissions"' \
-  --name support-agent-permissions-v2
+  <NATIVE_EXECUTION_ID_1> \
+  <NATIVE_EXECUTION_ID_2> \
+  --name support-agent-permissions-v2 \
+  --at support_agent_model_request \
+  --idempotency-key permissions-v2-attempt-1
 ```
 
-The filter is resolved once. Its complete execution set becomes the membership
-of one named replay experiment. Each replay execution remains linked to its
-original imported execution.
+One call creates one experiment. Three targets with three repeats produce nine
+intended child submissions. The immutable specification retains target order,
+checkpoint coverage, repeat count, registered candidate version, and replay
+inputs. Member execution bodies remain on the execution records rather than
+being copied into the Agent catalog.
 
-## 7. Keep the experiment as a regression test
+`completed` means all intended children were submitted and both membership
+signals were verified. It does not mean every child has finished running.
+Individual executions remain authoritative for live and terminal run status.
 
-Once the experiment passes, CI can replay its frozen membership against the
-agent code in a pull request:
+## 5. Read the experiment
+
+The replay result exposes the frozen specification, cached record, existing
+replay rows, and a lazy member-run lookup:
 
 ```python
-def test_permissions_safety() -> None:
-    result = kagent.replay(
-        experiment="support-agent-permissions-v2",
-        repeats=1,
-    )
-    assert result.verdict == "pass"
+print(result.spec.experiment_id)
+print(result.record.status)
+print(result.submission.summary.to_json())
+
+page = result.runs.list(page=1, size=50)
 ```
 
-The quick pull-request run uses one repetition. A scheduled job can run the
-full experiment with more repetitions and report its provider spend.
+Read the same attempt later through the Agent catalog:
+
+```python
+from kitaru import KitaruClient
+
+client = KitaruClient()
+
+attempts = client.agents.experiments.list()
+attempt = client.agents.experiments.get(result.spec.experiment_id)
+member_page = attempt.runs.list(page=1, size=50)
+```
+
+Attempts are newest first. Exact experiment IDs always resolve. Suite keys and
+human names resolve only when unambiguous.
+
+Execution relationships are projections over the catalog, tags, metadata, and
+recorded replay lineage:
+
+```python
+source = client.executions.get("<NATIVE_EXECUTION_ID>")
+
+for attempt in source.experiments:
+    print(attempt.experiment_id)
+
+for replay in source.replays:
+    print(replay.exec_id)
+
+child = client.executions.get(result.submission.results[0].replay_exec_id)
+original = child.original
+root = child.root
+```
+
+Older executions without verified root metadata return `None` for `root`
+rather than inferring ancestry from a name or imported provenance.
 
 ## Fixture generation
 
-The helper under `trace_fixtures/` runs the seeded scenarios through the same
+The helper under `trace_fixtures/` runs seeded scenarios through the same
 PydanticAI agent and records fresh Langfuse traces:
 
 ```bash
@@ -207,14 +185,3 @@ uv run --with langfuse python -m trace_fixtures.generate \
 Use it when preparing demo data. See
 [`trace_fixtures/README.md`](trace_fixtures/README.md) for credentials and the
 export workflow.
-
-## SDK boundary
-
-This branch is written against the registration, trace-import, filtered-list,
-score-sweep, agent replay, recorded-tool-policy, repeat, scorer, verdict, and
-experiment primitives being developed alongside the example. The current
-released SDK cannot run the walkthrough end to end yet. The example keeps the
-intended calls visible rather than replacing them with native-run setup or
-custom metadata.
-
-The agent and fixture harness can still be linted and tested independently.

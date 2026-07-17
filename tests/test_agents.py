@@ -279,7 +279,7 @@ def test_valid_metadata_builds_project_backed_agent_projection() -> None:
             default_version_id="pipeline-new",
         ),
         foreign={"other_product": {"preserve_me": True}},
-        kitaru_extra={"experiments": {"opaque": {"keep": True}}},
+        kitaru_extra={"future_stage": {"opaque": {"keep": True}}},
     )
 
     agent = _agent_info_from_project_model(
@@ -299,7 +299,8 @@ def test_valid_metadata_builds_project_backed_agent_projection() -> None:
         "pipeline-new",
     ]
     assert agent.agent_versions[1].aliases == ["stable", "v2.3"]
-    assert not hasattr(agent, "experiments")
+    assert agent.experiments == []
+    assert agent.experiment_count == 0
     assert not hasattr(agent, "other_product")
 
 
@@ -464,6 +465,8 @@ def test_agent_and_version_serialization_is_exact_and_structured() -> None:
         "agent_version_aliases": {"stable": "pipeline-id"},
         "agent_versions": [serialize_agent_version(agent.agent_versions[0])],
         "version_count": 1,
+        "experiments": [],
+        "experiment_count": 0,
     }
 
 

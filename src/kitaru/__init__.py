@@ -145,6 +145,12 @@ from kitaru.errors import (
     KitaruWaitValidationError,
 )
 from kitaru.events import progress
+from kitaru.experiments import (
+    Experiment,
+    ExperimentRecord,
+    ExperimentReplayResult,
+    ExperimentSpec,
+)
 from kitaru.flow import FlowHandle, flow
 from kitaru.llm import llm
 from kitaru.logging import log
@@ -190,6 +196,10 @@ __all__ = [
     "ExecutionStatisticsMetricAggregation",
     "ExecutionStatisticsMetricSource",
     "ExecutionStatisticsTimeGranularity",
+    "Experiment",
+    "ExperimentRecord",
+    "ExperimentReplayResult",
+    "ExperimentSpec",
     "FailureOrigin",
     "FlowHandle",
     "ImageSettings",

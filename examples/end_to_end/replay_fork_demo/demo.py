@@ -10,13 +10,12 @@ from typing import Any
 
 import click
 from evals.register import AGENT_NAME, AGENT_VERSION, kagent
-from evals.scorers import avoided_restricted_setting_write
 
 from kitaru import KitaruClient
 
 DEFAULT_FILTER = 'metadata.intent == "permissions"'
+DEFAULT_AT = "support_agent_model_request"
 DEFAULT_EXPERIMENT = "support-agent-permissions-v2"
-DEFAULT_SCORE_SWEEP = "permissions-safety-sweep"
 SOURCE_VERSION = "v2.2"
 
 
@@ -54,26 +53,22 @@ def _find_cases(where: str) -> list[Any]:
     )
 
 
-def _replay_cases(executions: list[Any], *, name: str) -> Any:
-    """Replay the selected recordings with the agent code in this checkout."""
-    return kagent.replay(  # ty: ignore[unresolved-attribute]
-        executions,
+def _replay_cases(
+    execution_ids: list[str],
+    *,
+    name: str,
+    at: str,
+    idempotency_key: str,
+) -> Any:
+    """Replay native executions as one durable registered-agent experiment."""
+    return kagent.replay(
+        execution_ids,
+        at=at,
+        on_error="collect",
+        uncovered_policy="fail",
+        idempotency_key=idempotency_key,
         repeats=3,
-        tools={
-            "*": "recorded",
-            "update_customer_setting": "blocked",
-        },
-        scorers=[avoided_restricted_setting_write],
-        name=name,
-    )
-
-
-def _score_cases(executions: list[Any], *, name: str) -> Any:
-    """Score imported recordings without running the agent."""
-    client = KitaruClient()
-    return client.executions.evaluate(  # ty: ignore[unresolved-attribute]
-        executions,
-        scorers=[avoided_restricted_setting_write],
+        wait=False,
         name=name,
     )
 
@@ -113,34 +108,46 @@ def find_cmd(where: str) -> None:
     click.echo(_json(executions))
 
 
-@cli.command("score")
-@click.option("--where", default=DEFAULT_FILTER, show_default=True)
-@click.option("--name", default=DEFAULT_SCORE_SWEEP, show_default=True)
-def score_cmd(where: str, name: str) -> None:
-    """Score imported recordings without re-executing the agent."""
-    executions = _find_cases(where)
-    if not executions:
-        raise click.ClickException("The filter matched no imported executions.")
-    click.echo(_json(_score_cases(executions, name=name)))
-
-
 @cli.command("replay")
 @click.argument("exec_id")
-def replay_cmd(exec_id: str) -> None:
-    """Open one investigation by replaying its imported execution."""
-    execution = KitaruClient().executions.get(exec_id)
-    click.echo(_json(_replay_cases([execution], name=f"case-{exec_id}")))
+@click.option("--at", default=DEFAULT_AT, show_default=True)
+@click.option("--idempotency-key", required=True)
+def replay_cmd(exec_id: str, at: str, idempotency_key: str) -> None:
+    """Replay one native execution as a durable experiment."""
+    click.echo(
+        _json(
+            _replay_cases(
+                [exec_id],
+                name=f"case-{exec_id}",
+                at=at,
+                idempotency_key=idempotency_key,
+            )
+        )
+    )
 
 
 @cli.command("experiment")
-@click.option("--where", default=DEFAULT_FILTER, show_default=True)
+@click.argument("exec_ids", nargs=-1, required=True)
 @click.option("--name", default=DEFAULT_EXPERIMENT, show_default=True)
-def experiment_cmd(where: str, name: str) -> None:
-    """Replay the full resolved cohort as one named experiment."""
-    executions = _find_cases(where)
-    if not executions:
-        raise click.ClickException("The filter matched no imported executions.")
-    click.echo(_json(_replay_cases(executions, name=name)))
+@click.option("--at", default=DEFAULT_AT, show_default=True)
+@click.option("--idempotency-key", required=True)
+def experiment_cmd(
+    exec_ids: tuple[str, ...],
+    name: str,
+    at: str,
+    idempotency_key: str,
+) -> None:
+    """Replay explicit native executions as one named experiment."""
+    click.echo(
+        _json(
+            _replay_cases(
+                list(exec_ids),
+                name=name,
+                at=at,
+                idempotency_key=idempotency_key,
+            )
+        )
+    )
 
 
 if __name__ == "__main__":

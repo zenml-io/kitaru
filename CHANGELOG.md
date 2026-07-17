@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Registered-agent replay now creates durable, idempotent experiments with frozen target membership, repeat and checkpoint-coverage policies, verified replay membership and candidate attribution, typed Agent experiment reads, paginated member-run lookup, and execution experiment/replay/original/root projections.
 - Registered Agents now have canonical lifecycle surfaces across `kitaru agents ...`, `KitaruClient.agents`, top-level SDK exports, and six `kitaru_agents_*` MCP tools. Direct PydanticAI `KitaruAgent` execution requires registration, and Agent versions use immutable Pipeline UUIDs with optional labels.
 - Langfuse observations JSONL exports can now be normalized and stored as inspectable synthetic Kitaru executions through `KitaruClient.imports.langfuse(...)` or `kitaru import langfuse`. Imports preview by default, require explicit consent before storing full inputs and outputs, support explicit stack selection without changing the active stack, report storage accessibility, preserve dynamic observation graphs and usage metadata, reject fragmented traces unless explicitly allowed, and are idempotent by source identity, content, and stack. Imported executions are read-only records: `retry`, `resume`, and `replay` refuse them with a clear error. An import interrupted by a backend failure marks its partially written execution as failed, reports the execution ID in the outcome, and resumes the remaining observations on re-import.
 

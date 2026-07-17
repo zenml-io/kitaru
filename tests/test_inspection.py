@@ -740,6 +740,7 @@ def test_serialize_execution_contract() -> None:
         "frozen_execution_spec",
         "llm_usage_records",
         "original_exec_id",
+        "root_exec_id",
         "checkpoints",
         "artifacts",
     }
@@ -780,6 +781,7 @@ def test_serialize_execution_contract() -> None:
         "project": None,
     }
     assert payload["original_exec_id"] == "kr-100"
+    assert payload["root_exec_id"] is None
     assert payload["checkpoints"][0]["name"] == "research"
     assert payload["checkpoints"][0]["checkpoint_type"] == "tool_call"
     assert payload["llm_usage_records"][0]["checkpoint_id"] == "attempt-1"

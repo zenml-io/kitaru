@@ -129,6 +129,11 @@ from kitaru._client._statistics import (
     normalize_execution_statistics_groupings,
     normalize_execution_statistics_metrics,
 )
+from kitaru._experiments import (
+    Experiment,
+    ExperimentRunLookup,
+    experiment_targets_execution,
+)
 from kitaru._import_contract import raise_if_imported_execution
 from kitaru._interface_deployments import (
     Deployment,
@@ -208,6 +213,7 @@ from kitaru.errors import (
     execution_error_from_failure,
 )
 from kitaru.replay import (
+    EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY,
     ReplayFailureRow,
     ReplayResultRow,
     ReplaySkippedRow,
@@ -1935,6 +1941,43 @@ class _ExecutionsAPI:
             client=self._client_ref,
         )
 
+    def _list_experiment_replays(self, exec_id: str) -> builtins.list[Execution]:
+        """Resolve verified tagged replay descendants without hydrating DAGs."""
+        experiments = self._client_ref.agents.experiments.list_for_execution(
+            exec_id,
+            agent=self._client_ref._project,
+        )
+        results: list[Execution] = []
+        seen_ids: set[str] = set()
+        page_size = 100
+        for experiment in experiments:
+            page = 1
+            while True:
+                run_page = experiment.runs.list(page=page, size=page_size)
+                runs = list(getattr(run_page, "items", run_page))
+                for run in runs:
+                    metadata = _to_plain_dict(getattr(run, "run_metadata", {}))
+                    if (
+                        metadata.get(EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY)
+                        != exec_id
+                    ):
+                        continue
+                    run_id = str(getattr(run, "id", "")).strip()
+                    if not run_id or run_id in seen_ids:
+                        continue
+                    seen_ids.add(run_id)
+                    results.append(
+                        _map_execution(
+                            run=run,
+                            client=self._client_ref,
+                            include_details=False,
+                        )
+                    )
+                if len(runs) < page_size:
+                    break
+                page += 1
+        return results
+
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
@@ -3172,11 +3215,73 @@ class _ProjectScopedAPIUnavailable:
         )
 
 
+class _AgentExperimentsAPI:
+    """Read-only experiment collection for one hydrated Agent Project."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+
+    def _agent(self, agent: str | None) -> AgentInfo:
+        if agent is None:
+            return _current_agent(client_factory=self._client_ref._client)
+        return _get_agent(agent, client_factory=self._client_ref._client)
+
+    def _view(self, agent: AgentInfo, record: Any) -> Experiment:
+        return Experiment(
+            record=record,
+            runs=ExperimentRunLookup(
+                experiment_id=record.spec.experiment_id,
+                project_id=agent.agent_id,
+                _client_factory=self._client_ref._client,
+            ),
+        )
+
+    def list(self, *, agent: str | None = None) -> builtins.list[Experiment]:
+        """List durable attempts in deterministic newest-first order."""
+        agent_info = self._agent(agent)
+        return [
+            self._view(agent_info, record) for record in agent_info.list_experiments()
+        ]
+
+    def get(
+        self,
+        name_or_id: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Get an attempt by exact ID or unambiguous suite/name."""
+        agent_info = self._agent(agent)
+        return self._view(agent_info, agent_info.get_experiment(name_or_id))
+
+    def list_for_execution(
+        self,
+        exec_id: str,
+        *,
+        agent: str | None = None,
+    ) -> builtins.list[Experiment]:
+        """List attempts whose verified frozen membership contains an execution."""
+        normalized_id = exec_id.strip()
+        if not normalized_id:
+            raise KitaruUsageError("Execution ID cannot be empty.")
+        agent_info = self._agent(agent)
+        zenml_client = self._client_ref._client()
+        return [
+            self._view(agent_info, record)
+            for record in agent_info.list_experiments()
+            if experiment_targets_execution(
+                record,
+                normalized_id,
+                client=zenml_client,
+            )
+        ]
+
+
 class _AgentsAPI:
     """Canonical Agent lifecycle operations for a Kitaru client."""
 
     def __init__(self, client_ref: KitaruClient) -> None:
         self._client_ref = client_ref
+        self.experiments = _AgentExperimentsAPI(client_ref)
 
     def current(self) -> AgentInfo:
         """Return the active initialized Kitaru Agent."""

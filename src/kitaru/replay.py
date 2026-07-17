@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
@@ -45,6 +45,13 @@ logger = logging.getLogger(__name__)
 
 REPLAY_SKIPPED_STEPS_METADATA_KEY = "kitaru_replay_skipped_steps_v1"
 REPLAY_OUTPUT_OVERRIDES_METADATA_KEY = "kitaru_replay_output_overrides_v1"
+EXPERIMENT_ID_METADATA_KEY = "kitaru_experiment_id_v1"
+EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_target_execution_id_v1"
+EXPERIMENT_REPEAT_INDEX_METADATA_KEY = "kitaru_experiment_repeat_index_v1"
+EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_parent_execution_id_v1"
+EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_root_execution_id_v1"
+EXPERIMENT_TAG_PREFIX = "kitaru-experiment:"
+_EXPERIMENT_MEMBERSHIP_ATTEMPTS = 3
 _ReplaySelectorKind = Literal["checkpoint", "invocation"]
 
 
@@ -89,6 +96,49 @@ class ReplayPlanDocument:
             self.matched_targets.get(_matched_target_key(selector_kind, selector), [])
         )
 
+    @classmethod
+    def from_json(cls, payload: Mapping[str, Any]) -> ReplayPlanDocument:
+        """Validate and construct a replay document from serialized data."""
+        flow_overrides = payload.get("flow_overrides", {})
+        checkpoint_overrides = payload.get("checkpoint_overrides", {})
+        invocation_overrides = payload.get("invocation_overrides", {})
+        skip = payload.get("skip", [])
+        matched_targets = payload.get("matched_targets", {})
+        mappings = (
+            flow_overrides,
+            checkpoint_overrides,
+            invocation_overrides,
+            matched_targets,
+        )
+        if not all(isinstance(value, Mapping) for value in mappings):
+            raise ValueError("Replay plan mappings must be JSON objects.")
+        if not isinstance(skip, list):
+            raise ValueError("Replay plan skip selectors must be a list.")
+        if not all(
+            isinstance(value, Mapping) for value in checkpoint_overrides.values()
+        ):
+            raise ValueError("Checkpoint overrides must contain object values.")
+        if not all(
+            isinstance(value, Mapping) for value in invocation_overrides.values()
+        ):
+            raise ValueError("Invocation overrides must contain object values.")
+        if not all(isinstance(value, list) for value in matched_targets.values()):
+            raise ValueError("Matched replay targets must contain list values.")
+        return cls(
+            flow_overrides=dict(flow_overrides),
+            checkpoint_overrides={
+                str(key): dict(value) for key, value in checkpoint_overrides.items()
+            },
+            invocation_overrides={
+                str(key): dict(value) for key, value in invocation_overrides.items()
+            },
+            skip=[str(value) for value in skip],
+            matched_targets={
+                str(key): [str(value) for value in values]
+                for key, values in matched_targets.items()
+            },
+        )
+
     def to_json(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "flow_overrides": self.flow_overrides,
@@ -121,6 +171,46 @@ class AppliedOutputOverride:
 
 
 @dataclass(frozen=True)
+class ExperimentReplayContext:
+    """Correlated identity required for one durable experiment child."""
+
+    experiment_id: str
+    target_execution_id: str
+    repeat_index: int
+    parent_execution_id: str
+    root_execution_id: str
+
+    def __post_init__(self) -> None:
+        values = (
+            self.experiment_id,
+            self.target_execution_id,
+            self.parent_execution_id,
+            self.root_execution_id,
+        )
+        if any(not value.strip() for value in values):
+            raise KitaruUsageError("Experiment replay identity fields cannot be empty.")
+        if isinstance(self.repeat_index, bool) or self.repeat_index < 0:
+            raise KitaruUsageError("repeat_index must be >= 0.")
+
+
+@dataclass(frozen=True)
+class ExperimentMemberVerification:
+    """Outcome of durable membership and candidate-attribution verification."""
+
+    verified: bool
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ExperimentReplayOutcome:
+    """Typed experiment identity and verification result for one replay row."""
+
+    context: ExperimentReplayContext
+    verification: ExperimentMemberVerification
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ReplayResultRow:
     """One successfully submitted replay child."""
 
@@ -130,15 +220,69 @@ class ReplayResultRow:
     status: Literal["submitted", "completed", "failed"]
     compare_url: str | None = None
     handle: Any | None = None
+    experiment: ExperimentReplayOutcome | None = None
+
+    @property
+    def experiment_id(self) -> str | None:
+        return self.experiment.context.experiment_id if self.experiment else None
+
+    @property
+    def target_execution_id(self) -> str | None:
+        return self.experiment.context.target_execution_id if self.experiment else None
+
+    @property
+    def repeat_index(self) -> int | None:
+        return self.experiment.context.repeat_index if self.experiment else None
+
+    @property
+    def parent_execution_id(self) -> str | None:
+        return self.experiment.context.parent_execution_id if self.experiment else None
+
+    @property
+    def root_execution_id(self) -> str | None:
+        return self.experiment.context.root_execution_id if self.experiment else None
+
+    @property
+    def membership_verified(self) -> bool | None:
+        if self.experiment is None:
+            return None
+        return self.experiment.verification.verified
+
+    @property
+    def membership_error(self) -> str | None:
+        if self.experiment is None:
+            return None
+        return self.experiment.verification.reason
+
+    @property
+    def post_submit_warnings(self) -> tuple[str, ...]:
+        if self.experiment is None:
+            return ()
+        return self.experiment.warnings
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        payload = {
             "original_exec_ref": self.original_exec_ref,
             "original_exec_id": self.original_exec_id,
             "replay_exec_id": self.replay_exec_id,
             "status": self.status,
             "compare_url": self.compare_url,
         }
+        if self.experiment is not None:
+            context = self.experiment.context
+            payload.update(
+                {
+                    "experiment_id": context.experiment_id,
+                    "target_execution_id": context.target_execution_id,
+                    "repeat_index": context.repeat_index,
+                    "parent_execution_id": context.parent_execution_id,
+                    "root_execution_id": context.root_execution_id,
+                    "membership_verified": self.membership_verified,
+                    "membership_error": self.membership_error,
+                    "warnings": list(self.post_submit_warnings),
+                }
+            )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -474,6 +618,200 @@ def safe_persist_replay_submission_metadata(
                 exc_info=True,
             )
     _safe_apply_replay_tag(replay_exec_id, tag)
+
+
+def _run_has_tag(run: Any, tag: str) -> bool:
+    """Return whether a hydrated run exposes one exact native tag."""
+    try:
+        tags = getattr(run, "tags", ()) or ()
+    except Exception:
+        return False
+    if isinstance(tags, Mapping):
+        return tag in tags
+    for item in tags:
+        try:
+            value = getattr(item, "name", item)
+        except Exception:
+            continue
+        if str(value) == tag:
+            return True
+    return False
+
+
+def _run_metadata_matches(run: Any, expected: Mapping[str, Any]) -> bool:
+    """Return whether all expected experiment metadata values match exactly."""
+    try:
+        metadata = getattr(run, "run_metadata", {}) or {}
+    except Exception:
+        return False
+    if not isinstance(metadata, Mapping):
+        return False
+    return all(metadata.get(key) == value for key, value in expected.items())
+
+
+def _apply_run_tag(client: Any, run_id: str, tag: str) -> None:
+    """Apply one native tag or raise when no supported update path succeeds."""
+    errors: list[Exception] = []
+    update_run = getattr(getattr(client, "zen_store", None), "update_run", None)
+    if callable(update_run):
+        try:
+            update_run(
+                run_id=run_id,
+                run_update=PipelineRunUpdate(add_tags=[tag]),
+            )
+            return
+        except Exception as exc:
+            errors.append(exc)
+    add_run_tags = getattr(client, "add_run_tags", None)
+    if callable(add_run_tags):
+        try:
+            add_run_tags(run_id, [tag])
+            return
+        except Exception as exc:
+            errors.append(exc)
+    if errors:
+        raise errors[-1]
+    raise KitaruStateError("The connected ZenML client cannot apply run tags.")
+
+
+def persist_and_verify_experiment_membership(
+    *,
+    replay_exec_id: str,
+    context: ExperimentReplayContext,
+    binding: Any,
+    client: Any,
+    max_attempts: int = _EXPERIMENT_MEMBERSHIP_ATTEMPTS,
+) -> ExperimentMemberVerification:
+    """Persist and verify durable experiment membership with bounded retries."""
+    if isinstance(max_attempts, bool) or max_attempts < 1:
+        raise KitaruUsageError("max_attempts must be >= 1.")
+
+    experiment_tag = f"{EXPERIMENT_TAG_PREFIX}{context.experiment_id}"
+    expected_metadata: dict[str, Any] = {
+        EXPERIMENT_ID_METADATA_KEY: context.experiment_id,
+        EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY: context.target_execution_id,
+        EXPERIMENT_REPEAT_INDEX_METADATA_KEY: context.repeat_index,
+        EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: context.parent_execution_id,
+        EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: context.root_execution_id,
+    }
+    last_error: Exception | None = None
+    hydrated_run: Any | None = None
+    refresh_after_write = False
+
+    for _ in range(max_attempts):
+        try:
+            hydrated_run = client.get_pipeline_run(
+                name_id_or_prefix=replay_exec_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+                project=binding.project_id,
+            )
+            tag_present = _run_has_tag(hydrated_run, experiment_tag)
+            metadata_present = _run_metadata_matches(hydrated_run, expected_metadata)
+            refresh_after_write = False
+        except Exception as exc:
+            last_error = exc
+            hydrated_run = None
+            continue
+
+        if tag_present and metadata_present:
+            return _verify_experiment_member_run(
+                hydrated_run,
+                context=context,
+                binding=binding,
+            )
+        if not tag_present:
+            try:
+                _apply_run_tag(client, replay_exec_id, experiment_tag)
+                refresh_after_write = True
+            except Exception as exc:
+                last_error = exc
+        if not metadata_present:
+            try:
+                from kitaru.logging import log_to_execution
+
+                log_to_execution(
+                    replay_exec_id,
+                    _client=client,
+                    **expected_metadata,
+                )
+                refresh_after_write = True
+            except Exception as exc:
+                last_error = exc
+
+    if hydrated_run is None or refresh_after_write:
+        try:
+            hydrated_run = client.get_pipeline_run(
+                name_id_or_prefix=replay_exec_id,
+                allow_name_prefix_match=False,
+                hydrate=True,
+                project=binding.project_id,
+            )
+        except Exception as exc:
+            return ExperimentMemberVerification(
+                verified=False,
+                reason=f"Unable to refetch the replay child for verification: {exc}",
+            )
+
+    missing: list[str] = []
+    if not _run_has_tag(hydrated_run, experiment_tag):
+        missing.append("native experiment tag")
+    if not _run_metadata_matches(hydrated_run, expected_metadata):
+        missing.append("experiment run metadata")
+    if missing:
+        detail = f": {last_error}" if last_error is not None else ""
+        return ExperimentMemberVerification(
+            verified=False,
+            reason=f"Missing {' and '.join(missing)} after bounded retries{detail}",
+        )
+    return _verify_experiment_member_run(
+        hydrated_run,
+        context=context,
+        binding=binding,
+    )
+
+
+def _verify_experiment_member_run(
+    run: Any,
+    *,
+    context: ExperimentReplayContext,
+    binding: Any,
+) -> ExperimentMemberVerification:
+    try:
+        from kitaru._agent_registration import (
+            verify_hydrated_submitted_run_binding,
+        )
+
+        verified_run = verify_hydrated_submitted_run_binding(
+            run,
+            binding=binding,
+        )
+    except Exception as exc:
+        return ExperimentMemberVerification(
+            verified=False,
+            reason=f"Candidate AgentVersion attribution verification failed: {exc}",
+        )
+
+    try:
+        original_run = getattr(verified_run, "original_run", None)
+        original_id = (
+            str(getattr(original_run, "id", "")).strip()
+            if original_run is not None
+            else ""
+        )
+    except Exception as exc:
+        return ExperimentMemberVerification(
+            verified=False,
+            reason=f"Unable to verify replay parent lineage: {exc}",
+        )
+    if original_id != context.parent_execution_id:
+        return ExperimentMemberVerification(
+            verified=False,
+            reason=(
+                "Replay parent lineage does not match the planned immediate parent."
+            ),
+        )
+    return ExperimentMemberVerification(verified=True)
 
 
 def new_replay_submission_id() -> str:
@@ -1413,11 +1751,69 @@ def build_replay_plan(
     )
 
 
+def build_replay_from_start_plan(
+    *,
+    run: PipelineRunResponse,
+    flow_overrides: Mapping[str, Any] | None = None,
+    checkpoint_overrides: Mapping[str, Any] | None = None,
+    invocation_overrides: Mapping[str, Any] | None = None,
+    skip: Sequence[str] | None = None,
+) -> ReplayPlan:
+    """Compile the existing replay plan representation from the run start."""
+    checkpoints = _checkpoints(run)
+    if not checkpoints:
+        request = build_replay_request_document(
+            flow_overrides=flow_overrides,
+            checkpoint_overrides=checkpoint_overrides,
+            invocation_overrides=invocation_overrides,
+            skip=skip,
+        )
+        if request.checkpoint_overrides or request.invocation_overrides or request.skip:
+            raise KitaruStateError(
+                f"Execution '{run.id}' has no checkpoints for targeted overrides."
+            )
+        inputs = _recorded_flow_parameters(run)
+        inputs.update(request.flow_overrides)
+        return ReplayPlan(
+            original_run_id=str(run.id),
+            steps_to_skip=set(),
+            input_overrides=inputs,
+            step_input_overrides={},
+            runtime_context=ReplayRuntimeContext(at=""),
+            document=request,
+        )
+
+    first = min(
+        checkpoints,
+        key=lambda checkpoint: (
+            checkpoint.started_at is None,
+            checkpoint.started_at.isoformat() if checkpoint.started_at else "",
+            checkpoint.call_id,
+        ),
+    )
+    plan = build_replay_plan(
+        run=run,
+        at=first.call_id,
+        flow_overrides=flow_overrides,
+        checkpoint_overrides=checkpoint_overrides,
+        invocation_overrides=invocation_overrides,
+        skip=skip,
+    )
+    return replace(plan, runtime_context=replace(plan.runtime_context, at=""))
+
+
 __all__ = [
+    "EXPERIMENT_ID_METADATA_KEY",
+    "EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY",
+    "EXPERIMENT_REPEAT_INDEX_METADATA_KEY",
+    "EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY",
+    "EXPERIMENT_TAG_PREFIX",
+    "EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY",
     "REPLAY_OUTPUT_OVERRIDES_METADATA_KEY",
     "REPLAY_RESERVED_KWARGS",
     "REPLAY_SKIPPED_STEPS_METADATA_KEY",
     "AppliedOutputOverride",
+    "ExperimentMemberVerification",
     "ReplayFailureRow",
     "ReplayPlan",
     "ReplayPlanDocument",
@@ -1425,11 +1821,13 @@ __all__ = [
     "ReplaySkippedRow",
     "ReplaySubmission",
     "ReplaySummary",
+    "build_replay_from_start_plan",
     "build_replay_plan",
     "build_replay_request_document",
     "new_replay_submission_id",
     "parse_replay_output_overrides_metadata",
     "parse_replay_skipped_steps_metadata",
+    "persist_and_verify_experiment_membership",
     "plan_requires_runtime_transport",
     "replay_at_skip_reason",
     "replay_at_status",

@@ -6726,6 +6726,8 @@ def test_agents_current_json_uses_canonical_envelope(
             "agent_version_aliases": {},
             "agent_versions": [],
             "version_count": 0,
+            "experiments": [],
+            "experiment_count": 0,
         },
     }
 

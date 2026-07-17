@@ -21,6 +21,7 @@ from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin, KitaruUsageError
 
 if TYPE_CHECKING:
+    from kitaru._experiments import Experiment
     from kitaru.client import KitaruClient
     from kitaru.replay import ReplaySubmission
 
@@ -577,6 +578,57 @@ class Execution:
             strip_usage_record_bookkeeping(record)
             for record in [*unique_run_records, *checkpoint_records]
         ]
+
+    @property
+    def experiments(self) -> list[Experiment]:
+        """Return attempts whose verified frozen targets contain this execution."""
+        return self._client.agents.experiments.list_for_execution(
+            self.exec_id,
+            agent=self.project_id,
+        )
+
+    @property
+    def replays(self) -> list[Execution]:
+        """Return tagged replay descendants across this execution's attempts."""
+        return self._client.executions._list_experiment_replays(self.exec_id)
+
+    @property
+    def original(self) -> Execution | None:
+        """Return the authoritative immediate replay parent, when present."""
+        if self.original_exec_id is None:
+            return None
+        return self._client.executions.get(self.original_exec_id)
+
+    @property
+    def root_exec_id(self) -> str | None:
+        """Return the verified stored replay root ID, or None for unknown ancestry."""
+        from kitaru.replay import (
+            EXPERIMENT_ID_METADATA_KEY,
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
+        )
+
+        experiment_id = self.metadata.get(EXPERIMENT_ID_METADATA_KEY)
+        parent_id = self.metadata.get(EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY)
+        root_id = self.metadata.get(EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY)
+        if (
+            not isinstance(experiment_id, str)
+            or not experiment_id.strip()
+            or not isinstance(parent_id, str)
+            or parent_id != self.original_exec_id
+            or not isinstance(root_id, str)
+            or not root_id.strip()
+        ):
+            return None
+        return root_id
+
+    @property
+    def root(self) -> Execution | None:
+        """Return the verified stored root execution, or None when unknown."""
+        root_id = self.root_exec_id
+        if root_id is None:
+            return None
+        return self._client.executions.get(root_id)
 
     def refresh(self) -> Execution:
         """Fetch the latest execution state."""
