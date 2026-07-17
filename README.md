@@ -151,27 +151,22 @@ recording gets minted — not the reason you reach for Kitaru.
 
 ### Works with your existing stack
 
-Two ways in, no rewrite either way.
+#### Wrap the agent you already have
 
-**Your agent framework.** Adapters wrap the agent you already have and
-record every run natively:
+One line around your existing agent records every run natively. Adapters
+ship for PydanticAI, OpenAI Agents SDK, Claude Agent SDK, LangGraph,
+Gemini, and Google ADK — see the
+[adapter guides](https://docs.zenml.io/kitaru/adapters). For raw-Python
+agents, `@flow` and `@checkpoint` give you the same recording without an
+adapter.
 
-| Framework | Adapter |
-|---|---|
-| PydanticAI | `kitaru.adapters.pydantic_ai.KitaruAgent` |
-| OpenAI Agents SDK | `kitaru.adapters.openai_agents.KitaruRunner` |
-| Claude Agent SDK | `kitaru.adapters.claude_agent_sdk.KitaruClaudeRunner` |
-| LangGraph | `kitaru.adapters.langgraph.KitaruGraphRunner` |
-| Gemini | `kitaru.adapters.gemini.KitaruGeminiInteractionsRunner` |
-| Google ADK | `kitaru.adapters.google_adk.KitaruADKRunner` |
+#### Import the traces you already collect
 
-For raw-Python agents, `@flow` and `@checkpoint` around your calls give you
-the same recording without an adapter.
+Runs recorded elsewhere land as executions too — bring a Langfuse trace or
+a JSONL export and replay it like anything recorded natively.
 
-**Your observability stack.** Runs recorded elsewhere import as executions —
-a Langfuse trace or OTel-shaped JSONL lands the same way and becomes
-something you can replay. Your model, your tools, your framework, your
-telemetry — Kitaru wraps them, not the other way around.
+Your model, your tools, your framework, your telemetry — Kitaru wraps
+them, not the other way around.
 
 ### Drive it from your coding agent
 
