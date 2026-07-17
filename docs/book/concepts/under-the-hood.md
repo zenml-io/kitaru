@@ -1,48 +1,19 @@
 ---
-description: The Kitaru mental model — a flow is a dynamic pipeline, a checkpoint is a step, and the record → replay → improve loop runs on top.
+description: How a run is recorded — server, runner, execution targets — and where Kitaru sits in an agent stack.
 icon: gears
 ---
 
-# How It Works
+# Under the Hood
 
-Kitaru is the runtime for production AI agents: **run** them durably, **replay**
-them faithfully, **improve** them with evidence. This page is the mental model
-that ties those three together, and the architecture that makes them work.
-
-## The mental model
-
-A **Kitaru flow is a dynamic ZenML pipeline**, and a **checkpoint is like a
-step**. Your agent runs on the same stacks, the same server, and the same
-dashboard as your ZenML pipelines — there is no separate agent runtime to
-operate.
+An [execution](executions.md) is a faithful recording because of how a run is
+wired: a **Kitaru flow is a dynamic ZenML pipeline**, a **checkpoint is like a
+step**, and the machinery that records and replays them is the same machinery
+that runs your ZenML pipelines. There is no separate agent runtime to operate.
 
 The difference from a classical pipeline is that a flow's shape is decided at
 runtime by the agent, not fixed in advance. Each `@checkpoint` you cross records
 its inputs and output as a durable unit. That recording is what the rest of
-Kitaru is built on.
-
-The loop:
-
-1. **Run (record).** Every model call and tool call is recorded as a durable
-   checkpoint. This is the enabler, not the headline.
-2. **Replay (the point).** Re-execute a real run from a checkpoint with exactly
-   one input changed — a different model, a different prompt. Compare it against a
-   faithful baseline rerun (the same run with nothing changed). Because the
-   baseline reproduces, the diff is your change, not noise. See
-   [Replay and overrides](../guides/replay-and-overrides.md).
-3. **Improve.** Apply the winning change across a cohort of recent runs, measure
-   cost / latency / quality, keep what wins.
-
-{% hint style="info" %}
-**Durable execution is the _how_, replay is the _why_.** Recording every
-checkpoint is what lets Kitaru reconstruct a run's exact starting state and
-re-execute it with one input swapped. Without durable checkpoints you can
-re-score outputs (an eval); you cannot faithfully re-run the agent. Replay
-re-executes the real run — it is not output re-scoring.
-{% endhint %}
-
-The rest of this page is the architecture that makes recording (and therefore
-replay) durable.
+Kitaru is built on — replay, resume, wait, and diff all read it back.
 
 ## Components
 
@@ -78,10 +49,7 @@ contract between the two.**
 
 ## Control / orchestration / execution
 
-Kitaru splits runtime responsibilities into three planes. (This is separate from
-the [harness / runtime / platform](harness-runtime-platform.md) split, which is
-about where Kitaru sits in the broader agent stack — not about how a single run
-executes.)
+Kitaru splits runtime responsibilities into three planes.
 
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/three-planes.png" alt="The control, orchestration, and execution planes of a Kitaru run."><figcaption></figcaption></figure>
 
@@ -184,11 +152,9 @@ In classical pipelines, a failed step is a crash. In Kitaru, a failed checkpoint
 is **durable context** — something the runner, the agent loop, a human, or a
 retry policy can reason about.
 
-Consider a document-synthesis agent:
-
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/failed-checkpoint.png" alt="A failed checkpoint is persisted as a typed artifact the runner, agent, or human can act on."><figcaption></figcaption></figure>
 
-Because the retrieval checkpoint's failure is persisted as a typed artifact, a
+Because a failing checkpoint's error is persisted as a typed artifact, a
 downstream consumer has several real options:
 
 * Retry the same checkpoint with the same input
@@ -202,88 +168,86 @@ This is what "agent-native error handling" means in practice: failures become
 data, durable state survives them, and the same recorded run can be re-executed
 with one thing changed.
 
-## How deep do you integrate?
+## Where Kitaru sits in an agent stack
 
-You don't have to restructure your agent to get value. Pick the depth that fits.
+Agent tooling spans four layers, and Kitaru is one of them — the **runtime**.
+Knowing which layer is which answers most "is Kitaru a competitor to X?"
+questions.
 
-### Level 0 — Black-box harness
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/harness-runtime-platform.png" alt="The four layers of an agent stack: model, harness, runtime, and platform."><figcaption></figcaption></figure>
 
-Wrap the entire agent run as one checkpoint.
+* **Model layer** — the LLM itself, picked per-call or per-agent.
+* **Harness layer** — the loop around the model: prompts, tools, context
+  management, structured outputs. Picked per-agent or per-team (PydanticAI,
+  OpenAI Agents SDK, LangGraph, Claude Agent SDK, raw Python).
+* **Runtime layer** — how the agent survives, executes, and improves over time:
+  durable checkpoints, faithful replay, cross-run diff, resume, wait states,
+  versioned deployments, artifact and state handling, execution placement. This
+  is Kitaru.
+* **Platform layer** — how your organization governs: auth, entitlements,
+  interceptors, observability, product UI, policy. Usually your existing stack.
 
-```text
-flow
-└── checkpoint: run_agent()
-    └── PydanticAI / LangGraph / Claude Agent SDK / custom loop
+Kitaru gives platform teams the durable execution primitives — record, replay,
+diff — that attach to the harness their app teams picked and the platform their
+org already runs. It is not a harness, and it is not a packaged platform.
+
+### What Kitaru owns vs integrates with
+
+| Concern | Kitaru owns? | Kitaru's stance |
+|---|---|---|
+| Checkpoint / faithful replay / cross-run diff / resume | Yes | Core product — the run/replay/improve loop |
+| Flow versioning and invocation routing | Yes | Core product |
+| Execution placement per checkpoint | Yes, as config | `@checkpoint(runtime="isolated")` today; richer policy evolving |
+| Sandbox implementation | No | Provide adapters; don't mandate a vendor |
+| Secrets storage | Partly | Alias-linked secret resolution for `kitaru.llm()`; integrate with your secret manager |
+| Auth to invoke flows | Yes | Workspace keys / service accounts; no per-deployment tokens |
+| Enterprise entitlements / RBAC | No | Integrate with your platform |
+| Network egress policy | No | Determined by the execution target your stack provides |
+| Interceptors / guardrails | No | Harness or your platform owns this |
+| Observability | Partly | Runtime metadata, logs, artifact lineage; integrate with your tracing |
+
+The line to remember: durability without execution policy is not enough for
+production agents — but Kitaru makes policy **attachable** to execution
+boundaries rather than mandating the policy itself.
+
+### The split in code
+
+A Python research agent, with each layer doing its part:
+
+```python
+from kitaru import flow, checkpoint, wait
+
+@checkpoint
+def plan(question: str) -> dict:
+    # Harness (Pydantic AI / raw LLM / whatever) lives INSIDE the checkpoint.
+    return pydantic_agent.run_sync(question).output
+
+@checkpoint
+def retrieve(plan: dict) -> list[dict]:
+    return search_docs(plan)
+
+@checkpoint
+def synthesize(docs: list[dict]) -> str:
+    return claude_agent.answer(docs)
+
+@flow
+def research_agent(question: str) -> str:
+    p = plan(question)
+    docs = retrieve(p)
+    approved = wait(name="approve", question="Looks right?", schema=bool)
+    return synthesize(docs) if approved else "rejected"
 ```
 
-* Fastest integration
-* Minimal code changes
-* Framework-agnostic
-
-The tradeoff: replay boundary is coarse (one per agent run) and you see less of
-the agent's internal state.
-
-### Level 1 — Coarse workflow checkpoints
-
-Add checkpoints around the phases that matter to your team.
-
-```text
-flow
-├── checkpoint: plan()
-├── checkpoint: retrieve()
-├── checkpoint: act()
-├── checkpoint: synthesize()
-└── checkpoint: validate()
-```
-
-* Useful replay points
-* Better audit trail
-* Good balance of portability and durability
-
-The tradeoff: you (not the framework) decide where the boundaries go.
-
-### Level 2 — Framework-aware adapter
-
-Use a Kitaru adapter that tracks the framework's internals (model calls, tool
-calls, intermediate state) as child events under the enclosing checkpoint.
-
-```text
-flow
-└── checkpointed framework runtime
-    ├── model calls
-    ├── tool calls
-    ├── intermediate state
-    └── final output
-```
-
-* Richer introspection
-* Better debugging
-* Tighter developer experience
-
-The tradeoff: adapters are per-framework and need maintenance. Supported
-framework integrations now live in the [Adapters section](../adapters/README.md).
-
-## Framework-agnostic by construction
-
-Kitaru does not require your agent to be written as a graph. `@checkpoint` wraps
-ordinary Python function boundaries, independent of the harness.
-
-That means a platform team supporting multiple harnesses — PydanticAI here,
-LangGraph there, Claude Agent SDK for one team, a raw-Python loop for another —
-can still standardize **durability, replay, and execution metadata** on a single
-runtime primitive. The harness choice stays a per-team decision.
-
-## Fits behind your platform
+* **Harness** decides how `plan`, `retrieve`, and `synthesize` reason.
+* **Kitaru runtime** decides what is durable, what waits, and where each
+  checkpoint runs — so you can replay a real run from any checkpoint with one
+  input changed and diff it against the baseline.
+* **Your platform** decides who can invoke `research_agent`, which stack it runs
+  on, and what gets logged where.
 
 Kitaru can be used directly through its invocation API, or placed **behind** your
-existing platform/gateway:
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/gateway-stack.png" alt="Kitaru placed behind an existing platform gateway that owns auth, entitlements, and UI."><figcaption></figcaption></figure>
-
-You keep your auth, entitlements, interceptors, observability, and UI. Kitaru
-handles the durable execution layer underneath. This is how Kitaru drops into a
-finance- or regulated-industry-style internal agent platform without asking you
-to rebuild the surrounding system.
+existing platform/gateway: you keep your auth, entitlements, interceptors,
+observability, and UI, and Kitaru handles the durable execution layer underneath.
 
 ## Local development
 
@@ -322,4 +286,4 @@ There is no mandatory SaaS control plane in the path of your agent's data.
 
 ## Related
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Harness, Runtime, Platform</strong></td><td>Where Kitaru fits in the broader agent stack.</td><td><a href="harness-runtime-platform.md">harness-runtime-platform.md</a></td></tr><tr><td><strong>Flows</strong></td><td>The outer durable boundary of a Kitaru run.</td><td><a href="flows.md">flows.md</a></td></tr><tr><td><strong>Checkpoints</strong></td><td>Durable work units. The contract between the runner and execution targets.</td><td><a href="checkpoints.md">checkpoints.md</a></td></tr><tr><td><strong>Wait and Input</strong></td><td>Pause a run, release compute, resume when input arrives.</td><td><a href="wait-and-input.md">wait-and-input.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Executions — the recording</strong></td><td>What a finished run leaves behind.</td><td><a href="executions.md">executions.md</a></td></tr><tr><td><strong>Flows</strong></td><td>The boundary that produces an execution.</td><td><a href="flows.md">flows.md</a></td></tr><tr><td><strong>Checkpoints</strong></td><td>The contract between the runner and execution targets.</td><td><a href="checkpoints.md">checkpoints.md</a></td></tr><tr><td><strong>Wait, Input &#x26; Resume</strong></td><td>Pause a run, release compute, resume when input arrives.</td><td><a href="wait-and-input.md">wait-and-input.md</a></td></tr></tbody></table>

@@ -20,7 +20,7 @@ A stack bundles three concerns:
 
 The active stack is the default. Per-flow and per-run overrides can bind a
 different stack for a single execution. See
-[How It Works](../concepts/how-it-works.md) for how execution placement interacts
+[Under the Hood](../concepts/under-the-hood.md) for how execution placement interacts
 with the runner.
 
 ## The default stack

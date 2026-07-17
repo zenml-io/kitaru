@@ -131,7 +131,7 @@ Migrating an existing Claude Agent SDK project? The
 includes `/kitaru:kitaru-claude-agent-sdk-migration` for wrapping one Claude
 invocation checkpoint while keeping Claude-owned tools, Bash, MCP, sessions,
 and workspace-file caveats explicit. See
-[Agent Skills](../agent-native/claude-code-skill.md).
+[Drive it from your coding agent](../agent-native/mcp-server.md).
 {% endhint %}
 
 ## Minimal flow

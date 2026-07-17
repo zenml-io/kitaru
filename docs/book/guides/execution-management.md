@@ -3,14 +3,18 @@ description: Inspect execution status, fetch runtime logs, resolve waits, and ma
 icon: list-check
 ---
 
-# Manage Executions with KitaruClient and CLI
+# Inspect & Manage Executions
 
-`KitaruClient` is the programmatic API for inspecting and acting on executions
-outside your flow functions. It is how you look up a real run by its `exec_id`,
-read its checkpoints and cost, resolve waits, and drive the run/replay/improve
-loop, replaying a recorded execution from a checkpoint with one input changed.
-The same surface is exposed over the CLI and the MCP server, so a coding agent
-can do all of this too.
+`KitaruClient` is the programmatic API for inspecting and acting on
+[executions](../concepts/executions.md) outside your flow functions. It is how you
+look up a real run by its `exec_id`, read its checkpoints and cost, resolve waits,
+and drive the run/replay/improve loop, replaying a recorded execution from a
+checkpoint with one input changed. The same surface is exposed over the CLI and
+the MCP server, so a coding agent can do all of this too.
+
+For what an execution *is* — the recording, its lineage, and why imported traces
+are read-only — see the concept page,
+[Executions — the recording](../concepts/executions.md).
 
 {% hint style="info" %}
 `KitaruClient` and the CLI use your current Kitaru connection context. If you

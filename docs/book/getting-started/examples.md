@@ -33,7 +33,7 @@ Most examples can be run from the repository root with `uv run python path/to/sc
 
 {% hint style="info" %}
 Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK,
-Gemini Interactions, or Google ADK project? See [Agent Skills](../agent-native/claude-code-skill.md)
+Gemini Interactions, or Google ADK project? See [Drive it from your coding agent](../agent-native/mcp-server.md)
 for migration skills that guide a coding agent through the adapter-specific path.
 {% endhint %}
 

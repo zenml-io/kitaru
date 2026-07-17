@@ -131,7 +131,7 @@ Migrating an existing LangGraph, LangChain agent, or Deep Agents-style project?
 The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
 package includes `/kitaru:kitaru-langgraph-migration` for choosing between the outer
 `graph_call` boundary and middleware-backed `calls` checkpoints. See
-[Agent Skills](../agent-native/claude-code-skill.md).
+[Drive it from your coding agent](../agent-native/mcp-server.md).
 {% endhint %}
 
 ## Minimal `graph_call` flow pattern

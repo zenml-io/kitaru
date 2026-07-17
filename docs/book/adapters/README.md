@@ -37,7 +37,7 @@ In Claude Code, invoke the skill that matches your current framework:
 - `/kitaru:kitaru-gemini-interactions-migration`
 - Google ADK support is experimental; use the [Google ADK adapter page](google-adk.md) and runnable example first.
 
-For install instructions and the full skill list, see [Agent Skills](../agent-native/claude-code-skill.md).
+For install instructions and the full skill list, see [Drive it from your coding agent](../agent-native/mcp-server.md).
 
 ## What adapters do not promise
 

@@ -8,8 +8,9 @@ icon: rocket
 A **deployment** is a versioned, remotely invocable entrypoint for a Kitaru flow.
 It lets a producer publish a flow once and consumers run it from anywhere by name
 — without importing the source or owning a long-lived service. Each invocation
-starts a fresh durable execution from a saved snapshot, so every deployed run is
-recorded, replayable, and improvable like any other Kitaru flow run.
+starts a fresh durable [execution](executions.md) from a saved snapshot, so every
+deployed run is recorded, replayable, and improvable like any other Kitaru flow
+run.
 
 The flow source is the recipe, a deployment version is one immutable saved copy
 of it, and an invocation starts a fresh execution from that copy.
@@ -26,25 +27,15 @@ route yet. Think of it as putting a sealed build artifact on the shelf. It
 exists, it has a version, but nobody reaches it through `default`, `stable`, or
 `canary` until you attach a tag later with `kitaru flow tag`.
 
-You can then invoke the deployed flow without the original target path:
+Deployments are created and invoked in the active Kitaru project, resolved from
+your persisted login/project selection, `KITARU_PROJECT`, or an explicit
+process-local override. If your active project is `staging`, `kitaru deploy`
+creates the deployment in `staging`; switch to `production` and the same command
+targets `production` instead.
 
-* CLI: `kitaru invoke flow_name`
-* Python SDK: `flow_name.invoke(...)` or `deployment.invoke(...)`
-* MCP: `kitaru_deployments_invoke(flow="flow_name", ...)`
-
-If you want a step-by-step producer/consumer walkthrough, see the
-[Deploy and invoke flows guide](../guides/deployments.md).
-
-When you deploy from source targets (`path.py:flow_name`) via CLI, run
-`kitaru init` in the repository first so build/deploy-from-source metadata can be
-resolved correctly.
-
-Deployments are created and invoked in the active Kitaru project. Kitaru gets
-that project from your persisted login/project selection (`kitaru login
---project ...` or `kitaru project use ...`), from `KITARU_PROJECT` in headless
-environments, or from an explicit process-local configuration override. If your
-active project is `staging`, `kitaru deploy` creates the deployment in `staging`;
-if you switch to `production`, the same command targets `production` instead.
+This page is the concept. For the end-to-end producer/consumer walkthrough —
+invocation from CLI, SDK, MCP, and curl, plus auth and server access — see
+[Deploy & Invoke](../guides/deployments.md).
 
 ## What gets saved
 
@@ -56,36 +47,8 @@ version, representative deployment-time input values, deploy-time image config
 Deployment-time inputs should be representative values. They let Kitaru prepare
 the saved deployment snapshot, especially for flows whose shape depends on
 concrete parameters. Later invocations can override those values by passing new
-inputs.
-
-Deploy-time image config follows the same shape across CLI, SDK, and MCP: a base
-image string or an object matching `kitaru.ImageSettings`.
-
-Image config is part of the saved deployment snapshot. Later `kitaru invoke` or
-`.invoke(...)` calls can override flow inputs for each execution, but they do not
-rewrite the deployment image.
-
-Each `kitaru deploy` call attaches exactly one routing tag at deploy time. If you
-want to add another tag later, or move an existing route after testing, use
-`kitaru flow tag` against the deployed version instead of redeploying.
-
-```bash
-kitaru deploy flows/research.py:research_agent \
-  --input '{"topic": "durable execution"}' \
-  --image '{"requirements":["kitaru[openai]"],"secret_environment_from":["openai-creds"]}'
-```
-
-```python
-from flows.research import research_agent
-
-research_agent.deploy(
-    topic="durable execution",
-    image={
-        "requirements": ["kitaru[openai]"],
-        "secret_environment_from": ["openai-creds"],
-    },
-)
-```
+inputs. Image config is part of the saved snapshot; later invokes can override
+flow inputs for each execution, but they do not rewrite the deployment image.
 
 ## Auto-versioning
 
@@ -95,23 +58,8 @@ Kitaru assigns deployment versions automatically per flow:
 2. The next deployment of `research_agent` becomes version `2`.
 3. Another flow gets its own independent version sequence.
 
-Internally, Kitaru injects the version into the backend snapshot name using this
-shape:
-
-```text
-kitaru::<flow>::v<N>
-```
-
-For example, `research_agent` version `3` is stored as:
-
-```text
-kitaru::research_agent::v3
-```
-
-That name is an implementation detail, but it explains the behavior: Kitaru can
-scan the existing deployment snapshots for a flow, find the highest `v<N>`, and
-allocate the next version. If two deploys race and both try the same next name,
-Kitaru retries with the next available version.
+If two deploys race and both try the same next version, Kitaru retries with the
+next available one.
 
 ## Tags and routing
 
@@ -136,90 +84,10 @@ The `default` tag is special:
   the exclusive tag first. Because `default` cannot be removed, move it to another
   version before deleting the old default version.
 
-Concrete routing story:
-
-1. You deploy `research_agent` for the first time. Kitaru creates `v1` and tags
-   it `default`.
-2. You deploy a new candidate with `--tag canary --exclusive`. Kitaru creates
-   `v2` and tags it `canary`.
-3. You invoke `kitaru invoke research_agent --tag canary` to test `v2`.
-4. When you are happy, you move the stable route:
-
-```bash
-kitaru flow tag research_agent stable --version 2 --exclusive
-```
-
-That split keeps deploy-time routing simple: create the version with one route,
-then use `kitaru flow tag` to mix in later routing changes. For example, you
-might deploy version `2` with an exclusive `canary` route, then add a shared
-`benchmark` label afterward:
-
-```bash
-kitaru flow tag research_agent benchmark --version 2
-```
-
-## Remote-executable stack requirement
-
-Deployment creation is only supported for stacks that the Kitaru server can
-execute remotely from a saved snapshot. If the selected stack is local or
-otherwise not remotely executable by the Kitaru server, deployment creation is
-rejected (CLI, SDK, and MCP).
-
-This guard keeps deploy-time behavior aligned with invoke/curl behavior.
-
-## Invocation model
-
-`kitaru invoke` is the primary CLI command for deployed flows:
-
-```bash
-kitaru invoke research_agent \
-  --tag default \
-  --input '{"topic": "serverless routing"}'
-```
-
-If you omit both `--version` and `--tag`, Kitaru tries the implicit `default`
-route:
-
-```bash
-kitaru invoke research_agent --input '{"topic": "default route"}'
-```
-
-If the flow has no deployments, Kitaru tells you that directly. If deployments
-exist but none is currently routed as `default`, invoke with an explicit tag or
-version, or move `default` with `kitaru flow tag ... --exclusive`.
-
-You can pin an exact version when you need reproducibility:
-
-```bash
-kitaru invoke research_agent --version 2 --input '{"topic": "pinned run"}'
-```
-
-In Python, `.invoke()` is the remote invocation verb for deployed flows:
-
-```python
-handle = research_agent.invoke(topic="serverless routing")  # uses tag="default"
-result = handle.wait()
-```
-
-A `Deployment` object invokes its pinned version:
-
-```python
-deployment = research_agent.deployment(version=2)
-handle = deployment.invoke(topic="pinned run")
-```
-
-At the client level, use the deployment API when the producer flow object is not
-imported in the consumer process:
-
-```python
-from kitaru import KitaruClient
-
-handle = KitaruClient().deployments.invoke(
-    flow="research_agent",
-    tag="stable",
-    inputs={"topic": "consumer request"},
-)
-```
+Deployment creation is only supported for stacks the Kitaru server can execute
+remotely from a saved snapshot. If the selected stack is local or otherwise not
+remotely executable, deployment creation is rejected (CLI, SDK, and MCP). This
+guard keeps deploy-time behavior aligned with invoke behavior.
 
 ## Serverless routing
 
@@ -242,139 +110,9 @@ That gives a clean producer/consumer split:
 * The producer owns source code, deploys versions, and moves tags.
 * The consumer only needs a flow name plus a selector (`default`, another tag, or
   an exact version).
-* There is no long-lived per-version service and no per-deployment token.
+* There is no long-lived per-version service and no per-deployment token — access
+  is controlled by the same active Kitaru server connection the CLI, SDK, and MCP
+  server already use.
 
 Inputs passed at invocation time override the deployment-time defaults for that
 new execution.
-
-## Authentication and Kitaru server access
-
-Deployments do not have per-deployment tokens. Access is controlled by the same
-active Kitaru server connection that the CLI, SDK, and MCP server already use.
-
-For a remote Kitaru server, authenticate once and choose the project you want to
-work in:
-
-```bash
-kitaru login https://kitaru.example.com --api-key KITARU_API_KEY_VALUE --project production
-kitaru status
-```
-
-For headless environments, configure the same connection with environment
-variables:
-
-```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
-export KITARU_PROJECT=production
-```
-
-For automation, `KITARU_AUTH_TOKEN` should normally be a service-account API key
-created with `kitaru auth service-accounts create` and
-`kitaru auth api-keys create`. Those three values are the whole connection
-puzzle: where the Kitaru server is, how to authenticate to it, and which project
-to use once you are there. If any piece is missing, commands that need the server
-fail with a short error telling you what to set. `kitaru info` shows which
-connection values Kitaru currently sees.
-
-After that, `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, and MCP
-`kitaru_deployments_invoke(...)` all use the active Kitaru server connection. The
-invocation request does not carry a separate deployment-specific token.
-
-For shell scripts or CI jobs, `kitaru flow deployments curl FLOW` generates a
-copy-pasteable curl command for the active Kitaru server. Kitaru resolves the
-requested tag or version first, then prints a command that starts a new execution
-for that resolved deployment version. The generated snippet calls
-`kitaru auth token` to get a short-lived server bearer token from your active
-connection, but the curl generator itself does not inline real token values. That
-bearer token is temporary; create or rotate long-lived automation credentials
-with `kitaru auth api-keys`.
-
-When you generate curl from a tag such as `default` or `stable`, the printed
-command is pinned to the deployment version that tag resolved to at generation
-time. Regenerate the command if the producer moves the tag later.
-
-Snapshot-backed invocation (`kitaru invoke`,
-`KitaruClient().deployments.invoke(...)`, and `kitaru flow deployments curl`)
-depends on server workload-manager support. The official `zenmldocker/kitaru`
-image already enables this. If you run a custom image or plain ZenML server
-setup, preserve or configure workload-manager support explicitly (for example via
-`ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE`).
-
-Runtime secrets for the flow itself should live in Kitaru secrets or stack
-configuration, not in deployment tags or invocation examples.
-
-## Worked example: producer deploys and shares
-
-A producer has a flow in `flows/research.py`:
-
-```python
-from kitaru import flow
-
-@flow
-def research_agent(topic: str) -> str:
-    ...
-```
-
-They deploy the first default version:
-
-```bash
-kitaru deploy flows/research.py:research_agent \
-  --input '{"topic": "durable agents"}'
-```
-
-They deploy a canary candidate:
-
-```bash
-kitaru deploy flows/research.py:research_agent \
-  --tag canary \
-  --exclusive \
-  --input '{"topic": "durable agents"}'
-```
-
-They inspect versions and promote the canary to the stable route:
-
-```bash
-kitaru flow deployments list research_agent
-kitaru flow tag research_agent stable --version 2 --exclusive
-```
-
-They can now tell consumers: "Invoke `research_agent` with tag `stable`."
-
-## Worked example: consumer invokes
-
-A CLI consumer invokes the shared route:
-
-```bash
-kitaru invoke research_agent \
-  --tag stable \
-  --input '{"topic": "deployment routing"}'
-```
-
-A Python consumer invokes the same route without importing the producer's source
-module:
-
-```python
-from kitaru import KitaruClient
-
-handle = KitaruClient().deployments.invoke(
-    flow="research_agent",
-    tag="stable",
-    inputs={"topic": "deployment routing"},
-)
-print(handle.exec_id)
-```
-
-An MCP-capable assistant can do the same with structured tool input:
-
-```json
-{
-  "flow": "research_agent",
-  "tag": "stable",
-  "inputs": {"topic": "deployment routing"}
-}
-```
-
-Use `kitaru_deployments_list(flow="research_agent")` or
-`kitaru_deployments_get(flow="research_agent", tag="stable")` when the assistant
-needs to inspect the available routes before invoking.

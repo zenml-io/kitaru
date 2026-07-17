@@ -5,19 +5,19 @@ icon: diagram-project
 
 # Flows
 
-A **flow** is the durable boundary for one agent run — the unit your platform
-invokes and the runner executes. It matters because the flow is what you can
-later **replay**: every model call and tool call inside it is recorded at
-[checkpoint](checkpoints.md) boundaries, so a finished run can be reproduced
-faithfully and rerun with one input changed. A flow is a dynamic ZenML pipeline;
-it runs on the same stacks, server, and dashboard as your ZenML pipelines.
+A **flow** is the boundary that produces an [execution](executions.md) — the one
+artifact Kitaru records. It is the unit your platform invokes and the runner
+executes, and it is what you later **replay**: every model call and tool call
+inside it is recorded at [checkpoint](checkpoints.md) boundaries, so a finished
+run can be reproduced faithfully and rerun with one input changed. A flow is a
+dynamic ZenML pipeline; it runs on the same stacks, server, and dashboard as your
+ZenML pipelines.
 
 Everything inside the flow is tracked at checkpoint boundaries: persisted
 outputs, retry, replay, resume, and wait. Your harness (Pydantic AI, LangGraph,
 Claude Agent SDK, raw Python) lives inside the checkpoints. Your platform sits in
-front of the flow's invocation API. See
-[Harness, Runtime, Platform](harness-runtime-platform.md) for the bigger
-picture.
+front of the flow's invocation API. See [Under the Hood](under-the-hood.md) for
+the bigger picture.
 
 ## The shape of a flow
 

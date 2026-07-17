@@ -1,21 +1,64 @@
 ---
-description: A practical producer-consumer guide to deploying Kitaru flows, moving tags, and invoking stable or canary routes
+description: Move a flow from local runs to shared cloud infrastructure, then deploy it as a versioned route others invoke, replay, and improve against.
 icon: rocket
 ---
 
-# Deploy and invoke flows
+# Deploy & Invoke
 
 A deployment is a saved, versioned entrypoint for a flow, so other people, systems, or agents can run it by name without importing your source. It turns a flow you run locally into a stable route others invoke, replay, and improve against.
 
-This guide covers the workflow a real team uses: one person publishes a flow, tests a canary version, promotes it, and then others invoke it by name.
+This guide covers both halves of going to production: standing up the shared infrastructure a flow runs on, then the deployment workflow a real team uses — one person publishes a flow, tests a canary version, promotes it, and then others invoke it by name.
 
-The mental model is:
+The deployment mental model is:
 
 1. **Producer deploys** from source: `kitaru deploy flows/research.py:research_agent`.
 2. **Kitaru versions** the deployment automatically: `v1`, then `v2`, then `v3`.
 3. **Producer moves tags** like `default`, `canary`, or `stable` to control routes.
 4. **Consumer invokes one route** by flow name plus a selector: usually a tag,
    sometimes an exact version. Kitaru resolves that route to the saved snapshot.
+
+## From local to production
+
+Running locally, the Kitaru server is embedded in your Python process. Production
+adds three things so your team shares one source of truth and agents run
+independently of your laptop. Your flow code does not change.
+
+### 1. Deploy a Kitaru server
+
+Deploy the server as a standalone service. It stores execution metadata,
+checkpoint state, and logs; it brokers temporary credentials so clients and the
+UI can read artifacts, and never accesses your cloud storage directly.
+
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Deploy with Helm</strong></td><td>Install the Kitaru server on any Kubernetes cluster.</td><td><a href="../deploy/helm.md">../deploy/helm.md</a></td></tr><tr><td><strong>Deploy with Docker</strong></td><td>Run the server as a container.</td><td><a href="../deploy/docker.md">../deploy/docker.md</a></td></tr></tbody></table>
+
+### 2. Connect to the server
+
+Point your local client at the deployed server:
+
+```bash
+kitaru login https://kitaru.your-company.com
+```
+
+From here, the CLI, `KitaruClient`, and the UI all talk to the same server, and
+any executions you start are visible to your whole team.
+
+### 3. Set up a cloud stack
+
+A [stack](../stacks/README.md) is a named runtime that tells Kitaru where to run
+your agent code and where to store its outputs. Pick the compute backend that
+matches your cloud — [Kubernetes](../stacks/kubernetes-stacks.md),
+[SageMaker](../stacks/sagemaker-stacks.md), [Vertex AI](../stacks/vertex-stacks.md),
+or [AzureML](../stacks/azureml-stacks.md) — then switch to it:
+
+```bash
+kitaru stack use prod-k8s
+```
+
+Now `research_agent.run(...)` executes on that stack: the client fetches
+short-lived credentials from the server and dispatches the execution to your
+compute backend, which writes checkpoint outputs to your cloud storage. Every
+cloud run records the same durable checkpoints as a local run, so you can replay a
+production execution with one input changed and diff it against the original.
 
 ## The story: a research flow you want to share
 

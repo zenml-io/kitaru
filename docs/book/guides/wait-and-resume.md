@@ -1,18 +1,20 @@
 ---
-description: Suspend a flow for external input and continue the same execution
+description: Pause a flow for a human approval, then continue the same execution when they respond.
 icon: hourglass-half
 ---
 
-# Wait, Input, and Resume
+# Pause for a human approval
 
-`kitaru.wait(...)` durably suspends a flow until external input arrives — a human
-approval, a webhook, an event. The flow's state is checkpointed, so the worker is
-free to exit; nothing has to sit in memory holding a thread open while you wait
-minutes, hours, or days. When the input arrives, Kitaru rehydrates the execution
-from its last checkpoint and continues the *same* run.
+Some steps should not happen until a person signs off — publishing a report,
+issuing a refund, sending an email. `kitaru.wait(...)` durably suspends the flow
+until that approval arrives. The flow's state is checkpointed, so the worker is
+free to exit; nothing sits in memory holding a thread open while you wait minutes,
+hours, or days. When the answer lands, Kitaru rehydrates the execution from its
+last checkpoint and continues the *same* run.
 
-This is the same durability that makes runs replayable: a paused flow is just a
-flow whose next checkpoint hasn't resolved yet.
+This guide is the task-oriented half. For the mechanics — where `wait()` may be
+called, timeout semantics, and the wait/resume timeline — see
+[Wait, Input & Resume](../concepts/wait-and-input.md).
 
 When your flow reaches `wait(...)`, what happens next depends on the environment:
 

@@ -1,21 +1,28 @@
 ---
-description: Use kitaru.llm() with model aliases, transported runtime config, and optional secret-backed credentials
+description: Every model call recorded — prompt, response, tokens, latency, and estimated cost — through kitaru.llm() and the framework adapters.
 icon: robot
 ---
 
-# Tracked LLM Calls
+# Track cost and model usage
 
-`kitaru.llm()` makes a single model call and records it as a durable boundary. That capture is the enabler for replay — once a call is recorded, you can reproduce the run faithfully and replay it with one input changed (a different model, a different prompt) to diff the effect of your change. Each call captures automatically:
+Every model call in a Kitaru run is recorded, so cost and usage are captured for
+you rather than instrumented by hand. `kitaru.llm()` makes a single model call and
+records it as a durable boundary; the framework adapters do the same for calls
+their agents make. Each call captures automatically:
 
 - prompt artifact capture
 - response artifact capture
-- usage/latency metadata logging
+- token usage and latency metadata
 - automatic estimated-cost metadata for direct OpenAI and Anthropic calls
+
+That capture is also what makes replay possible — once a call is recorded, you can
+reproduce the run faithfully and replay it with one input changed (a different
+model, a different prompt) to diff the effect on cost and quality.
 
 {% hint style="info" %}
 If you want the full setup path from stored credentials to an actual flow run,
 start with
-[Secrets + Model Registration](secrets-and-model-registration.md).
+[Secrets](secrets.md).
 {% endhint %}
 
 ## Model selection order
@@ -270,14 +277,14 @@ uv run pytest tests/test_phase12_llm_example.py
 ```
 
 If you want the full credential-backed setup path first, start with
-[Secrets + Model Registration](secrets-and-model-registration.md).
+[Secrets](secrets.md).
 
 For the broader catalog, see [Examples](../getting-started/examples.md).
 
 ## Related pages
 
 - [Examples](../getting-started/examples.md)
-- [Secrets + Model Registration](secrets-and-model-registration.md)
+- [Secrets](secrets.md)
 - [Manage Secrets](secrets.md)
 - [Configuration](configuration.md)
 - [CLI model commands](https://sdkdocs.kitaru.ai)

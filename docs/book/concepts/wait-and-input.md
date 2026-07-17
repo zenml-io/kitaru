@@ -13,6 +13,11 @@ seconds, hours, or months later when input lands, picking up at the exact wait
 point with the same state and artifacts. In non-interactive runs the runner polls
 for input up to its `timeout` (default 600 seconds), then exits.
 
+This is the same durability that makes runs replayable: a paused flow is just a
+flow whose next checkpoint has not resolved yet. When input arrives, Kitaru
+rehydrates the [execution](executions.md) from its last checkpoint and continues
+the *same* run — it does not start a new one.
+
 ## The wait/resume timeline
 
 <figure><img src="https://assets.kitaru.ai/docs/diagrams/wait-resume.png" alt="The server holds durable state while compute is idle, then the runner resumes at the exact wait point when input lands."><figcaption></figcaption></figure>
@@ -208,9 +213,16 @@ After timeout, the input can still be provided at any time.
 | `timeout` | `600` | Seconds the runner polls before exiting (not a wait expiration) |
 | `metadata` | `None` | Additional key-value data attached to the wait record |
 
+## Validation
+
+Input is validated against the wait `schema`:
+
+* invalid input raises `kitaru.KitaruWaitValidationError`
+* the execution stays in `waiting` until valid input is supplied
+
 ## Next steps
 
-* [Wait, Input, and Resume guide](../guides/wait-and-resume.md) — detailed
-  patterns including local interactive mode and abort
-* [Execution Management](../guides/execution-management.md) — inspect, replay,
-  and manage executions
+* [Pause for a human approval](../guides/wait-and-resume.md) — the task-oriented
+  guide, including the approval pattern, local interactive mode, and abort
+* [Inspect & Manage Executions](../guides/execution-management.md) — inspect,
+  replay, and manage executions

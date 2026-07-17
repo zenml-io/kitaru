@@ -22,4 +22,10 @@ redirects:
   concepts: concepts/README.md
   adapters: adapters/README.md
   stacks: stacks/README.md
+  # Vision restructure: merged and moved pages.
+  concepts/how-it-works: concepts/under-the-hood.md
+  concepts/harness-runtime-platform: concepts/under-the-hood.md
+  getting-started/deploy: guides/deployments.md
+  agent-native/claude-code-skill: agent-native/mcp-server.md
+  guides/secrets-and-model-registration: guides/secrets.md
 

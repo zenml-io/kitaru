@@ -206,7 +206,7 @@ default alias.
 Automatic estimated costs are calculated with [`genai-prices`](https://github.com/pydantic/genai-prices) after the provider or adapter call succeeds. Kitaru only estimates when it has reliable provider, model, and token data. If pricing fails, the model response and token counts are still recorded. See [Execution Management → LLM usage and cost metadata](execution-management.md#llm-usage-and-cost-metadata) for the actual-vs-estimated cost fields.
 
 If you want the full secret-backed setup path for `kitaru.llm()`, see
-[Secrets + Model Registration](secrets-and-model-registration.md).
+[Secrets](secrets.md).
 
 ### Housekeeping
 
@@ -437,7 +437,7 @@ For the broader catalog, see [Examples](../getting-started/examples.md).
 
 - [Stacks](../stacks/README.md)
 - [Examples](../getting-started/examples.md)
-- [Secrets + Model Registration](secrets-and-model-registration.md)
+- [Secrets](secrets.md)
 - [Tracked LLM Calls](llm-calls.md)
 - [Flows](../concepts/flows.md)
 - [Python configuration reference](https://sdkdocs.kitaru.ai)

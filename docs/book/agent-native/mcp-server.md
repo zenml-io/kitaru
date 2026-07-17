@@ -1,17 +1,21 @@
 ---
-description: Query and manage Kitaru executions, deployments, artifacts, projects, stacks, and secret creation through Model Context Protocol tools
+description: Drive the run/replay/improve loop from Claude Code, Codex, or Cursor — the MCP server for execution, plus the skills package for authoring.
 icon: plug
 ---
 
-# MCP Server
+# Drive it from your coding agent
 
-Kitaru ships an MCP server so a coding agent (Claude Code, Codex, Cursor) can
-drive the run/replay/improve loop directly: run a flow, replay it from a
-checkpoint with one input changed, diff the two, and hill-climb on cost,
-latency, and quality. The agent calls structured tools instead of parsing CLI
-text, so it can read execution state, change one variable, and measure the
-result without a human in the loop.
+Everything in the Kitaru loop is scriptable, so the agent you already code with
+can run it. Two pieces fit together: the **MCP server** gives a coding agent
+(Claude Code, Codex, Cursor) the tools to execute and replay, and the
+**skills package** gives it the judgment to author flows correctly. Use them
+together — the agent both writes the flow and drives the run → replay → improve
+loop against it.
 
+The MCP server lets an agent run a flow, replay it from a checkpoint with one
+input changed, diff the two, and hill-climb on cost, latency, and quality. It
+calls structured tools instead of parsing CLI text, so it can read execution
+state, change one variable, and measure the result without a human in the loop.
 The same tools also cover the supporting surface: querying executions,
 publishing and invoking deployments, inspecting artifacts, switching projects,
 and managing stacks and secrets.
@@ -552,3 +556,65 @@ After resolving the wait with `kitaru_executions_input` or
 `pending_wait` is absent but the execution does not continue, call
 `kitaru_executions_resume` (for example, because the original runner exited).
 The input and abort-wait tools do not call resume themselves.
+
+## Author flows with agent skills
+
+The MCP server gives an agent the tools to execute and replay. The
+[`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package
+gives it the judgment to author. The skills are reusable Markdown procedures that
+Claude Code and other skill-aware hosts read so they know the current Kitaru
+patterns: where to put checkpoints, where waits are safe, which adapter boundary
+is honest, and which side effects need extra care. They add no new runtime product
+— they are procedures, not code.
+
+### Skill inventory
+
+Core workflow skills, for learning Kitaru or designing new durable workflows:
+
+| Skill | Claude Code command | Use it for |
+|---|---|---|
+| `kitaru-quickstart` | `/kitaru:kitaru-quickstart` | Interactive onboarding: scaffold a small demo flow, then walk through crash recovery, replay, `wait()`, artifacts, dashboard inspection, and optional MCP setup. |
+| `kitaru-scoping` | `/kitaru:kitaru-scoping` | A structured interview that decides whether durable execution helps your workflow and produces a concrete `flow_architecture.md` plan. |
+| `kitaru-authoring` | `/kitaru:kitaru-authoring` | Implementation help for `@flow`, `@checkpoint`, waits, artifacts, `kitaru.llm()`, `KitaruClient`, CLI/MCP operations, deployments, secrets, and adapter usage. |
+
+Adapter migration skills, for adding Kitaru to existing framework code without
+pretending Kitaru can replay hidden framework internals:
+
+| Skill | Claude Code command | Use it for |
+|---|---|---|
+| `kitaru-pydantic-ai-migration` | `/kitaru:kitaru-pydantic-ai-migration` | Move PydanticAI code to `KitaruAgent`; choose `calls` vs `turn` boundaries and check human-in-the-loop safety. |
+| `kitaru-openai-agents-migration` | `/kitaru:kitaru-openai-agents-migration` | Move OpenAI Agents SDK code to `KitaruRunner`; handle runner-call vs per-call checkpoints, approvals, and context serialization. |
+| `kitaru-langgraph-migration` | `/kitaru:kitaru-langgraph-migration` | Move LangGraph or Deep Agents code to `KitaruGraphRunner`; choose `graph_call` or middleware-backed `calls` boundaries. |
+| `kitaru-claude-agent-sdk-migration` | `/kitaru:kitaru-claude-agent-sdk-migration` | Move Claude Agent SDK code to `KitaruClaudeRunner` with one invocation checkpoint and explicit caveats for Claude-owned tools. |
+| `kitaru-gemini-interactions-migration` | `/kitaru:kitaru-gemini-interactions-migration` | Move Gemini Interactions or Antigravity managed-agent code to `KitaruGeminiInteractionsRunner`; handle polling and `requires_action`. |
+
+### Install the skills
+
+Claude Code users install from the plugin marketplace:
+
+```bash
+/plugin marketplace add zenml-io/kitaru-skills
+/plugin install kitaru@kitaru
+```
+
+Once installed, Claude Code can select the skills from context, or you can invoke
+them explicitly with the plugin-qualified commands (`/kitaru:kitaru-quickstart`,
+`/kitaru:kitaru-authoring`, and so on).
+
+{% hint style="info" %}
+The `/kitaru:...` names are for the marketplace plugin. If you copy the skill
+directories into `.claude/skills` manually, use the unqualified names such as
+`/kitaru-authoring` and `/kitaru-langgraph-migration` instead. These are Markdown
+skill directories, so other agent hosts that support local skill folders can use
+the same source package — copy the relevant directories from `skills/`, including
+their `references/` files.
+{% endhint %}
+
+### A recommended workflow
+
+For new Kitaru work: **quickstart** to see the crash-and-replay story, **scope**
+to turn a workflow idea into checkpoint and wait boundaries, then **author**
+against the scoped plan. For existing framework code, pick the migration skill
+that matches the source framework and let it classify the boundary — the useful
+output is a report of which behavior maps directly to Kitaru, which needs an
+approximate boundary, and which stays owned by the framework.

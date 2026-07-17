@@ -47,7 +47,7 @@ Migrating an existing OpenAI Agents SDK project? The
 [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package
 includes `/kitaru:kitaru-openai-agents-migration` for moving to `KitaruRunner`,
 choosing `calls` vs `runner_call`, and checking approval/resume state. See
-[Agent Skills](../agent-native/claude-code-skill.md).
+[Drive it from your coding agent](../agent-native/mcp-server.md).
 {% endhint %}
 
 ## Minimal flow

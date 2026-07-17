@@ -1,11 +1,16 @@
 ---
-description: Reproduce a real execution from a checkpoint, replay it with flow, checkpoint, and invocation overrides, and diff the two.
+description: Reproduce a recorded execution, fork it with flow, checkpoint, and invocation overrides, and diff the two — to debug a failure or test a change.
 icon: rotate-left
 ---
 
-# Replay and Overrides
+# Debug and test on real runs
 
-Replay re-executes a real, recorded run from a checkpoint to produce a **new execution** — the same run, with the changes you specify. This is what makes Kitaru more than tracing: because every model call and tool call was recorded as a durable checkpoint, you can reproduce a run faithfully, fork it with one input changed, and attribute the difference to your change rather than to replay noise.
+Replay re-executes a real, recorded [execution](../concepts/executions.md) from a checkpoint to produce a **new execution** — the same run, with the changes you specify. That single mechanism covers two jobs:
+
+- **Debug a failing run.** Reproduce the failure from the checkpoint before it, reuse everything that already succeeded, and fork the run to isolate the cause without paying to re-run the whole thing.
+- **Test a change on real runs.** Swap a model, a prompt, or a tool result on a recorded run, and diff the fork against a faithful baseline so the difference is your change, not replay noise.
+
+Both are the same loop; the sections below build it up once. This is what makes Kitaru more than tracing: because every model call and tool call was recorded as a durable checkpoint, you can reproduce a run faithfully, fork it with one input changed, and attribute the difference to your change.
 
 The practical promise is simple: you keep the work that already succeeded, then rerun only the part you want to test or recover. If a flow researched a customer, called three tools, then failed while writing the final answer, replay can reuse the recorded research and tool results instead of paying for them again.
 

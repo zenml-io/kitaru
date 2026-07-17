@@ -41,7 +41,7 @@ Migrating an existing PydanticAI project? The
 [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package
 includes `/kitaru:kitaru-pydantic-ai-migration` for moving to `KitaruAgent` with the
 right checkpoint strategy and human-in-the-loop guardrails. See
-[Agent Skills](../agent-native/claude-code-skill.md).
+[Drive it from your coding agent](../agent-native/mcp-server.md).
 {% endhint %}
 
 ## Usage patterns

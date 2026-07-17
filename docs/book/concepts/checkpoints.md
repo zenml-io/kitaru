@@ -5,20 +5,21 @@ icon: floppy-disk
 
 # Checkpoints
 
-A **checkpoint** is a unit of work inside a flow whose inputs and output are
-recorded durably. Checkpoints are the recorded boundaries that make two things
-possible: **resume** a failed run from where it stopped, and **faithfully replay**
-a real run so you can change one thing and trust the diff. In ZenML terms, a
-checkpoint is like a step; a Kitaru flow is a dynamic pipeline of them.
+A **checkpoint** is a recorded boundary inside a flow — the unit that replay reads
+back. Its inputs and output are stored durably, which makes two things possible:
+**resume** a failed run from where it stopped, and **faithfully replay** a real
+run so you can change one thing and trust the diff. In ZenML terms, a checkpoint
+is like a step; a Kitaru flow is a dynamic pipeline of them, and its checkpoints
+are what an [execution](executions.md) is made of.
 
 A checkpoint is also the **contract between the runner and the
-[execution target](how-it-works.md)**: the runner owns durable control flow
+[execution target](under-the-hood.md)**: the runner owns durable control flow
 (order, retry, replay, resume, wait), the execution target (inline, isolated
 container, sandbox, external tool) does the work, and the checkpoint is the
 recorded boundary they agree on. That is why a checkpoint failure is never just a
 crash — it is persisted context the runner, an agent loop, or a human can retry,
-replay, or feed back into the flow. See [How it works](how-it-works.md) for the
-full model.
+replay, or feed back into the flow. See [Under the Hood](under-the-hood.md) for
+the full model.
 
 ## Checkpoints are replay boundaries
 

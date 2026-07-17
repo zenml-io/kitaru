@@ -1,9 +1,9 @@
 ---
-description: Create, inspect, list, and delete centralized secrets from the Kitaru CLI and Python SDK
+description: Store provider credentials as secrets, register a model alias, and use them from kitaru.llm() and your tools.
 icon: lock
 ---
 
-# Manage Secrets
+# Secrets
 
 Secrets are the credentials your flows need at runtime — provider API keys for
 `kitaru.llm()`, tokens for the external services your tools call. Storing them
@@ -11,11 +11,12 @@ centrally keeps keys out of code and lets a run reproduce later from the same
 checkpoint without you re-supplying them. Manage them with `kitaru secrets ...`
 or the Python SDK helpers.
 
-{% hint style="info" %}
-If you want the full LLM setup story — secret, model alias, and
-`kitaru.llm()` inside a flow — start with
-[Secrets + Model Registration](secrets-and-model-registration.md).
-{% endhint %}
+This page covers both secret management and the model-alias workflow that pairs
+with it: a model alias decouples your flow code from a specific provider/model
+and its credentials, so you can rotate a key or swap a model — including on
+replay — without touching code. Jump to
+[Register a model alias](#store-credentials-and-register-a-model-alias) for that
+walkthrough.
 
 ## Create or update a secret
 
@@ -163,11 +164,96 @@ results follow the same `keys_known=False` contract described above. The server
 intentionally does not expose secret deletion; use the CLI or Python SDK when
 you need to delete a secret.
 
+## Store credentials and register a model alias
+
+A model alias points a stable name (`fast`) at a real provider/model string
+(`openai/gpt-5-nano`) and, optionally, at a secret that holds its credentials.
+Your flow code uses the alias, so you can rotate the key or swap the model — even
+on a [replay](replay-and-overrides.md) — without editing code.
+
+The full path is three steps: store credentials in a secret, register an alias
+that references it, then call `kitaru.llm()` with the alias.
+
+### 1. Store provider credentials in a secret
+
+```bash
+kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
+```
+
+Use the exact key names your provider expects (`OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`). Pass `--private` if the credentials
+should not be visible to other users of the secret store.
+
+### 2. Register a model alias
+
+```bash
+kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
+kitaru model list
+```
+
+Kitaru stores the alias name, the real model string, and a *reference* to the
+secret — never the secret's raw values.
+
+{% hint style="info" %}
+The first alias you register also becomes your default alias. Submitted and
+replayed runs automatically receive the current registry snapshot through
+`KITARU_MODEL_REGISTRY`, so remote executions can still resolve the alias.
+{% endhint %}
+
+### 3. Use the alias inside a flow
+
+```python
+import kitaru
+from kitaru import checkpoint, flow
+
+
+@checkpoint
+def write_draft(topic: str, outline: str) -> str:
+    return kitaru.llm(
+        f"Write a short paragraph about {topic} using this outline:\n{outline}",
+        model="fast",
+        name="draft_call",
+    )
+
+
+@flow
+def llm_writer(topic: str) -> str:
+    outline = kitaru.llm(
+        f"Create a 3-bullet outline about {topic}.",
+        model="fast",
+        name="outline_call",
+    )
+    return write_draft(topic, outline)
+```
+
+### What happens at runtime
+
+When `kitaru.llm()` runs, Kitaru resolves the model, checks whether it is an alias
+in the effective registry, and — for built-in providers that need credentials
+(OpenAI, Anthropic, OpenRouter) — resolves credentials **environment first**:
+
+1. if the provider's env var is already set, Kitaru uses the environment;
+2. otherwise, if the alias has a linked secret, Kitaru loads that secret;
+3. if neither is available, the call fails with setup guidance.
+
+So environment variables win over a linked secret for known providers. Model
+selection precedence is the explicit `model=` argument, then
+`KITARU_DEFAULT_MODEL`, then the effective default alias.
+
+### Environment-only shortcut
+
+Skip the linked secret and keep credentials in the environment when developing
+locally:
+
+```bash
+kitaru model register fast --model openai/gpt-5-nano
+export OPENAI_API_KEY=sk-...
+```
+
 ## Related reference pages
 
-- [Secrets + Model Registration](secrets-and-model-registration.md)
+- [Track cost and model usage](llm-calls.md)
 - [CLI secrets commands](https://sdkdocs.kitaru.ai)
 - [Python secrets reference](https://sdkdocs.kitaru.ai)
 - [MCP Server](../agent-native/mcp-server.md)
-- [Tracked LLM calls](llm-calls.md)
 - [Configuration guide](configuration.md)

@@ -245,7 +245,7 @@ The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
 package includes `/kitaru:kitaru-gemini-interactions-migration` for wrapping stable
 interaction responses and checking polling, `requires_action`, function-result,
 and Google-owned-internals boundaries. See
-[Agent Skills](../agent-native/claude-code-skill.md).
+[Drive it from your coding agent](../agent-native/mcp-server.md).
 {% endhint %}
 
 ## Minimal flow
