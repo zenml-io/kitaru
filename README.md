@@ -146,9 +146,12 @@ invoke by name, and `@checkpoint(runtime="isolated")` runs heavy steps in
 their own pod on Kubernetes, AWS, GCP, or Azure. This is how a faithful
 recording gets minted — not the reason you reach for Kitaru.
 
-### Works with your agent SDK
+### Works with your existing stack
 
-Adapters for six agent frameworks — wrap your existing agent, no rewrite:
+Two ways in, no rewrite either way.
+
+**Your agent framework.** Adapters wrap the agent you already have and
+record every run natively:
 
 | Framework | Adapter |
 |---|---|
@@ -160,8 +163,12 @@ Adapters for six agent frameworks — wrap your existing agent, no rewrite:
 | Google ADK | `kitaru.adapters.google_adk.KitaruADKRunner` |
 
 For raw-Python agents, `@flow` and `@checkpoint` around your calls give you
-the same recording without an adapter. Your model, your tools, your
-framework — Kitaru wraps them, not the other way around.
+the same recording without an adapter.
+
+**Your observability stack.** Runs recorded elsewhere import as executions —
+a Langfuse trace or OTel-shaped JSONL lands the same way and becomes
+something you can replay. Your model, your tools, your framework, your
+telemetry — Kitaru wraps them, not the other way around.
 
 ### Drive it from your coding agent
 
