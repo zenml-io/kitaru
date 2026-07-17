@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">Production is the eval. Capture every trace, then replay it.</h3>
+<h3 align="center">Traces you can run, not just read.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") captures a full trace of every agent run — every model call, tool call, and decision — and replays it against your real code. Reproduce the trace exactly. Fork it with one thing changed. Trust the diff. It works underneath whatever framework you already use, self-hosted on your own infrastructure, and it can deploy and run your agents too.
+  Kitaru (来る, "to arrive") records every agent run as a full trace — every model call, tool call, and decision — and replays it against your real code. Reproduce the trace exactly. Fork it with one thing changed. Trust the diff. It works underneath whatever framework you already use, self-hosted on your own infrastructure, and it can deploy and run your agents too.
 </p>
 
 <p align="center">
@@ -50,7 +50,7 @@ held?" is an experiment over real traces instead of a guess.
   from any checkpoint with one thing changed and trust that the diff is your
   change, not replay noise.
 - **Decide with evidence.** Every trace includes the model traffic — prompt,
-  response, tokens, latency, estimated cost — captured automatically by the
+  response, tokens, latency, estimated cost — recorded automatically by the
   framework adapters, or by `kitaru.llm()` in raw Python.
 
 <a id="quick-start"></a>
