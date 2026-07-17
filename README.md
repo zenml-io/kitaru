@@ -39,7 +39,8 @@ original run saw. Kitaru is a debugger with a memory, sitting beside your
 observability stack — it tells you what happened; Kitaru re-runs it. That
 turns production traffic into the eval suite you never had to write: every
 incident is a reproducible test case, and "would the cheaper model have
-held?" is an experiment over real traces instead of a guess.
+held?" is an experiment over real traces instead of a guess. What arrives
+as a complaint leaves as a regression test.
 
 - **Every trace is a recording.** Each checkpoint output — model call, tool
   call, decision — is written to your object store as a typed, versioned
