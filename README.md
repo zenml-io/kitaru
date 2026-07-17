@@ -130,7 +130,7 @@ client.executions.replay(
 
 Overrides can also swap the model on an LLM call, edit tool arguments, or
 swap a checkpoint's code — see
-[Replay and overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides).
+[Debug and test on real runs](https://docs.zenml.io/kitaru/guides/replay-and-overrides).
 Explicit `@flow`/`@checkpoint` decorators are there when you want named
 replay boundaries or multi-turn workflows, and `flow.deploy()` ships a winner
 as a versioned deployment invoked by name — optional; stopping at the
@@ -201,7 +201,7 @@ plane.
 | [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
-| [MCP server](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Query, replay, and manage executions from any MCP-capable agent |
+| [Drive it from your coding agent](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Query, replay, and diff executions from Claude Code, Codex, or Cursor via MCP |
 
 ## 🌱 Origins
 
