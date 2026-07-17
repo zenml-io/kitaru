@@ -1,6 +1,5 @@
 """Configuration and typed models for the reference-agent example."""
 
-import os
 from pathlib import Path
 from typing import Any, Literal
 
@@ -10,14 +9,7 @@ from pydantic import BaseModel, Field
 EXAMPLE_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EXAMPLE_DIR / "fixtures"
 VARIANTS_DIR = EXAMPLE_DIR / "variants"
-SCENARIOS_PATH = EXAMPLE_DIR / "scenarios.yaml"
-DEFAULT_AGENT_VERSION = "replay-verify-reference-agent-stage-1"
-REQUIRED_TRACE_ENV_VARS = (
-    "LANGFUSE_PUBLIC_KEY",
-    "LANGFUSE_SECRET_KEY",
-    "LANGFUSE_BASE_URL",
-    "OPENAI_API_KEY",
-)
+SCENARIOS_PATH = EXAMPLE_DIR.parent / "trace_fixtures" / "scenarios.yaml"
 
 
 class Scenario(BaseModel):
@@ -112,8 +104,3 @@ def load_variant(name: str, variants_dir: Path = VARIANTS_DIR) -> AgentVariant:
 def load_variants(names: list[str]) -> list[AgentVariant]:
     """Load variants in the caller's requested order."""
     return [load_variant(name) for name in names]
-
-
-def missing_trace_environment() -> list[str]:
-    """Return trace-generation environment variables that are not set."""
-    return [name for name in REQUIRED_TRACE_ENV_VARS if not os.getenv(name)]
