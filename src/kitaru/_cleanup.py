@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from kitaru._env import KITARU_REPOSITORY_DIRECTORY_NAME
+from kitaru._repository import find_repository_root
 from kitaru.config import ActiveEnvironmentVariable
 from kitaru.errors import KitaruUsageError
 
@@ -325,29 +326,8 @@ def _build_global_preview(
 
 
 def _resolve_repo_root() -> Path | None:
-    """Resolve the Kitaru project root by walking up the directory tree.
-
-    Falls back to a manual directory search if the Client cannot read
-    the repository — the cleanup tool must work on broken projects.
-    """
-    from zenml.client import Client
-
-    try:
-        root = Client.find_repository()
-        if isinstance(root, Path):
-            return root
-    except Exception:
-        logger.debug(
-            "Client.find_repository() failed; trying manual search", exc_info=True
-        )
-
-    # Manual fallback: walk up from cwd looking for the .kitaru/ marker.
-    cwd = Path.cwd()
-    for parent in (cwd, *cwd.parents):
-        marker = parent / KITARU_REPOSITORY_DIRECTORY_NAME
-        if marker.is_dir():
-            return parent
-    return None
+    """Resolve the Kitaru project root without requiring a healthy store."""
+    return find_repository_root()
 
 
 def _resolve_config_root() -> Path:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from kitaru import analytics
 from kitaru.analytics import AnalyticsEvent, set_source, track
 
@@ -234,6 +236,28 @@ def test_cli_entrypoint_tracks_two_token_command_granularity() -> None:
     track_mock.assert_called_once_with(
         AnalyticsEvent.CLI_INVOKED,
         {"command": "executions logs"},
+    )
+
+
+@pytest.mark.parametrize("group", ["agents", "project"])
+def test_cli_entrypoint_tracks_agent_and_legacy_project_subcommands(group: str) -> None:
+    """Canonical and compatibility lifecycle groups should retain two-token parsing."""
+    with (
+        patch("kitaru.analytics.set_source"),
+        patch("kitaru.analytics.track", return_value=True) as track_mock,
+        patch("kitaru.cli.GlobalConfiguration") as gc_mock,
+        patch("kitaru.cli._apply_runtime_version"),
+        patch("kitaru.cli.app"),
+        patch("sys.argv", ["kitaru", group, "list"]),
+    ):
+        gc_mock.return_value = MagicMock()
+        from kitaru.cli import cli
+
+        cli()
+
+    track_mock.assert_called_once_with(
+        AnalyticsEvent.CLI_INVOKED,
+        {"command": f"{group} list"},
     )
 
 

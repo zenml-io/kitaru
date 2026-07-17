@@ -24,7 +24,9 @@ from zenml.execution.pipeline.dynamic.outputs import OutputArtifact
 from zenml.models import PipelineRunResponse
 
 import kitaru
+from kitaru._agent_registration import RegisteredAgentVersionBinding
 from kitaru._client._models import ExecutionStatus as KitaruExecutionStatus
+from kitaru._config._agents import _AgentVersionManifest
 from kitaru._config._core import ExecutionStackSource
 from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV
 from kitaru._run_identity import extract_run_project_identity
@@ -109,6 +111,32 @@ def _resolved_execution(
         image=image,
         cache=cache,
         retries=retries,
+    )
+
+
+def _registered_binding(
+    pipeline_name: str,
+    *,
+    project_id: str = "agent-project-id",
+) -> RegisteredAgentVersionBinding:
+    manifest = _AgentVersionManifest(
+        schema_version=1,
+        agent_version_id="pipeline-id",
+        pipeline_id="pipeline-id",
+        pipeline_name=pipeline_name,
+        fingerprint="sha256:fingerprint",
+        git_sha="1234567890abcdef",
+        git_dirty=False,
+        working_tree_hash=None,
+        configuration_hash="sha256:configuration",
+        worldview_hash="sha256:worldview",
+        entrypoint="tests.test_flow:registered_agent",
+        registered_at="2026-07-17T10:00:00Z",
+        source="registration",
+    )
+    return RegisteredAgentVersionBinding(
+        project_id=project_id,
+        manifest=manifest,
     )
 
 
@@ -752,6 +780,53 @@ def test_flow_run_activates_resolved_project_for_submission() -> None:
 
     assert handle._project == "production"
     assert project_events == [("enter", "production"), ("exit", "production")]
+
+
+def test_registered_flow_run_uses_binding_project_instead_of_active_project() -> None:
+    run = _DummyRun(status=ExecutionStatus.RUNNING)
+    project_events: list[tuple[str, str | None]] = []
+
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        project_events.append(("enter", project))
+        try:
+            yield
+        finally:
+            project_events.append(("exit", project))
+
+    configured_pipeline = MagicMock(return_value=run)
+    base_pipeline = MagicMock()
+    base_pipeline.name = "registered-pipeline"
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch(
+            "kitaru.flow.resolve_execution_config", return_value=_resolved_execution()
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="globally-active-project"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow._preflight_active_stack_implementation_hydration"),
+        patch("kitaru.flow.verify_submitted_run_binding"),
+    ):
+        wrapped = flow(lambda: None)
+        wrapped._bind_registered_version(_registered_binding("registered-pipeline"))
+        with patch.object(wrapped, "_preflight_registered_submission") as preflight:
+            handle = wrapped.run()
+
+    preflight.assert_called_once_with()
+    assert handle._project == "agent-project-id"
+    assert project_events == [
+        ("enter", "agent-project-id"),
+        ("exit", "agent-project-id"),
+    ]
 
 
 def test_implicit_default_stack_fallback_guard_fails_closed() -> None:
@@ -4549,6 +4624,105 @@ def test_replay_uses_resolved_project_for_source_lookup_and_replay_write() -> No
     assert project_events == [
         ("enter", "production"),
         ("exit", "production"),
+    ]
+
+
+def test_registered_batch_replay_rechecks_identity_before_each_bound_write() -> None:
+    source_runs = [
+        _DummyRun(status=ExecutionStatus.COMPLETED),
+        _DummyRun(status=ExecutionStatus.COMPLETED),
+    ]
+    replayed_runs = [
+        _DummyRun(status=ExecutionStatus.RUNNING),
+        _DummyRun(status=ExecutionStatus.RUNNING),
+    ]
+    events: list[str] = []
+
+    @contextmanager
+    def _project_context(project: str | None) -> Iterator[None]:
+        events.append(f"enter:{project}")
+        try:
+            yield
+        finally:
+            events.append(f"exit:{project}")
+
+    def replay_side_effect(**_kwargs: Any) -> _DummyRun:
+        events.append("write")
+        return replayed_runs.pop(0)
+
+    configured_pipeline = MagicMock()
+    configured_pipeline.replay.side_effect = replay_side_effect
+    base_pipeline = MagicMock()
+    base_pipeline.name = "registered-pipeline"
+    base_pipeline.with_options.return_value = configured_pipeline
+    zenml_decorator = MagicMock(return_value=base_pipeline)
+    replay_plan = ReplayPlan(
+        original_run_id=str(source_runs[0].id),
+        steps_to_skip=set(),
+        input_overrides={},
+        step_input_overrides={},
+        runtime_context=ReplayRuntimeContext(at="write"),
+    )
+
+    with (
+        patch("kitaru.flow.pipeline", return_value=zenml_decorator),
+        patch("kitaru.flow.Client") as client_cls,
+        patch(
+            "kitaru.flow.resolve_execution_config", return_value=_resolved_execution()
+        ),
+        patch(
+            "kitaru.flow.resolve_connection_config",
+            return_value=SimpleNamespace(project="globally-active-project"),
+        ),
+        patch("kitaru.flow.build_frozen_execution_spec", return_value=object()),
+        patch("kitaru.flow.persist_frozen_execution_spec"),
+        patch("kitaru.flow.build_replay_plan", return_value=replay_plan),
+        patch("kitaru.flow.safe_persist_replay_submission_metadata"),
+        patch("kitaru.flow._temporary_active_project", side_effect=_project_context),
+        patch("kitaru.flow._temporary_active_stack", return_value=nullcontext()),
+        patch("kitaru.flow._preflight_active_stack_implementation_hydration"),
+        patch("kitaru.flow.verify_submitted_run_binding"),
+    ):
+        client_instance = client_cls.return_value
+        client_instance.get_pipeline_run.side_effect = source_runs
+        wrapped = flow(lambda topic: topic)
+        wrapped._bind_registered_version(_registered_binding("registered-pipeline"))
+
+        def preflight(*, verify_pipeline: bool = True) -> None:
+            events.append(f"preflight:{verify_pipeline}")
+
+        with patch.object(
+            wrapped,
+            "_preflight_registered_submission",
+            side_effect=preflight,
+        ):
+            submission = wrapped.replay(
+                ["source-one", "source-two"],
+                at="write",
+                wait=False,
+                on_error="fail",
+            )
+
+    assert len(submission.results) == 2
+    assert events == [
+        "enter:agent-project-id",
+        "preflight:False",
+        "exit:agent-project-id",
+        "enter:agent-project-id",
+        "preflight:True",
+        "write",
+        "exit:agent-project-id",
+        "enter:agent-project-id",
+        "preflight:True",
+        "write",
+        "exit:agent-project-id",
+    ]
+    assert [
+        call_.kwargs["project"]
+        for call_ in client_instance.get_pipeline_run.call_args_list
+    ] == [
+        "agent-project-id",
+        "agent-project-id",
     ]
 
 

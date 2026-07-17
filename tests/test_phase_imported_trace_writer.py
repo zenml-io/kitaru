@@ -2,6 +2,7 @@
 
 from datetime import UTC
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from zenml.client import Client
@@ -142,7 +143,9 @@ def test_child_first_source_order_renders_without_a_dag_error(
 
     result = persist_imported_trace(trace, agent_name="support-agent")
     client = Client()
-    dag = client.zen_store.get_pipeline_run_dag(result.execution_id)  # type: ignore[attr-defined]
+    dag = client.zen_store.get_pipeline_run_dag(  # type: ignore[attr-defined]
+        UUID(result.execution_id)
+    )
     step_nodes = [node for node in dag.nodes if node.type == "step"]
     execution = KitaruClient().executions.get(result.execution_id)
     checkpoints = {

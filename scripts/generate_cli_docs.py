@@ -322,12 +322,18 @@ def build_command_tree(
 
     params = _extract_parameters(app)
     registered = getattr(app, "_registered_commands", {})
-    has_subcommands = bool(registered)
+    visible_registered = {
+        command_name: command_app
+        for command_name, command_app in registered.items()
+        if getattr(command_app, "show", True)
+    }
+    has_subcommands = bool(visible_registered)
     usage = _build_usage(invocation, params, has_subcommands=has_subcommands)
 
-    # Recurse into subcommands
+    # Recurse into visible subcommands. Hidden compatibility commands remain
+    # dispatchable in Cyclopts but are not part of the canonical reference.
     subcommands: list[CommandDoc] = []
-    for cmd_name, sub_app in sorted(registered.items()):
+    for cmd_name, sub_app in sorted(visible_registered.items()):
         subcommands.append(
             build_command_tree(
                 sub_app,

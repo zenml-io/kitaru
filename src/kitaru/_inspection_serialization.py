@@ -25,6 +25,8 @@ from kitaru._client._models import (
 from kitaru._inspection_runtime import RuntimeSnapshot
 from kitaru.config import (
     ActiveStackLogStore,
+    AgentInfo,
+    AgentVersionInfo,
     ModelAliasEntry,
     ProjectInfo,
     ResolvedLogStore,
@@ -309,6 +311,53 @@ def serialize_flow_deployment_summary(
         "default_version": default_version,
         "tags": public_tags,
         "deployments": [serialize_deployment(deployment) for deployment in ordered],
+    }
+
+
+def serialize_agent_version(version: AgentVersionInfo) -> dict[str, Any]:
+    """Serialize an immutable AgentVersion projection."""
+    return {
+        "schema_version": version.schema_version,
+        "agent_version_id": version.agent_version_id,
+        "pipeline_id": version.pipeline_id,
+        "pipeline_name": version.pipeline_name,
+        "fingerprint": version.fingerprint,
+        "git_sha": version.git_sha,
+        "git_dirty": version.git_dirty,
+        "working_tree_hash": version.working_tree_hash,
+        "configuration_hash": version.configuration_hash,
+        "worldview_hash": version.worldview_hash,
+        "entrypoint": version.entrypoint,
+        "registered_at": version.registered_at,
+        "source": version.source,
+        "aliases": list(version.aliases),
+    }
+
+
+def serialize_agent(agent: AgentInfo) -> dict[str, Any]:
+    """Serialize a Project-backed Agent projection."""
+    executable = agent.default_executable
+    return {
+        "agent_id": agent.agent_id,
+        "name": agent.name,
+        "display_name": agent.display_name,
+        "description": agent.description,
+        "is_active": agent.is_active,
+        "default_agent_version_id": agent.default_agent_version_id,
+        "default_executable": (
+            {
+                "kind": executable.kind,
+                "entrypoint": executable.entrypoint,
+                "repo_root_marker": executable.repo_root_marker,
+            }
+            if executable is not None
+            else None
+        ),
+        "agent_version_aliases": dict(agent.agent_version_aliases),
+        "agent_versions": [
+            serialize_agent_version(version) for version in agent.agent_versions
+        ],
+        "version_count": agent.version_count,
     }
 
 

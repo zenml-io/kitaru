@@ -23,12 +23,23 @@ from ._helpers import (
     _emit_json_items,
     _emit_pagination_note,
     _emit_snapshot,
+    _emit_warning,
     _exit_with_error,
     _print_success,
     _print_warning,
     _resolve_output_format,
     _validate_pagination,
 )
+
+
+def _warn_project_deprecated(output: CLIOutputFormat) -> None:
+    """Warn text users while keeping legacy JSON streams parseable."""
+    if output == CLIOutputFormat.JSON:
+        return
+    _emit_warning(
+        "`kitaru project` is deprecated; use `kitaru agents` instead.",
+        output=output,
+    )
 
 
 def _project_list_rows(projects: list[ProjectInfo]) -> list[tuple[str, str]]:
@@ -74,6 +85,7 @@ def list_(
     """List Kitaru projects visible to the current user."""
     command = "project.list"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     page, size = _validate_pagination(
         page=page,
         size=size,
@@ -113,6 +125,7 @@ def current(output: OutputFormatOption = "text") -> None:
     """Show the active Kitaru project."""
     command = "project.current"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     project = run_with_cli_error_boundary(
         cli_dependencies().current_project,
         command=command,
@@ -138,6 +151,7 @@ def show(
     """Show a Kitaru project by name or ID."""
     command = "project.show"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     project = run_with_cli_error_boundary(
         lambda: cli_dependencies().get_project(name_or_id),
         command=command,
@@ -168,6 +182,7 @@ def create(
     """Create a Kitaru project on ZenML Pro/Cloud, activating it by default."""
     command = "project.create"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     result = run_with_cli_error_boundary(
         lambda: cli_dependencies().create_project(
             name,
@@ -212,6 +227,7 @@ def use(
     """Use a Kitaru project on ZenML Pro/Cloud as the active default."""
     command = "project.use"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     project = run_with_cli_error_boundary(
         lambda: cli_dependencies().use_project(name_or_id),
         command=command,
@@ -245,6 +261,7 @@ def delete(
     """Delete a Kitaru project on ZenML Pro/Cloud by name or ID."""
     command = "project.delete"
     output_format = _resolve_output_format(output)
+    _warn_project_deprecated(output_format)
     if not yes:
         _exit_with_error(
             command,

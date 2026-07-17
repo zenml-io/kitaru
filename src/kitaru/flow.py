@@ -37,6 +37,11 @@ from zenml.models.v2.core.artifact_version import ArtifactVersionResponse
 from zenml.pipelines.pipeline_decorator import pipeline
 from zenml.pipelines.pipeline_definition import Pipeline
 
+from kitaru._agent_registration import (
+    RegisteredAgentVersionBinding,
+    verify_registered_pipeline,
+    verify_submitted_run_binding,
+)
 from kitaru._client._deployments import (
     DEFAULT_DEPLOYMENT_TAG,
     parse_deployment_snapshot_name,
@@ -49,6 +54,7 @@ from kitaru._config._active_context import (
     stringify_config_id,
     with_resolved_selection,
 )
+from kitaru._config._projects import _active_project_id
 from kitaru._config._stacks import MODAL_ORCHESTRATOR_FLAVOR
 from kitaru._env import ZENML_ACTIVE_PROJECT_ID_ENV, _temporary_env
 from kitaru._import_contract import raise_if_imported_execution
@@ -131,6 +137,9 @@ from kitaru.runtime import _flow_scope, _get_current_execution_id
 ImageSetting = ImageInput
 _ACTIVE_ZENML_STATE_LOCK = threading.RLock()
 _REPLAY_RUNTIME_CONTEXT_LOCK = threading.RLock()
+_REGISTERED_AGENT_PREFLIGHT: ContextVar[Callable[[], None] | None] = ContextVar(
+    "kitaru_registered_agent_preflight", default=None
+)
 logger = logging.getLogger(__name__)
 
 
@@ -1869,6 +1878,7 @@ class _FlowDefinition:
             retries: Default retry count.
         """
         self._func = func
+        self._registered_binding: RegisteredAgentVersionBinding | None = None
         self._decorator_config = _build_execution_overrides(
             stack=stack,
             image=image,
@@ -1895,6 +1905,78 @@ class _FlowDefinition:
             pipeline_obj=self._pipeline,
         )
         update_wrapper(self, func)
+
+    def _bind_registered_version(
+        self,
+        binding: RegisteredAgentVersionBinding,
+    ) -> None:
+        """Attach one immutable AgentVersion binding to this generated flow."""
+        if self._registered_binding is None:
+            self._registered_binding = binding
+            return
+        if self._registered_binding != binding:
+            raise KitaruStateError(
+                "A generated Agent flow cannot be rebound to another AgentVersion."
+            )
+
+    @contextmanager
+    def _registered_preflight_scope(
+        self,
+        preflight: Callable[[], None],
+    ) -> Iterator[None]:
+        """Provide the wrapper-specific identity check for one submission."""
+        if self._registered_binding is None:
+            raise KitaruStateError(
+                "This Agent flow is not bound to a registered AgentVersion."
+            )
+        token = _REGISTERED_AGENT_PREFLIGHT.set(preflight)
+        try:
+            yield
+        finally:
+            _REGISTERED_AGENT_PREFLIGHT.reset(token)
+
+    def _preflight_registered_submission(
+        self, *, verify_pipeline: bool = True
+    ) -> Any | None:
+        """Verify identity, active Project, exact name, and manifest UUID."""
+        binding = self._registered_binding
+        if binding is None:
+            return None
+        preflight = _REGISTERED_AGENT_PREFLIGHT.get()
+        if preflight is None:
+            raise KitaruStateError(
+                "Registered Agent execution requires its originating wrapper."
+            )
+        preflight()
+        client = Client()
+        active_project_id = _active_project_id(client)
+        if active_project_id != binding.project_id:
+            raise KitaruStateError(
+                "The active Project does not match the registered Agent."
+            )
+        if verify_pipeline:
+            verify_registered_pipeline(client, binding)
+        return client
+
+    def _submission_project(self, resolved_connection: Any) -> str | None:
+        """Return the exact Project that should receive this flow's writes."""
+        if self._registered_binding is not None:
+            return self._registered_binding.project_id
+        return _connection_project(resolved_connection)
+
+    def _registered_pipeline_options(
+        self,
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Require the generated Pipeline to retain the manifest name."""
+        binding = self._registered_binding
+        if binding is None:
+            return options
+        if str(getattr(self._pipeline, "name", "")).strip() != binding.pipeline_name:
+            raise KitaruStateError(
+                "The generated Agent flow no longer uses the manifest Pipeline name."
+            )
+        return options
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Raise a friendly error — direct flow calls are not supported."""
@@ -2115,7 +2197,7 @@ class _FlowDefinition:
                     name_id_or_prefix=execution,
                     allow_name_prefix_match=False,
                     hydrate=True,
-                    project=_connection_project(resolved_connection),
+                    project=self._submission_project(resolved_connection),
                 )
             except Exception as exc:
                 raise KitaruBackendError(
@@ -2152,7 +2234,7 @@ class _FlowDefinition:
             transport_image,
             replay_context_json=replay_plan.runtime_context.to_json(),
         )
-        resolved_project = _connection_project(resolved_connection)
+        resolved_project = self._submission_project(resolved_connection)
 
         with (
             _temporary_active_project(resolved_project),
@@ -2170,9 +2252,11 @@ class _FlowDefinition:
                 model_registry=effective_model_registry,
             )
             configured_pipeline = self._pipeline.with_options(
-                **_build_pipeline_options(
-                    resolved_execution=resolved_execution,
-                    transport_image=transport_image,
+                **self._registered_pipeline_options(
+                    _build_pipeline_options(
+                        resolved_execution=resolved_execution,
+                        transport_image=transport_image,
+                    )
                 )
             )
             deployment_metadata = _deployment_metadata_for_stack(
@@ -2190,6 +2274,7 @@ class _FlowDefinition:
                 with _scoped_replay_runtime_context(
                     replay_plan.runtime_context.to_json()
                 ):
+                    self._preflight_registered_submission()
                     replayed_run = configured_pipeline.replay(
                         pipeline_run=original_run.id,
                         skip=replay_plan.steps_to_skip,
@@ -2221,6 +2306,11 @@ class _FlowDefinition:
                 raise KitaruBackendError(
                     f"Failed to replay execution '{execution}': {exc}"
                 ) from exc
+
+            if replayed_run is not None and self._registered_binding is not None:
+                verify_submitted_run_binding(
+                    Client(), run=replayed_run, binding=self._registered_binding
+                )
 
             if replayed_run is None:
                 track(
@@ -2290,6 +2380,10 @@ class _FlowDefinition:
         if resolved_on_error not in {"collect", "fail"}:
             raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
         validated_connection = resolve_connection_config(validate_for_use=True)
+        if self._registered_binding is not None:
+            resolved_project = self._submission_project(validated_connection)
+            with _temporary_active_project(resolved_project):
+                self._preflight_registered_submission(verify_pipeline=False)
 
         submission_id = new_replay_submission_id()
         request_document = build_replay_request_document(
@@ -2312,7 +2406,7 @@ class _FlowDefinition:
                     name_id_or_prefix=exec_ref,
                     allow_name_prefix_match=False,
                     hydrate=True,
-                    project=_connection_project(validated_connection),
+                    project=self._submission_project(validated_connection),
                 )
                 raise_if_imported_execution(original_run, "replayed")
                 original_id = str(original_run.id)
@@ -2434,7 +2528,7 @@ class _FlowDefinition:
                 raw_active_stack_provenance=raw_active_stack_provenance,
             )
             resolved_connection = resolve_connection_config(validate_for_use=True)
-            resolved_project = _connection_project(resolved_connection)
+            resolved_project = self._submission_project(resolved_connection)
             transport_image, effective_model_registry = (
                 _prepare_model_registry_transport(resolved_execution.image)
             )
@@ -2455,10 +2549,13 @@ class _FlowDefinition:
                         connection=resolved_connection,
                         model_registry=effective_model_registry,
                     )
+                    self._preflight_registered_submission()
                     configured_pipeline = self._pipeline.with_options(
-                        **_build_pipeline_options(
-                            resolved_execution=resolved_execution,
-                            transport_image=transport_image,
+                        **self._registered_pipeline_options(
+                            _build_pipeline_options(
+                                resolved_execution=resolved_execution,
+                                transport_image=transport_image,
+                            )
                         )
                     )
                     deployment_metadata = _deployment_metadata_for_stack(
@@ -2474,6 +2571,11 @@ class _FlowDefinition:
                     )
 
                 submitted = True
+                if self._registered_binding is not None:
+                    verify_submitted_run_binding(
+                        Client(), run=run, binding=self._registered_binding
+                    )
+
                 _emit_kitaru_execution_url(run)
                 track(AnalyticsEvent.FLOW_SUBMITTED, deployment_metadata)
                 persist_frozen_execution_spec(

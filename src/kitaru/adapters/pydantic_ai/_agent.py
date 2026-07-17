@@ -7,7 +7,10 @@ import threading
 import time
 import uuid
 import warnings
+import weakref
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -23,12 +26,53 @@ from contextlib import (
 )
 from contextvars import ContextVar
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import kitaru
+from zenml.client import Client
+
+from kitaru._agent_registration import (
+    RegistrationIdentity,
+    RegisteredAgentVersionBinding,
+    build_agent_version_pipeline_name,
+    canonicalize_registration_value,
+    find_exact_project_pipeline,
+    hash_registration_value,
+    identity_drift_categories,
+    qualified_declared_path,
+    qualified_import_path,
+    resolve_agent_entrypoint,
+    resolve_registration_identity,
+    type_import_path,
+)
+from kitaru._config._agents import (
+    AgentRegistrationResult,
+    _AgentVersionManifest,
+    _agent_info_from_project_model,
+    _complete_project_metadata,
+    _manifest_for_fingerprint,
+    _parse_agent_metadata,
+    _reconcile_agent_version_registration,
+)
+from kitaru._config._projects import (
+    _active_project_id,
+    _active_project_model,
+    _connected_store_url_is_known_pro_cloud,
+    _get_project_by_exact_selector,
+)
+from kitaru._repository import find_repository_root
 from kitaru._source_aliases import build_pipeline_registration_name
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruRuntimeError, KitaruUsageError
-from kitaru.flow import _is_multiple_terminal_steps_output_error
+from kitaru.errors import (
+    KitaruMetadataConflictError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
+from kitaru.flow import (
+    _is_multiple_terminal_steps_output_error,
+    _temporary_active_project,
+)
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -39,11 +83,14 @@ from pydantic_ai.agent.abstract import (
     EventStreamHandler,
 )
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import CombinedCapability
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT, OutputSpec
 from pydantic_ai.tools import AgentDepsT, AgentNativeTool, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.mcp import MCPServer, MCPToolset
+from pydantic_ai.toolsets import FunctionToolset
 
 from ._constants import (
     ADAPTER_CHECKPOINT_KIND_TURN,
@@ -60,7 +107,7 @@ from ._streaming import (
     current_stream_surface,
     stream_surface,
 )
-from ._toolset import kitaruify_toolset
+from ._toolset import KitaruToolset, kitaruify_toolset
 from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_execution
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
@@ -108,14 +155,599 @@ class _TurnCheckpointCallConfig:
     mark_streaming_fallback_checkpoint: bool
 
 
+@dataclass(frozen=True)
+class _RegisteredAgentState:
+    repo_root: Path
+    identity: RegistrationIdentity
+    binding: RegisteredAgentVersionBinding
+
+
+_SENSITIVE_FIELD_NAMES = frozenset(
+    {
+        "access_key",
+        "access_key_id",
+        "access_token",
+        "api_key",
+        "apikey",
+        "api_token",
+        "auth_token",
+        "authorization",
+        "bearer_token",
+        "certificate",
+        "cert",
+        "client_secret",
+        "credential",
+        "credentials",
+        "oauth_client_secret",
+        "password",
+        "private_key",
+        "proxy_authorization",
+        "secret",
+        "secret_access_key",
+        "token",
+        "x_api_key",
+    }
+)
+_SENSITIVE_HEADER_NAMES = _SENSITIVE_FIELD_NAMES | {
+    "cookie",
+    "proxy_authenticate",
+    "set_cookie",
+}
+_SENSITIVE_QUERY_PARAMETER_NAMES = _SENSITIVE_FIELD_NAMES | {
+    "auth",
+    "key",
+    "sig",
+    "signature",
+    "x_amz_credential",
+    "x_amz_security_token",
+    "x_amz_signature",
+}
+_HEADER_FLAGS = frozenset({"--header", "-H"})
+_HEADER_MAPPING_NAMES = frozenset({"headers", "http_headers"})
+_PROVIDER_URI_FIELD_NAMES = frozenset(
+    {
+        "api_base",
+        "app_url",
+        "azure_endpoint",
+        "base_url",
+        "endpoint_url",
+    }
+)
+_BASE_URL_PROVIDER_PROJECTION = {
+    "base_url": ("base_url", "client.base_url"),
+}
+_PROVIDER_BEHAVIOR_PROJECTIONS: dict[str, dict[str, tuple[str, ...]]] = {
+    provider_type: _BASE_URL_PROVIDER_PROJECTION
+    for provider_type in {
+        "pydantic_ai.providers.alibaba:AlibabaProvider",
+        "pydantic_ai.providers.anthropic:AnthropicProvider",
+        "pydantic_ai.providers.cerebras:CerebrasProvider",
+        "pydantic_ai.providers.cohere:CohereProvider",
+        "pydantic_ai.providers.deepseek:DeepSeekProvider",
+        "pydantic_ai.providers.fireworks:FireworksProvider",
+        "pydantic_ai.providers.github:GitHubProvider",
+        "pydantic_ai.providers.google_gla:GoogleGLAProvider",
+        "pydantic_ai.providers.grok:GrokProvider",
+        "pydantic_ai.providers.groq:GroqProvider",
+        "pydantic_ai.providers.heroku:HerokuProvider",
+        "pydantic_ai.providers.huggingface:HuggingFaceProvider",
+        "pydantic_ai.providers.litellm:LiteLLMProvider",
+        "pydantic_ai.providers.mistral:MistralProvider",
+        "pydantic_ai.providers.moonshotai:MoonshotAIProvider",
+        "pydantic_ai.providers.nebius:NebiusProvider",
+        "pydantic_ai.providers.ollama:OllamaProvider",
+        "pydantic_ai.providers.openai:OpenAIProvider",
+        "pydantic_ai.providers.openrouter:OpenRouterProvider",
+        "pydantic_ai.providers.ovhcloud:OVHcloudProvider",
+        "pydantic_ai.providers.sambanova:SambaNovaProvider",
+        "pydantic_ai.providers.together:TogetherProvider",
+        "pydantic_ai.providers.vercel:VercelProvider",
+        "pydantic_ai.providers.voyageai:VoyageAIProvider",
+        "pydantic_ai.providers.xai:XaiProvider",
+    }
+}
+_PROVIDER_BEHAVIOR_PROJECTIONS.update(
+    {
+        "pydantic_ai.providers.azure:AzureProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "api_version": ("client._api_version",),
+            "azure_deployment": ("client._azure_deployment",),
+            "azure_endpoint": ("client._azure_endpoint",),
+        },
+        "pydantic_ai.providers.bedrock:BedrockProvider": {
+            "base_url": ("base_url",),
+            "endpoint_url": ("client.meta.endpoint_url",),
+            "region_name": ("client.meta.region_name",),
+        },
+        "pydantic_ai.providers.google:GoogleProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "location": ("client._api_client.location",),
+            "project": ("client._api_client.project",),
+            "vertexai": ("client.vertexai", "client._api_client.vertexai"),
+        },
+        "pydantic_ai.providers.google_cloud:GoogleCloudProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "location": ("client._api_client.location",),
+            "project": ("client._api_client.project",),
+            "vertexai": ("client.vertexai", "client._api_client.vertexai"),
+        },
+        "pydantic_ai.providers.google_vertex:GoogleVertexProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "model_publisher": ("model_publisher",),
+            "project_id": ("project_id",),
+            "region": ("region",),
+        },
+        "pydantic_ai.providers.outlines:OutlinesProvider": {},
+        "pydantic_ai.providers.sentence_transformers:SentenceTransformersProvider": {},
+    }
+)
+_PROVIDER_VALUE_MISSING = object()
+_SENSITIVE_FIELD_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_FIELD_NAMES
+)
+_SENSITIVE_HEADER_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_HEADER_NAMES
+)
+_SENSITIVE_QUERY_PARAMETER_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_QUERY_PARAMETER_NAMES
+)
+
+
+def _normalized_field_name(value: Any) -> str:
+    return str(value).strip().lstrip("-").split("=", 1)[0].lower().replace("-", "_")
+
+
+def _matches_sensitive_suffix(
+    value: Any,
+    suffixes: Sequence[tuple[str, ...]],
+) -> bool:
+    segments = tuple(
+        segment for segment in _normalized_field_name(value).split("_") if segment
+    )
+    while segments[-1:] in {("file",), ("path",)}:
+        segments = segments[:-1]
+    return any(
+        len(segments) >= len(suffix) and segments[-len(suffix) :] == suffix
+        for suffix in suffixes
+    )
+
+
+def _is_sensitive_field(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_FIELD_SUFFIXES)
+
+
+def _is_sensitive_header(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_HEADER_SUFFIXES)
+
+
+def _is_sensitive_query_parameter(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_QUERY_PARAMETER_SUFFIXES)
+
+
+def _safe_uri_fragment(value: str) -> str:
+    if "=" not in value:
+        return value
+    fragment_items = parse_qsl(value, keep_blank_values=True)
+    if not any(_is_sensitive_query_parameter(key) for key, _item in fragment_items):
+        return value
+    return urlencode(
+        [
+            (key, item)
+            for key, item in fragment_items
+            if not _is_sensitive_query_parameter(key)
+        ],
+        doseq=True,
+    )
+
+
+def _safe_uri(value: str) -> str:
+    """Remove user-info and credential query values from an absolute URI."""
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise KitaruUsageError(
+            "Registration found a malformed URI in version-defining settings."
+        ) from exc
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    has_sensitive_query = any(
+        _is_sensitive_query_parameter(key) for key, _item in query_items
+    )
+    fragment = _safe_uri_fragment(parsed.fragment)
+    has_sensitive_fragment = fragment != parsed.fragment
+    if not parsed.netloc:
+        if has_sensitive_query or has_sensitive_fragment:
+            raise KitaruUsageError(
+                "Registration cannot safely project credential query or fragment "
+                "values from an ambiguous URI."
+            )
+        return value
+
+    netloc = parsed.netloc.rsplit("@", 1)[-1]
+    query = urlencode(
+        [
+            (key, item)
+            for key, item in query_items
+            if not _is_sensitive_query_parameter(key)
+        ],
+        doseq=True,
+    )
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, fragment))
+
+
+def _safe_headers(value: Any) -> Any:
+    """Project structured headers while retaining only non-credential values."""
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise KitaruUsageError(
+                    "Registration found malformed structured HTTP headers."
+                )
+            projected[key] = (
+                None if _is_sensitive_header(key) else _safe_identity_value(item)
+            )
+        return projected
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        projected_items: list[list[Any]] = []
+        for item in value:
+            if (
+                not isinstance(item, Sequence)
+                or isinstance(item, (str, bytes))
+                or len(item) != 2
+                or not isinstance(item[0], str)
+                or not item[0].strip()
+            ):
+                raise KitaruUsageError(
+                    "Registration found malformed structured HTTP headers."
+                )
+            projected_items.append(
+                [
+                    item[0],
+                    None
+                    if _is_sensitive_header(item[0])
+                    else _safe_identity_value(item[1]),
+                ]
+            )
+        return projected_items
+    raise KitaruUsageError("Registration found malformed structured HTTP headers.")
+
+
+def _safe_identity_value(value: Any) -> Any:
+    """Recursively remove credentials from version-defining values."""
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_field(key):
+                continue
+            normalized_key = _normalized_field_name(key)
+            projected[str(key)] = (
+                _safe_headers(item)
+                if normalized_key in _HEADER_MAPPING_NAMES
+                else _safe_identity_value(item)
+            )
+        return projected
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_safe_identity_value(item) for item in value]
+    if isinstance(value, str):
+        return _safe_uri(value)
+    return value
+
+
+def _safe_mapping(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Exclude credential-like fields from version-defining projections."""
+    if value is None:
+        return {}
+    return dict(_safe_identity_value(value))
+
+
+def _provider_path_value(provider: Any, path: str, field_name: str) -> Any:
+    value = provider
+    for segment in path.split("."):
+        try:
+            value = getattr(value, segment)
+        except AttributeError:
+            return _PROVIDER_VALUE_MISSING
+        except Exception as exc:
+            raise KitaruUsageError(
+                f"Registration cannot read provider field '{field_name}'."
+            ) from exc
+    return value
+
+
+def _normalized_provider_identity_value(field_name: str, value: Any) -> Any:
+    if field_name in _PROVIDER_URI_FIELD_NAMES:
+        try:
+            rendered = str(value)
+        except Exception as exc:
+            raise KitaruUsageError(
+                f"Registration cannot normalize provider field '{field_name}'."
+            ) from exc
+        return _safe_uri(rendered)
+    return _safe_identity_value(value)
+
+
+def _provider_behavior_identity(provider: Any) -> dict[str, Any]:
+    """Project explicit routing fields for a supported provider implementation."""
+    provider_type = type_import_path(provider)
+    field_projections = _PROVIDER_BEHAVIOR_PROJECTIONS.get(provider_type)
+    if field_projections is None:
+        raise KitaruUsageError(
+            "Registration does not support provider implementation "
+            f"{provider_type!r}; its routing configuration cannot be projected safely."
+        )
+
+    projected: dict[str, Any] = {}
+    for field_name, paths in field_projections.items():
+        candidates: list[Any] = []
+        for path in paths:
+            value = _provider_path_value(provider, path, field_name)
+            if value is not _PROVIDER_VALUE_MISSING and value is not None:
+                candidates.append(
+                    _normalized_provider_identity_value(field_name, value)
+                )
+        if not candidates:
+            continue
+        first = candidates[0]
+        if any(candidate != first for candidate in candidates[1:]):
+            raise KitaruUsageError(
+                f"Registration found ambiguous provider field '{field_name}'."
+            )
+        projected[field_name] = first
+
+    if (
+        provider_type == "pydantic_ai.providers.google:GoogleProvider"
+        and projected.get("vertexai") is not True
+    ):
+        projected.pop("location", None)
+        projected.pop("project", None)
+    return projected
+
+
+def _safe_environment(value: Any) -> dict[str, str | None]:
+    """Retain non-secret MCP environment identity without credential values."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise KitaruUsageError(
+            "Registration found malformed MCP stdio environment settings."
+        )
+    projected: dict[str, str | None] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key.strip() or not isinstance(item, str):
+            raise KitaruUsageError(
+                "Registration found malformed MCP stdio environment settings."
+            )
+        projected[key] = None if _is_sensitive_field(key) else _safe_uri(item)
+    return projected
+
+
+def _function_tool_implementation(value: Any) -> str | dict[str, Any]:
+    """Identify an importable tool or a safely canonicalized local closure."""
+    try:
+        return qualified_import_path(value)
+    except KitaruUsageError:
+        declared_path = qualified_declared_path(value)
+
+    closure = getattr(value, "__closure__", None)
+    code = getattr(value, "__code__", None)
+    freevars = getattr(code, "co_freevars", ())
+    if not isinstance(freevars, tuple) or (
+        closure is not None and len(freevars) != len(closure)
+    ):
+        raise KitaruUsageError(
+            "Registration found a local tool without stable closure identity."
+        )
+
+    closure_values: dict[str, Any] = {}
+    for name, cell in zip(freevars, closure or (), strict=True):
+        try:
+            closure_values[name] = cell.cell_contents
+        except ValueError as exc:
+            raise KitaruUsageError(
+                "Registration found a local tool with an empty closure cell."
+            ) from exc
+
+    safe_values = _safe_identity_value(closure_values)
+    canonical_values = canonicalize_registration_value(safe_values)
+    canonical_safe_values = canonicalize_registration_value(
+        _safe_identity_value(canonical_values)
+    )
+    return {
+        "declared_path": declared_path,
+        "closure": canonical_safe_values,
+    }
+
+
+def _safe_command_header(value: Any) -> str:
+    if not isinstance(value, str):
+        raise KitaruUsageError(
+            "Registration found a non-string HTTP header command argument."
+        )
+    name, separator, header_value = value.partition(":")
+    if not separator or not name.strip():
+        raise KitaruUsageError(
+            "Registration cannot safely project a malformed HTTP header argument."
+        )
+    if _is_sensitive_header(name):
+        return f"{name.strip()}:"
+    return f"{name}:{_safe_uri(header_value)}"
+
+
+def _safe_command_args(args: Sequence[Any]) -> list[Any]:
+    """Exclude credentials from structured command arguments."""
+    sanitized: list[Any] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if isinstance(arg, str) and arg in _HEADER_FLAGS:
+            if index + 1 >= len(args):
+                raise KitaruUsageError(
+                    "Registration cannot safely project a header flag without a value."
+                )
+            sanitized.extend((arg, _safe_command_header(args[index + 1])))
+            index += 2
+            continue
+        if isinstance(arg, str) and arg.startswith("--header="):
+            sanitized.append(f"--header={_safe_command_header(arg.split('=', 1)[1])}")
+            index += 1
+            continue
+        if isinstance(arg, str) and arg.startswith("-H") and arg != "-H":
+            sanitized.append(f"-H{_safe_command_header(arg[2:])}")
+            index += 1
+            continue
+        if isinstance(arg, str) and arg.startswith("-") and _is_sensitive_field(arg):
+            flag, separator, _value = arg.partition("=")
+            sanitized.append(flag)
+            if separator:
+                index += 1
+                continue
+            if index + 1 >= len(args) or (
+                isinstance(args[index + 1], str) and args[index + 1].startswith("-")
+            ):
+                raise KitaruUsageError(
+                    f"Registration cannot safely project credential flag {flag!r} "
+                    "without an unambiguous value."
+                )
+            index += 2
+            continue
+        sanitized.append(_safe_identity_value(arg))
+        index += 1
+    return sanitized
+
+
+def _toolset_worldview(toolset: Any) -> dict[str, Any]:
+    """Project one toolset without prompts, credentials, or object reprs."""
+    component = toolset.wrapped if isinstance(toolset, KitaruToolset) else toolset
+    projection: dict[str, Any] = {"kind": type_import_path(component)}
+
+    if not isinstance(component, AbstractToolset):
+        raise KitaruUsageError(
+            "Registration requires Pydantic AI toolsets with stable public identity."
+        )
+    if component.id:
+        projection["id"] = component.id
+
+    if isinstance(component, FunctionToolset):
+        projected_tools: list[dict[str, Any]] = []
+        for declared_name, tool in sorted(
+            component.tools.items(), key=lambda item: str(item[0])
+        ):
+            try:
+                implementation = _function_tool_implementation(tool.function)
+                schema = tool.function_schema.json_schema
+            except AttributeError as exc:
+                raise KitaruUsageError(
+                    f"Tool {declared_name!r} has no stable registration identity."
+                ) from exc
+            projected_tools.append(
+                {
+                    "name": str(declared_name),
+                    "implementation": implementation,
+                    "schema": schema if isinstance(schema, Mapping) else None,
+                    "max_retries": tool.max_retries,
+                    "strict": tool.strict,
+                    "sequential": tool.sequential,
+                    "requires_approval": tool.requires_approval,
+                }
+            )
+        return {
+            **projection,
+            "tools": projected_tools,
+            "max_retries": component.max_retries,
+            "timeout": component.timeout,
+            "strict": component.strict,
+            "sequential": component.sequential,
+            "requires_approval": component.requires_approval,
+            "include_return_schema": component.include_return_schema,
+        }
+
+    if isinstance(component, MCPServer):
+        component_values = vars(component)
+        projection.update(
+            {
+                "max_retries": component.max_retries,
+                "timeout": component.timeout,
+                "cache_prompts": component.cache_prompts,
+                "cache_tools": component.cache_tools,
+                "cache_resources": component.cache_resources,
+                "include_instructions": component.include_instructions,
+                "include_return_schema": component.include_return_schema,
+                "allow_sampling": component.allow_sampling,
+            }
+        )
+        if "command" in component_values and "args" in component_values:
+            command = component_values["command"]
+            args = component_values["args"]
+            if (
+                not isinstance(command, str)
+                or not isinstance(args, Sequence)
+                or isinstance(args, (str, bytes))
+            ):
+                raise KitaruUsageError(
+                    "Registration found malformed MCP stdio transport settings."
+                )
+            cwd = component_values.get("cwd")
+            env = component_values.get("env")
+            safe_env = _safe_environment(env)
+            projection.update(
+                {
+                    "command": command,
+                    "args_hash": hash_registration_value(_safe_command_args(args)),
+                    "cwd": str(cwd) if cwd is not None else None,
+                    "env_keys": sorted(safe_env),
+                    "env_hash": hash_registration_value(safe_env),
+                }
+            )
+        elif "url" in component_values:
+            projection.update(
+                {
+                    "url": _safe_uri(str(component_values["url"])),
+                    "headers_hash": hash_registration_value(
+                        _safe_headers(component_values.get("headers", {}))
+                    ),
+                }
+            )
+        else:
+            raise KitaruUsageError(
+                "Registration does not support this MCP server transport."
+            )
+        return projection
+
+    if isinstance(component, MCPToolset):
+        if not isinstance(component.client, (str, Path)):
+            raise KitaruUsageError(
+                "Registration requires MCPToolset clients with a stable path or URL."
+            )
+        return {
+            **projection,
+            "client": (
+                _safe_uri(component.client)
+                if isinstance(component.client, str)
+                else str(component.client)
+            ),
+            "max_retries": component.max_retries,
+            "cache_prompts": component.cache_prompts,
+            "cache_tools": component.cache_tools,
+            "cache_resources": component.cache_resources,
+            "include_instructions": component.include_instructions,
+            "include_return_schema": component.include_return_schema,
+        }
+
+    raise KitaruUsageError(
+        f"Registration does not support toolset type {type_import_path(component)}."
+    )
+
+
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
 # level for ZenML dynamic-pipeline source resolution, so it can't close over
 # its body — the registry bridges the gap. In-process only; remote stacks
 # require an explicit @kitaru.flow.
 _AUTO_FLOW_BODIES: dict[str, "_AutoFlowSlot"] = {}
-# Intentionally unbounded: agent names should be stable/low-cardinality, and
-# evicting generated flows can break ZenML/Kitaru source resolution.
-_AUTO_FLOW_DEFINITIONS: dict[str, Any] = {}
+# Generated module entrypoints remain installed for ZenML source resolution,
+# while flow definitions are weakly retained and recreated on demand.
+_AUTO_FLOW_DEFINITIONS: weakref.WeakValueDictionary[str, Any] = (
+    weakref.WeakValueDictionary()
+)
 _AUTO_FLOW_LOCK = threading.Lock()
 
 if f"src.{__name__}" not in sys.modules:
@@ -276,8 +908,12 @@ def _make_auto_flow_entrypoint(flow_name: str) -> Callable[[str, str | None], An
     return _auto_flow_entrypoint
 
 
-def _auto_flow_for_agent(agent_name: str) -> Any:
-    flow_name = _auto_flow_name_for_agent(agent_name)
+def _auto_flow_for_agent(
+    agent_name: str,
+    *,
+    pipeline_name: str | None = None,
+) -> Any:
+    flow_name = pipeline_name or _auto_flow_name_for_agent(agent_name)
     with _AUTO_FLOW_LOCK:
         flow_definition = _AUTO_FLOW_DEFINITIONS.get(flow_name)
         if flow_definition is not None:
@@ -547,6 +1183,8 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._persist_message_history = persist_message_history
         self._last_messages: list[_messages.ModelMessage] | None = None
         self._message_history_lock = threading.Lock()
+        self._registration_lock = threading.RLock()
+        self._registered_state: _RegisteredAgentState | None = None
         track(
             AnalyticsEvent.PYDANTIC_AI_WRAPPED,
             {
@@ -592,6 +1230,475 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     @property
     def _uses_calls_strategy(self) -> bool:
         return self._checkpoint_strategy == "calls"
+
+    def _registration_configuration(self) -> dict[str, Any]:
+        cost_calculator = self._cost_calculator
+        cost_calculator_name: str | None = None
+        if cost_calculator is not None:
+            cost_calculator_name = qualified_import_path(cost_calculator)
+
+        return {
+            "adapter": "pydantic_ai",
+            "name": self._name,
+            "capture": _safe_mapping(vars(self._capture)),
+            "checkpoint_strategy": self._checkpoint_strategy,
+            "turn_checkpoint_config": _safe_mapping(self._turn_checkpoint_config),
+            "model_checkpoint_config": _safe_mapping(self._model_checkpoint_config),
+            "tool_checkpoint_config": _safe_mapping(self._tool_checkpoint_config),
+            "tool_checkpoint_config_by_name": _safe_mapping(
+                self._tool_checkpoint_config_by_name
+            ),
+            "mcp_checkpoint_config": _safe_mapping(self._mcp_checkpoint_config),
+            "persist_message_history": self._persist_message_history,
+            "allow_sync_tool_body_waits": self._allow_sync_tool_body_waits,
+            "cost_calculator": cost_calculator_name,
+        }
+
+    def _registration_worldview(self) -> dict[str, Any]:
+        wrapped_model = self._model.wrapped
+        model_name = wrapped_model.model_name
+        if not isinstance(model_name, str) or not model_name:
+            raise KitaruUsageError(
+                "The Pydantic AI model has no stable name for registration."
+            )
+        provider = wrapped_model.provider
+        provider_name = provider.name if provider is not None else None
+        if provider_name is not None and (
+            not isinstance(provider_name, str) or not provider_name
+        ):
+            raise KitaruUsageError(
+                "The Pydantic AI provider has no stable name for registration."
+            )
+
+        root_capability = self.wrapped.root_capability
+        capabilities = (
+            root_capability.capabilities
+            if isinstance(root_capability, CombinedCapability)
+            else [root_capability]
+        )
+        capability_names = sorted(
+            type_import_path(capability) for capability in capabilities
+        )
+
+        output_type = self.wrapped.output_type
+        if isinstance(output_type, type):
+            output_identity: Any = qualified_import_path(output_type)
+        elif output_type is None:
+            output_identity = None
+        elif isinstance(output_type, Sequence) and not isinstance(
+            output_type, (str, bytes)
+        ):
+            output_identity = [
+                qualified_import_path(item) if isinstance(item, type) else item
+                for item in output_type
+            ]
+        else:
+            output_identity = output_type
+
+        try:
+            model_settings = vars(self.wrapped)["model_settings"]
+        except (KeyError, TypeError) as exc:
+            raise KitaruUsageError(
+                "Registration requires an Agent with explicit model settings."
+            ) from exc
+        if model_settings is not None and not isinstance(model_settings, Mapping):
+            raise KitaruUsageError(
+                "The Pydantic AI model settings are not a stable mapping."
+            )
+
+        return {
+            "framework": "pydantic_ai",
+            "model": {
+                "kind": type_import_path(wrapped_model),
+                "name": model_name,
+                "provider": {
+                    "kind": type_import_path(provider) if provider is not None else None,
+                    "name": provider_name,
+                    "behavior": (
+                        _provider_behavior_identity(provider)
+                        if provider is not None
+                        else {}
+                    ),
+                },
+                "settings": _safe_mapping(model_settings),
+            },
+            "tools_and_mcp": [
+                _toolset_worldview(toolset) for toolset in self._toolsets
+            ],
+            "capabilities": capability_names,
+            "output_type": output_identity,
+            "replay": True,
+            "checkpoint_strategy": self._checkpoint_strategy,
+        }
+
+    def _resolve_registration_identity(
+        self,
+        *,
+        repo_root: Path,
+        entrypoint: str,
+    ) -> RegistrationIdentity:
+        return resolve_registration_identity(
+            repo_root=repo_root,
+            entrypoint=entrypoint,
+            configuration=self._registration_configuration(),
+            worldview=self._registration_worldview(),
+        )
+
+    def _resolve_registration_project(self, client: Any) -> Any:
+        """Use a named Project on Pro/Cloud and the active default Project locally."""
+        is_pro = False
+        try:
+            detector = client.zen_store.get_store_info().is_pro_server
+            is_pro = callable(detector) and detector() is True
+        except Exception:
+            is_pro = _connected_store_url_is_known_pro_cloud(client)
+
+        if not is_pro:
+            return _active_project_model(client)
+
+        try:
+            return _get_project_by_exact_selector(client, self._name)
+        except KeyError:
+            pass
+
+        from kitaru._config import _projects as project_ops
+
+        try:
+            project_ops.create_project(
+                self._name,
+                description=f"Kitaru Agent {self._name}",
+                activate=False,
+                client_factory=lambda: client,
+            )
+        except Exception as create_error:
+            try:
+                # A concurrent creator may have won the name race.
+                return _get_project_by_exact_selector(client, self._name)
+            except KeyError as recovery_error:
+                raise create_error from recovery_error
+
+        return _get_project_by_exact_selector(client, self._name)
+
+    def _resolve_bound_registration_project(
+        self,
+        client: Any,
+        state: _RegisteredAgentState,
+    ) -> Any:
+        """Verify an existing immutable Project and Pipeline binding."""
+        expected_project_id = state.binding.project_id
+        try:
+            project = _get_project_by_exact_selector(client, expected_project_id)
+        except Exception as exc:
+            raise KitaruStateError(
+                "The registered Project is unavailable on the current connection."
+            ) from exc
+
+        project_id = str(getattr(project, "id", "")).strip()
+        if project_id != expected_project_id:
+            raise KitaruStateError(
+                "The registered Project ID does not match the current connection."
+            )
+
+        metadata = _complete_project_metadata(project)
+        envelope = _parse_agent_metadata(project_id, metadata)
+        if envelope is None:
+            raise KitaruStateError(
+                "The registered Project is not initialized as the bound Agent."
+            )
+        if envelope.agent.name != self._name:
+            raise KitaruMetadataConflictError(
+                "The registered Project is bound to a different logical Agent name."
+            )
+        stored_manifest = envelope.agent_versions.get(state.binding.pipeline_id)
+        if stored_manifest != state.binding.manifest:
+            raise KitaruMetadataConflictError(
+                "The registered Project metadata no longer matches the bound "
+                "AgentVersion."
+            )
+
+        bound_pipeline = find_exact_project_pipeline(
+            client,
+            project_id=project_id,
+            pipeline_name=state.binding.pipeline_name,
+        )
+        if bound_pipeline is None:
+            raise KitaruStateError(
+                "The registered AgentVersion Pipeline no longer exists."
+            )
+        if str(getattr(bound_pipeline, "id", "")) != state.binding.pipeline_id:
+            raise KitaruMetadataConflictError(
+                "The registered Pipeline name no longer resolves to its bound UUID."
+            )
+        return project
+
+    def _registered_flow(self) -> Any:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            flow_definition = _auto_flow_for_agent(
+                self._name,
+                pipeline_name=state.binding.pipeline_name,
+            )
+            flow_definition._bind_registered_version(state.binding)
+            return flow_definition
+
+    def _preflight_registered_identity(self) -> None:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            resolve_agent_entrypoint(
+                target=self,
+                repo_root=state.repo_root,
+                entrypoint=state.identity.entrypoint,
+            )
+            actual = self._resolve_registration_identity(
+                repo_root=state.repo_root,
+                entrypoint=state.identity.entrypoint,
+            )
+            changed = identity_drift_categories(state.identity, actual)
+            if changed or actual.fingerprint != state.binding.fingerprint:
+                categories = ", ".join(changed or ["fingerprint"])
+                raise KitaruStateError(
+                    "Agent registration is stale because these static identity "
+                    f"categories changed: {categories}. Call agent.register() on "
+                    "a new KitaruAgent instance before execution."
+                )
+
+    def register(
+        self,
+        *,
+        label: str | None = None,
+        entrypoint: str | None = None,
+    ) -> AgentRegistrationResult:
+        """Register or reuse this AgentVersion without executing the Agent."""
+        normalized_label = label.strip() if label is not None else None
+        if normalized_label == "":
+            raise KitaruUsageError("AgentVersion label cannot be empty.")
+        repo_root = find_repository_root()
+        if repo_root is None:
+            raise KitaruStateError(
+                "Agent registration requires a Kitaru repository. Run `kitaru init`."
+            )
+        resolved_entrypoint = resolve_agent_entrypoint(
+            target=self,
+            repo_root=repo_root,
+            entrypoint=entrypoint,
+        )
+        identity = self._resolve_registration_identity(
+            repo_root=repo_root,
+            entrypoint=resolved_entrypoint,
+        )
+
+        with self._registration_lock:
+            current_state = self._registered_state
+            if (
+                current_state is not None
+                and current_state.identity.fingerprint != identity.fingerprint
+            ):
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot be rebound to a different "
+                    "AgentVersion. Create a new wrapper and register it."
+                )
+
+            client = Client()
+            project = (
+                self._resolve_bound_registration_project(client, current_state)
+                if current_state is not None
+                else self._resolve_registration_project(client)
+            )
+            project_id = str(getattr(project, "id", "")).strip()
+            project_name = str(getattr(project, "name", "")).strip()
+            if not project_id or not project_name:
+                raise KitaruStateError(
+                    "Unable to resolve the Project identity for Agent registration."
+                )
+            if (
+                current_state is not None
+                and current_state.binding.project_id != project_id
+            ):
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot replace its registered Project."
+                )
+            metadata = _complete_project_metadata(project)
+            envelope = _parse_agent_metadata(project_id, metadata)
+            if envelope is not None and envelope.agent.name != self._name:
+                raise KitaruMetadataConflictError(
+                    "The backing Project is already registered to Agent "
+                    f"{envelope.agent.name!r}, not {self._name!r}."
+                )
+            stored_manifest = _manifest_for_fingerprint(envelope, identity.fingerprint)
+            if stored_manifest is None and current_state is not None:
+                stored_manifest = current_state.binding.manifest
+            if normalized_label is not None and envelope is not None:
+                existing_target = envelope.agent_version_aliases.get(normalized_label)
+                fingerprint_target = (
+                    stored_manifest.pipeline_id if stored_manifest is not None else None
+                )
+                if (
+                    existing_target is not None
+                    and existing_target != fingerprint_target
+                ):
+                    raise KitaruMetadataConflictError(
+                        "The AgentVersion alias already points to a different version."
+                    )
+
+            if stored_manifest is not None and (
+                stored_manifest.git_sha != identity.git_sha
+                or stored_manifest.git_dirty != identity.git_dirty
+                or stored_manifest.working_tree_hash != identity.working_tree_hash
+                or stored_manifest.configuration_hash != identity.configuration_hash
+                or stored_manifest.worldview_hash != identity.worldview_hash
+                or stored_manifest.entrypoint != identity.entrypoint
+            ):
+                raise KitaruMetadataConflictError(
+                    "The stored AgentVersion manifest contradicts its fingerprint."
+                )
+            deterministic_name = build_agent_version_pipeline_name(
+                agent_name=self._name,
+                identity=identity,
+            )
+            if (
+                stored_manifest is not None
+                and stored_manifest.pipeline_name != deterministic_name
+            ):
+                raise KitaruMetadataConflictError(
+                    "The stored AgentVersion name contradicts deterministic identity."
+                )
+            pipeline_name = (
+                stored_manifest.pipeline_name
+                if stored_manifest is not None
+                else deterministic_name
+            )
+            flow_definition = _auto_flow_for_agent(
+                self._name,
+                pipeline_name=pipeline_name,
+            )
+
+            pipeline_model = find_exact_project_pipeline(
+                client,
+                project_id=project_id,
+                pipeline_name=pipeline_name,
+            )
+            created = stored_manifest is None
+            if stored_manifest is not None:
+                if pipeline_model is None:
+                    raise KitaruStateError(
+                        "The registered AgentVersion Pipeline no longer exists."
+                    )
+                if (
+                    str(getattr(pipeline_model, "id", ""))
+                    != stored_manifest.pipeline_id
+                ):
+                    raise KitaruMetadataConflictError(
+                        "The Pipeline name no longer resolves to the manifest UUID."
+                    )
+                manifest = stored_manifest
+            else:
+                if pipeline_model is None:
+                    with _temporary_active_project(project_id):
+                        returned_pipeline = flow_definition._pipeline.register()
+                    pipeline_model = find_exact_project_pipeline(
+                        client,
+                        project_id=project_id,
+                        pipeline_name=pipeline_name,
+                    )
+                    if pipeline_model is None:
+                        raise KitaruStateError(
+                            "Pipeline registration did not create a resolvable Pipeline."
+                        )
+                    if str(getattr(returned_pipeline, "id", "")) != str(
+                        getattr(pipeline_model, "id", "")
+                    ):
+                        raise KitaruMetadataConflictError(
+                            "Pipeline registration returned a different UUID than "
+                            "the exact project-scoped lookup."
+                        )
+                pipeline_id = str(getattr(pipeline_model, "id", "")).strip()
+                if not pipeline_id:
+                    raise KitaruStateError(
+                        "Pipeline registration returned no durable UUID."
+                    )
+                manifest = _AgentVersionManifest(
+                    schema_version=1,
+                    agent_version_id=pipeline_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
+                    fingerprint=identity.fingerprint,
+                    git_sha=identity.git_sha,
+                    git_dirty=identity.git_dirty,
+                    working_tree_hash=identity.working_tree_hash,
+                    configuration_hash=identity.configuration_hash,
+                    worldview_hash=identity.worldview_hash,
+                    entrypoint=identity.entrypoint,
+                    registered_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    source="registration",
+                )
+
+            _reconcile_agent_version_registration(
+                project_id=project_id,
+                agent_name=self._name,
+                manifest=manifest,
+                label=normalized_label,
+                client_factory=lambda: client,
+            )
+            reread_project = _get_project_by_exact_selector(client, project_id)
+            active_project_id = _active_project_id(client)
+            agent_info = _agent_info_from_project_model(
+                reread_project,
+                active_project_id=active_project_id,
+            )
+            if agent_info is None:
+                raise KitaruStateError(
+                    "Agent metadata verification returned an uninitialized Agent."
+                )
+            version_info = next(
+                (
+                    version
+                    for version in agent_info.agent_versions
+                    if version.pipeline_id == manifest.pipeline_id
+                ),
+                None,
+            )
+            if version_info is None:
+                raise KitaruStateError(
+                    "Agent metadata verification did not return the registered version."
+                )
+
+            binding = RegisteredAgentVersionBinding(
+                project_id=project_id,
+                manifest=manifest,
+            )
+            flow_definition._bind_registered_version(binding)
+            new_state = _RegisteredAgentState(
+                repo_root=repo_root,
+                identity=identity,
+                binding=binding,
+            )
+            if current_state is not None and current_state.binding != binding:
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot replace its registered state."
+                )
+            self._registered_state = new_state
+            return AgentRegistrationResult(
+                agent=agent_info,
+                agent_version=version_info,
+                label=normalized_label,
+                created=created,
+            )
+
+    def replay(self, execution: str | Sequence[str], **kwargs: Any) -> Any:
+        """Replay through this wrapper's immutable registered AgentVersion."""
+        flow_definition = self._registered_flow()
+        with flow_definition._registered_preflight_scope(
+            self._preflight_registered_identity
+        ):
+            return flow_definition.replay(execution, **kwargs)
 
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:
@@ -887,6 +1994,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         )
 
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
+        flow_definition = self._registered_flow()
         run_id = uuid.uuid4().hex
         slot = _AutoFlowSlot(body)
         serialized_body_path: str | None = None
@@ -895,7 +2003,10 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             _AUTO_FLOW_BODIES[run_id] = slot
         try:
             serialized_body_path = _try_serialize_auto_flow_body(body)
-            handle = _auto_flow_for_agent(self._name).run(run_id, serialized_body_path)
+            with flow_definition._registered_preflight_scope(
+                self._preflight_registered_identity
+            ):
+                handle = flow_definition.run(run_id, serialized_body_path)
             try:
                 flow_result = handle.wait()
             except KitaruRuntimeError as error:

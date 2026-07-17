@@ -149,6 +149,9 @@ from kitaru._telemetry import deployment_metadata_for_stack_model
 from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
+    AgentCreateResult,
+    AgentDeleteResult,
+    AgentInfo,
     ProjectCreateResult,
     ProjectDeleteResult,
     ProjectInfo,
@@ -157,19 +160,37 @@ from kitaru.config import (
     resolve_log_store,
 )
 from kitaru.config import (
+    create_agent as _create_agent,
+)
+from kitaru.config import (
     create_project as _create_project,
+)
+from kitaru.config import (
+    current_agent as _current_agent,
 )
 from kitaru.config import (
     current_project as _current_project,
 )
 from kitaru.config import (
+    delete_agent as _delete_agent,
+)
+from kitaru.config import (
     delete_project as _delete_project,
+)
+from kitaru.config import (
+    get_agent as _get_agent,
 )
 from kitaru.config import (
     get_project as _get_project,
 )
 from kitaru.config import (
+    list_agents as _list_agents,
+)
+from kitaru.config import (
     list_projects as _list_projects,
+)
+from kitaru.config import (
+    use_agent as _use_agent,
 )
 from kitaru.config import (
     use_project as _use_project,
@@ -3151,8 +3172,52 @@ class _ProjectScopedAPIUnavailable:
         )
 
 
+class _AgentsAPI:
+    """Canonical Agent lifecycle operations for a Kitaru client."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+
+    def current(self) -> AgentInfo:
+        """Return the active initialized Kitaru Agent."""
+        return _current_agent(client_factory=self._client_ref._client)
+
+    def list(self) -> builtins.list[AgentInfo]:
+        """List initialized Kitaru Agents visible to the current user."""
+        return _list_agents(client_factory=self._client_ref._client)
+
+    def get(self, name_or_id: str) -> AgentInfo:
+        """Return an initialized Kitaru Agent by name or ID."""
+        return _get_agent(name_or_id, client_factory=self._client_ref._client)
+
+    def create(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        display_name: str | None = None,
+        activate: bool = True,
+    ) -> AgentCreateResult:
+        """Create a Kitaru Agent on Pro/Cloud and optionally activate it."""
+        return _create_agent(
+            name,
+            description=description,
+            display_name=display_name,
+            activate=activate,
+            client_factory=self._client_ref._client,
+        )
+
+    def use(self, name_or_id: str) -> AgentInfo:
+        """Set the active Kitaru Agent on Pro/Cloud."""
+        return _use_agent(name_or_id, client_factory=self._client_ref._client)
+
+    def delete(self, name_or_id: str) -> AgentDeleteResult:
+        """Delete a Kitaru Agent on Pro/Cloud."""
+        return _delete_agent(name_or_id, client_factory=self._client_ref._client)
+
+
 class _ProjectsAPI:
-    """Project-management operations for a Kitaru client."""
+    """Deprecated Project-named compatibility delegate."""
 
     def __init__(self, client_ref: KitaruClient) -> None:
         self._client_ref = client_ref
@@ -3196,7 +3261,7 @@ class _ProjectsAPI:
 
 
 class KitaruClient:
-    """Client for executions, artifacts, deployments, imports, projects, and auth."""
+    """Client for Agents, executions, artifacts, deployments, imports, and auth."""
 
     def __init__(
         self,
@@ -3241,6 +3306,7 @@ class KitaruClient:
         self._project = resolved_connection.project
 
         self.auth = _AuthAPI(self)
+        self.agents = _AgentsAPI(self)
         self.projects = _ProjectsAPI(self)
         if not _require_project and self._project is None:
             unavailable = _ProjectScopedAPIUnavailable()
@@ -3266,15 +3332,18 @@ class KitaruClient:
         return cls(_require_project=False)
 
     @classmethod
-    def for_project_management(cls) -> KitaruClient:
-        """Create a client for project-management operations.
+    def for_agent_management(cls) -> KitaruClient:
+        """Create a client for Agent lifecycle operations.
 
-        Reading projects happens before a project-scoped operation can run.
-        Project create/use/delete additionally require ZenML Pro/Cloud through
-        the shared project helpers. This constructor validates server/auth
-        pairing while intentionally skipping the active-project requirement.
+        Reading Agents can happen before a project-scoped operation runs.
+        Agent create/use/delete retain the shared Pro/Cloud lifecycle guard.
         """
         return cls(_require_project=False)
+
+    @classmethod
+    def for_project_management(cls) -> KitaruClient:
+        """Create a client through the deprecated Project-named compatibility API."""
+        return cls.for_agent_management()
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""

@@ -13,6 +13,7 @@ from kitaru.adapters.pydantic_ai import KitaruAgent
 
 agent = Agent("openai:gpt-5-nano", name="researcher")
 durable_agent = KitaruAgent(agent)
+durable_agent.register(label="stable")
 
 result = durable_agent.run_sync("Summarize quantum error correction.")
 print(result.output)
@@ -44,9 +45,19 @@ right checkpoint strategy and human-in-the-loop guardrails. See
 [Agent Skills](../agent-native/claude-code-skill.md).
 {% endhint %}
 
+## Register the Agent
+
+Direct `run()` and `run_sync()` calls require registration. Call `register()`
+once after constructing the module-level `KitaruAgent`; registration records the
+Agent version but does not call the model or create an execution. Calls made
+inside an explicit `@kitaru.flow` keep their existing flow behavior.
+
+See [Agents](../guides/agents.md) for identity, versions, labels, and lifecycle
+management.
+
 ## Usage patterns
 
-### Zero-config
+### Direct execution
 
 Wrap the agent and call it directly. The adapter auto-opens a flow and per-call checkpoints with the default `checkpoint_strategy="calls"` when you're outside of one. If you already have an explicit `@kitaru.flow`, call the agent directly from the flow body — not from inside another `@kitaru.checkpoint` — when you want model/tool calls to become separate checkpoint rows.
 
@@ -56,11 +67,12 @@ from kitaru.adapters.pydantic_ai import KitaruAgent
 
 agent = Agent("openai:gpt-5-nano", name="researcher")
 durable_agent = KitaruAgent(agent)
+durable_agent.register()
 
 result = durable_agent.run_sync("What are the open questions in QEC?")
 ```
 
-Best for prototyping, porting an existing agent, or single-turn interactions.
+Best for prototyping, porting an existing agent, or single-turn interactions. Registration must complete before the first direct run.
 
 {% hint style="warning" %}
 Auto-flow is local-only. On remote stacks (Kubernetes, Vertex, SageMaker,
@@ -446,6 +458,7 @@ async def drain_events(_ctx: RunContext[None], stream: Any) -> None:
 
 agent = Agent("openai:gpt-5-nano", name="support_agent")
 durable_agent = KitaruAgent(agent, event_stream_handler=drain_events)
+durable_agent.register()
 result = durable_agent.run_sync("Check order ORD-1007").output
 ```
 
@@ -551,6 +564,7 @@ Pass `message_history` explicitly like any PydanticAI agent, or let the adapter 
 
 ```python
 durable_agent = KitaruAgent(agent, persist_message_history=True)
+durable_agent.register()
 
 durable_agent.run_sync("Hi, I am Alice.")
 durable_agent.run_sync("What's my name?")  # sees the prior turn automatically
@@ -571,7 +585,7 @@ one instance per conversation. If you need durable conversation state, persist
 ## Constraints
 
 - **Concrete model at construction time.** The wrapped agent must have a bound `Model` — late model binding and per-run `model=` overrides are not supported. To use a different model, wrap a different agent.
-- **Stable agent name.** `name=` is required; the adapter uses it for artifact keys and auto-created flow/checkpoint names. Changing it orphans existing executions.
+- **Stable agent name.** `name=` is required and forms part of the registered identity. If identity-defining configuration changes, create and register a new `KitaruAgent` instance before direct execution.
 - **No nested checkpoints.** Kitaru forbids opening a checkpoint inside another, so `checkpoint_strategy="calls"` cannot coexist with an enclosing turn checkpoint — the adapter runs the agent body inline at flow scope when per-call checkpoints are enabled.
 
 {% hint style="warning" %}
@@ -600,6 +614,8 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 
 ## Troubleshooting
 
+- **"This KitaruAgent is not registered"** — call `agent.register()` on the module-level wrapper before a direct `run()` or `run_sync()` call.
+- **"Agent registration is stale"** — create a new wrapper with the intended identity and call `register()` before execution.
 - **"KitaruAgent requires the wrapped agent to define a concrete model"** — pass `model=` to the `Agent()` constructor, not to `run()`.
 - **"requires an explicit `@kitaru.checkpoint`"** — `run_stream()` and `iter()` return context managers; wrap them in a checkpoint yourself.
 - **Auto-flow fails on a remote stack** — the in-process registry doesn't cross process boundaries. Use `@kitaru.flow` explicitly.

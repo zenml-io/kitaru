@@ -65,6 +65,23 @@ def test_smoke_script_has_valid_bash_syntax() -> None:
     assert completed.returncode == 0, completed.stderr
 
 
+def test_fresh_local_agent_smoke_registers_before_current_success() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    uninitialized = script.index(
+        'run_expected_failure "fresh local Agent is uninitialized"'
+    )
+    registration = script.index('run_test "Register local PydanticAI Agent"')
+    current_success = script.index('run_test "kitaru agents current"')
+
+    assert uninitialized < registration < current_success
+    assert 'Agent(TestModel(), name="local-smoke-agent"' in script
+    assert 'agent.register(entrypoint="local_smoke_agent:agent")' in script
+    assert 'mktemp -d "$REPO_ROOT/.kitaru-local-agent-smoke.XXXXXX"' in script
+    assert "${TMPDIR:-/tmp}/kitaru-local-agent-smoke" not in script
+    assert 'rm -rf "$LOCAL_AGENT_SMOKE_ENV"' in script
+
+
 def test_help_documents_remote_stack_smoke_contract() -> None:
     completed = _run_smoke_script("--help")
 

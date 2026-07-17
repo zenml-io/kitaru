@@ -813,6 +813,53 @@ def test_client_projects_current_resolves_name_env_without_zenml_uuid_env(
     assert fake_client.get_project_calls == [("production", False, True)]
 
 
+def test_agents_api_delegates_to_shared_helpers() -> None:
+    agent = object()
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client._current_agent", return_value=agent) as current,
+        patch("kitaru.client._list_agents", return_value=[agent]) as list_,
+        patch("kitaru.client._get_agent", return_value=agent) as get,
+        patch("kitaru.client._use_agent", return_value=agent) as use,
+        patch("kitaru.client._create_agent", return_value="created") as create,
+        patch("kitaru.client._delete_agent", return_value="deleted") as delete,
+    ):
+        client = KitaruClient()
+        assert client.agents.current() is agent
+        assert client.agents.list() == [agent]
+        assert client.agents.get("production") is agent
+        assert client.agents.use("production") is agent
+        assert client.agents.create("staging", activate=False) == "created"
+        assert client.agents.delete("staging") == "deleted"
+
+    current.assert_called_once_with(client_factory=client._client)
+    list_.assert_called_once_with(client_factory=client._client)
+    get.assert_called_once_with("production", client_factory=client._client)
+    use.assert_called_once_with("production", client_factory=client._client)
+    create.assert_called_once_with(
+        "staging",
+        description="",
+        display_name=None,
+        activate=False,
+        client_factory=client._client,
+    )
+    delete.assert_called_once_with("staging", client_factory=client._client)
+
+
+def test_project_management_constructor_delegates_to_agent_management() -> None:
+    with patch.object(
+        KitaruClient,
+        "for_agent_management",
+        return_value="client",
+    ) as canonical:
+        assert KitaruClient.for_project_management() == "client"
+
+    canonical.assert_called_once_with()
+
+
 def test_projects_api_delegates_to_shared_helpers() -> None:
     project = ProjectInfo(
         id="project-id",

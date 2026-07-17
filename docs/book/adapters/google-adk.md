@@ -18,15 +18,11 @@ There are two useful paths today. Both persist checkpoints when the wrapped ADK 
 
 `calls` mode is deliberately narrow. Kitaru does not inject plugins into the ADK runner, does not modify `ADKRunRequest.run_kwargs`, and does not checkpoint arbitrary unmodified ADK internals. The public ADK runner API verified by Kitaru does not expose a safe hook where Kitaru can put itself around every internal model/tool call in an arbitrary runner. If Kitaru only sees “before the step” and “after the step,” it cannot honestly replay the step body.
 
-## Install in an isolated ADK environment
+## Temporarily unavailable on this customer-demo branch
 
-Use a no-dev ADK environment for adapter checks. As of 2026-07-02, `google-adk` resolves FastAPI `0.138.0` / Starlette `1.3.1`. A direct resolver probe with `google-adk>=2.3,<3` plus `zenml[server]>=0.96.1` succeeds, but this project still intentionally blocks `google-adk` with the local/dev extras until the full local server path is certified with that newer stack.
-
-```bash
-UV_PROJECT_ENVIRONMENT=.venv-google-adk \
-  uv run --python 3.12 --no-dev --extra google-adk \
-  python examples/integrations/google_adk_agent/google_adk_adapter.py --help
-```
+{% hint style="warning" %}
+The `google-adk` extra is intentionally excluded on this branch. ZenML 0.96.2 requires OpenTelemetry 1.43.0, while currently released Google ADK versions require OpenTelemetry 1.42.1 or earlier. The adapter source remains for import-safety and source-level tests, but Google ADK installation and live checks are not supported on this branch. Commands below that use `--extra google-adk` are retained as reference and will not resolve here.
+{% endhint %}
 
 For provider-backed live runs, choose one Google auth path.
 

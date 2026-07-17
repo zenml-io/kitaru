@@ -1,0 +1,279 @@
+"""Canonical Agent CLI commands."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from cyclopts import Parameter
+
+from kitaru._interface_errors import run_with_cli_error_boundary
+from kitaru.cli_output import CLIOutputFormat
+from kitaru.config import KITARU_PROJECT_ENV, AgentInfo
+from kitaru.inspection import serialize_agent
+
+from . import agents_app
+from ._dependencies import cli_dependencies
+from ._helpers import (
+    DEFAULT_LIST_PAGE,
+    DEFAULT_LIST_SIZE,
+    OutputFormatOption,
+    PaginationPageOption,
+    PaginationSizeOption,
+    _emit_json_item,
+    _emit_json_items,
+    _emit_pagination_note,
+    _emit_snapshot,
+    _exit_with_error,
+    _print_success,
+    _print_warning,
+    _resolve_output_format,
+    _validate_pagination,
+)
+
+
+def _agent_list_rows(agents: list[AgentInfo]) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru agents list`."""
+    if not agents:
+        return [("Agents", "none found")]
+
+    return [
+        (
+            agent.name,
+            (
+                f"{agent.agent_id}"
+                f"{' (active)' if agent.is_active else ''}"
+                f" · {agent.version_count} version"
+                f"{'' if agent.version_count == 1 else 's'}"
+            ),
+        )
+        for agent in agents
+    ]
+
+
+def _current_agent_rows(agent: AgentInfo) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru agents current`."""
+    return [
+        ("Agent", agent.name),
+        ("Agent ID", agent.agent_id),
+        ("Versions", str(agent.version_count)),
+        ("Default version", agent.default_agent_version_id or "not registered"),
+    ]
+
+
+def _agent_show_rows(agent: AgentInfo) -> list[tuple[str, str]]:
+    """Build label/value rows for `kitaru agents show`."""
+    return [
+        ("Name", agent.name),
+        ("ID", agent.agent_id),
+        ("Display name", agent.display_name or "not set"),
+        ("Description", agent.description or "not set"),
+        ("Active", "yes" if agent.is_active else "no"),
+        ("Versions", str(agent.version_count)),
+        ("Default version", agent.default_agent_version_id or "not registered"),
+    ]
+
+
+@agents_app.command
+def list_(
+    *,
+    page: PaginationPageOption = DEFAULT_LIST_PAGE,
+    size: PaginationSizeOption = DEFAULT_LIST_SIZE,
+    output: OutputFormatOption = "text",
+) -> None:
+    """List initialized Kitaru Agents visible to the current user."""
+    command = "agents.list"
+    output_format = _resolve_output_format(output)
+    page, size = _validate_pagination(
+        page=page,
+        size=size,
+        command=command,
+        output=output_format,
+    )
+    agents = run_with_cli_error_boundary(
+        lambda: cli_dependencies().list_agents(page=page, size=size),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_agent(agent) for agent in agents],
+            output=output_format,
+        )
+        return
+
+    if page > DEFAULT_LIST_PAGE and not agents:
+        rows: list[tuple[str, str]] = [("Agents", f"no items on page {page}")]
+    else:
+        rows = _agent_list_rows(agents)
+    _emit_snapshot("Kitaru Agents", rows)
+    _emit_pagination_note(
+        page=page,
+        size=size,
+        returned_count=len(agents),
+        output=output_format,
+    )
+
+
+@agents_app.command
+def current(output: OutputFormatOption = "text") -> None:
+    """Show the active initialized Kitaru Agent."""
+    command = "agents.current"
+    output_format = _resolve_output_format(output)
+    agent = run_with_cli_error_boundary(
+        cli_dependencies().current_agent,
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_agent(agent), output=output_format)
+        return
+
+    _emit_snapshot("Kitaru Agent", _current_agent_rows(agent))
+
+
+@agents_app.command
+def show(
+    name_or_id: Annotated[
+        str,
+        Parameter(help="Agent name or ID."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Show an initialized Kitaru Agent by name or ID."""
+    command = "agents.show"
+    output_format = _resolve_output_format(output)
+    agent = run_with_cli_error_boundary(
+        lambda: cli_dependencies().get_agent(name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_agent(agent), output=output_format)
+        return
+
+    _emit_snapshot("Kitaru Agent", _agent_show_rows(agent))
+
+
+@agents_app.command
+def create(
+    name: Annotated[
+        str,
+        Parameter(help="Agent name."),
+    ],
+    *,
+    no_activate: Annotated[
+        bool | None,
+        Parameter(help="Create without activating the Agent."),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Create a Kitaru Agent on Pro/Cloud, activating it by default."""
+    command = "agents.create"
+    output_format = _resolve_output_format(output)
+    result = run_with_cli_error_boundary(
+        lambda: cli_dependencies().create_agent(
+            name,
+            activate=not no_activate,
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        payload = serialize_agent(result.agent)
+        payload["previous_active_agent"] = result.previous_active_agent
+        payload["activated"] = result.activated
+        _emit_json_item(command, payload, output=output_format)
+        return
+
+    _print_success(f"Created Agent: {result.agent.name}")
+    if result.activated and result.agent.is_active:
+        if result.previous_active_agent is not None:
+            print(
+                f"Activated Agent: {result.previous_active_agent} → {result.agent.name}"
+            )
+        else:
+            print(f"Activated Agent: {result.agent.name}")
+    elif result.activated:
+        _print_warning(
+            "Agent activation is still overridden by the environment.",
+            f"Unset or update {KITARU_PROJECT_ENV} to use {result.agent.name}.",
+        )
+
+
+@agents_app.command
+def use(
+    name_or_id: Annotated[
+        str,
+        Parameter(help="Agent name or ID to activate."),
+    ],
+    output: OutputFormatOption = "text",
+) -> None:
+    """Use a Kitaru Agent on Pro/Cloud as the active default."""
+    command = "agents.use"
+    output_format = _resolve_output_format(output)
+    agent = run_with_cli_error_boundary(
+        lambda: cli_dependencies().use_agent(name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, serialize_agent(agent), output=output_format)
+        return
+
+    _print_success(
+        f"Activated Agent: {agent.name}",
+        detail=f"Agent ID: {agent.agent_id}",
+    )
+
+
+@agents_app.command
+def delete(
+    name_or_id: Annotated[
+        str,
+        Parameter(help="Agent name or ID to delete."),
+    ],
+    *,
+    yes: Annotated[
+        bool,
+        Parameter(help="Confirm Agent deletion."),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Delete a Kitaru Agent on Pro/Cloud by name or ID."""
+    command = "agents.delete"
+    output_format = _resolve_output_format(output)
+    if not yes:
+        _exit_with_error(
+            command,
+            f"Kitaru will not delete Agent '{name_or_id}' without explicit "
+            "confirmation. Re-run with --yes if you want to delete it.",
+            output=output_format,
+        )
+
+    result = run_with_cli_error_boundary(
+        lambda: cli_dependencies().delete_agent(name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(
+            command,
+            serialize_agent(result.deleted_agent),
+            output=output_format,
+        )
+        return
+
+    _print_success(f"Deleted Agent: {result.deleted_agent.name}")

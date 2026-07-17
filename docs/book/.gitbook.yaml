@@ -14,6 +14,7 @@ structure:
 # these so existing inbound links resolve. Most other slugs are unchanged from
 # the previous FumaDocs site.
 redirects:
+  guides/projects: guides/agents.md
   guides/pydantic-ai-adapter: adapters/pydantic-ai.md
   guides/openai-agents-adapter: adapters/openai-agents.md
   guides/claude-agent-sdk-adapter: adapters/claude-agent-sdk.md

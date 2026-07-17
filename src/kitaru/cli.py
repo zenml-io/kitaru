@@ -28,6 +28,7 @@ from kitaru._cleanup import (
 )
 from kitaru._cli import (
     _UNKNOWN_VERSION,
+    agents_app,
     app,
     auth_api_keys_app,
     auth_app,
@@ -43,6 +44,24 @@ from kitaru._cli import (
     project_app,
     secrets_app,
     stack_app,
+)
+from kitaru._cli._agents import (
+    create as agent_create,
+)
+from kitaru._cli._agents import (
+    current as agent_current,
+)
+from kitaru._cli._agents import (
+    delete as agent_delete,
+)
+from kitaru._cli._agents import (
+    list_ as agent_list,
+)
+from kitaru._cli._agents import (
+    show as agent_show,
+)
+from kitaru._cli._agents import (
+    use as agent_use,
 )
 from kitaru._cli._auth import (
     _active_server_access_token,
@@ -249,10 +268,15 @@ from kitaru.config import (
     _delete_stack_operation,
     _list_stack_entries,
     _show_stack_operation,
+    create_agent,
     create_project,
+    current_agent,
     current_project,
+    delete_agent,
     delete_project,
+    get_agent,
     get_project,
+    list_agents,
     list_model_aliases,
     list_projects,
     login_to_server,
@@ -260,6 +284,7 @@ from kitaru.config import (
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+    use_agent,
     use_project,
 )
 from kitaru.config import current_stack as get_current_stack
@@ -328,6 +353,7 @@ def _apply_runtime_version() -> None:
 
 _MULTI_TOKEN_COMMANDS: frozenset[str] = frozenset(
     {
+        "agents",
         "analytics",
         "auth",
         "clean",
@@ -483,6 +509,13 @@ __all__ = [
     "_system_rows",
     "_validate_pagination",
     "_value_style",
+    "agent_create",
+    "agent_current",
+    "agent_delete",
+    "agent_list",
+    "agent_show",
+    "agent_use",
+    "agents_app",
     "all_",
     "api_keys_create",
     "api_keys_delete",
@@ -501,11 +534,14 @@ __all__ = [
     "clean_app",
     "cli",
     "create",
+    "create_agent",
     "create_project",
     "current",
+    "current_agent",
     "current_project",
     "delete",
     "delete_",
+    "delete_agent",
     "delete_project",
     "deploy",
     "deployment_delete",
@@ -522,6 +558,7 @@ __all__ = [
     "flow_tag",
     "flow_untag",
     "get_",
+    "get_agent",
     "get_available_stacks",
     "get_credentials_store",
     "get_current_stack",
@@ -537,6 +574,7 @@ __all__ = [
     "list__",
     "list___",
     "list____",
+    "list_agents",
     "list_model_aliases",
     "list_projects",
     "log_store_app",
@@ -584,5 +622,6 @@ __all__ = [
     "stop_registered_local_server",
     "time",
     "use",
+    "use_agent",
     "use_project",
 ]

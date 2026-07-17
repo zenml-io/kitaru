@@ -41,7 +41,7 @@ resolved correctly.
 
 Deployments are created and invoked in the active Kitaru project. Kitaru gets
 that project from your persisted login/project selection (`kitaru login
---project ...` or `kitaru project use ...`), from `KITARU_PROJECT` in headless
+--project ...` or `kitaru agents use ...`), from `KITARU_PROJECT` in headless
 environments, or from an explicit process-local configuration override. If your
 active project is `staging`, `kitaru deploy` creates the deployment in `staging`;
 if you switch to `production`, the same command targets `production` instead.

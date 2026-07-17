@@ -28,9 +28,17 @@ stack_app = cyclopts.App(
     name="stack",
     help="Inspect, create, delete, and switch stacks.",
 )
+agents_app = cyclopts.App(
+    name="agents",
+    help="Inspect, create, delete, and switch Kitaru Agents.",
+)
 project_app = cyclopts.App(
     name="project",
-    help="Inspect projects; create, delete, and switch them on ZenML Pro/Cloud.",
+    help=(
+        "Deprecated compatibility commands for Kitaru projects; mutations "
+        "require ZenML Pro/Cloud."
+    ),
+    show=False,
 )
 secrets_app = cyclopts.App(
     name="secrets",
@@ -84,6 +92,7 @@ flow_deployments_app = cyclopts.App(
 
 app.command(log_store_app)
 app.command(stack_app)
+app.command(agents_app)
 app.command(project_app)
 app.command(secrets_app)
 app.command(model_app)
@@ -113,6 +122,7 @@ def main(
 
 
 from . import (  # noqa: F401,E402
+    _agents,
     _analytics,
     _auth,
     _clean,
@@ -129,6 +139,7 @@ from . import (  # noqa: F401,E402
 
 __all__ = [
     "_UNKNOWN_VERSION",
+    "agents_app",
     "analytics_app",
     "app",
     "auth_api_keys_app",

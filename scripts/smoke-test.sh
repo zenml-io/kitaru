@@ -48,6 +48,8 @@
 # No -e: we deliberately continue past failures to collect all results.
 set -uo pipefail
 
+REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
 # Disable analytics so smoke-test runs don't leak events to Mixpanel.
 export KITARU_ANALYTICS_OPT_IN=false
 export ZENML_ANALYTICS_OPT_IN=false
@@ -416,6 +418,7 @@ RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
 GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
 GOOGLE_ADK_SMOKE_ENV=""
+LOCAL_AGENT_SMOKE_ENV=""
 PRO_PROJECT_SMOKE_CREATED_PROJECT=""
 PRO_PROJECT_SMOKE_LOGGED_IN=false
 # Track whether this script started the server (vs. attaching to an existing one).
@@ -833,11 +836,11 @@ from kitaru import KitaruClient
 from kitaru.errors import KitaruFeatureNotAvailableError
 
 project_name = os.environ["KITARU_SMOKE_PROJECT_NAME"]
-client = KitaruClient.for_project_management()
+client = KitaruClient.for_agent_management()
 operations: dict[str, Callable[[], object]] = {
-    "create": lambda: client.projects.create(project_name, activate=False),
-    "use": lambda: client.projects.use(project_name),
-    "delete": lambda: client.projects.delete(project_name),
+    "create": lambda: client.agents.create(project_name, activate=False),
+    "use": lambda: client.agents.use(project_name),
+    "delete": lambda: client.agents.delete(project_name),
 }
 
 for operation, call in operations.items():
@@ -1095,7 +1098,7 @@ run_pro_project_smoke_section() {
     local current_output
     local current_name
     local current_start=$SECONDS
-    current_output=$(timed 60 $UV_RUN kitaru project current -o json 2>&1)
+    current_output=$(timed 60 $UV_RUN kitaru agents current -o json 2>&1)
     local current_rc=$?
     local current_duration=$((SECONDS - current_start))
     if [[ $current_rc -ne 0 ]]; then
@@ -1118,7 +1121,7 @@ run_pro_project_smoke_section() {
         echo "$current_output" | redact_remote_output | sed 's/^/    /'
     fi
     run_test "Pro/Cloud project use current project" \
-        timed 60 $UV_RUN kitaru project use "$current_name"
+        timed 60 $UV_RUN kitaru agents use "$current_name"
 
     local project_name
     project_name="${PRO_PROJECT_SMOKE_RUN_PREFIX}-$(date +%Y%m%d%H%M%S)-$$"
@@ -1127,7 +1130,7 @@ run_pro_project_smoke_section() {
 
     PRO_PROJECT_SMOKE_CREATED_PROJECT="$project_name"
     if run_test "Pro/Cloud project create --no-activate" \
-        timed 60 $UV_RUN kitaru project create "$project_name" --no-activate; then
+        timed 60 $UV_RUN kitaru agents create "$project_name" --no-activate; then
         created=true
     fi
 
@@ -1135,7 +1138,7 @@ run_pro_project_smoke_section() {
         local after_create_output
         local after_create_name
         local after_create_start=$SECONDS
-        after_create_output=$(timed 60 $UV_RUN kitaru project current -o json 2>&1)
+        after_create_output=$(timed 60 $UV_RUN kitaru agents current -o json 2>&1)
         local after_create_rc=$?
         local after_create_duration=$((SECONDS - after_create_start))
         if [[ $after_create_rc -eq 0 ]]; then
@@ -1165,7 +1168,7 @@ run_pro_project_smoke_section() {
 
         if [[ "$active_project_changed" == true ]]; then
             run_test "Pro/Cloud project restore previous active project" \
-                timed 60 $UV_RUN kitaru project use "$current_name" || true
+                timed 60 $UV_RUN kitaru agents use "$current_name" || true
         else
             printf "  ${GREEN}✓${RESET} Pro/Cloud project restore not needed\n"
             record_pass_evidence "Pro/Cloud project restore not needed" \
@@ -1173,13 +1176,13 @@ run_pro_project_smoke_section() {
         fi
 
         run_test "Pro/Cloud project show created project" \
-            timed 60 $UV_RUN kitaru project show "$project_name" || true
+            timed 60 $UV_RUN kitaru agents show "$project_name" || true
         if run_test "Pro/Cloud project delete created project" \
-            timed 60 $UV_RUN kitaru project delete "$project_name" --yes; then
+            timed 60 $UV_RUN kitaru agents delete "$project_name" --yes; then
             PRO_PROJECT_SMOKE_CREATED_PROJECT=""
         fi
     else
-        if timed 60 $UV_RUN kitaru project delete "$project_name" --yes &>/dev/null; then
+        if timed 60 $UV_RUN kitaru agents delete "$project_name" --yes &>/dev/null; then
             PRO_PROJECT_SMOKE_CREATED_PROJECT=""
         fi
         skip_test "Pro/Cloud project show created project" "project create did not pass"
@@ -1293,7 +1296,7 @@ cleanup() {
     restore_repo_active_stack
 
     if [[ -n "${PRO_PROJECT_SMOKE_CREATED_PROJECT:-}" ]] && [[ "${PRO_PROJECT_SMOKE_LOGGED_IN:-false}" == true ]]; then
-        timed 60 $UV_RUN kitaru project delete \
+        timed 60 $UV_RUN kitaru agents delete \
             "$PRO_PROJECT_SMOKE_CREATED_PROJECT" --yes &>/dev/null || true
         PRO_PROJECT_SMOKE_CREATED_PROJECT=""
     fi
@@ -1314,6 +1317,9 @@ cleanup() {
     fi
     if [[ -n "${GOOGLE_ADK_SMOKE_ENV:-}" ]]; then
         rm -rf "$GOOGLE_ADK_SMOKE_ENV"
+    fi
+    if [[ -n "${LOCAL_AGENT_SMOKE_ENV:-}" ]]; then
+        rm -rf "$LOCAL_AGENT_SMOKE_ENV"
     fi
     if [[ "$KEEP_SERVER" == true ]] && [[ "$SCRIPT_OWNS_SERVER" == true ]]; then
         printf "\n${CYAN}Server left running at %s${RESET}\n" "$DASHBOARD_URL"
@@ -1495,7 +1501,7 @@ section_header "Clear state"
 
 # Logout may exit non-zero if no session is active — that's fine.
 if [[ -n "${PRO_PROJECT_SMOKE_CREATED_PROJECT:-}" ]] && [[ "${PRO_PROJECT_SMOKE_LOGGED_IN:-false}" == true ]]; then
-    if timed 60 $UV_RUN kitaru project delete \
+    if timed 60 $UV_RUN kitaru agents delete \
         "$PRO_PROJECT_SMOKE_CREATED_PROJECT" --yes &>/dev/null; then
         PRO_PROJECT_SMOKE_CREATED_PROJECT=""
     fi
@@ -1565,22 +1571,40 @@ run_test "kitaru status"                 $UV_RUN kitaru status
 run_test "kitaru info"                   $UV_RUN kitaru info
 run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
 run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
-run_test "kitaru project --help"         $UV_RUN kitaru project --help
-run_test "kitaru project list"           $UV_RUN kitaru project list
-run_test "kitaru project list -o json"   $UV_RUN kitaru project list -o json
-run_test "kitaru project current"        $UV_RUN kitaru project current
-run_test "SDK project-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_project_management(); projects = client.projects.list(); current = client.projects.current(); assert isinstance(projects, list); assert current.name'
+run_test "kitaru agents --help"         $UV_RUN kitaru agents --help
+run_test "kitaru agents list"           $UV_RUN kitaru agents list
+run_test "kitaru agents list -o json"   $UV_RUN kitaru agents list -o json
+run_expected_failure "fresh local Agent is uninitialized" \
+    "is not initialized. Register the Agent first." \
+    $UV_RUN kitaru agents current
+LOCAL_AGENT_SMOKE_ENV=$(mktemp -d "$REPO_ROOT/.kitaru-local-agent-smoke.XXXXXX")
+cat > "$LOCAL_AGENT_SMOKE_ENV/local_smoke_agent.py" <<'PY'
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
+
+from kitaru.adapters.pydantic_ai import KitaruAgent
+
+agent = KitaruAgent(
+    Agent(TestModel(), name="local-smoke-agent", output_type=str)
+)
+PY
+run_test "Register local PydanticAI Agent" \
+    env PYTHONPATH="$LOCAL_AGENT_SMOKE_ENV${PYTHONPATH:+:$PYTHONPATH}" \
+    $UV_RUN python -c \
+    'from local_smoke_agent import agent; agent.register(entrypoint="local_smoke_agent:agent")'
+run_test "kitaru agents current"        $UV_RUN kitaru agents current
+run_test "SDK agent-management API"    $UV_RUN python -c 'from kitaru import KitaruClient; client = KitaruClient.for_agent_management(); projects = client.agents.list(); current = client.agents.current(); assert isinstance(projects, list); assert current.name'
 PROJECT_GUARD_MESSAGE="requires a ZenML Pro/Cloud server"
 SMOKE_LOCAL_PROJECT="kitaru-smoke-local-project-$$"
-run_expected_failure "local/OSS blocks kitaru project create" \
+run_expected_failure "local/OSS blocks kitaru agents create" \
     "$PROJECT_GUARD_MESSAGE" \
-    $UV_RUN kitaru project create "$SMOKE_LOCAL_PROJECT" --no-activate
-run_expected_failure "local/OSS blocks kitaru project use" \
+    $UV_RUN kitaru agents create "$SMOKE_LOCAL_PROJECT" --no-activate
+run_expected_failure "local/OSS blocks kitaru agents use" \
     "$PROJECT_GUARD_MESSAGE" \
-    $UV_RUN kitaru project use "$SMOKE_LOCAL_PROJECT"
-run_expected_failure "local/OSS blocks kitaru project delete" \
+    $UV_RUN kitaru agents use "$SMOKE_LOCAL_PROJECT"
+run_expected_failure "local/OSS blocks kitaru agents delete" \
     "$PROJECT_GUARD_MESSAGE" \
-    $UV_RUN kitaru project delete "$SMOKE_LOCAL_PROJECT" --yes
+    $UV_RUN kitaru agents delete "$SMOKE_LOCAL_PROJECT" --yes
 run_sdk_project_guard_checks "$SMOKE_LOCAL_PROJECT"
 run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
@@ -2016,18 +2040,18 @@ run_test "MCP: kitaru_status" \
 run_test "MCP: kitaru_stacks_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_stacks_list --json
 
-run_test "MCP: kitaru_projects_list" \
-    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_list --json
+run_test "MCP: kitaru_agents_list" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_agents_list --json
 
-run_test "MCP: kitaru_projects_current" \
-    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_current --json
+run_test "MCP: kitaru_agents_current" \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_agents_current --json
 
 run_test "MCP: kitaru_secrets_list" \
     $FASTMCP call --command "$MCP_SERVER" --target kitaru_secrets_list --json
 
-run_expected_failure "MCP: local/OSS blocks kitaru_projects_use" \
+run_expected_failure "MCP: local/OSS blocks kitaru_agents_use" \
     "$PROJECT_GUARD_MESSAGE" \
-    $FASTMCP call --command "$MCP_SERVER" --target kitaru_projects_use \
+    $FASTMCP call --command "$MCP_SERVER" --target kitaru_agents_use \
         --input-json "{\"name_or_id\":\"$SMOKE_LOCAL_PROJECT\"}" --json
 
 run_test "MCP: kitaru_executions_list" \

@@ -131,6 +131,14 @@ class KitaruBackendError(KitaruRuntimeError):
     """Raised when Kitaru cannot communicate with the backend."""
 
 
+class KitaruMetadataReconciliationError(KitaruBackendError):
+    """Raised when a bounded Project metadata update cannot be verified."""
+
+
+class KitaruMetadataConflictError(KitaruStateError):
+    """Raised when Agent metadata conflicts with immutable persisted state."""
+
+
 class KitaruLogRetrievalError(KitaruBackendError):
     """Raised when runtime logs cannot be retrieved from the backend."""
 
@@ -313,6 +321,8 @@ __all__ = [
     "KitaruExecutionError",
     "KitaruFeatureNotAvailableError",
     "KitaruLogRetrievalError",
+    "KitaruMetadataConflictError",
+    "KitaruMetadataReconciliationError",
     "KitaruRuntimeError",
     "KitaruStackIntegrationDependencyError",
     "KitaruStackNotRemoteExecutableStateError",

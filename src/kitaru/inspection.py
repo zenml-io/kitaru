@@ -20,6 +20,8 @@ from kitaru._inspection_runtime import (
     uses_stale_local_server_url,
 )
 from kitaru._inspection_serialization import (
+    serialize_agent,
+    serialize_agent_version,
     serialize_artifact_ref,
     serialize_artifact_value,
     serialize_checkpoint_attempt,
@@ -56,6 +58,8 @@ __all__ = [
     "describe_local_server",
     "is_registered_local_server_url",
     "log_store_mismatch_details",
+    "serialize_agent",
+    "serialize_agent_version",
     "serialize_artifact_ref",
     "serialize_artifact_value",
     "serialize_checkpoint_attempt",

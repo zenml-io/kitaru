@@ -133,17 +133,18 @@ and `@checkpoint` around your calls. Your model, your tools, your framework —
 Kitaru wraps them, not the other way around.
 
 ```python
-from kitaru import flow
 from kitaru.adapters.pydantic_ai import KitaruAgent
 from pydantic_ai import Agent
 
 researcher = KitaruAgent(
-    Agent("openai:gpt-5.4", system_prompt="You summarize research topics.")
+    Agent(
+        "openai:gpt-5.4",
+        name="researcher",
+        system_prompt="You summarize research topics.",
+    )
 )
-
-@flow
-def research_flow(topic: str) -> str:
-    return researcher.run_sync(topic).output
+researcher.register(label="stable")
+result = researcher.run_sync("Summarize durable AI agents.")
 ```
 
 <a id="quick-start"></a>
@@ -186,10 +187,19 @@ the project you want later commands to use:
 
 ```bash
 kitaru login https://my-server.example.com --project production
-kitaru project list
-kitaru project use production
 kitaru status
+kitaru agents list
 ```
+
+The `--project production` option selects that Project during login. Agents are
+the canonical public lifecycle resource. After registering a `KitaruAgent`,
+inspect or switch initialized Agents with `kitaru agents current` and
+`kitaru agents use`.
+
+An existing Project without Agent metadata is a compatibility state. Until its
+first Agent registration, select it with `KITARU_PROJECT=production` or the
+hidden compatibility command `kitaru project use production`. Do not use the
+deprecated `project` commands for normal Agent lifecycle work.
 
 For CI, Docker, and other headless environments, set `KITARU_PROJECT` alongside
 `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` instead of relying on persisted local
