@@ -44,6 +44,7 @@ from kitaru.replay import (
     persist_and_verify_experiment_membership,
     safe_compare_url_for_executions,
 )
+from kitaru.scoring import OperationalLimitOutcome, OperationalLimitReason
 
 
 def experiment_submission_id(experiment_id: str) -> str:
@@ -123,7 +124,7 @@ def _recover_verified_results(
     trials = {
         (trial.target_execution_id, trial.repeat_index): trial
         for row in spec.planning_rows
-        if row.disposition == "replay"
+        if row.disposition in {"replay", "top"}
         for trial in (
             ReplayTrialPlan(target=row, repeat_index=repeat_index)
             for repeat_index in range(spec.repeats)
@@ -230,6 +231,12 @@ def execute_replay_attempt(
     *,
     submit_trial: Callable[..., ReplaySubmission],
     tag: str | None = None,
+    observe_trial: Callable[
+        [ReplayTrialPlan, ReplaySubmission | None], OperationalLimitReason | None
+    ]
+    | None = None,
+    finalize_operational_limit: Callable[[int, str | None], OperationalLimitOutcome]
+    | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> ExperimentReplayResult:
     """Reserve, submit, verify, and finalize one registered replay attempt."""
@@ -251,6 +258,7 @@ def execute_replay_attempt(
         project_id=spec.candidate_project_id,
         _client_factory=client_factory,
     )
+    operational_started_at = reservation.record.started_at
     if reservation.record.status in _TERMINAL_STATUSES:
         return ExperimentReplayResult(
             record=reservation.record,
@@ -266,11 +274,12 @@ def execute_replay_attempt(
 
     recovered_results: dict[tuple[str, int], ReplayResultRow] = {}
     if reservation.record.status == "pending":
-        transition_experiment_to_running(
+        running_record = transition_experiment_to_running(
             spec.candidate_project_id,
             spec.experiment_id,
             client_factory=client_factory,
         )
+        operational_started_at = running_record.started_at
     elif reservation.record.status == "running":
         recovery_client = client_factory()
         recovered_results = _recover_verified_results(
@@ -279,7 +288,7 @@ def execute_replay_attempt(
             client=recovery_client,
         )
         expected_replay_trials = (
-            sum(row.disposition == "replay" for row in spec.planning_rows)
+            sum(row.disposition in {"replay", "top"} for row in spec.planning_rows)
             * spec.repeats
         )
         if len(recovered_results) != expected_replay_trials:
@@ -303,6 +312,8 @@ def execute_replay_attempt(
     compare_ids: list[str] = []
     planning_by_target = {row.target_execution_id: row for row in spec.planning_rows}
     stop_submissions = False
+    limit_stop_reason: OperationalLimitReason | None = None
+    limit_remaining_trials = 0
 
     for row in spec.planning_rows:
         target_id = row.target_execution_id
@@ -338,10 +349,30 @@ def execute_replay_attempt(
                 compare_ids.extend(
                     [recovered.original_exec_id, recovered.replay_exec_id]
                 )
+                if observe_trial is not None:
+                    recovered_submission = ReplaySubmission.create(
+                        submission_id=submission_id,
+                        tag=tag,
+                        at=spec.at,
+                        wait=spec.wait,
+                        plan=plan_document,
+                        results=[recovered],
+                    )
+                    observed_reason = observe_trial(trial, recovered_submission)
+                    if observed_reason is not None:
+                        limit_stop_reason = observed_reason
+                        stop_submissions = True
                 continue
 
             if stop_submissions:
-                reason = "Not submitted after an earlier fail-fast replay error."
+                if limit_stop_reason is None:
+                    reason = "Not submitted after an earlier fail-fast replay error."
+                else:
+                    reason = (
+                        "Not submitted because a regression limit stopped further "
+                        f"trials ({limit_stop_reason})."
+                    )
+                    limit_remaining_trials += 1
                 failures.append(
                     ReplayFailureRow(
                         original_exec_ref=target_id,
@@ -385,6 +416,11 @@ def execute_replay_attempt(
                 )
                 if spec.on_error == "fail":
                     stop_submissions = True
+                if observe_trial is not None:
+                    observed_reason = observe_trial(trial, None)
+                    if observed_reason is not None:
+                        limit_stop_reason = observed_reason
+                        stop_submissions = True
                 continue
 
             results.extend(child.results)
@@ -418,6 +454,11 @@ def execute_replay_attempt(
                 )
             if child.failures and spec.on_error == "fail":
                 stop_submissions = True
+            if observe_trial is not None:
+                observed_reason = observe_trial(trial, child)
+                if observed_reason is not None:
+                    limit_stop_reason = observed_reason
+                    stop_submissions = True
 
     counts = ExperimentCounts(
         target_count=spec.target_membership.count,
@@ -434,6 +475,14 @@ def execute_replay_attempt(
         terminal_status = "partial"
     else:
         terminal_status = "failed"
+    operational_limit = (
+        None
+        if finalize_operational_limit is None
+        else finalize_operational_limit(
+            limit_remaining_trials,
+            operational_started_at,
+        )
+    )
     record = finalize_experiment_outcomes(
         spec.candidate_project_id,
         spec.experiment_id,
@@ -442,6 +491,7 @@ def execute_replay_attempt(
         errors=errors,
         skips=skips,
         unverified_children=unverified,
+        operational_limit=operational_limit,
         client_factory=client_factory,
     )
     submission = ReplaySubmission.create(

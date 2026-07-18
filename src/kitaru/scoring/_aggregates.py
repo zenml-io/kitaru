@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from zenml.artifacts.utils import save_artifact
+from zenml.client import Client
 from zenml.enums import ArtifactSaveType, ArtifactType
 
 from kitaru.errors import (
@@ -69,6 +70,16 @@ class ScoreAttemptAggregate(BaseModel):
     @classmethod
     def _validate_strings(cls, value: str) -> str:
         return require_string(value, field_name="Score aggregate field")
+
+    @field_validator("observation_ids")
+    @classmethod
+    def _validate_observation_ids(cls, value: list[str]) -> list[str]:
+        normalized = [
+            require_string(item, field_name="Score observation ID") for item in value
+        ]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("Score aggregate observation IDs must be unique.")
+        return normalized
 
     @field_validator("content_hash")
     @classmethod
@@ -176,18 +187,20 @@ def persist_score_aggregate(
     """Persist a score aggregate as an immutable manual artifact version."""
     if aggregate.project_id != project_id:
         raise KitaruStateError("Score aggregates cannot be written across projects.")
-    if client is not None:
-        active_project_id = str(
-            getattr(getattr(client, "active_project", None), "id", "")
-        ).strip()
-        if active_project_id and active_project_id != project_id:
-            raise KitaruStateError(
-                "Score aggregates require the Agent Project to be active."
-            )
+    resolved_client = client or Client()
+    active_project_id = str(
+        getattr(getattr(resolved_client, "active_project", None), "id", "")
+    ).strip()
+    if active_project_id != project_id:
+        raise KitaruStateError(
+            "Score aggregates require the Agent Project to be active."
+        )
+
     try:
         artifact = save_artifact_fn(
             data=aggregate.model_dump(mode="json"),
             name=AGGREGATE_ARTIFACT_NAME,
+            version=aggregate.experiment_id,
             artifact_type=ArtifactType.DATA,
             save_type=ArtifactSaveType.MANUAL,
             has_custom_name=True,
@@ -202,13 +215,63 @@ def persist_score_aggregate(
             },
         )
     except Exception as exc:
-        raise KitaruBackendError("Unable to save the score aggregate.") from exc
+        artifact = _find_score_aggregate(
+            resolved_client,
+            experiment_id=aggregate.experiment_id,
+            project_id=project_id,
+        )
+        if artifact is None:
+            raise KitaruBackendError("Unable to save the score aggregate.") from exc
+
     artifact_id = str(getattr(artifact, "id", "")).strip()
     if not artifact_id:
         raise KitaruStateError("The score aggregate has no artifact-version ID.")
+    try:
+        loaded = resolved_client.get_artifact_version(
+            name_id_or_prefix=artifact_id,
+            project=project_id,
+            hydrate=True,
+        ).load()
+    except Exception as exc:
+        raise KitaruBackendError("Unable to verify the score aggregate.") from exc
+    loaded_aggregate = ScoreAttemptAggregate.model_validate(loaded)
+    if loaded_aggregate != aggregate:
+        raise KitaruMetadataConflictError(
+            "The existing score aggregate conflicts with this idempotent attempt."
+        )
     return ScoreAggregateReference(
         artifact_version_id=artifact_id, sha256=aggregate.content_hash
     )
+
+
+def _find_score_aggregate(
+    client: Any,
+    *,
+    experiment_id: str,
+    project_id: str,
+) -> Any | None:
+    try:
+        page = client.list_artifact_versions(
+            name=f"equals:{AGGREGATE_ARTIFACT_NAME}",
+            version=experiment_id,
+            project=project_id,
+            tags=AGGREGATE_ARTIFACT_TAG,
+            hydrate=True,
+            size=2,
+        )
+    except Exception as exc:
+        raise KitaruBackendError("Unable to resolve the score aggregate.") from exc
+    items = list(getattr(page, "items", page))
+    exact = [
+        item
+        for item in items
+        if str(getattr(item, "name", "")) == AGGREGATE_ARTIFACT_NAME
+    ]
+    if len(exact) > 1:
+        raise KitaruMetadataConflictError(
+            "Multiple artifact versions match the immutable score aggregate."
+        )
+    return exact[0] if exact else None
 
 
 def _per_scorer_aggregates(

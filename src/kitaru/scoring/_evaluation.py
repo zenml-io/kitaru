@@ -27,6 +27,7 @@ from kitaru._experiments._models import (
     ExperimentCounts,
     ExperimentIssue,
     ExperimentRecord,
+    ExperimentSpec,
     ScoreExperimentSpec,
     ScoreRequestInputs,
     experiment_request_hash,
@@ -40,6 +41,7 @@ from kitaru.scoring._aggregates import (
 )
 from kitaru.scoring._contracts import (
     GroundedPolicySnapshot,
+    ProtectionDeclaration,
     Score,
     ScoreObservation,
     ScoreObservationOutcome,
@@ -63,6 +65,7 @@ from kitaru.scoring._grounded import (
     GroundedWorld,
 )
 from kitaru.scoring._repository import ObservationQuery, ScoreObservationRepository
+from kitaru.scoring._verdicts import VerdictPolicy, evaluate_verdict
 
 ScorerInput = Callable[..., Any]
 
@@ -71,7 +74,7 @@ ScorerInput = Callable[..., Any]
 class ScoreAttemptResult:
     """Durable result returned by score evaluation entry points."""
 
-    record: Any
+    record: ExperimentRecord
     observations: list[ScoreObservation]
     aggregate: ScoreAttemptAggregate | None = None
     aggregate_reference: ScoreAggregateReference | None = None
@@ -127,15 +130,22 @@ class ScoreEvaluationService:
         metadata: Mapping[str, JsonValue] | None = None,
         grounded_policy: GroundedPolicySnapshot | None = None,
         grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        protections: Sequence[ProtectionDeclaration] = (),
+        objective_minimum_mean: float | None = None,
     ) -> ScoreAttemptResult:
         """Reserve and run one score-only attempt against stored executions."""
         execution_items = list(executions)
         if not execution_items:
             raise KitaruUsageError("At least one execution is required for evaluation.")
-        declarations = [_scorer_callable(item) for item in scorers]
-        if not declarations:
+        objective_declarations = [_scorer_callable(item) for item in scorers]
+        protection_declarations = list(protections)
+        if not objective_declarations and not protection_declarations:
             raise KitaruUsageError("At least one scorer is required for evaluation.")
-        snapshots = [scorer_snapshot(item) for item in declarations]
+        declarations, snapshots, verdict_policy = _scoring_contract(
+            objective_declarations,
+            protection_declarations,
+            objective_minimum_mean=objective_minimum_mean,
+        )
         target_ids = [self._execution_id(item) for item in execution_items]
         normalized_name = name.strip() if name is not None else None
         if normalized_name == "":
@@ -153,6 +163,7 @@ class ScoreEvaluationService:
             comparative=is_comparative,
             metadata=metadata,
             grounded_policy=grounded_policy,
+            verdict_policy=verdict_policy,
         )
         experiment_id = _score_experiment_id(self.project_id, key)
         resolved_suite = suite_key or f"suite-{experiment_id.removeprefix('exp-')}"
@@ -171,6 +182,7 @@ class ScoreEvaluationService:
                 comparative=is_comparative,
                 metadata=metadata,
                 grounded_policy=grounded_policy,
+                verdict_policy=verdict_policy,
             )
             return self._resume_score_attempt(
                 existing,
@@ -216,6 +228,7 @@ class ScoreEvaluationService:
             comparative=is_comparative,
             metadata=metadata,
             grounded_policy=grounded_policy,
+            verdict_policy=verdict_policy,
         )
         reservation = reserve_experiment(
             self.project_id,
@@ -258,6 +271,7 @@ class ScoreEvaluationService:
         comparative: bool,
         metadata: Mapping[str, JsonValue] | None,
         grounded_policy: GroundedPolicySnapshot | None,
+        verdict_policy: VerdictPolicy | None,
     ) -> None:
         spec = record.spec
         if not isinstance(spec, ScoreExperimentSpec):
@@ -280,6 +294,7 @@ class ScoreEvaluationService:
             or spec.name != name
             or spec.suite_key != suite_key
             or spec.request_inputs != requested_inputs
+            or spec.verdict_policy != verdict_policy
         ):
             raise KitaruMetadataConflictError(
                 "The idempotency key already identifies a different score request."
@@ -340,15 +355,18 @@ class ScoreEvaluationService:
         return self._finalize_score_attempt(record=record, observations=observations)
 
     def _load_attempt_observations(
-        self, record: ExperimentRecord
+        self,
+        record: ExperimentRecord,
+        *,
+        expected: int | None = None,
     ) -> list[ScoreObservation]:
         repo = ScoreObservationRepository(
             project_id=self.project_id,
             client=self.client,
             save_artifact_fn=self._save_artifact_fn or _default_save_artifact,
         )
-        expected = record.counts.intended
-        page_size = min(100, expected + 1)
+        planned = record.counts.intended if expected is None else expected
+        page_size = min(100, planned + 1)
         observations: list[ScoreObservation] = []
         page = 1
         while True:
@@ -358,7 +376,7 @@ class ScoreEvaluationService:
                 size=page_size,
             )
             observations.extend(items)
-            if len(observations) > expected:
+            if len(observations) > planned:
                 raise KitaruMetadataConflictError(
                     "The score attempt contains more observations than planned."
                 )
@@ -391,10 +409,24 @@ class ScoreEvaluationService:
             scorer_count=len(spec.scorers),
             observations=selected,
         )
+        status = _terminal_status(counts)
+        preview = record.model_copy(
+            update={
+                "status": status,
+                "counts": counts,
+                "score_aggregate": aggregate_reference,
+            },
+            deep=True,
+        )
+        verdict = (
+            None
+            if spec.verdict_policy is None
+            else evaluate_verdict(preview, aggregate, spec.verdict_policy)
+        )
         final_record = finalize_experiment_outcomes(
             self.project_id,
             spec.experiment_id,
-            status=_terminal_status(counts),
+            status=status,
             counts=counts,
             errors=_issues_for_status(selected, ScoreObservationStatus.ERROR),
             skips=[
@@ -402,6 +434,7 @@ class ScoreEvaluationService:
                 *_issues_for_status(selected, ScoreObservationStatus.BLOCKED),
             ],
             aggregate_reference=aggregate_reference,
+            verdict_result=verdict,
             client_factory=lambda: self.client,
         )
         return ScoreAttemptResult(
@@ -417,38 +450,98 @@ class ScoreEvaluationService:
         experiment_id: str,
         executions: Sequence[Any],
         scorers: Sequence[ScorerInput],
+        record: ExperimentRecord | None = None,
         grounded_policy: GroundedPolicySnapshot | None = None,
         grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
     ) -> ScoreAttemptResult:
         """Score verified replay children and attach an immutable aggregate."""
         runs = [self._resolve_run(item) for item in executions]
         declarations = [_scorer_callable(item) for item in scorers]
-        if not runs:
-            raise KitaruUsageError(
-                "Replay scoring requires at least one verified replay child."
-            )
         if not declarations:
             raise KitaruUsageError("Replay scoring requires at least one scorer.")
         snapshots = [scorer_snapshot(item) for item in declarations]
-        manifest = freeze_execution_evidence_manifest(
-            runs,
-            project_id=self.project_id,
-            comparative=any(snapshot.comparative for snapshot in snapshots),
-            client=self.client,
-            run_loader=self._load_run_by_id,
+        policy = None if record is None else record.spec.verdict_policy
+        if record is not None:
+            if not isinstance(record.spec, ExperimentSpec):
+                raise KitaruMetadataConflictError(
+                    "Replay scoring requires a frozen replay experiment."
+                )
+            if snapshots != record.spec.scorers:
+                raise KitaruMetadataConflictError(
+                    "Replay scorer callables do not match the frozen verdict policy."
+                )
+            if grounded_policy != record.spec.grounded_policy:
+                raise KitaruMetadataConflictError(
+                    "Replay grounded policy does not match the frozen request."
+                )
+            if record.score_aggregate is not None:
+                aggregate = load_score_aggregate(
+                    record.score_aggregate,
+                    project_id=self.project_id,
+                    client=self.client,
+                )
+                return ScoreAttemptResult(
+                    record=record,
+                    observations=[],
+                    aggregate=aggregate,
+                    aggregate_reference=record.score_aggregate,
+                )
+        if not runs and policy is None:
+            raise KitaruUsageError(
+                "Replay scoring requires at least one verified replay child."
+            )
+        existing_observations = (
+            []
+            if record is None
+            else self._load_attempt_observations(
+                record,
+                expected=len(runs) * len(snapshots),
+            )
         )
-        observations = self._evaluate_matrix(
-            manifest=manifest,
-            experiment_id=experiment_id,
-            scorers=declarations,
-            grounded_policy=grounded_policy,
-            grounded_capabilities=grounded_capabilities or {},
-        )
+        observations: list[ScoreObservation]
+        if runs:
+            manifest_reference = (
+                None if record is None else record.spec.evidence_manifest
+            )
+            if manifest_reference is None:
+                manifest = freeze_execution_evidence_manifest(
+                    runs,
+                    project_id=self.project_id,
+                    comparative=any(snapshot.comparative for snapshot in snapshots),
+                    client=self.client,
+                    run_loader=self._load_run_by_id,
+                    created_at="1970-01-01T00:00:00+00:00",
+                )
+            else:
+                manifest = load_evidence_manifest(
+                    manifest_reference,
+                    project_id=self.project_id,
+                    client=self.client,
+                )
+                expected_execution_ids = [
+                    str(getattr(run, "id", "")).strip() for run in runs
+                ]
+                if [
+                    entry.target_execution_id for entry in manifest.entries
+                ] != expected_execution_ids:
+                    raise KitaruMetadataConflictError(
+                        "Replay evidence does not match the verified child set."
+                    )
+            observations = self._evaluate_matrix(
+                manifest=manifest,
+                experiment_id=experiment_id,
+                scorers=declarations,
+                grounded_policy=grounded_policy,
+                grounded_capabilities=grounded_capabilities or {},
+                existing=existing_observations,
+            )
+        else:
+            observations = existing_observations
         aggregate = ScoreAttemptAggregate.create(
             experiment_id=experiment_id,
             project_id=self.project_id,
             observations=observations,
-            planned=len(manifest.entries) * len(snapshots),
+            planned=len(runs) * len(snapshots),
         )
         aggregate_reference = persist_score_aggregate(
             aggregate,
@@ -456,10 +549,25 @@ class ScoreEvaluationService:
             client=self.client,
             save_artifact_fn=self._save_artifact_fn or _default_save_artifact,
         )
+        verdict = None
+        if policy is not None:
+            assert record is not None
+            preview = record.model_copy(
+                update={"score_aggregate": aggregate_reference},
+                deep=True,
+            )
+            verdict = evaluate_verdict(
+                preview,
+                aggregate,
+                policy,
+                operational_limit=record.operational_limit,
+            )
         record = attach_experiment_score_aggregate(
             self.project_id,
             experiment_id,
             aggregate_reference=aggregate_reference,
+            operational_limit=None if record is None else record.operational_limit,
+            verdict_result=verdict,
             client_factory=lambda: self.client,
         )
         return ScoreAttemptResult(
@@ -732,6 +840,44 @@ def _issues_for_status(
     ]
 
 
+def _scoring_contract(
+    objective_declarations: Sequence[ScorerInput],
+    protections: Sequence[ProtectionDeclaration],
+    *,
+    objective_minimum_mean: float | None,
+) -> tuple[list[ScorerInput], list[ScorerSnapshot], VerdictPolicy | None]:
+    if protections and len(objective_declarations) > 1:
+        raise KitaruUsageError(
+            "Protected attempts support at most one objective scorer."
+        )
+    if objective_minimum_mean is not None and len(objective_declarations) != 1:
+        raise KitaruUsageError(
+            "objective_minimum_mean requires exactly one objective scorer."
+        )
+    protection_declarations: list[ScorerInput] = []
+    protection_snapshots = []
+    for declaration in protections:
+        if not isinstance(declaration, ProtectionDeclaration):
+            raise KitaruUsageError(
+                "Agent protections require callable ProtectionDeclaration values."
+            )
+        protection_declarations.append(_scorer_callable(declaration.scorer))
+        protection_snapshots.append(declaration.snapshot)
+    objective_snapshot = (
+        scorer_snapshot(objective_declarations[0])
+        if len(objective_declarations) == 1
+        and (protections or objective_minimum_mean is not None)
+        else None
+    )
+    policy = VerdictPolicy.create(
+        objective=objective_snapshot,
+        minimum_mean=objective_minimum_mean,
+        protections=protection_snapshots,
+    )
+    declarations = [*objective_declarations, *protection_declarations]
+    return declarations, [scorer_snapshot(item) for item in declarations], policy
+
+
 def _score_spec(
     *,
     experiment_id: str,
@@ -746,6 +892,7 @@ def _score_spec(
     comparative: bool,
     metadata: Mapping[str, JsonValue] | None,
     grounded_policy: GroundedPolicySnapshot | None,
+    verdict_policy: VerdictPolicy | None,
 ) -> ScoreExperimentSpec:
     resolved_suite = suite_key or f"suite-{experiment_id.removeprefix('exp-')}"
     payload = {
@@ -765,6 +912,7 @@ def _score_spec(
             metadata=dict(metadata or {}),
             grounded_policy=grounded_policy,
         ),
+        "verdict_policy": verdict_policy,
     }
     provisional = cast(Any, ScoreExperimentSpec).model_construct(
         schema_version=1,
@@ -791,32 +939,29 @@ def _request_key(
     comparative: bool,
     metadata: Mapping[str, JsonValue] | None,
     grounded_policy: GroundedPolicySnapshot | None,
+    verdict_policy: VerdictPolicy | None,
 ) -> str:
-    return _score_experiment_id(
-        "request",
-        canonical_json(
+    payload = {
+        "target_ids": list(target_ids),
+        "scorers": [
             {
-                "target_ids": list(target_ids),
-                "scorers": [
-                    {
-                        "name": item.name,
-                        "revision": item.revision,
-                        "configuration_hash": item.configuration_hash,
-                    }
-                    for item in snapshots
-                ],
-                "name": name,
-                "suite_key": suite_key,
-                "comparative": comparative,
-                "metadata": dict(metadata or {}),
-                "grounded_policy": (
-                    None
-                    if grounded_policy is None
-                    else grounded_policy.model_dump(mode="json")
-                ),
+                "name": item.name,
+                "revision": item.revision,
+                "configuration_hash": item.configuration_hash,
             }
+            for item in snapshots
+        ],
+        "name": name,
+        "suite_key": suite_key,
+        "comparative": comparative,
+        "metadata": dict(metadata or {}),
+        "grounded_policy": (
+            None if grounded_policy is None else grounded_policy.model_dump(mode="json")
         ),
-    )
+    }
+    if verdict_policy is not None:
+        payload["verdict_policy"] = verdict_policy.model_dump(mode="json")
+    return _score_experiment_id("request", canonical_json(payload))
 
 
 def _observation_key(

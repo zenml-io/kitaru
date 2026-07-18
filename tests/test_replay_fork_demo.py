@@ -98,6 +98,15 @@ def test_import_command_defaults_to_read_only_dry_run(monkeypatch: Any) -> None:
     assert calls[0]["confirm_data_storage"] is False
 
 
+def test_example_declares_completed_execution_protection(monkeypatch: Any) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    demo = _load_demo_module()
+
+    snapshots = demo.kagent._protection_snapshots()
+    assert set(snapshots) == {"completed-execution"}
+    assert snapshots["completed-execution"].pass_rule == "score == 1.0"
+
+
 def test_register_command_uses_agent_version_as_label(monkeypatch: Any) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     demo = _load_demo_module()
@@ -153,8 +162,65 @@ def test_experiment_replays_explicit_native_set(monkeypatch: Any) -> None:
             "uncovered_policy": "fail",
             "idempotency_key": "permissions-v2-attempt-1",
             "repeats": 3,
-            "wait": False,
+            "wait": True,
             "name": demo.DEFAULT_EXPERIMENT,
+            "suite_key": demo.DEFAULT_EXPERIMENT,
         },
     ]
     assert '"target_count": 3' in result.output
+
+
+def test_rerun_command_uses_limits_and_asserts_pass(monkeypatch: Any) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    demo = _load_demo_module()
+    calls: list[dict[str, Any]] = []
+
+    class FakeResult:
+        def assert_pass(self) -> None:
+            calls.append({"operation": "assert_pass"})
+
+        def to_json(self) -> dict[str, Any]:
+            return {"verdict": "pass"}
+
+    class FakeAgent:
+        def register(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append({"operation": "register", **kwargs})
+            return {"created": False}
+
+        def replay(self, **kwargs: Any) -> FakeResult:
+            calls.append({"operation": "replay", **kwargs})
+            return FakeResult()
+
+    monkeypatch.setattr(demo, "kagent", FakeAgent())
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "rerun",
+            "support-agent-permissions-v2",
+            "--idempotency-key",
+            "permissions-v2-attempt-2",
+            "--max-trials",
+            "2",
+            "--max-cost-usd",
+            "0.5",
+            "--max-incurred-tokens",
+            "5000",
+            "--max-duration-seconds",
+            "60",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0] == {"operation": "register", "label": demo.AGENT_VERSION}
+    assert calls[1]["operation"] == "replay"
+    assert calls[1]["experiment"] == "support-agent-permissions-v2"
+    assert calls[1]["idempotency_key"] == "permissions-v2-attempt-2"
+    assert calls[1]["repeats"] == 1
+    assert calls[1]["limits"] == demo.RegressionLimits(
+        max_trials=2,
+        max_cost_usd=0.5,
+        max_incurred_tokens=5000,
+        max_duration_seconds=60.0,
+    )
+    assert calls[2] == {"operation": "assert_pass"}
+    assert '"verdict": "pass"' in result.output

@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Protocol, cast
+from typing import Any, Literal, NoReturn, Protocol, cast, runtime_checkable
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -147,6 +147,10 @@ from kitaru._interface_deployments import (
     validate_remove_deployment_tag,
     warn_if_deployment_drifted,
 )
+from kitaru._llm_usage import (
+    LLM_USAGE_SUMMARY_METADATA_KEY,
+    parse_usage_summary,
+)
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
@@ -229,11 +233,14 @@ from kitaru.replay import (
     safe_persist_replay_submission_metadata,
 )
 from kitaru.scoring import (
+    GroundedCapability,
+    GroundedPolicySnapshot,
     ObservationQuery,
+    ProtectionDeclaration,
     ScoreObservation,
     ScoreObservationStatus,
 )
-from kitaru.scoring._evaluation import ScoreEvaluationService
+from kitaru.scoring._evaluation import ScoreAttemptResult, ScoreEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -557,6 +564,19 @@ def _attempt_local_key_activation(
             rollback_succeeded=True,
         )
     return _with_local_key_activation_status(result, succeeded=True)
+
+
+@runtime_checkable
+class _EvaluationAgent(Protocol):
+    """Agent capabilities required by stored-execution evaluation."""
+
+    def _preflight_registered_identity(self) -> None: ...
+
+    def _registered_protection_declarations(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[ProtectionDeclaration]: ...
 
 
 class _ReplayFlowLike(Protocol):
@@ -1990,6 +2010,12 @@ class _ExecutionsAPI:
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         return _map_execution(run=run, client=self._client_ref, include_details=True)
 
+    def _get_llm_usage_summary(self, exec_id: str) -> dict[str, Any] | None:
+        """Read terminal usage metadata without hydrating execution details."""
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=False)
+        metadata = _to_plain_dict(getattr(run, "run_metadata", {}))
+        return parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
+
     def _list_replays_for_originals(
         self,
         *,
@@ -2070,9 +2096,11 @@ class _ExecutionsAPI:
         idempotency_key: str | None = None,
         comparative: bool | None = None,
         metadata: Mapping[str, Any] | None = None,
-        grounded_policy: Any | None = None,
-        grounded_capabilities: Mapping[str, Any] | None = None,
-    ) -> Any:
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        agent: _EvaluationAgent | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
         """Evaluate stored executions without running replay or agent code."""
         execution_items: list[str | Execution]
         if isinstance(executions, (str, Execution)):
@@ -2084,9 +2112,40 @@ class _ExecutionsAPI:
             if isinstance(scorers, Sequence) and not callable(scorers)
             else [scorers]
         )
+        project_id = self._project_id()
+        native_client = self._client_ref._client()
+        protections: list[Any] = []
+        if agent is None:
+            from kitaru._config._agents import (
+                _complete_project_metadata,
+                _parse_agent_metadata,
+            )
+            from kitaru._config._projects import _get_project_by_exact_selector
+
+            project = _get_project_by_exact_selector(native_client, project_id)
+            envelope = _parse_agent_metadata(
+                project_id,
+                _complete_project_metadata(project),
+            )
+            if envelope is not None and any(
+                manifest.protections for manifest in envelope.agent_versions.values()
+            ):
+                raise KitaruUsageError(
+                    "A registered AgentVersion declares protections. Pass the exact "
+                    "registered KitaruAgent with agent= so evaluation cannot omit them."
+                )
+        else:
+            if not isinstance(agent, _EvaluationAgent):
+                raise KitaruUsageError(
+                    "agent= must provide registered Kitaru evaluation protections."
+                )
+            agent._preflight_registered_identity()
+            protections = agent._registered_protection_declarations(
+                project_id=project_id
+            )
         service = ScoreEvaluationService(
-            project_id=self._project_id(),
-            client=self._client_ref._client(),
+            project_id=project_id,
+            client=native_client,
             run_loader=lambda exec_id: self._client_ref._get_pipeline_run(
                 exec_id, hydrate=True
             ),
@@ -2101,6 +2160,8 @@ class _ExecutionsAPI:
             metadata=metadata,
             grounded_policy=grounded_policy,
             grounded_capabilities=grounded_capabilities,
+            protections=protections,
+            objective_minimum_mean=objective_minimum_mean,
         )
 
     def score_history(
@@ -3436,6 +3497,45 @@ class _AgentExperimentsAPI:
         """Get an attempt by exact ID or unambiguous suite/name."""
         agent_info = self._agent(agent)
         return self._view(agent_info, agent_info.get_experiment(name_or_id))
+
+    def list_suite(
+        self,
+        suite_key: str,
+        *,
+        agent: str | None = None,
+    ) -> builtins.list[Experiment]:
+        """List attempts for one exact suite key in newest-first order."""
+        agent_info = self._agent(agent)
+        return [
+            self._view(agent_info, record)
+            for record in agent_info.list_suite_attempts(suite_key)
+        ]
+
+    def get_attempt(
+        self,
+        experiment_id: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Get one exact attempt without suite or display-name fallback."""
+        agent_info = self._agent(agent)
+        return self._view(
+            agent_info,
+            agent_info.get_experiment_attempt(experiment_id),
+        )
+
+    def resolve_source(
+        self,
+        experiment_id_or_suite_key: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Resolve an exact attempt or the newest terminal attempt in a suite."""
+        agent_info = self._agent(agent)
+        return self._view(
+            agent_info,
+            agent_info.resolve_experiment_source(experiment_id_or_suite_key),
+        )
 
     def list_for_execution(
         self,

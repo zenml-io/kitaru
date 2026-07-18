@@ -11,7 +11,11 @@ from uuid import NAMESPACE_URL, uuid5
 from zenml.artifacts.utils import save_artifact
 from zenml.client import Client
 
-from kitaru._experiments._membership import persist_target_membership
+from kitaru._experiments._limits import RegressionLimits
+from kitaru._experiments._membership import (
+    load_target_membership,
+    persist_target_membership,
+)
 from kitaru._experiments._models import (
     CohortAudit,
     CohortRankingRow,
@@ -19,6 +23,7 @@ from kitaru._experiments._models import (
     ExperimentExecutable,
     ExperimentIssue,
     ExperimentPlanningError,
+    ExperimentRecord,
     ExperimentSpec,
     ForkCoverage,
     FrozenReplayPlan,
@@ -34,7 +39,12 @@ from kitaru._experiments._models import (
 )
 from kitaru._import_contract import raise_if_imported_execution
 from kitaru._run_identity import extract_run_project_identity
-from kitaru.errors import KitaruBackendError, KitaruStateError, KitaruUsageError
+from kitaru.errors import (
+    KitaruBackendError,
+    KitaruMetadataConflictError,
+    KitaruStateError,
+    KitaruUsageError,
+)
 from kitaru.replay import (
     ReplayPlan,
     build_replay_from_start_plan,
@@ -42,7 +52,13 @@ from kitaru.replay import (
     replay_at_skip_reason,
     replay_at_status,
 )
-from kitaru.scoring import ScorerSnapshot
+from kitaru.scoring import (
+    GroundedPolicySnapshot,
+    ProtectionSnapshot,
+    ScorerIdentity,
+    ScorerSnapshot,
+    VerdictPolicy,
+)
 
 if TYPE_CHECKING:
     from kitaru._agent_registration import RegisteredAgentVersionBinding
@@ -58,6 +74,7 @@ def _spec_from_draft(
         "name": draft.name,
         "display_name": draft.display_name,
         "suite_key": draft.suite_key,
+        "source_experiment_id": draft.source_experiment_id,
         "idempotency_key": draft.idempotency_key,
         "created_at": draft.created_at,
         "candidate_project_id": draft.candidate_project_id,
@@ -74,6 +91,9 @@ def _spec_from_draft(
         "planning_rows": draft.planning_rows,
         "cohort_audit": draft.cohort_audit,
         "scorers": draft.scorers,
+        "grounded_policy": draft.grounded_policy,
+        "verdict_policy": draft.verdict_policy,
+        "regression_limits": draft.regression_limits,
     }
     provisional = cast(Any, ExperimentSpec).model_construct(
         schema_version=1,
@@ -106,6 +126,8 @@ def preplan_replay_attempt(
     client: Any | None = None,
     pipeline_verifier: Callable[[Any, Any], Any] | None = None,
     scorers: Sequence[ScorerSnapshot] = (),
+    grounded_policy: GroundedPolicySnapshot | None = None,
+    verdict_policy: VerdictPolicy | None = None,
 ) -> ReplayAttemptDraft:
     """Hydrate and validate every target before any experiment write or child run."""
     from kitaru._agent_registration import verify_registered_pipeline
@@ -314,6 +336,251 @@ def preplan_replay_attempt(
         planning_rows=rows,
         cohort_audit=cohort_audit,
         scorers=list(scorers),
+        grounded_policy=grounded_policy,
+        verdict_policy=verdict_policy,
+    )
+
+
+def _validate_suite_rerun_request(
+    source: ExperimentRecord,
+    *,
+    binding: RegisteredAgentVersionBinding,
+    idempotency_key: str,
+    repeats: int,
+    limits: RegressionLimits | None,
+) -> str:
+    source_spec = cast(ExperimentSpec, source.spec)
+    if source_spec.kind != "replay":
+        raise KitaruUsageError("Suite reruns require a replay experiment source.")
+    if source.status not in {"completed", "partial", "failed", "cancelled"}:
+        raise KitaruUsageError("Suite reruns require a terminal source attempt.")
+    if source_spec.candidate_project_id != binding.project_id:
+        raise KitaruUsageError(
+            "The source attempt belongs to a different Agent Project."
+        )
+    normalized_key = _required_string(idempotency_key, field_name="Idempotency key")
+    if normalized_key == source_spec.idempotency_key:
+        raise KitaruUsageError("A suite rerun requires a new idempotency key.")
+    if isinstance(repeats, bool) or repeats < 1:
+        raise KitaruUsageError("repeats must be >= 1.")
+    trial_count = source_spec.target_membership.count * repeats
+    if limits is not None and trial_count > limits.max_trials:
+        raise KitaruUsageError(
+            f"Suite rerun plans {trial_count} trials, exceeding "
+            f"max_trials={limits.max_trials}. No experiment was created."
+        )
+    return normalized_key
+
+
+def _suite_rerun_scoring_contract(
+    source: ExperimentRecord,
+    *,
+    binding: RegisteredAgentVersionBinding,
+    objective_scorers: Sequence[ScorerSnapshot],
+    protections: Sequence[ProtectionSnapshot],
+) -> tuple[list[ScorerSnapshot], VerdictPolicy | None]:
+    source_spec = cast(ExperimentSpec, source.spec)
+    objective_items = list(objective_scorers)
+    if source_spec.verdict_policy is None and source_spec.scorers:
+        raise KitaruUsageError(
+            "This suite predates verdict policies but has a frozen scorer contract. "
+            "Create a new scored replay suite before rerunning it."
+        )
+    source_objective = (
+        None
+        if source_spec.verdict_policy is None
+        else source_spec.verdict_policy.objective
+    )
+    if source_objective is None:
+        if objective_items:
+            raise KitaruUsageError(
+                "This suite has no objective scorer contract to rerun."
+            )
+        objective_snapshot = None
+        objective_minimum = None
+    else:
+        if len(objective_items) != 1:
+            raise KitaruUsageError(
+                "This suite rerun requires exactly one current objective "
+                "scorer callable."
+            )
+        objective_snapshot = objective_items[0]
+        if ScorerIdentity.from_snapshot(objective_snapshot) != source_objective.scorer:
+            raise KitaruMetadataConflictError(
+                "The current objective scorer does not match the source suite revision "
+                "and configuration."
+            )
+        objective_minimum = source_objective.minimum_mean
+
+    protection_items = list(protections)
+    actual_protections = {item.protection_id: item for item in protection_items}
+    if actual_protections != binding.manifest.protections:
+        raise KitaruMetadataConflictError(
+            "Current protection callables do not match the registered candidate "
+            "AgentVersion."
+        )
+    verdict_policy = VerdictPolicy.create(
+        objective=objective_snapshot,
+        minimum_mean=objective_minimum,
+        protections=protection_items,
+    )
+    scorer_snapshots = [
+        *([] if objective_snapshot is None else [objective_snapshot]),
+        *(item.scorer for item in protection_items),
+    ]
+    return scorer_snapshots, verdict_policy
+
+
+def validate_existing_suite_rerun(
+    existing: ExperimentRecord,
+    source: ExperimentRecord,
+    *,
+    binding: RegisteredAgentVersionBinding,
+    idempotency_key: str,
+    repeats: int,
+    objective_scorers: Sequence[ScorerSnapshot] = (),
+    protections: Sequence[ProtectionSnapshot] = (),
+    limits: RegressionLimits | None = None,
+) -> ReplayAttemptPlan:
+    """Validate retry inputs without rebuilding already-frozen replay plans."""
+    source_spec = cast(ExperimentSpec, source.spec)
+    normalized_key = _validate_suite_rerun_request(
+        source,
+        binding=binding,
+        idempotency_key=idempotency_key,
+        repeats=repeats,
+        limits=limits,
+    )
+    scorer_snapshots, verdict_policy = _suite_rerun_scoring_contract(
+        source,
+        binding=binding,
+        objective_scorers=objective_scorers,
+        protections=protections,
+    )
+    spec = existing.spec
+    if spec.kind != "replay":
+        raise KitaruMetadataConflictError(
+            "The idempotency key already belongs to a non-replay attempt."
+        )
+    expected = {
+        "source_experiment_id": source_spec.experiment_id,
+        "idempotency_key": normalized_key,
+        "candidate_project_id": binding.project_id,
+        "candidate_agent_version_id": binding.manifest.agent_version_id,
+        "candidate_pipeline_id": binding.pipeline_id,
+        "executable": ExperimentExecutable(entrypoint=binding.manifest.entrypoint),
+        "name": source_spec.name,
+        "display_name": source_spec.display_name,
+        "suite_key": source_spec.suite_key,
+        "target_membership": source_spec.target_membership,
+        "replay_inputs": source_spec.replay_inputs,
+        "at": source_spec.at,
+        "repeats": repeats,
+        "wait": True,
+        "on_error": source_spec.on_error,
+        "coverage": source_spec.coverage,
+        "planning_rows": source_spec.planning_rows,
+        "cohort_audit": source_spec.cohort_audit,
+        "scorers": scorer_snapshots,
+        "grounded_policy": source_spec.grounded_policy,
+        "verdict_policy": verdict_policy,
+        "regression_limits": limits,
+    }
+    if any(
+        getattr(spec, field_name) != value for field_name, value in expected.items()
+    ):
+        raise KitaruMetadataConflictError(
+            "The idempotent suite rerun request conflicts with its existing "
+            "immutable attempt."
+        )
+    return ReplayAttemptPlan(spec=spec)
+
+
+def plan_suite_rerun(
+    source: ExperimentRecord,
+    *,
+    binding: RegisteredAgentVersionBinding,
+    idempotency_key: str,
+    repeats: int = 1,
+    objective_scorers: Sequence[ScorerSnapshot] = (),
+    protections: Sequence[ProtectionSnapshot] = (),
+    limits: RegressionLimits | None = None,
+    created_at: str | None = None,
+    client: Any | None = None,
+    pipeline_verifier: Callable[[Any, Any], Any] | None = None,
+) -> ReplayAttemptPlan:
+    """Create a new immutable attempt from one verified replay suite source."""
+    from kitaru._agent_registration import verify_registered_pipeline
+
+    source_spec = cast(ExperimentSpec, source.spec)
+    normalized_key = _validate_suite_rerun_request(
+        source,
+        binding=binding,
+        idempotency_key=idempotency_key,
+        repeats=repeats,
+        limits=limits,
+    )
+
+    resolved_client = client or Client()
+    verifier = pipeline_verifier or verify_registered_pipeline
+    verifier(resolved_client, binding)
+    target_ids = load_target_membership(
+        source_spec.target_membership,
+        project_id=binding.project_id,
+        client=resolved_client,
+    )
+    row_ids = [row.target_execution_id for row in source_spec.planning_rows]
+    if row_ids != target_ids:
+        raise KitaruMetadataConflictError(
+            "The source planning rows do not match its verified target membership."
+        )
+    if any(
+        row.disposition in {"replay", "top"} and row.replay_plan is None
+        for row in source_spec.planning_rows
+    ):
+        raise KitaruMetadataConflictError(
+            "The source attempt is missing a frozen per-target replay plan."
+        )
+
+    scorer_snapshots, verdict_policy = _suite_rerun_scoring_contract(
+        source,
+        binding=binding,
+        objective_scorers=objective_scorers,
+        protections=protections,
+    )
+    timestamp = created_at or datetime.now(UTC).isoformat()
+    _timestamp(timestamp, field_name="created_at")
+    experiment_id = _experiment_id(binding.project_id, normalized_key)
+    if experiment_id == source_spec.experiment_id:
+        raise KitaruUsageError("A suite rerun must create a new experiment attempt.")
+
+    draft = ReplayAttemptDraft(
+        experiment_id=experiment_id,
+        name=source_spec.name,
+        display_name=source_spec.display_name,
+        suite_key=source_spec.suite_key,
+        source_experiment_id=source_spec.experiment_id,
+        idempotency_key=normalized_key,
+        created_at=timestamp,
+        candidate_project_id=binding.project_id,
+        candidate_agent_version_id=binding.manifest.agent_version_id,
+        candidate_pipeline_id=binding.pipeline_id,
+        executable=ExperimentExecutable(entrypoint=binding.manifest.entrypoint),
+        replay_inputs=deepcopy(source_spec.replay_inputs),
+        at=source_spec.at,
+        repeats=repeats,
+        wait=True,
+        on_error=source_spec.on_error,
+        coverage=deepcopy(source_spec.coverage),
+        planning_rows=deepcopy(source_spec.planning_rows),
+        cohort_audit=deepcopy(source_spec.cohort_audit),
+        scorers=scorer_snapshots,
+        grounded_policy=deepcopy(source_spec.grounded_policy),
+        verdict_policy=verdict_policy,
+        regression_limits=limits,
+    )
+    return ReplayAttemptPlan(
+        spec=_spec_from_draft(draft, deepcopy(source_spec.target_membership))
     )
 
 

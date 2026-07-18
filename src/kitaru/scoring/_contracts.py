@@ -8,6 +8,7 @@ import json
 import math
 from collections.abc import Callable, Mapping, Sequence
 from enum import StrEnum
+from functools import update_wrapper
 from typing import Any, Literal, Protocol, get_type_hints
 
 from pydantic import (
@@ -352,6 +353,69 @@ class ScorerDeclaration:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self._func(*args, **kwargs)
+
+
+class ProtectionSnapshot(BaseModel):
+    """Immutable, non-executable snapshot of one Agent protection."""
+
+    schema_version: Literal[1] = 1
+    protection_id: str
+    scorer: ScorerSnapshot
+    pass_rule: Literal["score == 1.0"] = "score == 1.0"
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("protection_id")
+    @classmethod
+    def _validate_protection_id(cls, value: str) -> str:
+        return require_string(value, field_name="Protection ID")
+
+
+class ProtectionDeclaration:
+    """Callable protection declaration retained only in the caller process."""
+
+    __wrapped__: ScorerDeclaration
+
+    def __init__(
+        self,
+        func: Callable[..., Any],
+        snapshot: ProtectionSnapshot,
+    ) -> None:
+        self.snapshot = snapshot
+        self.scorer = ScorerDeclaration(func, snapshot.scorer)
+        update_wrapper(self, self.scorer, updated=())
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.scorer(*args, **kwargs)
+
+    @classmethod
+    def from_callable(
+        cls,
+        func: Callable[..., Any],
+        *,
+        protection_id: str,
+        capability: ScorerCapability | Literal["pure", "grounded"],
+        name: str | None = None,
+        comparative: bool = False,
+        configuration: Mapping[str, JsonValue] | None = None,
+        grounded_capabilities: Sequence[GroundedCapabilityDeclaration] = (),
+    ) -> ProtectionDeclaration:
+        """Declare a protection while retaining no executable persisted value."""
+        scorer = ScorerSnapshot.from_callable(
+            func,
+            name=name or protection_id,
+            capability=capability,
+            comparative=comparative,
+            configuration=configuration,
+            grounded_capabilities=grounded_capabilities,
+        )
+        return cls(
+            func,
+            ProtectionSnapshot(
+                protection_id=protection_id,
+                scorer=scorer,
+            ),
+        )
 
 
 class ScoreObservationOutcome(BaseModel):

@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from kitaru._experiments import Experiment
     from kitaru.client import KitaruClient
     from kitaru.replay import ReplaySubmission
+    from kitaru.scoring import GroundedCapability, GroundedPolicySnapshot
+    from kitaru.scoring._evaluation import ScoreAttemptResult
 
 
 def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
@@ -666,9 +668,11 @@ class Execution:
         idempotency_key: str | None = None,
         comparative: bool | None = None,
         metadata: Mapping[str, Any] | None = None,
-        grounded_policy: Any | None = None,
-        grounded_capabilities: Mapping[str, Any] | None = None,
-    ) -> Any:
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        agent: Any | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
         """Evaluate this stored execution through the collection API."""
         return self._client.executions.evaluate(
             [self.exec_id],
@@ -680,6 +684,8 @@ class Execution:
             metadata=metadata,
             grounded_policy=grounded_policy,
             grounded_capabilities=grounded_capabilities,
+            agent=agent,
+            objective_minimum_mean=objective_minimum_mean,
         )
 
     @property

@@ -115,6 +115,7 @@ def _draft(
     *,
     idempotency_key: str = "request-1",
     name: str | None = None,
+    suite_key: str | None = None,
     flow_overrides: dict[str, Any] | None = None,
     created_at: str = "2026-07-17T09:00:00Z",
 ) -> Any:
@@ -129,6 +130,7 @@ def _draft(
         repeats=1,
         wait=False,
         name=name,
+        suite_key=suite_key,
         flow_overrides=flow_overrides,
         created_at=created_at,
         client=_RunClient({"run-1": run}),

@@ -116,9 +116,14 @@ def test_score_only_specs_reject_replay_fields_and_count_mismatches() -> None:
 def test_replay_specs_deserialize_unchanged_and_scorer_free_hash_is_stable() -> None:
     spec = _plan().spec
     old_json = spec.model_dump(mode="json", exclude={"scorers", "evidence_manifest"})
+    old_json.pop("source_experiment_id")
+    old_json.pop("grounded_policy")
+    old_json.pop("verdict_policy")
     reloaded = type(spec).model_validate(old_json)
 
     assert reloaded == spec
     assert reloaded.scorers == []
     assert reloaded.evidence_manifest is None
     assert experiment_request_hash(reloaded) == spec.request_hash
+    linked = spec.model_copy(update={"source_experiment_id": "exp-source"})
+    assert experiment_request_hash(linked) != spec.request_hash

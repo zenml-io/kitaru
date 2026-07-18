@@ -14,6 +14,7 @@ from kitaru._experiments._execution import (
     execute_replay_attempt,
     experiment_submission_id,
 )
+from kitaru._experiments._limits import RegressionLimits
 from kitaru._experiments._membership import (
     experiment_targets_execution,
     load_target_membership,
@@ -45,8 +46,10 @@ from kitaru._experiments._models import (
 )
 from kitaru._experiments._planning import (
     freeze_replay_attempt,
+    plan_suite_rerun,
     preplan_replay_attempt,
     thaw_replay_plan,
+    validate_existing_suite_rerun,
 )
 from kitaru._experiments._views import (
     Experiment,
@@ -71,6 +74,7 @@ __all__ = [
     "ForkCoverage",
     "FrozenReplayPlan",
     "InlineTargetMembership",
+    "RegressionLimits",
     "ReplayAttemptDraft",
     "ReplayAttemptPlan",
     "ReplayExperimentSpec",
@@ -89,11 +93,13 @@ __all__ = [
     "get_experiment_by_idempotency_key",
     "load_target_membership",
     "persist_target_membership",
+    "plan_suite_rerun",
     "preplan_replay_attempt",
     "record_experiment_outcomes",
     "reserve_experiment",
     "target_manifest_payload",
     "thaw_replay_plan",
     "transition_experiment_to_running",
+    "validate_existing_suite_rerun",
     "validate_experiment_record_transition",
 ]

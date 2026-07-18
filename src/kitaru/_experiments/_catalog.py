@@ -19,7 +19,11 @@ from kitaru._experiments._models import (
     _required_string,
 )
 from kitaru.errors import KitaruMetadataConflictError, KitaruStateError
-from kitaru.scoring import ScoreAggregateReference
+from kitaru.scoring import (
+    OperationalLimitOutcome,
+    ScoreAggregateReference,
+    VerdictResult,
+)
 
 
 def validate_experiment_record_transition(
@@ -68,6 +72,15 @@ def validate_experiment_record_transition(
         raise KitaruMetadataConflictError(
             "Experiment score aggregate references cannot be replaced."
         )
+    if (
+        previous.operational_limit is not None
+        and desired.operational_limit != previous.operational_limit
+    ):
+        raise KitaruMetadataConflictError(
+            "Experiment operational limit outcomes cannot be replaced."
+        )
+    if previous.verdict is not None and desired.verdict != previous.verdict:
+        raise KitaruMetadataConflictError("Experiment verdicts cannot be replaced.")
     for old, new in (
         (previous.errors, desired.errors),
         (previous.skips, desired.skips),
@@ -299,6 +312,8 @@ def finalize_experiment_outcomes(
     skips: Sequence[ExperimentIssue] = (),
     unverified_children: Sequence[ExperimentIssue] = (),
     aggregate_reference: ScoreAggregateReference | None = None,
+    operational_limit: OperationalLimitOutcome | None = None,
+    verdict_result: VerdictResult | None = None,
     at: str | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> ExperimentRecord:
@@ -321,6 +336,11 @@ def finalize_experiment_outcomes(
                     aggregate_reference is None
                     or record.score_aggregate == aggregate_reference
                 )
+                and (
+                    operational_limit is None
+                    or record.operational_limit == operational_limit
+                )
+                and (verdict_result is None or record.verdict == verdict_result)
             ):
                 return record
             raise KitaruMetadataConflictError(
@@ -338,6 +358,8 @@ def finalize_experiment_outcomes(
                 "skips": desired_skips,
                 "unverified_children": desired_unverified,
                 "score_aggregate": aggregate_reference or record.score_aggregate,
+                "operational_limit": operational_limit or record.operational_limit,
+                "verdict": verdict_result or record.verdict,
                 "finished_at": timestamp,
                 "updated_at": timestamp,
             },
@@ -357,19 +379,36 @@ def attach_experiment_score_aggregate(
     experiment_id: str,
     *,
     aggregate_reference: ScoreAggregateReference,
+    operational_limit: OperationalLimitOutcome | None = None,
+    verdict_result: VerdictResult | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> ExperimentRecord:
-    """Attach one immutable score aggregate reference to an attempt."""
+    """Atomically attach immutable score evidence and its optional verdict."""
 
     def update(record: ExperimentRecord) -> ExperimentRecord:
-        if record.score_aggregate == aggregate_reference:
+        if (
+            record.score_aggregate == aggregate_reference
+            and record.operational_limit == operational_limit
+            and record.verdict == verdict_result
+        ):
             return record
-        if record.score_aggregate is not None:
+        if record.score_aggregate is not None or record.verdict is not None:
             raise KitaruMetadataConflictError(
-                "Experiment score aggregate references cannot be replaced."
+                "Experiment score evidence or verdict cannot be replaced."
+            )
+        if (
+            record.operational_limit is not None
+            and record.operational_limit != operational_limit
+        ):
+            raise KitaruMetadataConflictError(
+                "Experiment operational limit outcomes cannot be replaced."
             )
         return record.model_copy(
-            update={"score_aggregate": aggregate_reference},
+            update={
+                "score_aggregate": aggregate_reference,
+                "operational_limit": operational_limit or record.operational_limit,
+                "verdict": verdict_result,
+            },
             deep=True,
         )
 

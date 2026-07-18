@@ -19,6 +19,7 @@ from kitaru._experiments import (
     ExperimentRecord,
     InlineTargetMembership,
     finalize_experiment,
+    freeze_replay_attempt,
     load_target_membership,
     persist_target_membership,
     record_experiment_outcomes,
@@ -31,10 +32,17 @@ from kitaru.errors import (
     KitaruMetadataConflictError,
     KitaruUsageError,
 )
+from kitaru.scoring import (
+    GroundedPolicySnapshot,
+    ProtectionSnapshot,
+    ScorerSnapshot,
+    VerdictPolicy,
+)
 from tests.experiments._helpers import (
     _Artifact,
     _ArtifactClient,
     _base_envelope,
+    _draft,
     _plan,
     _ProjectClient,
     _stored_metadata,
@@ -91,6 +99,107 @@ def test_hydrated_agent_lists_newest_first_and_rejects_ambiguous_names() -> None
         agent.get_experiment("Regression")
 
 
+def test_exact_suite_and_attempt_selection_ignores_display_names() -> None:
+    older_pending = ExperimentRecord.pending(
+        _plan(
+            idempotency_key="suite-older",
+            name="Shared display",
+            suite_key="regression-suite",
+            created_at="2026-07-17T09:00:00Z",
+        ).spec
+    )
+    older = ExperimentRecord.model_validate(
+        {
+            **older_pending.model_dump(mode="json"),
+            "status": "completed",
+            "started_at": "2026-07-17T09:01:00Z",
+            "finished_at": "2026-07-17T09:02:00Z",
+            "updated_at": "2026-07-17T09:02:00Z",
+            "counts": {
+                **older_pending.counts.model_dump(mode="json"),
+                "submitted": older_pending.counts.intended,
+                "verified": older_pending.counts.intended,
+            },
+        }
+    )
+    newest_terminal_pending = ExperimentRecord.pending(
+        _plan(
+            idempotency_key="suite-newest-terminal",
+            name="Shared display",
+            suite_key="regression-suite",
+            created_at="2026-07-17T10:00:00Z",
+        ).spec
+    )
+    newest_terminal = ExperimentRecord.model_validate(
+        {
+            **newest_terminal_pending.model_dump(mode="json"),
+            "status": "completed",
+            "started_at": "2026-07-17T10:01:00Z",
+            "finished_at": "2026-07-17T10:02:00Z",
+            "updated_at": "2026-07-17T10:02:00Z",
+            "counts": {
+                **newest_terminal_pending.counts.model_dump(mode="json"),
+                "submitted": newest_terminal_pending.counts.intended,
+                "verified": newest_terminal_pending.counts.intended,
+            },
+        }
+    )
+    newest_pending = ExperimentRecord.pending(
+        _plan(
+            idempotency_key="suite-running",
+            name="Shared display",
+            suite_key="regression-suite",
+            created_at="2026-07-17T11:00:00Z",
+        ).spec
+    )
+    envelope = _base_envelope().model_copy(
+        update={
+            "experiments": {
+                record.spec.experiment_id: record
+                for record in (older, newest_terminal, newest_pending)
+            },
+            "experiment_idempotency_index": {
+                record.spec.idempotency_key: record.spec.experiment_id
+                for record in (older, newest_terminal, newest_pending)
+            },
+        },
+        deep=True,
+    )
+    agent = _agent_info_from_project_model(
+        SimpleNamespace(
+            id="project-id",
+            name="support-agent",
+            display_name="Support Agent",
+            description="Support",
+            project_metadata=_stored_metadata(envelope),
+        ),
+        active_project_id="project-id",
+    )
+
+    assert agent is not None
+    assert agent.list_suite_attempts("regression-suite") == [
+        newest_pending,
+        newest_terminal,
+        older,
+    ]
+    assert (
+        agent.get_experiment_attempt(newest_pending.spec.experiment_id)
+        == newest_pending
+    )
+    assert agent.resolve_experiment_source("regression-suite") == newest_terminal
+    assert (
+        agent.get_experiment_by_idempotency_key(newest_terminal.spec.idempotency_key)
+        == newest_terminal
+    )
+    assert agent.resolve_experiment_source(older.spec.experiment_id) == older
+    assert agent.resolve_suite_rerun_request(
+        "regression-suite",
+        "new-rerun-key",
+    ) == (None, newest_terminal)
+    with pytest.raises(KitaruUsageError, match="ambiguous"):
+        agent.get_experiment("Shared display")
+
+
 def test_artifact_backed_membership_is_hash_verified_for_reads() -> None:
     execution_ids = [f"run-{index}" for index in range(501)]
     _, content_hash = target_manifest_payload(execution_ids)
@@ -143,6 +252,117 @@ def test_frontend_experiment_serialization_is_stable_and_omits_member_runs() -> 
     assert "runs" not in first
     assert "spec" not in first
     assert client.list_run_calls == []
+
+
+def _policy_score(_: object) -> bool:
+    return True
+
+
+def test_verdict_policy_round_trip_and_request_hash_sensitivity() -> None:
+    objective = ScorerSnapshot.from_callable(
+        _policy_score,
+        capability="pure",
+        name="quality",
+    )
+    protection = ProtectionSnapshot(
+        protection_id="safe-output",
+        scorer=ScorerSnapshot.from_callable(
+            _policy_score,
+            capability="pure",
+            name="safe-output",
+        ),
+    )
+    first_policy = VerdictPolicy.create(
+        objective=objective,
+        minimum_mean=0.8,
+        protections=[protection],
+    )
+    second_policy = VerdictPolicy.create(
+        objective=objective,
+        minimum_mean=0.9,
+        protections=[protection],
+    )
+    assert first_policy is not None
+    assert second_policy is not None
+
+    first = freeze_replay_attempt(
+        _draft().model_copy(
+            update={
+                "scorers": [objective, protection.scorer],
+                "verdict_policy": first_policy,
+            },
+            deep=True,
+        )
+    ).spec
+    second = freeze_replay_attempt(
+        _draft().model_copy(
+            update={
+                "scorers": [objective, protection.scorer],
+                "verdict_policy": second_policy,
+            },
+            deep=True,
+        )
+    ).spec
+
+    assert type(first).model_validate(first.model_dump(mode="json")) == first
+    assert first.request_hash != second.request_hash
+    assert _plan().spec.verdict_policy is None
+
+
+def test_replay_grounded_policy_is_frozen_and_hashed() -> None:
+    grounded_policy = GroundedPolicySnapshot(policy_id="read-only-v1")
+    baseline = _plan().spec
+    protected = freeze_replay_attempt(
+        _draft().model_copy(update={"grounded_policy": grounded_policy}, deep=True)
+    ).spec
+
+    assert protected.grounded_policy == grounded_policy
+    assert (
+        type(protected).model_validate(protected.model_dump(mode="json")) == protected
+    )
+    assert protected.request_hash != baseline.request_hash
+
+
+def test_replay_scorers_reject_duplicate_identities() -> None:
+    scorer = ScorerSnapshot.from_callable(
+        _policy_score,
+        capability="pure",
+        name="quality",
+    )
+
+    with pytest.raises(ValidationError, match="must be unique"):
+        freeze_replay_attempt(
+            _draft().model_copy(update={"scorers": [scorer, scorer]}, deep=True)
+        )
+
+
+def test_verdict_policy_rejects_unknown_and_duplicate_protections() -> None:
+    objective = ScorerSnapshot.from_callable(
+        _policy_score,
+        capability="pure",
+        name="quality",
+    )
+    protection = ProtectionSnapshot(
+        protection_id="safe-output",
+        scorer=ScorerSnapshot.from_callable(
+            _policy_score,
+            capability="pure",
+            name="safe-output",
+        ),
+    )
+    policy = VerdictPolicy.create(protections=[protection])
+    assert policy is not None
+
+    with pytest.raises(ValidationError, match="exactly match"):
+        freeze_replay_attempt(
+            _draft().model_copy(
+                update={"scorers": [objective], "verdict_policy": policy},
+                deep=True,
+            )
+        )
+
+    with pytest.raises(ValidationError, match="protection IDs must be unique"):
+        VerdictPolicy.create(protections=[protection, protection])
 
 
 def test_experiment_models_round_trip_and_reject_malformed_references() -> None:

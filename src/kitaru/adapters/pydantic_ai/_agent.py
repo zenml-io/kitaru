@@ -45,6 +45,7 @@ from kitaru._agent_registration import (
     resolve_registration_identity,
     type_import_path,
 )
+from kitaru._client._models import Execution
 from kitaru._config._agents import (
     AgentRegistrationResult,
     _AgentVersionManifest,
@@ -56,12 +57,15 @@ from kitaru._config._agents import (
 )
 from kitaru.cohort import CohortResult
 from kitaru.config import ImageInput
+from kitaru._experiments._limits import RegressionLimits, RegressionLimitTracker
 from kitaru._experiments import (
     ExperimentReplayResult,
     ReplayTrialPlan,
     execute_replay_attempt,
     freeze_replay_attempt,
+    plan_suite_rerun,
     preplan_replay_attempt,
+    validate_existing_suite_rerun,
 )
 from kitaru._config._projects import (
     _active_project_id,
@@ -71,8 +75,20 @@ from kitaru._config._projects import (
 )
 from kitaru._repository import find_repository_root
 from kitaru.replay import ExperimentReplayContext
-from kitaru.scoring import scorer_snapshot
-from kitaru.scoring._evaluation import ScoreEvaluationService
+from kitaru.scoring import (
+    GroundedCapability,
+    GroundedCapabilityDeclaration,
+    GroundedPolicySnapshot,
+    ProtectionDeclaration,
+    OperationalLimitReason,
+    ProtectionSnapshot,
+    scorer_snapshot,
+)
+from kitaru.scoring._evaluation import (
+    ScoreAttemptResult,
+    ScoreEvaluationService,
+    _scoring_contract,
+)
 from kitaru._source_aliases import build_pipeline_registration_name
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import (
@@ -1030,6 +1046,12 @@ def _verified_replay_execution_ids(result: ExperimentReplayResult) -> list[str]:
         if row.membership_verified is True
     ]
     expected_count = result.record.counts.verified
+    if expected_count == 0:
+        if submitted_ids:
+            raise KitaruStateError(
+                "Replay scoring received verified children outside the frozen counts."
+            )
+        return []
     if submitted_ids:
         if len(submitted_ids) != expected_count:
             raise KitaruStateError(
@@ -1074,10 +1096,6 @@ def _verified_replay_execution_ids(result: ExperimentReplayResult) -> list[str]:
     if len(recovered_ids) != expected_count:
         raise KitaruStateError(
             "Replay scoring could not recover the complete verified child set."
-        )
-    if not recovered_ids:
-        raise KitaruStateError(
-            "Replay scoring requires at least one verified child execution."
         )
     return recovered_ids
 
@@ -1257,6 +1275,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._message_history_lock = threading.Lock()
         self._registration_lock = threading.RLock()
         self._registered_state: _RegisteredAgentState | None = None
+        self._protections: dict[str, ProtectionDeclaration] = {}
         track(
             AnalyticsEvent.PYDANTIC_AI_WRAPPED,
             {
@@ -1303,13 +1322,77 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     def _uses_calls_strategy(self) -> bool:
         return self._checkpoint_strategy == "calls"
 
+    def protection(
+        self,
+        protection_id: str,
+        *,
+        capability: Literal["pure", "grounded"],
+        name: str | None = None,
+        comparative: bool = False,
+        configuration: Mapping[str, Any] | None = None,
+        grounded_capabilities: Sequence[GroundedCapabilityDeclaration] = (),
+    ) -> Callable[[Callable[..., Any]], ProtectionDeclaration]:
+        """Declare one Agent-pinned scorer with the fixed V1 passing rule."""
+        normalized_id = protection_id.strip()
+        if not normalized_id:
+            raise KitaruUsageError("Protection ID cannot be empty.")
+
+        def decorate(func: Callable[..., Any]) -> ProtectionDeclaration:
+            if normalized_id in self._protections:
+                raise KitaruUsageError(
+                    f"Protection ID {normalized_id!r} is already declared."
+                )
+            declaration = ProtectionDeclaration.from_callable(
+                func,
+                protection_id=normalized_id,
+                capability=capability,
+                name=name,
+                comparative=comparative,
+                configuration=configuration,
+                grounded_capabilities=grounded_capabilities,
+            )
+            self._protections[normalized_id] = declaration
+            return declaration
+
+        return decorate
+
+    def _protection_snapshots(self) -> dict[str, ProtectionSnapshot]:
+        return {
+            protection_id: declaration.snapshot
+            for protection_id, declaration in self._protections.items()
+        }
+
+    def _registered_protection_declarations(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[ProtectionDeclaration]:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            if project_id is not None and state.binding.project_id != project_id:
+                raise KitaruStateError(
+                    "The registered Agent belongs to a different Agent Project."
+                )
+            expected = state.binding.manifest.protections
+            actual = self._protection_snapshots()
+            if actual != expected:
+                raise KitaruMetadataConflictError(
+                    "In-memory protection callables do not match the registered "
+                    "AgentVersion snapshots."
+                )
+            return list(self._protections.values())
+
     def _registration_configuration(self) -> dict[str, Any]:
         cost_calculator = self._cost_calculator
         cost_calculator_name: str | None = None
         if cost_calculator is not None:
             cost_calculator_name = qualified_import_path(cost_calculator)
 
-        return {
+        configuration = {
             "adapter": "pydantic_ai",
             "name": self._name,
             "capture": _safe_mapping(vars(self._capture)),
@@ -1325,6 +1408,21 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             "allow_sync_tool_body_waits": self._allow_sync_tool_body_waits,
             "cost_calculator": cost_calculator_name,
         }
+        protections = sorted(
+            self._protection_snapshots().values(),
+            key=lambda snapshot: snapshot.protection_id,
+        )
+        if protections:
+            configuration["protections"] = [
+                (
+                    snapshot.protection_id,
+                    snapshot.scorer.revision,
+                    snapshot.scorer.configuration_hash,
+                    snapshot.pass_rule,
+                )
+                for snapshot in protections
+            ]
+        return configuration
 
     def _registration_worldview(self) -> dict[str, Any]:
         wrapped_model = self._model.wrapped
@@ -1629,6 +1727,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 or stored_manifest.configuration_hash != identity.configuration_hash
                 or stored_manifest.worldview_hash != identity.worldview_hash
                 or stored_manifest.entrypoint != identity.entrypoint
+                or stored_manifest.protections != self._protection_snapshots()
             ):
                 raise KitaruMetadataConflictError(
                     "The stored AgentVersion manifest contradicts its fingerprint."
@@ -1712,6 +1811,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     entrypoint=identity.entrypoint,
                     registered_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     source="registration",
+                    protections=self._protection_snapshots(),
                 )
 
             _reconcile_agent_version_registration(
@@ -1768,11 +1868,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
 
     def replay(
         self,
-        execution: str | CohortResult | Sequence[str],
+        execution: str | CohortResult | Sequence[str] | None = None,
         *,
-        at: str,
-        on_error: Literal["collect", "fail"],
-        uncovered_policy: Literal["fail", "skip", "top"],
+        experiment: str | None = None,
+        at: str | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+        uncovered_policy: Literal["fail", "skip", "top"] | None = None,
         idempotency_key: str,
         name: str | None = None,
         suite_key: str | None = None,
@@ -1789,8 +1890,15 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         cache: bool | None = None,
         retries: int | None = None,
         scorers: Sequence[Any] = (),
+        objective_minimum_mean: float | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        limits: RegressionLimits | None = None,
     ) -> ExperimentReplayResult:
-        """Create one durable replay attempt through the registered AgentVersion."""
+        """Create a fresh replay or rerun an immutable suite attempt."""
+        if (execution is None) == (experiment is None):
+            raise KitaruUsageError("Pass exactly one of execution or experiment.")
+
         flow_definition = self._registered_flow()
         with self._registration_lock:
             state = self._registered_state
@@ -1800,50 +1908,168 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 )
             binding = state.binding
 
-        scorer_items = list(scorers)
-        if isinstance(execution, CohortResult):
-            target_count = len(execution.exec_ids)
-        elif isinstance(execution, str):
-            target_count = 1
-        else:
-            target_count = len(execution)
-        if scorer_items and wait is False:
-            raise KitaruUsageError(
-                "Replay scoring requires terminal child evidence. Pass wait=True "
-                "or omit wait so scoring can wait for replay children."
-            )
-        resolved_wait = (
-            True
-            if scorer_items and wait is None
-            else target_count * repeats == 1
-            if wait is None
-            else wait
-        )
-
-        client = Client()
         self._preflight_registered_identity()
-        scorer_snapshots = [scorer_snapshot(item) for item in scorer_items]
-        draft = preplan_replay_attempt(
-            execution,
-            binding=binding,
-            at=at,
-            on_error=on_error,
-            uncovered_policy=uncovered_policy,
-            idempotency_key=idempotency_key,
-            repeats=repeats,
-            wait=resolved_wait,
-            name=name,
-            suite_key=suite_key,
-            acknowledge_partial_cohort=acknowledge_partial_cohort,
-            flow_overrides=flow_overrides,
-            checkpoint_overrides=checkpoint_overrides,
-            invocation_overrides=invocation_overrides,
-            skip=skip,
-            client=client,
-            scorers=scorer_snapshots,
+        protection_items = self._registered_protection_declarations()
+        objective_items = list(scorers)
+        scorer_items = [
+            *objective_items,
+            *(item.scorer for item in protection_items),
+        ]
+        client = Client()
+        resolved_wait: bool | None = None
+
+        if experiment is not None:
+            if any(not callable(item) for item in objective_items):
+                raise KitaruUsageError(
+                    "Suite rerun objective scorers must be current executable callables."
+                )
+            forbidden = {
+                "at": at,
+                "on_error": on_error,
+                "uncovered_policy": uncovered_policy,
+                "name": name,
+                "suite_key": suite_key,
+                "flow_overrides": flow_overrides,
+                "checkpoint_overrides": checkpoint_overrides,
+                "invocation_overrides": invocation_overrides,
+                "skip": skip,
+                "objective_minimum_mean": objective_minimum_mean,
+                "grounded_policy": grounded_policy,
+            }
+            supplied = [key for key, value in forbidden.items() if value is not None]
+            if acknowledge_partial_cohort:
+                supplied.append("acknowledge_partial_cohort")
+            if supplied:
+                raise KitaruUsageError(
+                    "Suite reruns copy frozen source settings; do not pass: "
+                    + ", ".join(sorted(set(supplied)))
+                    + "."
+                )
+            if wait is False:
+                raise KitaruUsageError(
+                    "Suite reruns require terminal evidence and cannot use wait=False."
+                )
+            project = _get_project_by_exact_selector(client, binding.project_id)
+            agent_info = _agent_info_from_project_model(
+                project,
+                active_project_id=_active_project_id(client),
+            )
+            if agent_info is None:
+                raise KitaruStateError(
+                    "The registered Agent Project has no readable Agent metadata."
+                )
+            existing, source = agent_info.resolve_suite_rerun_request(
+                experiment,
+                idempotency_key,
+            )
+            objective_snapshots = [scorer_snapshot(item) for item in objective_items]
+            protection_snapshots = [item.snapshot for item in protection_items]
+            if existing is None:
+                plan = plan_suite_rerun(
+                    source,
+                    binding=binding,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    objective_scorers=objective_snapshots,
+                    protections=protection_snapshots,
+                    limits=limits,
+                    client=client,
+                )
+            else:
+                plan = validate_existing_suite_rerun(
+                    existing,
+                    source,
+                    binding=binding,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    objective_scorers=objective_snapshots,
+                    protections=protection_snapshots,
+                    limits=limits,
+                )
+            resolved_grounded_policy = plan.spec.grounded_policy
+        else:
+            assert execution is not None
+            if limits is not None:
+                raise KitaruUsageError(
+                    "Regression limits are available only when rerunning a suite "
+                    "through experiment=."
+                )
+            if at is None or on_error is None or uncovered_policy is None:
+                raise KitaruUsageError(
+                    "Fresh replays require at, on_error, and uncovered_policy."
+                )
+            scorer_items, scorer_snapshots, verdict_policy = _scoring_contract(
+                objective_items,
+                protection_items,
+                objective_minimum_mean=objective_minimum_mean,
+            )
+            if isinstance(execution, CohortResult):
+                target_count = len(execution.exec_ids)
+            elif isinstance(execution, str):
+                target_count = 1
+            else:
+                target_count = len(execution)
+            if scorer_items and wait is False:
+                raise KitaruUsageError(
+                    "Replay scoring requires terminal child evidence. Pass wait=True "
+                    "or omit wait so scoring can wait for replay children."
+                )
+            resolved_wait = (
+                True
+                if scorer_items and wait is None
+                else target_count * repeats == 1
+                if wait is None
+                else wait
+            )
+            draft = preplan_replay_attempt(
+                execution,
+                binding=binding,
+                at=at,
+                on_error=on_error,
+                uncovered_policy=uncovered_policy,
+                idempotency_key=idempotency_key,
+                repeats=repeats,
+                wait=resolved_wait,
+                name=name,
+                suite_key=suite_key,
+                acknowledge_partial_cohort=acknowledge_partial_cohort,
+                flow_overrides=flow_overrides,
+                checkpoint_overrides=checkpoint_overrides,
+                invocation_overrides=invocation_overrides,
+                skip=skip,
+                client=client,
+                scorers=scorer_snapshots,
+                grounded_policy=grounded_policy,
+                verdict_policy=verdict_policy,
+            )
+            with _temporary_active_project(binding.project_id):
+                plan = freeze_replay_attempt(draft, client=client)
+            resolved_grounded_policy = grounded_policy
+
+        spec = plan.spec
+        regression_limits = spec.regression_limits
+        if (
+            regression_limits is not None
+            and regression_limits.has_operational_limits
+            and not scorer_items
+        ):
+            raise KitaruUsageError(
+                "Cost, token, and duration limits require a graded suite rerun."
+            )
+        limit_tracker = (
+            RegressionLimitTracker(regression_limits)
+            if regression_limits is not None
+            and regression_limits.has_operational_limits
+            else None
         )
-        with _temporary_active_project(binding.project_id):
-            plan = freeze_replay_attempt(draft, client=client)
+        usage_client: Any | None = None
+        replay_inputs = spec.replay_inputs
+        effective_flow_overrides = replay_inputs.flow_overrides
+        effective_checkpoint_overrides = replay_inputs.checkpoint_overrides
+        effective_invocation_overrides = replay_inputs.invocation_overrides
+        effective_skip = replay_inputs.skip
+        effective_at = spec.at
+        effective_wait = spec.wait
 
         def submit_trial(
             *,
@@ -1856,13 +2082,13 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             ):
                 return flow_definition.replay(
                     trial.target_execution_id,
-                    at=at,
-                    flow_overrides=flow_overrides,
-                    checkpoint_overrides=checkpoint_overrides,
-                    invocation_overrides=invocation_overrides,
-                    skip=skip,
+                    at=effective_at,
+                    flow_overrides=effective_flow_overrides,
+                    checkpoint_overrides=effective_checkpoint_overrides,
+                    invocation_overrides=effective_invocation_overrides,
+                    skip=effective_skip,
                     tag=tag,
-                    wait=resolved_wait,
+                    wait=effective_wait,
                     on_error="collect",
                     stack=stack,
                     image=image,
@@ -1871,7 +2097,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     replay_submission_id=submission_id,
                     preplanned_replay_plan=replay_plan,
                     experiment_context=ExperimentReplayContext(
-                        experiment_id=plan.spec.experiment_id,
+                        experiment_id=spec.experiment_id,
                         target_execution_id=trial.target_execution_id,
                         repeat_index=trial.repeat_index,
                         parent_execution_id=trial.parent_execution_id,
@@ -1879,10 +2105,39 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     ),
                 )
 
+        def observe_trial(
+            _trial: ReplayTrialPlan, child: Any | None
+        ) -> OperationalLimitReason | None:
+            nonlocal usage_client
+            assert limit_tracker is not None
+            summaries: list[Mapping[str, Any] | None] = []
+            if child is not None:
+                for row in child.results:
+                    try:
+                        if usage_client is None:
+                            usage_client = kitaru.KitaruClient()
+                        summaries.append(
+                            usage_client.executions._get_llm_usage_summary(
+                                row.replay_exec_id
+                            )
+                        )
+                    except Exception:
+                        summaries.append(None)
+            return limit_tracker.observe_trial(summaries)
+
         result = execute_replay_attempt(
             plan,
             submit_trial=submit_trial,
             tag=tag,
+            observe_trial=None if limit_tracker is None else observe_trial,
+            finalize_operational_limit=(
+                None
+                if limit_tracker is None
+                else lambda remaining, started_at: limit_tracker.outcome(
+                    remaining_trials=remaining,
+                    started_at=started_at,
+                )
+            ),
             client_factory=lambda: client,
         )
         if scorer_items and result.record.score_aggregate is None:
@@ -1891,12 +2146,44 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 project_id=binding.project_id,
                 client=client,
             ).evaluate_existing_attempt(
-                experiment_id=plan.spec.experiment_id,
+                experiment_id=spec.experiment_id,
                 executions=verified_child_ids,
                 scorers=scorer_items,
+                record=result.record,
+                grounded_policy=resolved_grounded_policy,
+                grounded_capabilities=grounded_capabilities,
             )
             result = replace(result, record=score_result.record)
         return result
+
+    def evaluate(
+        self,
+        executions: str | Execution | Sequence[str | Execution],
+        scorers: Sequence[Any] | Any = (),
+        *,
+        name: str | None = None,
+        suite_key: str | None = None,
+        idempotency_key: str | None = None,
+        comparative: bool | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
+        """Evaluate stored executions with this AgentVersion's protections."""
+        return kitaru.KitaruClient().executions.evaluate(
+            executions,
+            scorers,
+            name=name,
+            suite_key=suite_key,
+            idempotency_key=idempotency_key,
+            comparative=comparative,
+            metadata=metadata,
+            grounded_policy=grounded_policy,
+            grounded_capabilities=grounded_capabilities,
+            agent=self,
+            objective_minimum_mean=objective_minimum_mean,
+        )
 
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:

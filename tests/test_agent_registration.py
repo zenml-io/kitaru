@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, cast
 from unittest.mock import MagicMock, Mock
 
 import pytest
+from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai import mcp as pydantic_ai_mcp
 from pydantic_ai.models.test import TestModel
@@ -39,12 +40,17 @@ from kitaru.errors import (
 )
 from kitaru.flow import flow
 from kitaru.replay import ExperimentReplayContext
+from kitaru.scoring import ProtectionDeclaration
 
 REGISTERABLE_AGENT: KitaruAgent[Any, str] | None = None
 
 
 async def _importable_tool(value: str) -> str:
     return value
+
+
+def _registration_protection(_: object) -> bool:
+    return True
 
 
 def _closure_tool(config: dict[str, str]) -> Any:
@@ -1095,6 +1101,11 @@ def test_registration_is_idempotent_and_does_not_invoke_agent(
 
     model = TestModel()
     durable_agent = KitaruAgent(Agent(model, name="support-agent", output_type=str))
+    durable_agent.protection(
+        "safe-output",
+        capability="pure",
+        configuration={"rule_version": 1},
+    )(_registration_protection)
     REGISTERABLE_AGENT = durable_agent
     monkeypatch.setattr(agent_module, "Client", lambda: client)
     monkeypatch.setattr(agent_module, "find_repository_root", Path.cwd)
@@ -1126,6 +1137,12 @@ def test_registration_is_idempotent_and_does_not_invoke_agent(
     assert first.created is True
     assert second.agent_version.pipeline_id == "pipeline-id"
     assert second.created is False
+    assert list(first.agent_version.protections) == ["safe-output"]
+    persisted = client.metadata["kitaru"]["agent_versions"]["pipeline-id"][
+        "protections"
+    ]["safe-output"]
+    assert persisted["pass_rule"] == "score == 1.0"
+    assert "callable" not in str(persisted).lower()
     assert flow._pipeline.register_calls == 1
     assert client.update_calls
     assert len(client.update_calls) == 1
@@ -1135,6 +1152,59 @@ def test_registration_is_idempotent_and_does_not_invoke_agent(
         call["name"].startswith("equals:") and call["project"] == "project-id"
         for call in client.list_calls
     )
+
+
+def test_protection_identity_changes_registration_configuration() -> None:
+    first = KitaruAgent(Agent(TestModel(), name="support-agent", output_type=str))
+    second = KitaruAgent(Agent(TestModel(), name="support-agent", output_type=str))
+    second.protection("safe-output", capability="pure")(_registration_protection)
+
+    assert "protections" not in first._registration_configuration()
+    assert hash_registration_value(first._registration_configuration()) != (
+        hash_registration_value(second._registration_configuration())
+    )
+
+
+def test_agent_version_rejects_mismatched_protection_map_keys() -> None:
+    declaration = ProtectionDeclaration.from_callable(
+        _registration_protection,
+        protection_id="safe-output",
+        capability="pure",
+    )
+    payload = _manifest().model_dump(mode="json")
+    payload["future_namespace"] = {"preserve": True}
+    round_tripped = _AgentVersionManifest.model_validate(payload)
+    assert round_tripped.model_dump(mode="json")["future_namespace"] == {
+        "preserve": True
+    }
+
+    payload["protections"] = {"wrong-key": declaration.snapshot.model_dump(mode="json")}
+    with pytest.raises(ValidationError, match="map keys"):
+        _AgentVersionManifest.model_validate(payload)
+
+
+def test_registered_protection_callable_must_match_manifest() -> None:
+    agent = KitaruAgent(Agent(TestModel(), name="support-agent", output_type=str))
+    declaration = agent.protection("safe-output", capability="pure")(
+        _registration_protection
+    )
+    manifest = _manifest().model_copy(
+        update={"protections": {"safe-output": declaration.snapshot}},
+        deep=True,
+    )
+    agent._registered_state = cast(
+        Any,
+        SimpleNamespace(
+            binding=RegisteredAgentVersionBinding(
+                project_id="project-id",
+                manifest=manifest,
+            )
+        ),
+    )
+    agent._protections.clear()
+
+    with pytest.raises(KitaruMetadataConflictError, match="do not match"):
+        agent._registered_protection_declarations(project_id="project-id")
 
 
 def test_local_registration_rejects_different_logical_agent_before_writes(
@@ -1519,7 +1589,20 @@ def test_registered_agent_replay_builds_one_durable_attempt(
         lambda _project: nullcontext(),
     )
     draft = object()
-    plan = SimpleNamespace(spec=SimpleNamespace(experiment_id="exp-1"))
+    plan = SimpleNamespace(
+        spec=SimpleNamespace(
+            experiment_id="exp-1",
+            regression_limits=None,
+            replay_inputs=SimpleNamespace(
+                flow_overrides=None,
+                checkpoint_overrides=None,
+                invocation_overrides=None,
+                skip=None,
+            ),
+            at="checkpoint",
+            wait=False,
+        )
+    )
     preplan = Mock(return_value=draft)
     freeze = Mock(return_value=plan)
     monkeypatch.setattr(agent_module, "preplan_replay_attempt", preplan)
@@ -1531,8 +1614,12 @@ def test_registered_agent_replay_builds_one_durable_attempt(
         *,
         submit_trial: Any,
         tag: str | None,
+        observe_trial: Any,
+        finalize_operational_limit: Any,
         client_factory: Any,
     ) -> Any:
+        assert observe_trial is None
+        assert finalize_operational_limit is None
         assert received_plan is plan
         assert tag == "review"
         assert client_factory() is client
@@ -1583,6 +1670,178 @@ def test_registered_agent_replay_builds_one_durable_attempt(
         root_execution_id="root-1",
     )
     assert replay_call.kwargs["replay_submission_id"] == "rs-exp-1"
+
+
+def test_registered_agent_rerun_uses_current_candidate_and_frozen_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    durable_agent = KitaruAgent(
+        Agent(TestModel(), name="registered-agent", output_type=str)
+    )
+    binding = RegisteredAgentVersionBinding(
+        project_id="project-id",
+        manifest=_manifest("current-pipeline"),
+    )
+    durable_agent._registered_state = cast(Any, SimpleNamespace(binding=binding))
+    flow_definition = MagicMock()
+    flow_definition._registered_preflight_scope.side_effect = lambda _callback: (
+        nullcontext()
+    )
+    monkeypatch.setattr(durable_agent, "_registered_flow", lambda: flow_definition)
+    monkeypatch.setattr(
+        durable_agent,
+        "_preflight_registered_identity",
+        Mock(),
+    )
+    client = object()
+    monkeypatch.setattr(agent_module, "Client", lambda: client)
+    monkeypatch.setattr(
+        agent_module,
+        "_get_project_by_exact_selector",
+        lambda received_client, project_id: (
+            received_client is client and project_id == "project-id" and object()
+        ),
+    )
+    monkeypatch.setattr(
+        agent_module, "_active_project_id", lambda _client: "project-id"
+    )
+    source = SimpleNamespace(
+        spec=SimpleNamespace(
+            experiment_id="exp-source",
+            candidate_pipeline_id="old-pipeline",
+        )
+    )
+    source_before = deepcopy(source)
+    agent_info = SimpleNamespace(
+        resolve_suite_rerun_request=Mock(return_value=(None, source)),
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "_agent_info_from_project_model",
+        lambda _project, active_project_id: (
+            agent_info if active_project_id == "project-id" else None
+        ),
+    )
+    frozen_inputs = SimpleNamespace(
+        flow_overrides={"model": "frozen"},
+        checkpoint_overrides={"checkpoint": {"output": "frozen"}},
+        invocation_overrides={},
+        skip=["later"],
+    )
+    plan = SimpleNamespace(
+        spec=SimpleNamespace(
+            experiment_id="exp-rerun",
+            kind="replay",
+            source_experiment_id="exp-source",
+            suite_key="regression-suite",
+            request_hash="sha256:" + "1" * 64,
+            at="checkpoint",
+            wait=True,
+            replay_inputs=frozen_inputs,
+            grounded_policy=None,
+            regression_limits=None,
+        )
+    )
+    planner = Mock(return_value=plan)
+    monkeypatch.setattr(agent_module, "plan_suite_rerun", planner)
+    result = SimpleNamespace(
+        record=SimpleNamespace(score_aggregate=None),
+    )
+
+    execute_calls = 0
+
+    def execute(
+        received_plan: Any,
+        *,
+        submit_trial: Any,
+        tag: str | None,
+        observe_trial: Any,
+        finalize_operational_limit: Any,
+        client_factory: Any,
+    ) -> Any:
+        assert observe_trial is None
+        assert finalize_operational_limit is None
+        nonlocal execute_calls
+        execute_calls += 1
+        assert client_factory() is client
+        assert tag == "rerun"
+        if execute_calls == 2:
+            assert received_plan.spec is plan.spec
+            return result
+        assert received_plan is plan
+        submitted = submit_trial(
+            trial=SimpleNamespace(
+                target_execution_id="old-child",
+                repeat_index=0,
+                parent_execution_id="old-child",
+                root_execution_id="old-root",
+            ),
+            replay_plan=object(),
+            submission_id="rs-exp-rerun",
+        )
+        assert submitted == "current-child"
+        return result
+
+    monkeypatch.setattr(agent_module, "execute_replay_attempt", execute)
+    flow_definition.replay.return_value = "current-child"
+
+    with pytest.raises(KitaruUsageError, match="executable callables"):
+        durable_agent.replay(
+            experiment="regression-suite",
+            idempotency_key="snapshot-only",
+            scorers=[SimpleNamespace(snapshot=object())],
+        )
+    planner.assert_not_called()
+    agent_info.resolve_suite_rerun_request.assert_not_called()
+
+    actual = durable_agent.replay(
+        experiment="regression-suite",
+        idempotency_key="rerun-request",
+        repeats=2,
+        tag="rerun",
+    )
+
+    assert actual is result
+    planner.assert_called_once()
+    planner_call = planner.call_args
+    assert planner_call.args == (source,)
+    assert planner_call.kwargs["binding"] == binding
+    assert planner_call.kwargs["repeats"] == 2
+    assert planner_call.kwargs["protections"] == []
+    assert agent_info.resolve_suite_rerun_request.call_args.args == (
+        "regression-suite",
+        "rerun-request",
+    )
+    replay_call = flow_definition.replay.call_args
+    assert replay_call.args == ("old-child",)
+    assert replay_call.kwargs["at"] == "checkpoint"
+    assert replay_call.kwargs["wait"] is True
+    assert replay_call.kwargs["flow_overrides"] == {"model": "frozen"}
+    assert replay_call.kwargs["checkpoint_overrides"] == {
+        "checkpoint": {"output": "frozen"}
+    }
+    assert source == source_before
+    assert source.spec.candidate_pipeline_id == "old-pipeline"
+    assert binding.pipeline_id == "current-pipeline"
+
+    existing = SimpleNamespace(spec=plan.spec)
+    agent_info.resolve_suite_rerun_request.return_value = (existing, source)
+    validator = Mock(return_value=plan)
+    monkeypatch.setattr(agent_module, "validate_existing_suite_rerun", validator)
+    flow_definition.replay.reset_mock()
+
+    retried = durable_agent.replay(
+        experiment="regression-suite",
+        idempotency_key="rerun-request",
+        repeats=2,
+        tag="rerun",
+    )
+
+    assert retried is result
+    assert execute_calls == 2
+    flow_definition.replay.assert_not_called()
+    planner.assert_called_once()
+    validator.assert_called_once()
 
 
 def test_unregistered_direct_native_and_replay_paths_fail_before_body() -> None:

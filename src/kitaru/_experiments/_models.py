@@ -20,14 +20,19 @@ from pydantic import (
     model_validator,
 )
 
+from kitaru._experiments._limits import RegressionLimits
 from kitaru.errors import KitaruUsageError
 from kitaru.replay import ReplayPlan, ReplayPlanDocument
 from kitaru.replay_context import ReplayRuntimeContext
 from kitaru.scoring import (
     EvidenceManifestReference,
     GroundedPolicySnapshot,
+    OperationalLimitOutcome,
     ScoreAggregateReference,
+    ScorerIdentity,
     ScorerSnapshot,
+    VerdictPolicy,
+    VerdictResult,
 )
 
 _INLINE_TARGET_LIMIT = 500
@@ -342,6 +347,7 @@ class ExperimentSpec(BaseModel):
     name: str | None = None
     display_name: str
     suite_key: str
+    source_experiment_id: str | None = None
     idempotency_key: str
     created_at: str
     candidate_project_id: str
@@ -359,6 +365,9 @@ class ExperimentSpec(BaseModel):
     cohort_audit: CohortAudit | None = None
     scorers: list[ScorerSnapshot] = Field(default_factory=list)
     evidence_manifest: EvidenceManifestReference | None = None
+    grounded_policy: GroundedPolicySnapshot | None = None
+    verdict_policy: VerdictPolicy | None = None
+    regression_limits: RegressionLimits | None = None
     request_hash: str
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -376,6 +385,13 @@ class ExperimentSpec(BaseModel):
     @classmethod
     def _validate_required_strings(cls, value: str) -> str:
         return _required_string(value, field_name="Experiment field")
+
+    @field_validator("source_experiment_id")
+    @classmethod
+    def _validate_source_experiment_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _required_string(value, field_name="Source experiment ID")
 
     @field_validator("name")
     @classmethod
@@ -401,6 +417,11 @@ class ExperimentSpec(BaseModel):
                 "Candidate AgentVersion and Pipeline IDs must be identical."
             )
         count = self.target_membership.count
+        if (
+            self.regression_limits is not None
+            and count * self.repeats > self.regression_limits.max_trials
+        ):
+            raise ValueError("Replay trial count exceeds the frozen max_trials limit.")
         if self.coverage.selected != count or len(self.planning_rows) != count:
             raise ValueError(
                 "Coverage, planning rows, and target membership must have equal counts."
@@ -424,6 +445,7 @@ class ExperimentSpec(BaseModel):
             for row in self.planning_rows
         ):
             raise ValueError("Uncovered targets require an explicit disposition.")
+        _validate_verdict_scorers(self.scorers, self.verdict_policy)
         expected = experiment_request_hash(self)
         if self.request_hash != expected:
             raise ValueError(
@@ -461,6 +483,7 @@ class ScoreExperimentSpec(BaseModel):
     scorers: list[ScorerSnapshot] = Field(min_length=1)
     evidence_manifest: EvidenceManifestReference
     request_inputs: ScoreRequestInputs = Field(default_factory=ScoreRequestInputs)
+    verdict_policy: VerdictPolicy | None = None
     request_hash: str
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -505,6 +528,7 @@ class ScoreExperimentSpec(BaseModel):
             raise ValueError(
                 "Score experiment scorers must be unique by revision/config."
             )
+        _validate_verdict_scorers(self.scorers, self.verdict_policy)
         expected = experiment_request_hash(self)
         if self.request_hash != expected:
             raise ValueError(
@@ -574,6 +598,8 @@ class ExperimentRecord(BaseModel):
     skips: list[ExperimentIssue] = Field(default_factory=list)
     unverified_children: list[ExperimentIssue] = Field(default_factory=list)
     score_aggregate: ScoreAggregateReference | None = None
+    operational_limit: OperationalLimitOutcome | None = None
+    verdict: VerdictResult | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -608,6 +634,28 @@ class ExperimentRecord(BaseModel):
         for summaries in (self.errors, self.skips, self.unverified_children):
             if len(summaries) > _MAX_ISSUE_SUMMARIES:
                 raise ValueError("Experiment issue summaries exceed the bounded limit.")
+        if self.verdict is not None:
+            if self.score_aggregate is None or self.spec.verdict_policy is None:
+                raise ValueError(
+                    "Verdicts require a frozen policy and score aggregate."
+                )
+            if (
+                self.verdict.experiment_id != self.spec.experiment_id
+                or self.verdict.aggregate_artifact_version_id
+                != self.score_aggregate.artifact_version_id
+                or self.verdict.aggregate_sha256 != self.score_aggregate.sha256
+                or self.verdict.policy_sha256 != self.spec.verdict_policy.content_hash
+                or self.verdict.operational_limit != self.operational_limit
+            ):
+                raise ValueError(
+                    "Verdict references must match the record's immutable evidence."
+                )
+        if (
+            self.spec.verdict_policy is not None
+            and self.score_aggregate is not None
+            and self.verdict is None
+        ):
+            raise ValueError("A graded score aggregate requires an immutable verdict.")
         if self.status == "pending":
             if self.started_at is not None or self.finished_at is not None:
                 raise ValueError(
@@ -714,6 +762,7 @@ class ReplayAttemptDraft(BaseModel):
     name: str | None
     display_name: str
     suite_key: str
+    source_experiment_id: str | None = None
     idempotency_key: str
     created_at: str
     candidate_project_id: str
@@ -729,6 +778,9 @@ class ReplayAttemptDraft(BaseModel):
     planning_rows: list[TargetPlanningRow]
     cohort_audit: CohortAudit | None
     scorers: list[ScorerSnapshot] = Field(default_factory=list)
+    grounded_policy: GroundedPolicySnapshot | None = None
+    verdict_policy: VerdictPolicy | None = None
+    regression_limits: RegressionLimits | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -748,6 +800,7 @@ class ReplayAttemptDraft(BaseModel):
             row.checkpoint_covered for row in self.planning_rows
         ):
             raise ValueError("Coverage count must match target planning rows.")
+        _validate_verdict_scorers(self.scorers, self.verdict_policy)
         return self
 
     def iter_trials(self) -> Iterator[ReplayTrialPlan]:
@@ -794,8 +847,31 @@ def experiment_request_hash(spec: ExperimentSpecRecord) -> str:
         exclude={"request_hash", "experiment_id", "created_at"},
     )
     if payload.get("kind") == "replay":
+        if payload.get("source_experiment_id") is None:
+            payload.pop("source_experiment_id", None)
         if payload.get("scorers") == []:
             payload.pop("scorers")
         if payload.get("evidence_manifest") is None:
             payload.pop("evidence_manifest")
+        if payload.get("regression_limits") is None:
+            payload.pop("regression_limits", None)
+    if payload.get("grounded_policy") is None:
+        payload.pop("grounded_policy", None)
+    if payload.get("verdict_policy") is None:
+        payload.pop("verdict_policy")
     return _sha256(_canonical_json(payload))
+
+
+def _validate_verdict_scorers(
+    scorers: Sequence[ScorerSnapshot],
+    policy: VerdictPolicy | None,
+) -> None:
+    scorer_identities = [ScorerIdentity.from_snapshot(item) for item in scorers]
+    if len(scorer_identities) != len(set(scorer_identities)):
+        raise ValueError("Experiment scorers must be unique by revision/config.")
+    if policy is None:
+        return
+    if scorer_identities != policy.scorer_identities:
+        raise ValueError(
+            "Verdict policy roles must exactly match the frozen scorer identities."
+        )

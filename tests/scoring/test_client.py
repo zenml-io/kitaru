@@ -6,9 +6,12 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
+import pytest
+
 import kitaru.scoring as scoring_pkg
 from kitaru._client._models import Execution, ExecutionStatus, ScoreFilter
 from kitaru.client import _ExecutionsAPI
+from kitaru.errors import KitaruUsageError
 from kitaru.scoring import (
     Score,
     ScoreObservation,
@@ -29,7 +32,13 @@ MANIFEST_HASH = f"sha256:{'3' * 64}"
 class _ClientRef:
     def __init__(self) -> None:
         self._project = "project-id"
-        self.zen = SimpleNamespace(active_project=SimpleNamespace(id="project-id"))
+        self.zen = SimpleNamespace(
+            active_project=SimpleNamespace(id="project-id"),
+            get_project=lambda *_args, **_kwargs: SimpleNamespace(
+                id="project-id",
+                project_metadata={},
+            ),
+        )
 
     def _client(self) -> Any:
         return self.zen
@@ -98,6 +107,42 @@ def test_collection_evaluate_uses_shared_service(monkeypatch: Any) -> None:
     assert calls[1]["kwargs"]["name"] == "Check"
 
 
+def test_evaluate_requires_agent_when_a_non_default_version_is_protected(
+    monkeypatch: Any,
+) -> None:
+    import kitaru._config._agents as agents_module
+
+    envelope = SimpleNamespace(
+        agent_versions={
+            "default": SimpleNamespace(protections={}),
+            "protected": SimpleNamespace(protections={"safe-output": object()}),
+        }
+    )
+    monkeypatch.setattr(
+        agents_module,
+        "_parse_agent_metadata",
+        lambda *_args, **_kwargs: envelope,
+    )
+    api = _ExecutionsAPI(cast(Any, _ClientRef()))
+
+    with pytest.raises(KitaruUsageError, match="declares protections"):
+        api.evaluate("run-1", _score)
+
+
+def test_usage_summary_read_does_not_hydrate_execution_details() -> None:
+    calls: list[tuple[str, bool]] = []
+
+    class ClientRef(_ClientRef):
+        def _get_pipeline_run(self, exec_id: str, *, hydrate: bool) -> Any:
+            calls.append((exec_id, hydrate))
+            return SimpleNamespace(run_metadata={})
+
+    api = _ExecutionsAPI(cast(Any, ClientRef()))
+
+    assert api._get_llm_usage_summary("run-1") is None
+    assert calls == [("run-1", False)]
+
+
 def test_execution_evaluate_delegates_to_collection_api() -> None:
     calls: list[tuple[Any, Any, dict[str, Any]]] = []
 
@@ -122,6 +167,8 @@ def test_execution_evaluate_delegates_to_collection_api() -> None:
                 "metadata": None,
                 "grounded_policy": None,
                 "grounded_capabilities": None,
+                "agent": None,
+                "objective_minimum_mean": None,
             },
         )
     ]

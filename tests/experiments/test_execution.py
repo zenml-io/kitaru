@@ -14,7 +14,9 @@ from kitaru._experiments import (
     reserve_experiment,
     transition_experiment_to_running,
 )
+from kitaru._experiments._limits import RegressionLimitTracker
 from kitaru.errors import KitaruStateError
+from kitaru.experiments import RegressionLimits
 from kitaru.replay import (
     EXPERIMENT_ID_METADATA_KEY,
     EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
@@ -30,6 +32,7 @@ from kitaru.replay import (
     ReplayResultRow,
     ReplaySubmission,
 )
+from kitaru.scoring import OperationalLimitReason
 from tests.experiments._helpers import (
     _base_envelope,
     _binding,
@@ -182,7 +185,7 @@ def test_execute_attempt_completes_named_repeats_and_is_idempotent() -> None:
     assert len({submission_id for _, _, submission_id in calls}) == 1
     assert result.submission.summary.submitted == 4
     assert result.submission.summary.failed == 1
-    assert set(result.to_json()) == {"record", "submission"}
+    assert set(result.to_json()) == {"record", "submission", "regression"}
 
     result.runs.list(page=2, size=25)
     assert client.list_run_calls == [
@@ -205,6 +208,85 @@ def test_execute_attempt_completes_named_repeats_and_is_idempotent() -> None:
     assert retry.record == result.record
     assert retry.submission.submission_id == result.submission.submission_id
     assert retry.submission.results == []
+
+
+def test_execute_attempt_stops_between_trials_and_freezes_usage() -> None:
+    plan = _attempt_plan(repeats=2, name="bounded")
+    client = _ProjectClient(_base_envelope())
+    tracker = RegressionLimitTracker(
+        RegressionLimits(max_trials=4, max_incurred_tokens=10)
+    )
+    calls: list[str] = []
+
+    def submit_trial(*, trial: Any, replay_plan: Any, submission_id: str) -> Any:
+        calls.append(f"{trial.target_execution_id}:{trial.repeat_index}")
+        return ReplaySubmission.create(
+            submission_id=submission_id,
+            tag=None,
+            at="at",
+            wait=True,
+            plan=replay_plan.document,
+            results=[
+                ReplayResultRow(
+                    original_exec_ref=trial.target_execution_id,
+                    original_exec_id=trial.target_execution_id,
+                    replay_exec_id=f"child-{len(calls)}",
+                    status="completed",
+                    experiment=_experiment_outcome(
+                        experiment_id=plan.spec.experiment_id,
+                        trial=trial,
+                        verified=True,
+                    ),
+                )
+            ],
+        )
+
+    def observe_trial(_trial: Any, _child: Any) -> OperationalLimitReason | None:
+        return tracker.observe_trial(
+            [
+                {
+                    "cost_policy": "non_reused_is_incurred_v1",
+                    "display_cost_usd": 0.02,
+                    "records_without_cost_count": 0,
+                    "incurred_total_tokens": 5,
+                }
+            ]
+        )
+
+    result = execute_replay_attempt(
+        plan,
+        submit_trial=submit_trial,
+        observe_trial=observe_trial,
+        finalize_operational_limit=lambda remaining, started_at: tracker.outcome(
+            remaining_trials=remaining,
+            started_at=started_at,
+        ),
+        client_factory=lambda: client,
+    )
+
+    assert calls == ["first:0", "first:1"]
+    assert result.record.status == "partial"
+    assert result.record.counts.submitted == 2
+    assert result.record.counts.failed == 2
+    assert result.record.operational_limit is not None
+    assert (
+        result.record.operational_limit.reason_code
+        is OperationalLimitReason.TOKEN_LIMIT_REACHED
+    )
+    assert result.record.operational_limit.facts.incurred_tokens == 10
+    assert result.record.operational_limit.facts.remaining_trials == 2
+    assert result.record.operational_limit.facts.one_trial_may_overshoot is True
+
+    retry = execute_replay_attempt(
+        plan,
+        submit_trial=lambda **_kwargs: pytest.fail("retry submitted a child"),
+        observe_trial=lambda *_args: pytest.fail("retry observed a child"),
+        finalize_operational_limit=lambda _remaining, _started_at: pytest.fail(
+            "retry replaced the frozen limit outcome"
+        ),
+        client_factory=lambda: client,
+    )
+    assert retry.record.operational_limit == result.record.operational_limit
 
 
 def test_execute_attempt_recovers_after_lost_reservation_response() -> None:
@@ -269,6 +351,101 @@ def test_execute_attempt_finalizes_fully_submitted_running_attempt() -> None:
     assert [row.replay_exec_id for row in result.submission.results] == [
         "child-first-0",
         "child-second-0",
+    ]
+
+
+def test_recovered_children_all_contribute_usage_after_frozen_stop_reason() -> None:
+    plan = _attempt_plan(repeats=1)
+    client = _RecoveryProjectClient()
+    reserve_experiment("project-id", plan.spec, client_factory=lambda: client)
+    transition_experiment_to_running(
+        "project-id",
+        plan.spec.experiment_id,
+        client_factory=lambda: client,
+    )
+    client.add_verified_member(plan=plan, target_id="first", repeat=0)
+    client.add_verified_member(plan=plan, target_id="second", repeat=0)
+    tracker = RegressionLimitTracker(
+        RegressionLimits(
+            max_trials=2,
+            max_cost_usd=0.015,
+            max_incurred_tokens=5,
+        )
+    )
+    observed_children: list[str] = []
+
+    def observe_trial(
+        _trial: Any, child: ReplaySubmission | None
+    ) -> OperationalLimitReason | None:
+        assert child is not None
+        observed_children.append(child.results[0].replay_exec_id)
+        return tracker.observe_trial(
+            [
+                {
+                    "cost_policy": "non_reused_is_incurred_v1",
+                    "display_cost_usd": 0.01,
+                    "records_without_cost_count": 0,
+                    "incurred_total_tokens": 5,
+                }
+            ]
+        )
+
+    result = execute_replay_attempt(
+        plan,
+        submit_trial=lambda **_kwargs: pytest.fail("recovery duplicated a child"),
+        observe_trial=observe_trial,
+        finalize_operational_limit=lambda remaining, started_at: tracker.outcome(
+            remaining_trials=remaining,
+            started_at=started_at,
+        ),
+        client_factory=lambda: client,
+    )
+
+    assert observed_children == ["child-first-0", "child-second-0"]
+    assert result.record.operational_limit is not None
+    assert (
+        result.record.operational_limit.reason_code
+        is OperationalLimitReason.TOKEN_LIMIT_REACHED
+    )
+    assert result.record.operational_limit.facts.submitted_trials == 2
+    assert result.record.operational_limit.facts.incurred_tokens == 10
+    assert result.record.operational_limit.facts.incurred_cost_usd == 0.02
+    assert result.record.operational_limit.facts.remaining_trials == 0
+
+
+def test_execute_attempt_recovers_frozen_top_trials() -> None:
+    draft = preplan_replay_attempt(
+        ["top-target"],
+        binding=_binding(),
+        at="missing",
+        on_error="fail",
+        uncovered_policy="top",
+        idempotency_key="top-recovery",
+        repeats=1,
+        wait=False,
+        client=_RunClient({"top-target": _run("top-target", _step("other"))}),
+        pipeline_verifier=lambda _client, _binding: None,
+    )
+    plan = freeze_replay_attempt(draft)
+    assert plan.spec.planning_rows[0].disposition == "top"
+    client = _RecoveryProjectClient()
+    reserve_experiment("project-id", plan.spec, client_factory=lambda: client)
+    transition_experiment_to_running(
+        "project-id",
+        plan.spec.experiment_id,
+        client_factory=lambda: client,
+    )
+    client.add_verified_member(plan=plan, target_id="top-target", repeat=0)
+
+    result = execute_replay_attempt(
+        plan,
+        submit_trial=lambda **_kwargs: pytest.fail("recovery duplicated a top child"),
+        client_factory=lambda: client,
+    )
+
+    assert result.record.status == "completed"
+    assert [row.replay_exec_id for row in result.submission.results] == [
+        "child-top-target-0"
     ]
 
 

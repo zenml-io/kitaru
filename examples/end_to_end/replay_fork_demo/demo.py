@@ -12,7 +12,7 @@ from typing import Any
 import click
 from evals.register import AGENT_NAME, AGENT_VERSION, kagent
 
-from kitaru import KitaruClient
+from kitaru import KitaruClient, RegressionLimits
 
 DEFAULT_AT = "support_agent_model_request"
 DEFAULT_EXPERIMENT = "support-agent-permissions-v2"
@@ -66,9 +66,28 @@ def _replay_cases(
         uncovered_policy="fail",
         idempotency_key=idempotency_key,
         repeats=3,
-        wait=False,
+        wait=True,
         name=name,
+        suite_key=name,
     )
+
+
+def _rerun_suite(
+    suite: str,
+    *,
+    idempotency_key: str,
+    limits: RegressionLimits,
+) -> Any:
+    """Rerun a protected suite against the registered candidate and assert PASS."""
+    kagent.register(label=AGENT_VERSION)
+    result = kagent.replay(
+        experiment=suite,
+        idempotency_key=idempotency_key,
+        repeats=1,
+        limits=limits,
+    )
+    result.assert_pass()
+    return result
 
 
 @click.group()
@@ -148,6 +167,38 @@ def experiment_cmd(
                 name=name,
                 at=at,
                 idempotency_key=idempotency_key,
+            )
+        )
+    )
+
+
+@cli.command("rerun")
+@click.argument("suite")
+@click.option("--idempotency-key", required=True)
+@click.option("--max-trials", type=int, default=3, show_default=True)
+@click.option("--max-cost-usd", type=float, default=1.0, show_default=True)
+@click.option("--max-incurred-tokens", type=int, default=100_000, show_default=True)
+@click.option("--max-duration-seconds", type=float, default=300.0, show_default=True)
+def rerun_cmd(
+    suite: str,
+    idempotency_key: str,
+    max_trials: int,
+    max_cost_usd: float,
+    max_incurred_tokens: int,
+    max_duration_seconds: float,
+) -> None:
+    """Rerun a named protected suite as a bounded regression gate."""
+    click.echo(
+        _json(
+            _rerun_suite(
+                suite,
+                idempotency_key=idempotency_key,
+                limits=RegressionLimits(
+                    max_trials=max_trials,
+                    max_cost_usd=max_cost_usd,
+                    max_incurred_tokens=max_incurred_tokens,
+                    max_duration_seconds=max_duration_seconds,
+                ),
             )
         )
     )

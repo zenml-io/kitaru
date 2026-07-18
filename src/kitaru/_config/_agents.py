@@ -13,6 +13,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationError,
     computed_field,
     field_validator,
@@ -37,6 +38,7 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.scoring import ProtectionSnapshot
 
 _KITARU_METADATA_KEY = "kitaru"
 _KITARU_METADATA_SCHEMA_VERSION = 1
@@ -116,8 +118,10 @@ class _AgentVersionManifest(BaseModel):
     entrypoint: str
     registered_at: str
     source: Literal["registration"]
+    protections: dict[str, ProtectionSnapshot] = Field(default_factory=dict)
 
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    # Unknown namespaces remain opaque so newer manifests survive older clients.
+    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
 
     @field_validator(
         "agent_version_id",
@@ -133,6 +137,18 @@ class _AgentVersionManifest(BaseModel):
     @classmethod
     def _validate_required_string(cls, value: str) -> str:
         return _non_empty_string(value, field_name="AgentVersion field")
+
+    @field_validator("protections")
+    @classmethod
+    def _validate_protections(
+        cls, value: dict[str, ProtectionSnapshot]
+    ) -> dict[str, ProtectionSnapshot]:
+        for protection_id, snapshot in value.items():
+            if protection_id != snapshot.protection_id:
+                raise ValueError(
+                    "Protection map keys must match immutable protection IDs."
+                )
+        return value
 
     @field_validator("working_tree_hash")
     @classmethod
@@ -308,6 +324,23 @@ class AgentInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+    _experiments_by_id: dict[str, ExperimentRecord] = PrivateAttr(default_factory=dict)
+    _experiments_by_idempotency_key: dict[str, ExperimentRecord] = PrivateAttr(
+        default_factory=dict
+    )
+    _experiments_by_suite: dict[str, list[ExperimentRecord]] = PrivateAttr(
+        default_factory=dict
+    )
+
+    def model_post_init(self, _context: Any) -> None:
+        """Index immutable experiment records once for exact SDK lookups."""
+        for record in self.experiments:
+            self._experiments_by_id[record.spec.experiment_id] = record
+            self._experiments_by_idempotency_key[record.spec.idempotency_key] = record
+            self._experiments_by_suite.setdefault(record.spec.suite_key, []).append(
+                record
+            )
+
     @computed_field(return_type=int)
     @property
     def version_count(self) -> int:
@@ -323,6 +356,108 @@ class AgentInfo(BaseModel):
     def list_experiments(self) -> list[ExperimentRecord]:
         """Return experiment records in deterministic newest-first order."""
         return list(self.experiments)
+
+    @staticmethod
+    def _resolve_source_from_indexes(
+        selector: str,
+        *,
+        by_id: Mapping[str, ExperimentRecord],
+        by_suite: Mapping[str, list[ExperimentRecord]],
+    ) -> ExperimentRecord:
+        exact = by_id.get(selector)
+        if exact is not None:
+            return exact
+        suite_attempts = by_suite.get(selector, [])
+        for record in suite_attempts:
+            if record.status in {"completed", "partial", "failed", "cancelled"}:
+                return record
+        if suite_attempts:
+            raise KitaruStateError(
+                f"Suite '{selector}' has no terminal experiment attempt."
+            )
+        raise KitaruStateError(
+            f"Experiment attempt or suite '{selector}' was not found."
+        )
+
+    def list_suite_attempts(self, suite_key: str) -> list[ExperimentRecord]:
+        """Return attempts for one exact suite key in newest-first order."""
+        selector = _non_empty_string(suite_key, field_name="Suite key")
+        return list(self._experiments_by_suite.get(selector, []))
+
+    def get_experiment_by_idempotency_key(
+        self, idempotency_key: str
+    ) -> ExperimentRecord | None:
+        """Return the exact attempt reserved for an idempotency key, if any."""
+        selector = _non_empty_string(
+            idempotency_key,
+            field_name="Experiment idempotency key",
+        )
+        return self._experiments_by_idempotency_key.get(selector)
+
+    def get_experiment_attempt(self, experiment_id: str) -> ExperimentRecord:
+        """Resolve one exact experiment attempt ID."""
+        selector = _non_empty_string(experiment_id, field_name="Experiment ID")
+        record = self._experiments_by_id.get(selector)
+        if record is not None:
+            return record
+        raise KitaruStateError(f"Experiment attempt '{selector}' was not found.")
+
+    def resolve_experiment_source(
+        self, experiment_id_or_suite_key: str
+    ) -> ExperimentRecord:
+        """Resolve an exact attempt ID or the newest terminal suite attempt."""
+        selector = _non_empty_string(
+            experiment_id_or_suite_key,
+            field_name="Experiment source selector",
+        )
+        return self._resolve_source_from_indexes(
+            selector,
+            by_id=self._experiments_by_id,
+            by_suite=self._experiments_by_suite,
+        )
+
+    def resolve_suite_rerun_request(
+        self,
+        experiment_id_or_suite_key: str,
+        idempotency_key: str,
+    ) -> tuple[ExperimentRecord | None, ExperimentRecord]:
+        """Resolve an idempotent rerun attempt and its source in one scan."""
+        selector = _non_empty_string(
+            experiment_id_or_suite_key,
+            field_name="Experiment source selector",
+        )
+        normalized_key = _non_empty_string(
+            idempotency_key,
+            field_name="Experiment idempotency key",
+        )
+        existing = self._experiments_by_idempotency_key.get(normalized_key)
+        if existing is None:
+            return None, self._resolve_source_from_indexes(
+                selector,
+                by_id=self._experiments_by_id,
+                by_suite=self._experiments_by_suite,
+            )
+
+        spec = existing.spec
+        if spec.kind != "replay" or spec.source_experiment_id is None:
+            raise KitaruMetadataConflictError(
+                "The idempotency key already belongs to a non-rerun attempt."
+            )
+        valid_selectors = {
+            spec.experiment_id,
+            spec.source_experiment_id,
+            spec.suite_key,
+        }
+        if selector not in valid_selectors:
+            raise KitaruMetadataConflictError(
+                "The idempotency key belongs to a different suite rerun."
+            )
+        source = self._experiments_by_id.get(spec.source_experiment_id)
+        if source is None:
+            raise KitaruStateError(
+                f"Experiment attempt '{spec.source_experiment_id}' was not found."
+            )
+        return existing, source
 
     def get_experiment(self, name_or_id: str) -> ExperimentRecord:
         """Resolve an exact attempt ID or an unambiguous suite/name."""

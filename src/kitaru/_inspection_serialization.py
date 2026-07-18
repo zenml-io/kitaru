@@ -333,6 +333,10 @@ def serialize_agent_version(version: AgentVersionInfo) -> dict[str, Any]:
         "entrypoint": version.entrypoint,
         "registered_at": version.registered_at,
         "source": version.source,
+        "protections": {
+            protection_id: snapshot.model_dump(mode="json")
+            for protection_id, snapshot in version.protections.items()
+        },
         "aliases": list(version.aliases),
     }
 
@@ -374,6 +378,19 @@ def serialize_experiment(
             else record.score_aggregate.model_dump(mode="json")
         ),
         "score_aggregate_data": None,
+        "verdict_policy": (
+            None
+            if spec.verdict_policy is None
+            else spec.verdict_policy.model_dump(mode="json")
+        ),
+        "operational_limit": (
+            None
+            if record.operational_limit is None
+            else record.operational_limit.model_dump(mode="json")
+        ),
+        "verdict": (
+            None if record.verdict is None else record.verdict.model_dump(mode="json")
+        ),
     }
     if spec.kind == "replay":
         payload["candidate_agent_version_id"] = spec.candidate_agent_version_id
@@ -391,6 +408,7 @@ def serialize_experiment_replay_result(
     return {
         "record": result.record.model_dump(mode="json"),
         "submission": result.submission.to_json(),
+        "regression": result.regression_summary(),
     }
 
 

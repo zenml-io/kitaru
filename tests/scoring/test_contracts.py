@@ -7,11 +7,15 @@ from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
 
 from kitaru import Score, scorer
+from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.errors import KitaruUsageError
 from kitaru.scoring import (
     GroundedCapabilityDeclaration,
+    ProtectionDeclaration,
     ScoreObservationOutcome,
     ScoreObservationStatus,
     ScorerDeclaration,
@@ -79,6 +83,42 @@ def test_scorer_snapshot_is_deterministic_and_secret_safe() -> None:
             capability="pure",
             configuration={"api_key": "should-not-persist"},
         )
+
+
+def test_protection_declaration_has_stable_fixed_identity() -> None:
+    declaration = ProtectionDeclaration.from_callable(
+        _score_evidence,
+        protection_id="complete-output",
+        capability="pure",
+        configuration={"rule_version": 1},
+    )
+
+    assert declaration.snapshot.protection_id == "complete-output"
+    assert declaration.snapshot.pass_rule == "score == 1.0"
+    assert declaration.snapshot.scorer.configuration_hash == sha256_json(
+        {"rule_version": 1}
+    )
+    assert declaration.snapshot.scorer.source.status == "captured"
+    assert declaration(object()).value == 1.0
+    assert declaration.__wrapped__ is declaration.scorer
+    assert "_func" not in declaration.__dict__
+    assert "_func" not in declaration.snapshot.model_dump_json()
+
+    with pytest.raises(KitaruUsageError, match="secret"):
+        ProtectionDeclaration.from_callable(
+            _score_evidence,
+            protection_id="unsafe-config",
+            capability="pure",
+            configuration={"access_token": "do-not-store"},
+        )
+
+
+def test_agent_rejects_duplicate_protection_ids() -> None:
+    agent = KitaruAgent(Agent(TestModel(), name="protected-agent", output_type=str))
+    agent.protection("complete-output", capability="pure")(_score_evidence)
+
+    with pytest.raises(KitaruUsageError, match="already declared"):
+        agent.protection("complete-output", capability="pure")(_score_evidence)
 
 
 def test_source_capture_failure_is_explicit(monkeypatch: pytest.MonkeyPatch) -> None:

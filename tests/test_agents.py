@@ -448,6 +448,7 @@ def test_agent_and_version_serialization_is_exact_and_structured() -> None:
         "entrypoint": "evals.register:kagent",
         "registered_at": "2026-07-17T08:30:00Z",
         "source": "registration",
+        "protections": {},
         "aliases": ["stable"],
     }
     assert serialize_agent(agent) == {

@@ -13,10 +13,11 @@ The distinction between the two execution sources matters:
 - The `replay` and `experiment` commands therefore accept only execution IDs
   from native Kitaru runs of this agent.
 
-The example does not ship a permission-policy scorer. Kitaru's current frozen
-scoring evidence does not expose the tool-call names needed to prove whether
-this agent attempted a restricted write. A scorer that guessed from checkpoint
-IDs would produce a convincing-looking but false result.
+The registered agent pins a deterministic `completed-execution` protection.
+Every replayed case must reach terminal completion and score `1.0` before the
+suite can pass. The example deliberately does not guess at permission-policy
+behavior from checkpoint IDs because the frozen evidence does not expose enough
+tool-call detail to make that claim safely.
 
 ## Setup
 
@@ -81,8 +82,9 @@ uv run python demo.py register
 ```
 
 The stable entrypoint is `evals.register:kagent`. Kitaru fingerprints its code,
-configuration, and worldview. Repeating registration with the same identity
-and label reuses the existing AgentVersion.
+configuration, worldview, and protection snapshot. Repeating registration with
+the same identity and label reuses the existing AgentVersion. Changing or
+removing the protection creates a different AgentVersion identity.
 
 The replay commands also perform this idempotent registration in their own
 process before submitting work. Running `register` separately is useful for
@@ -110,8 +112,9 @@ result = kagent.replay(
     uncovered_policy="fail",
     idempotency_key="permissions-case-48211-v2",
     repeats=3,
-    wait=False,
+    wait=True,
     name=f"case-{execution_id}",
+    suite_key=f"case-{execution_id}",
 )
 ```
 
@@ -142,11 +145,56 @@ count, registered candidate version, and replay inputs. Member execution bodies
 remain on their execution records rather than being copied into the Agent
 catalog.
 
-`completed` means all intended children were submitted and membership was
-verified. It does not mean every asynchronous child has finished running.
-Individual execution records remain authoritative for live and terminal status.
+Because the Agent has a pinned protection, this call waits for terminal child
+evidence, scores every verified child, and freezes a separate `pass`, `fail`, or
+`hold` verdict. Lifecycle `completed` and verdict `pass` are distinct facts.
 
-## 5. Read the experiment
+## 5. Rerun the suite as a bounded regression gate
+
+After registering the candidate code you want to test, rerun the frozen suite
+with fewer repeats and explicit limits:
+
+```bash
+uv run python demo.py rerun support-agent-permissions-v2 \\
+  --idempotency-key permissions-v2-attempt-2 \\
+  --max-trials 3 \\
+  --max-cost-usd 1.00 \\
+  --max-incurred-tokens 100000 \\
+  --max-duration-seconds 300
+```
+
+The command follows the same SDK path a pytest gate can use:
+
+```python
+from kitaru import RegressionLimits
+
+result = kagent.replay(
+    experiment="support-agent-permissions-v2",
+    idempotency_key="permissions-v2-attempt-2",
+    repeats=1,
+    limits=RegressionLimits(
+        max_trials=3,
+        max_cost_usd=1.00,
+        max_incurred_tokens=100_000,
+        max_duration_seconds=300,
+    ),
+)
+result.assert_pass()
+```
+
+`max_trials` is checked before Kitaru creates the new attempt. Cost, incurred
+tokens, and elapsed time are checked between terminal trials. One model call
+can therefore cross a cost or token ceiling before further submissions stop.
+Missing required usage or a reached operational limit freezes a `hold` verdict,
+not a false `pass`. Retrying the same idempotency key returns the same attempt
+and cannot duplicate the suite spend.
+
+If the assertion fails, its structured output includes the suite and attempt
+IDs, objective and protection facts, completeness counts, frozen usage facts,
+and the compare URL when available. The same fields appear under `regression`
+in `result.to_json()`.
+
+## 6. Read the experiment
 
 The immediate result exposes the frozen specification, durable record,
 submission rows, and member-run lookup:
@@ -154,6 +202,7 @@ submission rows, and member-run lookup:
 ```python
 print(result.spec.experiment_id)
 print(result.record.status)
+print(result.verdict)
 print(result.submission.summary.to_json())
 
 page = result.runs.list(page=1, size=50)
