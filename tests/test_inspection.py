@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -19,7 +19,7 @@ from kitaru._checkpoint_metadata import (
     KITARU_METADATA_NAMESPACE,
     adapter_checkpoint_metadata,
 )
-from kitaru._client._mappers import _map_checkpoint_call
+from kitaru._client._mappers import _map_checkpoint_call, _map_imported_execution_info
 from kitaru._llm_usage import LLM_USAGE_METADATA_KEY, build_usage_record
 from kitaru.client import (
     ArtifactRef,
@@ -716,6 +716,7 @@ def test_serialize_execution_summary_contract() -> None:
         "checkpoint_count": 1,
         "artifact_count": 1,
         "llm_usage_summary": None,
+        "import_info": None,
     }
 
 
@@ -743,6 +744,7 @@ def test_serialize_execution_contract() -> None:
         "root_exec_id",
         "checkpoints",
         "artifacts",
+        "import_info",
     }
     spec = payload["frozen_execution_spec"]
     assert spec["resolved_execution"] == {
@@ -788,6 +790,91 @@ def test_serialize_execution_contract() -> None:
     assert payload["llm_usage_records"][0]["checkpoint_name"] == "research"
     assert payload["artifacts"][0]["name"] == "final_summary"
     assert payload["pending_wait"]["wait_id"] == "wait-1"
+
+
+def test_serialize_execution_includes_typed_import_information() -> None:
+    metadata = {
+        "kitaru_synthetic_import": True,
+        "kitaru_import_schema_version": 5,
+        "kitaru_import_source_provider_v1": "langfuse",
+        "kitaru_import_source_project_id_v1": "source-project",
+        "kitaru_import_source_trace_id_v1": "trace-one",
+        "kitaru_import_source_agent_version_id_v1": "version-one",
+        "kitaru_import_source_agent_version_label_v1": "prod",
+        "kitaru_import_source_pipeline_id_v1": "version-one",
+        "kitaru_import_attribution_v1": {
+            "status": "caller_attributed",
+            "stamps": [],
+            "diagnostics": [],
+        },
+        "kitaru_import_integrity_v1": "complete",
+        "kitaru_import_observation_count_v1": 3,
+        "kitaru_import_raw_evidence_sha256_v1": "a" * 64,
+        "kitaru_import_raw_evidence_artifact_id_v1": "raw-artifact",
+        "kitaru_import_raw_evidence_schema_version_v1": 1,
+        "kitaru_import_replay_bundle_sha256_v1": "b" * 64,
+        "kitaru_import_replay_bundle_artifact_id_v1": "bundle-artifact",
+        "kitaru_import_replay_bundle_schema_version_v1": 1,
+        "kitaru_import_replay_profile_version_v1": "pydantic_ai_replay_v1",
+        "kitaru_import_replay_readiness_v1": {
+            "root_input_candidate_rerun": {
+                "capability": "root_input_candidate_rerun",
+                "status": "ready",
+                "diagnostics": [],
+            },
+            "model_message_reconstruction": {
+                "capability": "model_message_reconstruction",
+                "status": "unknown",
+                "diagnostics": [],
+            },
+            "tool_result_boundary_reconstruction": {
+                "capability": "tool_result_boundary_reconstruction",
+                "status": "unsupported",
+                "diagnostics": [],
+            },
+            "recorded_response_matching": {
+                "capability": "recorded_response_matching",
+                "status": "unknown",
+                "diagnostics": [],
+            },
+            "candidate_tool_compatibility": {
+                "capability": "candidate_tool_compatibility",
+                "status": "unknown",
+                "diagnostics": [
+                    {
+                        "code": "candidate_tool_contract_unknown",
+                        "observation_id": None,
+                        "part_kind": None,
+                        "missing_field": None,
+                    }
+                ],
+            },
+        },
+        "kitaru_import_cohort_tag_v1": "customer-a",
+    }
+    info = _map_imported_execution_info(metadata, pipeline_id="version-one")
+    assert info is not None
+
+    payload = serialize_execution(replace(_sample_execution(), import_info=info))[
+        "import_info"
+    ]
+
+    assert payload is not None
+    assert payload["source_kind"] == "external_trace"
+    assert payload["source_agent_version_label"] == "prod"
+    assert payload["attribution"] == {
+        "status": "caller_attributed",
+        "stamps": [],
+    }
+    assert payload["raw_evidence"] == {
+        "artifact_id": "raw-artifact",
+        "sha256": "a" * 64,
+        "schema_version": 1,
+    }
+    assert payload["replay_readiness"]["root_input_candidate_rerun"]["status"] == (
+        "ready"
+    )
+    assert payload["cohort_tag"] == "customer-a"
 
 
 def test_serialize_stack_contract() -> None:

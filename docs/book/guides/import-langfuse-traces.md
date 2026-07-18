@@ -1,59 +1,93 @@
 ---
-description: Import a Langfuse observations JSONL export as inspectable Kitaru executions, with a read-only preview and explicit data-storage consent.
+description: Import a Langfuse observations JSONL export with source attribution, replay-readiness evidence, and explicit storage consent.
 icon: file-import
 ---
 
 # Import Langfuse Traces
 
-Kitaru can import a Langfuse **observations JSONL export** as historical
-executions. Each source trace becomes one execution, and each observation in
-that trace becomes a checkpoint call. Different traces can have different
-checkpoint graphs, so dynamic agent runs do not need to share one fixed shape.
+Kitaru can import a Langfuse **observations JSONL export** as historical,
+inspectable executions. Each source trace becomes one execution, and each
+observation becomes a checkpoint call.
 
-Importing does not call a model, invoke a tool, or run source application code.
-It records the exported history so you can inspect it through the Kitaru UI,
-SDK, and execution CLI.
+Every import declares the exact Kitaru Agent and AgentVersion that produced the
+selected traces. Kitaru verifies that declaration before it writes anything.
+The import does not call a model, invoke a tool, run source application code, or
+execute a replay.
 
 {% hint style="warning" %}
-Imported executions are historical synthetic records. They are not executable
-flow snapshots, and Kitaru refuses to replay, resume, retry, or cancel them
-with a clear read-only error. Import is the inspection foundation for external
-traces, not yet a reconstruction or re-execution mechanism.
+Imported executions are read-only historical records. Kitaru refuses to replay,
+resume, retry, or cancel them. Replay readiness describes which evidence was
+preserved; it does not claim that an execution can be replayed.
 {% endhint %}
 
 ## What Kitaru stores
 
 For every selected trace, Kitaru stores:
 
-- the source identity: Langfuse project ID and trace ID;
-- the observation graph, including parent relationships;
-- observation names, kinds, timestamps, and success/error state;
-- full observation inputs and outputs;
-- compatible model, token-usage, latency, and USD cost information; and
-- an integrity classification describing gaps in the exported graph.
+- the Langfuse project ID and trace ID;
+- the declared source Agent and immutable AgentVersion;
+- the observation graph, including parent relationships and source order;
+- observation names, kinds, timestamps, and success or error state;
+- imported inputs, outputs, message parts, tool parts, model, usage, cost, and
+  timing fields when the export contains them;
+- the exact selected JSONL rows as raw imported evidence;
+- a normalized, versioned replay-evidence bundle; and
+- compact source-attribution, integrity, and replay-readiness summaries.
 
-When Langfuse reports a USD cost, Kitaru records it as the historical actual
-cost. When cost is absent but the model and token counts are available, Kitaru
-can estimate cost with the currently installed `genai-prices` catalog. That
-fallback is labeled as an estimate, includes the catalog version, and may not
-match the price that applied when the trace originally ran.
+The raw rows and normalized bundle are separate immutable artifacts. Their IDs,
+schema versions, and SHA-256 hashes are available through the import result and
+`Execution.import_info`. The compact summaries do not contain prompts, tool
+arguments, tool results, or other imported payloads.
 
-The `agent_name` you provide is a stable grouping label. Kitaru derives a
-collision-resistant flow name from that label and reports it in every preview
-and write result. The label does not need to correspond to executable Python
-code.
-
-Every preview and write also reports the current Kitaru project, selected stack
-name and ID, storage type, and whether that storage is local or remotely
-accessible.
+When Langfuse reports a USD cost, Kitaru records it as historical actual cost.
+When cost is absent but model and token counts are available, Kitaru can estimate
+cost with the installed `genai-prices` catalog. The estimate is labeled and may
+not match the price that applied when the trace originally ran.
 
 {% hint style="danger" %}
-An actual import persists full input and output payloads in your configured
-Kitaru storage. These values can contain prompts, customer data, tool
-arguments, tool results, or secrets. Check access controls, retention, and
+An actual import stores the selected raw rows and normalized replay evidence in
+your configured Kitaru storage. These values can contain prompts, customer data,
+tool arguments, tool results, or secrets. Check access controls, retention, and
 deletion requirements before writing an export. Kitaru does not automatically
 redact the export.
 {% endhint %}
+
+## Source attribution
+
+Kitaru accepts one Agent and one AgentVersion per import request. The AgentVersion
+selector must be an exact immutable ID or an exact registered label. There is no
+default version.
+
+For each selected trace, Kitaru reports one attribution status:
+
+| Status | Meaning |
+|---|---|
+| `source_verified` | A supported Langfuse version field exactly matches the declared AgentVersion's full Git SHA or one of its labels, and no supported field conflicts. |
+| `caller_attributed` | The export contains no supported version field. Kitaru records the caller's exact AgentVersion declaration without claiming provider verification. |
+| `conflict` | A supported version field contradicts the declared AgentVersion, or supported fields disagree with each other. |
+
+Kitaru preserves supported provider fields in the result. It does not accept Git
+SHA prefixes, guess labels, or infer an AgentVersion from a trace. If any selected
+trace has a source-version conflict, Kitaru writes none of the selected traces.
+The conflicting outcomes explain which declaration or export field to correct.
+
+## Replay-readiness meanings
+
+Readiness is reported separately for each capability because one exported trace
+can contain a usable root input but lack ordered messages or complete tool
+results.
+
+| Capability | `ready` means | Other results |
+|---|---|---|
+| Root-input candidate rerun | The export contains one unredacted, unambiguous root input. | `unsupported` includes a bounded diagnostic such as `root_input_missing`. |
+| Model-message reconstruction | Not reported by the importer. | `unknown` means the necessary fields appear present but have not been validated for execution. `unsupported` means required evidence is absent, redacted, or ambiguous. |
+| Tool-result-boundary reconstruction | Not reported by the importer. | `unknown` or `unsupported`, with bounded diagnostics such as `tool_call_without_result`. |
+| Recorded-response matching | Not reported by the importer. | `unknown` or `unsupported`, depending on the preserved response evidence. |
+| Candidate-tool compatibility | Not reported by the importer. | Always `unknown`; the import does not compare a candidate AgentVersion's tool contract. |
+
+Only root-input readiness can be `ready`. A `ready` result still does not execute
+a replay or prove that the declared AgentVersion, its tools, or provider behavior
+can reproduce the historical run.
 
 ## Preview an export
 
@@ -62,49 +96,57 @@ The CLI is read-only unless you pass `--write`:
 ```bash
 kitaru import langfuse langfuse-observations.jsonl \
   --source-project-id <langfuse-project-id> \
-  --agent-name support-agent
+  --agent support-agent \
+  --agent-version prod
 ```
 
-The preview reads and normalizes the export, checks each selected trace against
-the current Kitaru project, and reports what a write would do. It does not
-create executions or store payloads.
-
-### Choose the storage stack before importing
-
-Use `--stack` to select the stack that stores observation payloads and is
-recorded on each synthetic execution:
-
-```bash
-kitaru import langfuse langfuse-observations.jsonl \
-  --source-project-id <langfuse-project-id> \
-  --agent-name support-agent \
-  --stack production-cloud
-```
-
-The selector accepts an exact stack name or ID. If you omit it, Kitaru uses the
-active stack and prints a warning so that the choice is visible before you add
-`--write`. Selecting a stack for an import does not change your active stack.
-
-{% hint style="warning" %}
-When Kitaru is connected to a shared server but the selected stack uses local
-storage, execution metadata is sent to the server while payloads remain on the
-machine running the import. The shared UI may show the execution but be unable
-to load its inputs and outputs. Use remotely accessible storage when imported
-payloads need to be available in a shared UI.
-{% endhint %}
+The preview resolves and verifies the AgentVersion, reads and normalizes the
+export, classifies attribution and readiness, and reports what a write would do.
+It does not create executions or store evidence artifacts. Evidence artifact IDs
+and schema-version result fields are `None` in preview; hashes and replay-readiness
+analysis are still available.
 
 Use JSON output for automation:
 
 ```bash
 kitaru import langfuse langfuse-observations.jsonl \
   --source-project-id <langfuse-project-id> \
-  --agent-name support-agent \
+  --agent support-agent \
+  --agent-version prod \
   --output json
 ```
 
-The result contains aggregate `counts` plus one outcome per selected trace.
+The result includes the Agent Project and AgentVersion IDs, the actual registered
+Pipeline name in `flow_name`, the requested label when present, outcome and
+attribution counts, storage details, optional cohort tag,
+and one outcome per selected trace. Each outcome includes attribution, supported
+provider fields, evidence hashes, capability-specific readiness, diagnostics,
+and an execution ID when one is available.
 
-## Select a small cohort
+### Choose storage explicitly
+
+Use `--stack` to select the stack that stores imported payloads and evidence:
+
+```bash
+kitaru import langfuse langfuse-observations.jsonl \
+  --source-project-id <langfuse-project-id> \
+  --agent support-agent \
+  --agent-version prod \
+  --stack production-cloud
+```
+
+The selector accepts an exact stack name or ID in the Agent Project. If you omit
+it, Kitaru uses the active stack and prints a warning. Selecting a stack for an
+import does not change your active stack.
+
+{% hint style="warning" %}
+When Kitaru is connected to a shared server but the selected stack uses local
+storage, execution metadata is available on the server while evidence remains on
+the importing machine. The shared UI may be unable to load those artifacts. Use
+remotely accessible storage when imported evidence must be shared.
+{% endhint %}
+
+## Select and label a cohort
 
 Repeat `--trace-id` to select exact traces. Kitaru preserves that order and
 applies `--limit` after selection:
@@ -112,42 +154,60 @@ applies `--limit` after selection:
 ```bash
 kitaru import langfuse langfuse-observations.jsonl \
   --source-project-id <langfuse-project-id> \
-  --agent-name support-agent \
+  --agent support-agent \
+  --agent-version prod \
   --trace-id trace-a \
   --trace-id trace-b \
-  --limit 2
+  --limit 2 \
+  --cohort-tag customer-a
 ```
 
-Without `--trace-id`, every trace in the export is selected. Start with a small
-cohort before importing a large production export.
+Without `--trace-id`, every trace in the export is selected. The optional cohort
+tag is attached to every imported execution. It must contain 1 to 64 letters,
+numbers, dots, underscores, or hyphens and cannot use a reserved Kitaru prefix.
+The tag is immutable for an existing imported trace.
 
 ## Write the selected traces
 
-Writing requires both mutation intent and explicit acknowledgement that full
-payloads will be stored:
+Writing requires both mutation intent and explicit acknowledgement of evidence
+storage:
 
 ```bash
 kitaru import langfuse langfuse-observations.jsonl \
   --source-project-id <langfuse-project-id> \
-  --agent-name support-agent \
+  --agent support-agent \
+  --agent-version prod \
   --trace-id trace-a \
   --write \
   --confirm-data-storage
 ```
 
-The default is one trace operation at a time. You can increase bounded
-concurrency with `--max-workers`, from 1 to 8, after validating the workflow
-against your storage and server:
+The default processes one trace at a time. After validating a preview, you can
+set `--max-workers` from 1 to 8 for bounded concurrency.
 
-```bash
-kitaru import langfuse langfuse-observations.jsonl \
-  --source-project-id <langfuse-project-id> \
-  --agent-name support-agent \
-  --limit 20 \
-  --max-workers 4 \
-  --write \
-  --confirm-data-storage
-```
+### Concurrent writers and interrupted imports
+
+Kitaru claims each imported execution through a pending ZenML run wait condition.
+ZenML creates that condition while locking the run row and permits only one pending
+condition per dynamic run, so independent clients and processes cannot both claim
+the write phase. Kitaru attaches a five-minute lease and refreshes it before each
+artifact, step, metadata, or final-status write. Preview and write both report a
+conflict while that lease is active. If the writer dies, a later preview reports
+`would_resume` after expiry and a later write resolves the stale condition, claims
+a new lease, validates existing data, and resumes missing work.
+
+ZenML does not expose compare-and-set or fencing-token conditions on ordinary run,
+step, artifact, and metadata writes. Its wait-condition lease refresh endpoint
+serializes updates on the condition row, but it does not compare the caller's owner
+token. Kitaru therefore checks the owner before each refresh and confirms it again
+afterward. The wait-condition lease is the strongest backend-supported claim
+available, not one transaction spanning every record.
+
+Kitaru limits the remaining risk by checking and refreshing ownership before every
+mutation, using immutable deterministic artifacts and steps, and validating all
+existing content before recovery. A process paused across lease expiry can detect
+that it lost ownership before its next mutation, but ZenML cannot atomically fence
+a mutation that was already in flight when the lease expired.
 
 ## Import through the SDK
 
@@ -164,80 +224,95 @@ export = Path("langfuse-observations.jsonl")
 preview = client.imports.langfuse(
     export,
     source_project_id="<langfuse-project-id>",
-    agent_name="support-agent",
+    agent="support-agent",
+    version="prod",
     stack="production-cloud",
     trace_ids=["trace-a", "trace-b"],
+    cohort_tag="customer-a",
 )
-print(preview.counts)
-print(preview.flow_name)
+print(preview.attribution_counts)
+print(preview.outcomes[0].replay_readiness)
 
 result = client.imports.langfuse(
     export,
     source_project_id="<langfuse-project-id>",
-    agent_name="support-agent",
+    agent="support-agent",
+    version="prod",
     stack="production-cloud",
     trace_ids=["trace-a", "trace-b"],
+    cohort_tag="customer-a",
     dry_run=False,
     confirm_data_storage=True,
 )
 
 for outcome in result.outcomes:
-    print(outcome.trace_id, outcome.status, outcome.execution_id)
+    print(outcome.trace_id, outcome.attribution.status, outcome.execution_id)
 ```
 
-## Understand integrity classifications
+After a write, inspect typed provenance without parsing metadata keys:
 
-Langfuse exports can omit observations, especially the root observation. Kitaru
-classifies each normalized trace before writing it:
+```python
+execution_id = result.outcomes[0].execution_id
+assert execution_id is not None
+execution = client.executions.get(execution_id)
+info = execution.import_info
+assert info is not None
+assert info.raw_evidence is not None
+assert info.replay_readiness is not None
+
+print(info.source_agent_version_id, info.source_agent_version_label)
+print(info.attribution.status)
+print(info.raw_evidence.artifact_id, info.raw_evidence.sha256)
+print(info.replay_readiness.root_input_candidate_rerun.status)
+```
+
+## Integrity and outcomes
+
+Kitaru classifies each normalized observation graph before writing:
 
 | Integrity | Meaning | Default behavior |
 |---|---|---|
-| `complete` | The exported observations form one connected graph with no missing parent. | Accepted. |
-| `root_omitted` | One parent is missing, which commonly means the export omitted the trace root. | Accepted, with the gap recorded. |
+| `complete` | The observations form one connected graph with no missing parent. | Accepted. |
+| `root_omitted` | One parent is missing, commonly because the export omitted the trace root. | Accepted, with the gap recorded. |
 | `fragmented` | The export has multiple disconnected components or more than one missing parent. | Rejected unless you pass `--allow-fragmented` or `allow_fragmented=True`. |
 | `invalid` | The observation graph contains a cycle. | Always rejected. |
 
-Allowing a fragmented trace does not repair or infer its missing relationships.
-It records the available components and their limitations.
-
-Kitaru also rejects a trace when any exported observation lacks a terminal
-source status. This prevents an unfinished observation from appearing as a
-successful checkpoint. Export the trace again after Langfuse records its end
-time, then retry the import.
-
-## Interpret outcomes
+Allowing a fragmented trace records the available components. It does not infer
+or repair missing relationships. Kitaru also rejects observations without a
+terminal source status. Export the trace again after Langfuse records its end
+time, then retry.
 
 | Outcome | Meaning |
 |---|---|
-| `would_create` | Preview found no execution with this source identity. |
-| `would_resume` | Preview found an interrupted import that a write can continue. |
-| `created` | A new synthetic execution was stored. |
-| `resumed` | An interrupted import was completed. |
-| `unchanged` | The same source identity and content already has a finished import. Nothing was rewritten. |
-| `conflict` | The source identity already exists with different content, a different agent name, or a different stack. The outcome includes the existing execution ID and a specific next action. |
+| `would_create` | Preview found no attributed execution with this source identity. |
+| `would_resume` | Preview found an interrupted matching import that a write can continue. |
+| `created` | A new imported execution and both evidence artifacts were stored. |
+| `resumed` | A matching interrupted import was completed. |
+| `unchanged` | The same source identity, AgentVersion, stack, content, evidence, and cohort tag already has a complete import. |
+| `conflict` | An immutable identity or evidence field differs from the existing import. |
 | `rejected` | The trace or request violates an import safety rule. |
 | `failed` | A backend operation failed for that trace. |
 
-The stable identity is the combination of provider, source project ID, and
-trace ID. Re-running an identical import is a no-op. Kitaru reports a conflict
-instead of silently replacing historical evidence when the same identity has
-different normalized content.
+The stable external identity is provider, source project ID, and trace ID. The
+declared AgentVersion, stack, normalized content, raw evidence, replay bundle,
+and cohort tag are immutable conflict checks. Kitaru never overwrites or
+reattributes historical evidence. Inspect `existing_execution_id`, `reason`, and
+`resolution`, then retry with the original values or remove the existing
+execution and artifacts before intentionally creating a replacement.
 
-For a conflict, inspect `existing_execution_id`, `reason`, and `resolution` in
-the SDK or JSON result. If only the agent name differs, retry with the original
-agent name to reuse the import. Changing the grouping label or replacing source
-content requires deleting the existing execution first; Kitaru does not
-silently relabel or overwrite imported history.
+The CLI exits non-zero after rendering all outcomes if any trace is `conflict`,
+`rejected`, or `failed`.
 
-The selected stack is also immutable for an existing import. Re-running the
-same source identity with another stack reports a conflict because changing a
-stack does not move existing payload bytes. Remove the existing synthetic
-execution and its artifacts before importing that source identity into another
-stack.
+## Legacy imports
 
-The CLI exits non-zero if any selected trace is `conflict`, `rejected`, or
-`failed`, after printing all per-trace outcomes. This lets an automation keep
-the successful results while still detecting a partial failure.
+Imports created with the earlier storage format remain readable and unchanged.
+Their typed attribution status is `legacy_unattributed` because Kitaru cannot
+reliably infer which AgentVersion produced them. Their inspection projection
+does not invent source labels, evidence artifacts, or readiness results.
+
+Importing the same source again with an explicit Agent and AgentVersion creates
+the attributed representation beside the legacy record. It does not rewrite or
+relabel the older execution.
 
 ## Inspect imported executions
 
@@ -245,21 +320,19 @@ Use the normal execution interfaces after import:
 
 ```bash
 kitaru executions get <execution-id>
-kitaru executions list --flow <flow-name-reported-by-import>
 ```
 
 Or through Python:
 
 ```python
 execution = client.executions.get("<execution-id>")
-print(execution.status)
+info = execution.import_info
+assert info is not None
+print(info.attribution.status)
 for checkpoint in execution.checkpoints:
     print(checkpoint.name, checkpoint.status)
 ```
 
-An error on an imported root or agent observation marks the execution as
-failed. A failed child tool observation remains visible as a failed checkpoint
-without necessarily changing the overall execution status.
-
-For executable Kitaru-native recordings, see
-[Replay and Overrides](replay-and-overrides.md).
+An error on an imported root or Agent observation marks the execution as failed.
+A failed child tool observation remains visible as a failed checkpoint without
+necessarily changing the overall execution status.

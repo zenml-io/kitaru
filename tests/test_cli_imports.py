@@ -10,11 +10,57 @@ import pytest
 
 from kitaru.cli import app
 from kitaru.imports import (
+    CapabilityReadiness,
     ImportOutcomeStatus,
     LangfuseImportResult,
+    ProviderVersionStamp,
+    ProviderVersionStampKind,
+    ReplayCapability,
+    ReplayDiagnostic,
+    ReplayDiagnosticCode,
+    ReplayReadinessStatus,
+    ReplayReadinessSummary,
+    SourceAttribution,
+    SourceAttributionStatus,
     TraceImportOutcome,
     TraceIntegrity,
 )
+
+
+def _readiness() -> ReplayReadinessSummary:
+    return ReplayReadinessSummary(
+        root_input_candidate_rerun=CapabilityReadiness(
+            capability=ReplayCapability.ROOT_INPUT_CANDIDATE_RERUN,
+            status=ReplayReadinessStatus.READY,
+        ),
+        model_message_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.MODEL_MESSAGE_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        tool_result_boundary_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.TOOL_RESULT_BOUNDARY_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNSUPPORTED,
+            diagnostics=(
+                ReplayDiagnostic(
+                    code=ReplayDiagnosticCode.TOOL_CALL_WITHOUT_RESULT,
+                    observation_id="observation-one",
+                ),
+            ),
+        ),
+        recorded_response_matching=CapabilityReadiness(
+            capability=ReplayCapability.RECORDED_RESPONSE_MATCHING,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        candidate_tool_compatibility=CapabilityReadiness(
+            capability=ReplayCapability.CANDIDATE_TOOL_COMPATIBILITY,
+            status=ReplayReadinessStatus.UNKNOWN,
+            diagnostics=(
+                ReplayDiagnostic(
+                    code=ReplayDiagnosticCode.CANDIDATE_TOOL_CONTRACT_UNKNOWN
+                ),
+            ),
+        ),
+    )
 
 
 def _result(
@@ -24,12 +70,20 @@ def _result(
     existing_execution_id: str | None = None,
     reason: str | None = None,
     resolution: str | None = None,
+    cohort_tag: str | None = "customer-a",
 ) -> LangfuseImportResult:
     return LangfuseImportResult(
         dry_run=dry_run,
         source_project_id="source-project",
         agent_name="support-agent",
-        project_name="default",
+        agent_id="agent-project-id",
+        agent_version_id="agent-version-id",
+        pipeline_id="agent-version-id",
+        pipeline_name="support_agent__av_test",
+        requested_version="prod",
+        requested_alias="prod",
+        cohort_tag=cohort_tag,
+        project_name="support-agent",
         project_id="project-id",
         stack_name="cloud-stack",
         stack_id="stack-id",
@@ -45,6 +99,23 @@ def _result(
                 integrity=TraceIntegrity.COMPLETE,
                 observation_count=4,
                 status=status,
+                attribution=SourceAttribution(
+                    status=SourceAttributionStatus.SOURCE_VERIFIED,
+                    stamps=(
+                        ProviderVersionStamp(
+                            kind=ProviderVersionStampKind.TRACE_VERSION,
+                            value="prod",
+                            source_field="trace.version",
+                        ),
+                    ),
+                ),
+                raw_evidence_digest="a" * 64,
+                raw_evidence_artifact_id=(None if dry_run else "raw-artifact-id"),
+                raw_evidence_schema_version=(None if dry_run else 1),
+                replay_bundle_digest="b" * 64,
+                replay_bundle_artifact_id=(None if dry_run else "replay-artifact-id"),
+                replay_bundle_schema_version=(None if dry_run else 1),
+                replay_readiness=_readiness(),
                 execution_id=("execution-one" if not dry_run else None),
                 existing_execution_id=existing_execution_id,
                 reason=reason,
@@ -71,8 +142,10 @@ def test_langfuse_import_defaults_to_read_only_preview(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
                 "--stack",
                 "cloud-stack",
                 "--trace-id",
@@ -91,7 +164,8 @@ def test_langfuse_import_defaults_to_read_only_preview(
     fake_client.imports.langfuse.assert_called_once_with(
         Path("export.jsonl"),
         source_project_id="source-project",
-        agent_name="support-agent",
+        agent="support-agent",
+        version="prod",
         stack="cloud-stack",
         trace_ids=["trace-two", "trace-one"],
         limit=1,
@@ -99,13 +173,17 @@ def test_langfuse_import_defaults_to_read_only_preview(
         confirm_data_storage=False,
         allow_fragmented=True,
         max_workers=2,
+        cohort_tag=None,
     )
     output = capsys.readouterr().out
     assert "Langfuse trace import" in output
     assert "Preview" in output
-    assert "imported_support-agent__langfuse_v4_" in output
+    assert "support_agent__av_test" in output
     assert "trace-one" in output
     assert "would_create" in output
+    assert "source_verified" in output
+    assert "root_input_candidate_rerun=ready" in output
+    assert "a" * 64 in output
 
 
 def test_langfuse_import_write_requires_storage_confirmation(
@@ -124,8 +202,10 @@ def test_langfuse_import_write_requires_storage_confirmation(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
                 "--write",
             ]
         )
@@ -151,8 +231,10 @@ def test_langfuse_import_confirmation_requires_write(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
                 "--confirm-data-storage",
             ]
         )
@@ -182,8 +264,12 @@ def test_langfuse_import_write_forwards_explicit_consent(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
+                "--cohort-tag",
+                "customer-a",
                 "--write",
                 "--confirm-data-storage",
             ]
@@ -193,7 +279,8 @@ def test_langfuse_import_write_forwards_explicit_consent(
     fake_client.imports.langfuse.assert_called_once_with(
         Path("export.jsonl"),
         source_project_id="source-project",
-        agent_name="support-agent",
+        agent="support-agent",
+        version="prod",
         stack=None,
         trace_ids=None,
         limit=None,
@@ -201,6 +288,7 @@ def test_langfuse_import_write_forwards_explicit_consent(
         confirm_data_storage=True,
         allow_fragmented=False,
         max_workers=1,
+        cohort_tag="customer-a",
     )
     assert "No --stack was specified" in capsys.readouterr().err
 
@@ -222,8 +310,10 @@ def test_langfuse_import_json_emits_one_structured_result(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
                 "--output",
                 "json",
             ]
@@ -233,11 +323,25 @@ def test_langfuse_import_json_emits_one_structured_result(
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "import.langfuse"
     assert payload["item"]["dry_run"] is True
-    assert payload["item"]["flow_name"].startswith(
-        "imported_support-agent__langfuse_v4_"
-    )
+    assert payload["item"]["flow_name"] == "support_agent__av_test"
     assert payload["item"]["counts"] == {"would_create": 1}
-    assert payload["item"]["project"] == {"id": "project-id", "name": "default"}
+    assert payload["item"]["attribution_counts"] == {"source_verified": 1}
+    assert payload["item"]["cohort_tag"] == "customer-a"
+    assert payload["item"]["agent"] == {
+        "id": "agent-project-id",
+        "name": "support-agent",
+    }
+    assert payload["item"]["agent_version"] == {
+        "id": "agent-version-id",
+        "pipeline_id": "agent-version-id",
+        "pipeline_name": "support_agent__av_test",
+        "requested_version": "prod",
+        "requested_alias": "prod",
+    }
+    assert payload["item"]["project"] == {
+        "id": "project-id",
+        "name": "support-agent",
+    }
     assert payload["item"]["stack"] == {
         "id": "stack-id",
         "name": "cloud-stack",
@@ -254,6 +358,24 @@ def test_langfuse_import_json_emits_one_structured_result(
             "integrity": "complete",
             "observation_count": 4,
             "status": "would_create",
+            "attribution": {
+                "status": "source_verified",
+                "stamps": [
+                    {
+                        "kind": "trace_version",
+                        "value": "prod",
+                        "source_field": "trace.version",
+                    }
+                ],
+                "diagnostics": [],
+            },
+            "raw_evidence_digest": "a" * 64,
+            "raw_evidence_artifact_id": None,
+            "raw_evidence_schema_version": None,
+            "replay_bundle_digest": "b" * 64,
+            "replay_bundle_artifact_id": None,
+            "replay_bundle_schema_version": None,
+            "replay_readiness": _readiness().model_dump(mode="json"),
             "execution_id": None,
             "existing_execution_id": None,
             "reason": None,
@@ -281,8 +403,10 @@ def test_langfuse_import_partial_failure_exits_nonzero_after_rendering(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
             ]
         )
 
@@ -297,8 +421,8 @@ def test_langfuse_import_conflict_prints_existing_execution_and_next_action(
     fake_client.imports.langfuse.return_value = _result(
         status=ImportOutcomeStatus.CONFLICT,
         existing_execution_id="execution-existing",
-        reason="Already imported with agent_name='original-agent'.",
-        resolution="Retry with agent_name='original-agent'.",
+        reason="Already imported with a different source AgentVersion.",
+        resolution="Retry with the original source AgentVersion.",
     )
 
     with (
@@ -312,12 +436,14 @@ def test_langfuse_import_conflict_prints_existing_execution_and_next_action(
                 "export.jsonl",
                 "--source-project-id",
                 "source-project",
-                "--agent-name",
+                "--agent",
                 "support-agent",
+                "--agent-version",
+                "prod",
             ]
         )
 
     assert exc_info.value.code == 1
     output = capsys.readouterr().out
     assert "execution-existing" in output
-    assert "Retry with agent_name='original-agent'." in output
+    assert "Retry with the original source AgentVersion." in output

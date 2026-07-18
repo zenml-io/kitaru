@@ -7,8 +7,16 @@ from uuid import UUID
 
 import pytest
 
+from kitaru._agent_registration import RegisteredAgentVersionBinding
+from kitaru._config._agents import _AgentVersionManifest
 from kitaru._llm_usage import CalculatedCostMetadata
-from kitaru.imports import normalize_langfuse_observations
+from kitaru.imports import LangfuseSourceRecord, normalize_langfuse_observations
+from kitaru.imports._pydantic_ai_replay import build_pydantic_ai_replay_evidence
+from kitaru.imports._replay_evidence import (
+    SourceAttribution,
+    SourceAttributionStatus,
+    build_raw_imported_evidence,
+)
 from kitaru.imports._writer import (
     ImportedTraceConflictError,
     _get_or_create_snapshot,
@@ -17,6 +25,45 @@ from kitaru.imports._writer import (
     _steps_by_name,
     _validate_existing_run,
 )
+
+
+def _v5_contract(trace, *, project_id: str = "project-id"):
+    binding = RegisteredAgentVersionBinding(
+        project_id=project_id,
+        manifest=_AgentVersionManifest(
+            schema_version=1,
+            agent_version_id="pipeline-id",
+            pipeline_id="pipeline-id",
+            pipeline_name="support_agent__av_test",
+            fingerprint="sha256:fingerprint",
+            git_sha="0123456789abcdef0123456789abcdef01234567",
+            git_dirty=False,
+            working_tree_hash=None,
+            configuration_hash="sha256:configuration",
+            worldview_hash="sha256:worldview",
+            entrypoint="tests.test_imported_trace_writer:REGISTERED_IMPORT_AGENT",
+            registered_at="2026-07-18T10:00:00Z",
+            source="registration",
+        ),
+        agent_name="support-agent",
+    )
+    raw_evidence = build_raw_imported_evidence(
+        source=trace.source,
+        records=(
+            LangfuseSourceRecord(
+                line_number=1,
+                source_order=0,
+                raw_text="{}\n",
+                row={},
+            ),
+        ),
+    )
+    replay_evidence = build_pydantic_ai_replay_evidence(
+        trace,
+        raw_evidence=raw_evidence,
+    )
+    attribution = SourceAttribution(status=SourceAttributionStatus.CALLER_ATTRIBUTED)
+    return binding, raw_evidence, replay_evidence, attribution
 
 
 def test_steps_by_name_reads_every_page() -> None:
@@ -29,12 +76,20 @@ def test_steps_by_name_reads_every_page() -> None:
         SimpleNamespace(items=second_page),
     ]
 
-    steps = _steps_by_name(client, run_id=UUID(int=1))
+    steps = _steps_by_name(
+        client,
+        run_id=UUID(int=1),
+        project_id="project-id",
+    )
 
     assert len(steps) == 201
     assert client.list_run_steps.call_count == 2
     assert client.list_run_steps.call_args_list[0].kwargs["page"] == 1
     assert client.list_run_steps.call_args_list[1].kwargs["page"] == 2
+    assert all(
+        call.kwargs["project"] == "project-id"
+        for call in client.list_run_steps.call_args_list
+    )
 
 
 def test_non_llm_usage_is_not_published_as_llm_usage() -> None:
@@ -247,8 +302,8 @@ def test_import_snapshot_identity_includes_selected_stack() -> None:
 
     first = _get_or_create_snapshot(
         client=client,
-        project_id=UUID(int=3),
-        pipeline_id=UUID(int=4),
+        project_id=str(UUID(int=3)),
+        pipeline_id=str(UUID(int=4)),
         pipeline_name="imported-agent",
         trace=trace,
         step_config_by_observation={},
@@ -256,8 +311,8 @@ def test_import_snapshot_identity_includes_selected_stack() -> None:
     )
     second = _get_or_create_snapshot(
         client=client,
-        project_id=UUID(int=3),
-        pipeline_id=UUID(int=4),
+        project_id=str(UUID(int=3)),
+        pipeline_id=str(UUID(int=4)),
         pipeline_name="imported-agent",
         trace=trace,
         step_config_by_observation={},
@@ -286,12 +341,16 @@ def test_existing_import_cannot_silently_change_stacks() -> None:
         ],
         project_id="project-1",
     )[0]
+    binding, raw_evidence, replay_evidence, _ = _v5_contract(trace)
     run = SimpleNamespace(
         id=UUID(int=3),
         orchestrator_environment=_import_environment(
             trace,
-            agent_name="support-agent",
+            binding=binding,
             stack_id=first_stack,
+            raw_evidence=raw_evidence,
+            replay_evidence=replay_evidence,
+            cohort_tag=None,
         ),
         snapshot=SimpleNamespace(stack=SimpleNamespace(id=first_stack)),
     )
@@ -302,8 +361,11 @@ def test_existing_import_cannot_silently_change_stacks() -> None:
         _validate_existing_run(
             cast(Any, run),
             trace=trace,
-            agent_name="support-agent",
+            binding=binding,
             stack_id=second_stack,
+            raw_evidence=raw_evidence,
+            replay_evidence=replay_evidence,
+            cohort_tag=None,
         )
 
     assert "cannot move existing artifact bytes" in (exc_info.value.resolution or "")
@@ -324,10 +386,14 @@ def test_legacy_import_reads_stack_from_snapshot() -> None:
         ],
         project_id="project-1",
     )[0]
+    binding, raw_evidence, replay_evidence, _ = _v5_contract(trace)
     environment = _import_environment(
         trace,
-        agent_name="support-agent",
+        binding=binding,
         stack_id=stack_id,
+        raw_evidence=raw_evidence,
+        replay_evidence=replay_evidence,
+        cohort_tag=None,
     )
     environment.pop("kitaru_import_stack_id_v1")
     run = SimpleNamespace(
@@ -339,6 +405,9 @@ def test_legacy_import_reads_stack_from_snapshot() -> None:
     _validate_existing_run(
         cast(Any, run),
         trace=trace,
-        agent_name="support-agent",
+        binding=binding,
         stack_id=stack_id,
+        raw_evidence=raw_evidence,
+        replay_evidence=replay_evidence,
+        cohort_tag=None,
     )

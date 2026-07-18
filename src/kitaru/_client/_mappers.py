@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -33,9 +34,34 @@ from kitaru._client._models import (
     Execution,
     ExecutionStatus,
     FailureInfo,
+    ImportedEvidenceArtifactRef,
+    ImportedExecutionAttribution,
+    ImportedExecutionAttributionStatus,
+    ImportedExecutionInfo,
+    ImportedExecutionSourceKind,
     PendingWait,
 )
 from kitaru._import_contract import (
+    IMPORT_ATTRIBUTION_KEY,
+    IMPORT_COHORT_TAG_KEY,
+    IMPORT_INTEGRITY_KEY,
+    IMPORT_OBSERVATION_COUNT_KEY,
+    IMPORT_RAW_EVIDENCE_ARTIFACT_ID_KEY,
+    IMPORT_RAW_EVIDENCE_DIGEST_KEY,
+    IMPORT_RAW_EVIDENCE_SCHEMA_VERSION_KEY,
+    IMPORT_REPLAY_BUNDLE_ARTIFACT_ID_KEY,
+    IMPORT_REPLAY_BUNDLE_DIGEST_KEY,
+    IMPORT_REPLAY_BUNDLE_SCHEMA_VERSION_KEY,
+    IMPORT_REPLAY_PROFILE_VERSION_KEY,
+    IMPORT_REPLAY_READINESS_KEY,
+    IMPORT_SCHEMA_VERSION_KEY,
+    IMPORT_SOURCE_AGENT_VERSION_ID_KEY,
+    IMPORT_SOURCE_AGENT_VERSION_LABEL_KEY,
+    IMPORT_SOURCE_PIPELINE_ID_KEY,
+    IMPORT_SOURCE_PROJECT_ID_KEY,
+    IMPORT_SOURCE_PROVIDER_KEY,
+    IMPORT_SOURCE_TRACE_ID_KEY,
+    IMPORTED_EXECUTION_ENVIRONMENT_KEY,
     IMPORTED_OBSERVATION_ID_METADATA_KEY,
     IMPORTED_PARENT_OBSERVATION_ID_METADATA_KEY,
 )
@@ -63,6 +89,11 @@ from kitaru.errors import (
     classify_failure_origin,
     traceback_exception_type,
     traceback_last_line,
+)
+from kitaru.imports._models import TraceIntegrity
+from kitaru.imports._replay_evidence import (
+    ReplayReadinessSummary,
+    SourceAttribution,
 )
 from kitaru.replay import (
     parse_replay_skipped_steps_metadata,
@@ -101,6 +132,148 @@ _RAW_STATUS_TO_PUBLIC_STATUS: dict[str, ExecutionStatus] = {
     for public_status, raw_statuses in _RAW_STATUSES_BY_PUBLIC_STATUS.items()
     for raw_status in raw_statuses
 }
+
+
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _metadata_int(metadata: Mapping[str, Any], key: str) -> int | None:
+    value = metadata.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _map_evidence_ref(
+    metadata: Mapping[str, Any],
+    *,
+    artifact_id_key: str,
+    digest_key: str,
+    schema_version_key: str,
+) -> ImportedEvidenceArtifactRef | None:
+    artifact_id = _metadata_string(metadata, artifact_id_key)
+    digest = _metadata_string(metadata, digest_key)
+    schema_version = _metadata_int(metadata, schema_version_key)
+    if artifact_id is None or digest is None or schema_version is None:
+        return None
+    return ImportedEvidenceArtifactRef(
+        artifact_id=artifact_id,
+        sha256=digest,
+        schema_version=schema_version,
+    )
+
+
+def _map_imported_execution_info(
+    metadata: Mapping[str, Any],
+    *,
+    pipeline_id: str | None,
+) -> ImportedExecutionInfo | None:
+    """Parse bounded import metadata without trusting denormalized attribution."""
+    schema_version = _metadata_int(metadata, IMPORT_SCHEMA_VERSION_KEY)
+    is_imported = bool(metadata.get(IMPORTED_EXECUTION_ENVIRONMENT_KEY))
+    if not is_imported and schema_version is None:
+        return None
+
+    integrity: TraceIntegrity | None = None
+    raw_integrity = _metadata_string(metadata, IMPORT_INTEGRITY_KEY)
+    if raw_integrity is not None:
+        try:
+            integrity = TraceIntegrity(raw_integrity)
+        except ValueError:
+            integrity = None
+
+    if schema_version is not None and schema_version <= 4:
+        attribution = ImportedExecutionAttribution(
+            status=ImportedExecutionAttributionStatus.LEGACY_UNATTRIBUTED
+        )
+        source_agent_version_id = None
+        source_agent_version_label = None
+        source_pipeline_id = None
+        raw_evidence = None
+        replay_bundle = None
+        replay_profile_version = None
+        replay_readiness = None
+    else:
+        stored_attribution: SourceAttribution | None = None
+        with suppress(TypeError, ValidationError):
+            stored_attribution = SourceAttribution.model_validate(
+                metadata.get(IMPORT_ATTRIBUTION_KEY),
+                strict=False,
+            )
+
+        source_agent_version_id = _metadata_string(
+            metadata, IMPORT_SOURCE_AGENT_VERSION_ID_KEY
+        )
+        declared_pipeline_id = _metadata_string(metadata, IMPORT_SOURCE_PIPELINE_ID_KEY)
+        binding_is_valid = (
+            source_agent_version_id is not None
+            and pipeline_id is not None
+            and source_agent_version_id == pipeline_id
+            and declared_pipeline_id == pipeline_id
+        )
+        if not binding_is_valid or stored_attribution is None:
+            attribution = ImportedExecutionAttribution(
+                status=ImportedExecutionAttributionStatus.INVALID,
+                stamps=(stored_attribution.stamps if stored_attribution else ()),
+            )
+            source_agent_version_label = None
+        else:
+            attribution = ImportedExecutionAttribution(
+                status=ImportedExecutionAttributionStatus(
+                    stored_attribution.status.value
+                ),
+                stamps=stored_attribution.stamps,
+            )
+            source_agent_version_label = _metadata_string(
+                metadata, IMPORT_SOURCE_AGENT_VERSION_LABEL_KEY
+            )
+        source_pipeline_id = pipeline_id
+        raw_evidence = _map_evidence_ref(
+            metadata,
+            artifact_id_key=IMPORT_RAW_EVIDENCE_ARTIFACT_ID_KEY,
+            digest_key=IMPORT_RAW_EVIDENCE_DIGEST_KEY,
+            schema_version_key=IMPORT_RAW_EVIDENCE_SCHEMA_VERSION_KEY,
+        )
+        replay_bundle = _map_evidence_ref(
+            metadata,
+            artifact_id_key=IMPORT_REPLAY_BUNDLE_ARTIFACT_ID_KEY,
+            digest_key=IMPORT_REPLAY_BUNDLE_DIGEST_KEY,
+            schema_version_key=IMPORT_REPLAY_BUNDLE_SCHEMA_VERSION_KEY,
+        )
+        replay_profile_version = _metadata_string(
+            metadata, IMPORT_REPLAY_PROFILE_VERSION_KEY
+        )
+        try:
+            replay_readiness = ReplayReadinessSummary.model_validate(
+                metadata.get(IMPORT_REPLAY_READINESS_KEY),
+                strict=False,
+            )
+        except (TypeError, ValidationError):
+            replay_readiness = None
+
+    return ImportedExecutionInfo(
+        source_kind=ImportedExecutionSourceKind.EXTERNAL_TRACE,
+        provider=_metadata_string(metadata, IMPORT_SOURCE_PROVIDER_KEY),
+        source_project_id=_metadata_string(metadata, IMPORT_SOURCE_PROJECT_ID_KEY),
+        source_trace_id=_metadata_string(metadata, IMPORT_SOURCE_TRACE_ID_KEY),
+        source_agent_version_id=source_agent_version_id,
+        source_agent_version_label=source_agent_version_label,
+        source_pipeline_id=source_pipeline_id,
+        attribution=attribution,
+        import_schema_version=schema_version,
+        integrity=integrity,
+        observation_count=_metadata_int(metadata, IMPORT_OBSERVATION_COUNT_KEY),
+        raw_evidence=raw_evidence,
+        replay_bundle=replay_bundle,
+        replay_profile_version=replay_profile_version,
+        replay_readiness=replay_readiness,
+        cohort_tag=_metadata_string(metadata, IMPORT_COHORT_TAG_KEY),
+    )
 
 
 def _backend_filter_value(values: Sequence[str]) -> str:
@@ -787,6 +960,7 @@ def _map_execution(
         _client=client,
         project_id=project_identity.project_id,
         project_name=project_identity.project_name,
+        import_info=_map_imported_execution_info(metadata, pipeline_id=flow_id),
     )
 
 
@@ -809,6 +983,7 @@ __all__ = [
     "_map_checkpoint_call",
     "_map_execution",
     "_map_failure_info",
+    "_map_imported_execution_info",
     "_map_pending_wait",
     "_normalize_checkpoint_name",
     "_normalize_flow_name",

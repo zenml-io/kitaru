@@ -19,14 +19,17 @@ def test_langfuse_import_forwards_explicit_stack(monkeypatch) -> None:
     ImportsAPI(cast(Any, client_ref)).langfuse(
         Path("export.jsonl"),
         source_project_id="source-project",
-        agent_name="support-agent",
+        agent="support-agent",
+        version="prod",
         stack="cloud-stack",
+        cohort_tag="customer-a",
     )
 
     import_langfuse_jsonl.assert_called_once_with(
         Path("export.jsonl"),
         source_project_id="source-project",
-        agent_name="support-agent",
+        agent="support-agent",
+        version="prod",
         stack="cloud-stack",
         trace_ids=None,
         limit=None,
@@ -34,5 +37,6 @@ def test_langfuse_import_forwards_explicit_stack(monkeypatch) -> None:
         confirm_data_storage=False,
         allow_fragmented=False,
         max_workers=1,
+        cohort_tag="customer-a",
         client=backend,
     )

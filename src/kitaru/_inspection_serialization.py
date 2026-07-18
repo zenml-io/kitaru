@@ -7,7 +7,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from zenml.models import SecretResponse
 
@@ -19,6 +19,7 @@ from kitaru._client._models import (
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     FailureInfo,
+    ImportedExecutionInfo,
     LogEntry,
     PendingWait,
 )
@@ -102,6 +103,15 @@ def serialize_failure(failure: FailureInfo | None) -> dict[str, Any] | None:
         "traceback": failure.traceback,
         "origin": to_jsonable(failure.origin, fallback_repr=True),
     }
+
+
+def serialize_imported_execution_info(
+    info: ImportedExecutionInfo | None,
+) -> dict[str, Any] | None:
+    """Serialize optional imported-execution attribution and readiness."""
+    if info is None:
+        return None
+    return cast(dict[str, Any], to_jsonable(info, fallback_repr=True))
 
 
 def serialize_pending_wait(wait: PendingWait | None) -> dict[str, Any] | None:
@@ -220,6 +230,9 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
         "llm_usage_summary": to_jsonable(
             execution.llm_usage_summary,
             fallback_repr=True,
+        ),
+        "import_info": serialize_imported_execution_info(
+            getattr(execution, "import_info", None)
         ),
     }
 

@@ -1,6 +1,11 @@
 """Canonical data models for importing external agent traces."""
 
-from kitaru.imports._langfuse import LangfuseImportError, read_langfuse_jsonl
+from kitaru.imports._langfuse import (
+    LangfuseImportError,
+    LangfuseSourceRecord,
+    read_langfuse_jsonl,
+    read_langfuse_jsonl_records,
+)
 from kitaru.imports._models import (
     ImportedObservation,
     ImportedTrace,
@@ -13,6 +18,35 @@ from kitaru.imports._models import (
     TraceUsage,
 )
 from kitaru.imports._normalization import normalize_langfuse_observations
+from kitaru.imports._pydantic_ai_replay import (
+    PydanticAIReplayBundle,
+    PydanticAIReplayEvidence,
+    ReplayEvidencePart,
+    ReplayObservationEvidence,
+    ReplayPartKind,
+    build_pydantic_ai_replay_evidence,
+)
+from kitaru.imports._replay_evidence import (
+    CapabilityReadiness,
+    EvidenceCaptureStatus,
+    EvidenceRedactionStatus,
+    ProviderVersionStamp,
+    ProviderVersionStampKind,
+    RawImportedEvidence,
+    RawSourceRow,
+    ReplayCapability,
+    ReplayDiagnostic,
+    ReplayDiagnosticCode,
+    ReplayReadinessStatus,
+    ReplayReadinessSummary,
+    SourceAttribution,
+    SourceAttributionStatus,
+    build_raw_imported_evidence,
+    canonical_json,
+    classify_source_attribution,
+    extract_langfuse_provider_stamps,
+    sha256_canonical_json,
+)
 from kitaru.imports._service import (
     ImportOutcomeStatus,
     LangfuseImportResult,
@@ -27,6 +61,9 @@ from kitaru.imports._writer import (
 )
 
 __all__ = [
+    "CapabilityReadiness",
+    "EvidenceCaptureStatus",
+    "EvidenceRedactionStatus",
     "ImportOutcomeStatus",
     "ImportedExecutionResult",
     "ImportedObservation",
@@ -36,15 +73,39 @@ __all__ = [
     "ImportedTraceWriteError",
     "LangfuseImportError",
     "LangfuseImportResult",
+    "LangfuseSourceRecord",
     "ObservationKind",
     "ObservationStatus",
+    "ProviderVersionStamp",
+    "ProviderVersionStampKind",
+    "PydanticAIReplayBundle",
+    "PydanticAIReplayEvidence",
+    "RawImportedEvidence",
+    "RawSourceRow",
+    "ReplayCapability",
+    "ReplayDiagnostic",
+    "ReplayDiagnosticCode",
+    "ReplayEvidencePart",
+    "ReplayObservationEvidence",
+    "ReplayPartKind",
+    "ReplayReadinessStatus",
+    "ReplayReadinessSummary",
+    "SourceAttribution",
+    "SourceAttributionStatus",
     "SourceObservationType",
     "TraceCost",
     "TraceImportOutcome",
     "TraceIntegrity",
     "TraceSource",
     "TraceUsage",
+    "build_pydantic_ai_replay_evidence",
+    "build_raw_imported_evidence",
+    "canonical_json",
+    "classify_source_attribution",
+    "extract_langfuse_provider_stamps",
     "import_langfuse_jsonl",
     "normalize_langfuse_observations",
     "read_langfuse_jsonl",
+    "read_langfuse_jsonl_records",
+    "sha256_canonical_json",
 ]

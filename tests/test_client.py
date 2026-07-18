@@ -39,6 +39,7 @@ from kitaru._client._mappers import (
     _RAW_STATUS_TO_PUBLIC_STATUS,
     _RAW_STATUSES_BY_PUBLIC_STATUS,
     _backend_filter_value,
+    _map_imported_execution_info,
     _to_public_status,
 )
 from kitaru._client._statistics import (
@@ -75,6 +76,7 @@ from kitaru.client import (
     ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
+    ImportedExecutionAttributionStatus,
     KitaruClient,
     _import_module_for_replay,
     _is_retryable_replay_import_error,
@@ -97,11 +99,158 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruWaitValidationError,
 )
+from kitaru.imports import (
+    CapabilityReadiness,
+    ProviderVersionStamp,
+    ProviderVersionStampKind,
+    ReplayCapability,
+    ReplayDiagnostic,
+    ReplayDiagnosticCode,
+    ReplayReadinessStatus,
+    ReplayReadinessSummary,
+    SourceAttribution,
+    SourceAttributionStatus,
+)
 from kitaru.replay import (
     EXPERIMENT_ID_METADATA_KEY,
     EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
     EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
 )
+
+
+def _import_readiness_metadata() -> dict[str, Any]:
+    readiness = ReplayReadinessSummary(
+        root_input_candidate_rerun=CapabilityReadiness(
+            capability=ReplayCapability.ROOT_INPUT_CANDIDATE_RERUN,
+            status=ReplayReadinessStatus.READY,
+        ),
+        model_message_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.MODEL_MESSAGE_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        tool_result_boundary_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.TOOL_RESULT_BOUNDARY_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNSUPPORTED,
+        ),
+        recorded_response_matching=CapabilityReadiness(
+            capability=ReplayCapability.RECORDED_RESPONSE_MATCHING,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        candidate_tool_compatibility=CapabilityReadiness(
+            capability=ReplayCapability.CANDIDATE_TOOL_COMPATIBILITY,
+            status=ReplayReadinessStatus.UNKNOWN,
+            diagnostics=(
+                ReplayDiagnostic(
+                    code=ReplayDiagnosticCode.CANDIDATE_TOOL_CONTRACT_UNKNOWN
+                ),
+            ),
+        ),
+    )
+    return readiness.model_dump(mode="json")
+
+
+def _v5_import_metadata() -> dict[str, Any]:
+    attribution = SourceAttribution(
+        status=SourceAttributionStatus.SOURCE_VERIFIED,
+        stamps=(
+            ProviderVersionStamp(
+                kind=ProviderVersionStampKind.GIT_SHA,
+                value="1" * 40,
+                source_field="metadata.git_sha",
+            ),
+        ),
+    )
+    return {
+        "kitaru_synthetic_import": True,
+        "kitaru_import_schema_version": 5,
+        "kitaru_import_source_provider_v1": "langfuse",
+        "kitaru_import_source_project_id_v1": "langfuse-project",
+        "kitaru_import_source_trace_id_v1": "trace-one",
+        "kitaru_import_source_agent_version_id_v1": "version-one",
+        "kitaru_import_source_agent_version_label_v1": "prod",
+        "kitaru_import_source_pipeline_id_v1": "version-one",
+        "kitaru_import_attribution_v1": attribution.model_dump(mode="json"),
+        "kitaru_import_integrity_v1": "complete",
+        "kitaru_import_observation_count_v1": 4,
+        "kitaru_import_raw_evidence_sha256_v1": "a" * 64,
+        "kitaru_import_raw_evidence_artifact_id_v1": "raw-artifact",
+        "kitaru_import_raw_evidence_schema_version_v1": 1,
+        "kitaru_import_replay_bundle_sha256_v1": "b" * 64,
+        "kitaru_import_replay_bundle_artifact_id_v1": "bundle-artifact",
+        "kitaru_import_replay_bundle_schema_version_v1": 1,
+        "kitaru_import_replay_profile_version_v1": "pydantic_ai_replay_v1",
+        "kitaru_import_replay_readiness_v1": _import_readiness_metadata(),
+        "kitaru_import_cohort_tag_v1": "customer-a",
+    }
+
+
+def test_imported_execution_projection_maps_typed_v5_metadata() -> None:
+    info = _map_imported_execution_info(
+        _v5_import_metadata(),
+        pipeline_id="version-one",
+    )
+
+    assert info is not None
+    assert info.provider == "langfuse"
+    assert info.source_project_id == "langfuse-project"
+    assert info.source_trace_id == "trace-one"
+    assert info.source_agent_version_id == "version-one"
+    assert info.source_agent_version_label == "prod"
+    assert info.source_pipeline_id == "version-one"
+    assert info.attribution.status is ImportedExecutionAttributionStatus.SOURCE_VERIFIED
+    assert info.attribution.stamps[0].value == "1" * 40
+    assert info.raw_evidence is not None
+    assert info.raw_evidence.artifact_id == "raw-artifact"
+    assert info.replay_bundle is not None
+    assert info.replay_bundle.sha256 == "b" * 64
+    assert info.replay_readiness is not None
+    assert (
+        info.replay_readiness.root_input_candidate_rerun.status
+        is ReplayReadinessStatus.READY
+    )
+    assert info.cohort_tag == "customer-a"
+
+
+def test_imported_execution_projection_rejects_denormalized_version_mismatch() -> None:
+    metadata = _v5_import_metadata()
+    metadata["kitaru_import_source_agent_version_id_v1"] = "other-version"
+
+    info = _map_imported_execution_info(metadata, pipeline_id="version-one")
+
+    assert info is not None
+    assert info.attribution.status is ImportedExecutionAttributionStatus.INVALID
+    assert info.source_agent_version_id == "other-version"
+    assert info.source_agent_version_label is None
+    assert info.source_pipeline_id == "version-one"
+
+
+def test_imported_execution_projection_preserves_v4_as_legacy_unattributed() -> None:
+    info = _map_imported_execution_info(
+        {
+            "kitaru_synthetic_import": True,
+            "kitaru_import_schema_version": 4,
+            "kitaru_import_source_provider_v1": "langfuse",
+            "kitaru_import_source_project_id_v1": "source-project",
+            "kitaru_import_source_trace_id_v1": "trace-legacy",
+            "kitaru_import_integrity_v1": "root_omitted",
+            "kitaru_import_observation_count_v1": 2,
+        },
+        pipeline_id="legacy-synthetic-flow",
+    )
+
+    assert info is not None
+    assert (
+        info.attribution.status
+        is ImportedExecutionAttributionStatus.LEGACY_UNATTRIBUTED
+    )
+    assert info.source_agent_version_id is None
+    assert info.source_pipeline_id is None
+    assert info.raw_evidence is None
+    assert info.replay_readiness is None
+
+
+def test_imported_execution_projection_ignores_native_execution_metadata() -> None:
+    assert _map_imported_execution_info({}, pipeline_id="flow-one") is None
 
 
 def _module_spec(name: str) -> ModuleSpec:
@@ -769,7 +918,8 @@ def test_project_management_client_blocks_project_scoped_apis_without_project() 
         client.imports.langfuse(
             "export.jsonl",
             source_project_id="source-project",
-            agent_name="support-agent",
+            agent="support-agent",
+            version="prod",
         )
 
 

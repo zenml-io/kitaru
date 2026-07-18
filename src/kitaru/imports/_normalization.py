@@ -6,12 +6,17 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import ValidationError
 
-from kitaru.imports._langfuse import LangfuseImportError, strict_json_loads
+from kitaru.imports._langfuse import (
+    LangfuseImportError,
+    LangfuseSourceRecord,
+    strict_json_loads,
+)
 from kitaru.imports._models import (
     ImportedObservation,
     ImportedTrace,
@@ -23,6 +28,15 @@ from kitaru.imports._models import (
     TraceSource,
     TraceUsage,
 )
+
+
+@dataclass(frozen=True)
+class NormalizedLangfuseTrace:
+    """One normalized trace paired with its selected source records."""
+
+    trace: ImportedTrace
+    records: tuple[LangfuseSourceRecord, ...]
+
 
 _TYPE_TO_KIND = {
     SourceObservationType.AGENT: ObservationKind.AGENT_CALL,
@@ -66,25 +80,83 @@ def normalize_selected_langfuse_observations(
     )
 
 
+def normalize_langfuse_records(
+    records: Iterable[LangfuseSourceRecord], *, project_id: str
+) -> list[NormalizedLangfuseTrace]:
+    """Normalize record-aware rows while retaining exact selected evidence."""
+    grouped: dict[str, list[LangfuseSourceRecord]] = defaultdict(list)
+    for record in records:
+        trace_id = _required_string(
+            record.row,
+            "traceId",
+            "trace_id",
+            row_number=record.line_number,
+        )
+        grouped[trace_id].append(record)
+    return _normalize_grouped_records(grouped, project_id=project_id)
+
+
+def normalize_selected_langfuse_records(
+    records: Iterable[LangfuseSourceRecord],
+    *,
+    project_id: str,
+    trace_ids: set[str],
+) -> tuple[list[NormalizedLangfuseTrace], int]:
+    """Normalize exact record-aware traces and count all source identities."""
+    grouped: dict[str, list[LangfuseSourceRecord]] = defaultdict(list)
+    all_trace_ids: set[str] = set()
+    for record in records:
+        trace_id = _required_string(
+            record.row,
+            "traceId",
+            "trace_id",
+            row_number=record.line_number,
+        )
+        all_trace_ids.add(trace_id)
+        if trace_id in trace_ids:
+            grouped[trace_id].append(record)
+    return (
+        _normalize_grouped_records(grouped, project_id=project_id),
+        len(all_trace_ids),
+    )
+
+
+def _normalize_grouped_records(
+    grouped: Mapping[str, list[LangfuseSourceRecord]],
+    *,
+    project_id: str,
+) -> list[NormalizedLangfuseTrace]:
+    normalized: list[NormalizedLangfuseTrace] = []
+    for trace_id, records in grouped.items():
+        trace = _normalize_trace_safely(
+            trace_id,
+            [(record.line_number, record.row) for record in records],
+            project_id=project_id,
+        )
+        normalized.append(
+            NormalizedLangfuseTrace(
+                trace=trace,
+                records=tuple(sorted(records, key=lambda record: record.source_order)),
+            )
+        )
+    return sorted(
+        normalized,
+        key=lambda item: (
+            item.trace.started_at or datetime.min.astimezone(),
+            item.trace.source.trace_id,
+        ),
+    )
+
+
 def _normalize_grouped_traces(
     grouped: Mapping[str, list[tuple[int, Mapping[str, Any]]]],
     *,
     project_id: str,
 ) -> list[ImportedTrace]:
-    traces = []
-    for trace_id, trace_rows in grouped.items():
-        try:
-            traces.append(_normalize_trace(trace_id, trace_rows, project_id=project_id))
-        except LangfuseImportError:
-            raise
-        # Payload trees below json.loads's depth limit can still overflow
-        # Python-level normalization: digesting raises RecursionError, and
-        # pydantic serialization raises ValueError ("depth exceeded").
-        # Surface both as a clean import error, not an unhandled traceback.
-        except (RecursionError, ValueError) as exc:
-            raise LangfuseImportError(
-                f"Trace {trace_id!r} could not be normalized: {exc}"
-            ) from exc
+    traces = [
+        _normalize_trace_safely(trace_id, trace_rows, project_id=project_id)
+        for trace_id, trace_rows in grouped.items()
+    ]
     return sorted(
         traces,
         key=lambda trace: (
@@ -92,6 +164,24 @@ def _normalize_grouped_traces(
             trace.source.trace_id,
         ),
     )
+
+
+def _normalize_trace_safely(
+    trace_id: str,
+    rows: list[tuple[int, Mapping[str, Any]]],
+    *,
+    project_id: str,
+) -> ImportedTrace:
+    try:
+        return _normalize_trace(trace_id, rows, project_id=project_id)
+    except LangfuseImportError:
+        raise
+    # Payload trees below json.loads's depth limit can still overflow
+    # Python-level normalization or Pydantic serialization.
+    except (RecursionError, ValueError) as exc:
+        raise LangfuseImportError(
+            f"Trace {trace_id!r} could not be normalized: {exc}"
+        ) from exc
 
 
 def _normalize_trace(
@@ -151,6 +241,8 @@ def _normalize_trace(
         "name": root.name,
         "started_at": started_at,
         "ended_at": ended_at,
+        "input_present": root.input_present,
+        "output_present": root.output_present,
         "input": root.input,
         "output": root.output,
         "metadata": root.metadata,
@@ -207,6 +299,8 @@ def _normalize_observation(
             status_message=_optional_string(
                 _first(row, "statusMessage", "status_message")
             ),
+            input_present="input" in row,
+            output_present="output" in row,
             input=_parse_json_string(row.get("input")),
             output=_parse_json_string(row.get("output")),
             metadata=_metadata(row.get("metadata")),

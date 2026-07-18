@@ -18,7 +18,12 @@ from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
-from kitaru._config._agents import _AgentVersionManifest
+from kitaru._config._agents import (
+    _AgentVersionManifest,
+    _complete_project_metadata,
+    _parse_agent_metadata,
+    _resolve_agent_project,
+)
 from kitaru._run_identity import (
     extract_resource_pipeline_id,
     extract_run_project_identity,
@@ -54,6 +59,10 @@ class RegisteredAgentVersionBinding:
 
     project_id: str
     manifest: _AgentVersionManifest
+    agent_name: str = ""
+    project_name: str = ""
+    aliases: tuple[str, ...] = ()
+    requested_alias: str | None = None
 
     @property
     def pipeline_id(self) -> str:
@@ -66,6 +75,89 @@ class RegisteredAgentVersionBinding:
     @property
     def fingerprint(self) -> str:
         return self.manifest.fingerprint
+
+
+def resolve_registered_agent_version(
+    client: Any,
+    *,
+    agent: str,
+    version: str,
+) -> RegisteredAgentVersionBinding:
+    """Resolve and verify one exact registered source AgentVersion."""
+    normalized_agent = _nonempty_selector(agent, field_name="agent")
+    normalized_version = _nonempty_selector(version, field_name="version")
+    try:
+        project = _resolve_agent_project(client, normalized_agent)
+    except (KitaruBackendError, KitaruStateError, KitaruUsageError):
+        raise
+    except Exception as exc:
+        raise KitaruBackendError(
+            "Unable to resolve the declared source Agent."
+        ) from exc
+
+    project_id = str(getattr(project, "id", "")).strip()
+    if not project_id:
+        raise KitaruStateError("The declared source Agent Project has no ID.")
+    project_name = str(getattr(project, "name", "")).strip()
+    if not project_name:
+        raise KitaruStateError("The declared source Agent Project has no name.")
+    envelope = _parse_agent_metadata(
+        project_id,
+        _complete_project_metadata(project),
+    )
+    if envelope is None:
+        raise KitaruStateError(
+            "The selected Project is not an initialized Kitaru Agent."
+        )
+
+    id_manifest = envelope.agent_versions.get(normalized_version)
+    alias_target = envelope.agent_version_aliases.get(normalized_version)
+    alias_manifest = (
+        envelope.agent_versions.get(alias_target) if alias_target is not None else None
+    )
+    if alias_target is not None and alias_manifest is None:
+        raise KitaruStateError(
+            "The selected AgentVersion alias points to a missing version."
+        )
+    if (
+        id_manifest is not None
+        and alias_manifest is not None
+        and id_manifest.agent_version_id != alias_manifest.agent_version_id
+    ):
+        raise KitaruStateError(
+            "The AgentVersion selector is ambiguous because it matches a UUID "
+            "and an alias for different versions."
+        )
+    manifest = id_manifest or alias_manifest
+    if manifest is None:
+        raise KitaruStateError(
+            f"AgentVersion '{normalized_version}' was not found for Agent "
+            f"'{envelope.agent.name}'."
+        )
+
+    aliases = tuple(
+        sorted(
+            alias
+            for alias, version_id in envelope.agent_version_aliases.items()
+            if version_id == manifest.agent_version_id
+        )
+    )
+    binding = RegisteredAgentVersionBinding(
+        project_id=project_id,
+        manifest=manifest,
+        agent_name=envelope.agent.name,
+        project_name=project_name,
+        aliases=aliases,
+        requested_alias=(normalized_version if alias_target is not None else None),
+    )
+    verify_registered_agent_version_binding(client, binding)
+    return binding
+
+
+def _nonempty_selector(value: str, *, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise KitaruUsageError(f"{field_name} must be a non-empty string.")
+    return value.strip()
 
 
 def qualified_declared_path(value: Any) -> str:
@@ -525,6 +617,84 @@ def find_exact_project_pipeline(
             "The registered AgentVersion Pipeline belongs to a different Project."
         )
     return pipeline
+
+
+def verify_registered_agent_version_binding(
+    client: Any,
+    binding: RegisteredAgentVersionBinding,
+) -> RegisteredAgentVersionBinding:
+    """Reload and verify every field in a supplied registered binding."""
+    try:
+        project = client.get_project(
+            binding.project_id,
+            allow_name_prefix_match=False,
+            hydrate=True,
+        )
+    except Exception as exc:
+        raise KitaruBackendError(
+            "Unable to reload the declared source Agent Project."
+        ) from exc
+
+    project_id = str(getattr(project, "id", "")).strip()
+    if project_id != binding.project_id:
+        raise KitaruStateError(
+            "The declared source Agent Project resolved to a different UUID."
+        )
+    project_name = str(getattr(project, "name", "")).strip()
+    envelope = _parse_agent_metadata(
+        project_id,
+        _complete_project_metadata(project),
+    )
+    if envelope is None:
+        raise KitaruStateError(
+            "The declared source Agent Project is no longer an initialized "
+            "Kitaru Agent."
+        )
+
+    matches = [
+        manifest
+        for manifest in envelope.agent_versions.values()
+        if manifest.pipeline_id == binding.pipeline_id
+    ]
+    if len(matches) != 1:
+        raise KitaruStateError(
+            "The declared source Pipeline UUID does not identify exactly one "
+            "registered AgentVersion manifest."
+        )
+    authoritative_manifest = matches[0]
+    authoritative_aliases = tuple(
+        sorted(
+            alias
+            for alias, version_id in envelope.agent_version_aliases.items()
+            if version_id == authoritative_manifest.agent_version_id
+        )
+    )
+
+    mismatches: list[str] = []
+    if binding.manifest != authoritative_manifest:
+        mismatches.append("AgentVersion manifest")
+    if binding.agent_name != envelope.agent.name:
+        mismatches.append("Agent name")
+    if binding.project_name != project_name:
+        mismatches.append("Project name")
+    if binding.aliases != authoritative_aliases:
+        mismatches.append("AgentVersion aliases")
+    if (
+        binding.requested_alias is not None
+        and envelope.agent_version_aliases.get(binding.requested_alias)
+        != authoritative_manifest.agent_version_id
+    ):
+        mismatches.append("requested AgentVersion alias")
+    if mismatches:
+        raise KitaruStateError(
+            "The supplied registered AgentVersion binding differs from authoritative "
+            "Project Agent metadata: "
+            + ", ".join(mismatches)
+            + ". Resolve the AgentVersion again before importing."
+        )
+
+    verify_registered_pipeline(client, binding)
+    return binding
 
 
 def verify_registered_pipeline(

@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class ImportsAPI:
-    """Operations for importing external traces as synthetic executions."""
+    """Operations for importing external traces as observed executions."""
 
     def __init__(self, client_ref: KitaruClient) -> None:
         self._client_ref = client_ref
@@ -23,7 +23,8 @@ class ImportsAPI:
         path: str | Path,
         *,
         source_project_id: str,
-        agent_name: str,
+        agent: str,
+        version: str,
         trace_ids: Sequence[str] | None = None,
         stack: str | None = None,
         limit: int | None = None,
@@ -31,17 +32,19 @@ class ImportsAPI:
         confirm_data_storage: bool = False,
         allow_fragmented: bool = False,
         max_workers: int = 1,
+        cohort_tag: str | None = None,
     ) -> LangfuseImportResult:
-        """Plan or import a Langfuse observations JSONL export.
+        """Preview or import a Langfuse observations JSONL export.
 
-        The default dry run is read-only. An actual import persists the full
-        observation inputs and outputs and therefore requires explicit data
-        storage confirmation.
+        The default dry run is read-only. An actual import persists the selected
+        raw rows and normalized replay evidence, including observation inputs
+        and outputs, and therefore requires explicit data-storage confirmation.
         """
         return import_langfuse_jsonl(
             path,
             source_project_id=source_project_id,
-            agent_name=agent_name,
+            agent=agent,
+            version=version,
             stack=stack,
             trace_ids=trace_ids,
             limit=limit,
@@ -49,5 +52,6 @@ class ImportsAPI:
             confirm_data_storage=confirm_data_storage,
             allow_fragmented=allow_fragmented,
             max_workers=max_workers,
+            cohort_tag=cohort_tag,
             client=self._client_ref._client(),
         )

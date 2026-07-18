@@ -74,6 +74,11 @@ from kitaru._client._models import (
     ExecutionStatisticsMetricAggregation,
     ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
+    ImportedEvidenceArtifactRef,
+    ImportedExecutionAttribution,
+    ImportedExecutionAttributionStatus,
+    ImportedExecutionInfo,
+    ImportedExecutionSourceKind,
     ScoreFilter,
 )
 from kitaru._interface_deployments import Deployment
@@ -239,6 +244,11 @@ __all__ = [
     "GroundedPolicySnapshot",
     "GroundedWorld",
     "ImageSettings",
+    "ImportedEvidenceArtifactRef",
+    "ImportedExecutionAttribution",
+    "ImportedExecutionAttributionStatus",
+    "ImportedExecutionInfo",
+    "ImportedExecutionSourceKind",
     "KitaruAmbiguousFlowResultError",
     "KitaruBackendError",
     "KitaruClient",

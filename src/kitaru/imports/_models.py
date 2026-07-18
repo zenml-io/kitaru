@@ -106,6 +106,8 @@ class ImportedObservation(BaseModel):
     ended_at: datetime | None = None
     status: ObservationStatus = ObservationStatus.UNKNOWN
     status_message: str | None = None
+    input_present: bool = False
+    output_present: bool = False
     input: Any = None
     output: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -147,6 +149,8 @@ class ImportedTrace(BaseModel):
     name: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    input_present: bool = False
+    output_present: bool = False
     input: Any = None
     output: Any = None
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -2,12 +2,23 @@
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 
 class LangfuseImportError(ValueError):
     """Raised when a Langfuse export cannot be imported safely."""
+
+
+@dataclass(frozen=True)
+class LangfuseSourceRecord:
+    """One parsed Langfuse row with its exact source text and position."""
+
+    raw_text: str
+    row: dict[str, Any]
+    line_number: int
+    source_order: int
 
 
 def _reject_json_constant(constant: str) -> Any:
@@ -29,20 +40,23 @@ def strict_json_loads(value: str) -> Any:
     return _STRICT_DECODER.decode(value)
 
 
-def read_langfuse_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
-    """Yield observations from a Langfuse JSONL export one line at a time.
+def read_langfuse_jsonl_records(
+    path: str | Path,
+) -> Iterator[LangfuseSourceRecord]:
+    """Yield Langfuse rows with exact source text and physical positions.
 
     Args:
         path: Path to a Langfuse observations export.
 
     Yields:
-        One decoded observation object per non-empty line.
+        One source record per non-empty line, in file order.
 
     Raises:
         LangfuseImportError: If a line is invalid JSON or not an object.
     """
     source = Path(path)
-    with source.open(encoding="utf-8") as file:
+    source_order = 0
+    with source.open(encoding="utf-8", newline="") as file:
         for line_number, line in enumerate(file, start=1):
             if not line.strip():
                 continue
@@ -59,4 +73,20 @@ def read_langfuse_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
                 raise LangfuseImportError(
                     f"Expected a JSON object in {source} at line {line_number}."
                 )
-            yield row
+            yield LangfuseSourceRecord(
+                raw_text=line,
+                row=row,
+                line_number=line_number,
+                source_order=source_order,
+            )
+            source_order += 1
+
+
+def read_langfuse_jsonl(path: str | Path) -> Iterator[dict[str, Any]]:
+    """Yield decoded observations from a Langfuse JSONL export.
+
+    This compatibility reader intentionally yields dictionaries. Use
+    :func:`read_langfuse_jsonl_records` when exact source evidence is needed.
+    """
+    for record in read_langfuse_jsonl_records(path):
+        yield record.row

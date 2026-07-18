@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from kitaru.imports import LangfuseImportError, read_langfuse_jsonl
+from kitaru.imports import (
+    LangfuseImportError,
+    read_langfuse_jsonl,
+    read_langfuse_jsonl_records,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "langfuse_observations.jsonl"
 
@@ -15,6 +19,29 @@ def test_reader_streams_jsonl_rows() -> None:
 
     assert len(rows) == 9
     assert rows[0]["traceId"] == "trace-complete"
+
+
+def test_record_reader_preserves_exact_text_line_and_source_order() -> None:
+    records = list(read_langfuse_jsonl_records(FIXTURE))
+
+    assert records[0].line_number == 1
+    assert records[0].source_order == 0
+    assert records[0].raw_text.endswith("\n")
+    assert records[0].row["traceId"] == "trace-complete"
+
+
+def test_record_reader_preserves_crlf_and_unterminated_final_line(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "line-endings.jsonl"
+    path.write_bytes(b'{"id":"first"}\r\n{"id":"last"}')
+
+    records = list(read_langfuse_jsonl_records(path))
+
+    assert [record.raw_text for record in records] == [
+        '{"id":"first"}\r\n',
+        '{"id":"last"}',
+    ]
 
 
 def test_reader_reports_malformed_line_number(tmp_path: Path) -> None:

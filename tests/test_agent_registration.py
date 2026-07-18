@@ -25,6 +25,7 @@ from kitaru._agent_registration import (
     canonicalize_registration_value,
     find_exact_project_pipeline,
     hash_registration_value,
+    resolve_registered_agent_version,
     resolve_registration_identity,
     verify_submitted_run_binding,
 )
@@ -236,6 +237,140 @@ def _manifest(pipeline_id: str = "pipeline-id") -> _AgentVersionManifest:
         registered_at="2026-07-17T10:00:00Z",
         source="registration",
     )
+
+
+def _resolver_project(
+    *manifests: _AgentVersionManifest,
+    aliases: dict[str, str] | None = None,
+) -> SimpleNamespace:
+    project_id = "00000000-0000-0000-0000-000000000001"
+    return SimpleNamespace(
+        id=project_id,
+        name="actual-project",
+        project_metadata={
+            "kitaru": {
+                "schema_version": 1,
+                "agent": {
+                    "agent_id": project_id,
+                    "name": "support-agent",
+                },
+                "agent_versions": {
+                    manifest.agent_version_id: manifest.model_dump(mode="json")
+                    for manifest in manifests
+                },
+                "agent_version_aliases": aliases or {},
+            }
+        },
+    )
+
+
+def _resolver_client(
+    project: SimpleNamespace,
+    *,
+    pipeline_id: str = "pipeline-id",
+) -> MagicMock:
+    client = MagicMock()
+    client.get_project.return_value = project
+    client.list_pipelines.return_value = SimpleNamespace(
+        items=[
+            SimpleNamespace(
+                id=pipeline_id,
+                name=_manifest().pipeline_name,
+                body=SimpleNamespace(project_id=project.id),
+            )
+        ]
+    )
+    return client
+
+
+def test_resolves_registered_agent_version_by_exact_alias_or_uuid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _manifest()
+    project = _resolver_project(manifest, aliases={"prod": manifest.pipeline_id})
+    client = _resolver_client(project)
+    monkeypatch.setattr(
+        "kitaru._agent_registration._resolve_agent_project",
+        lambda received_client, selector: (
+            project
+            if received_client is client and selector == "support-agent"
+            else None
+        ),
+    )
+
+    by_alias = resolve_registered_agent_version(
+        client,
+        agent="support-agent",
+        version="prod",
+    )
+    by_id = resolve_registered_agent_version(
+        client,
+        agent="support-agent",
+        version=manifest.pipeline_id,
+    )
+
+    assert by_alias.manifest == by_id.manifest == manifest
+    assert by_alias.requested_alias == "prod"
+    assert by_alias.aliases == ("prod",)
+    assert by_id.requested_alias is None
+    assert by_id.agent_name == "support-agent"
+    assert by_id.project_name == "actual-project"
+
+
+def test_rejects_agent_version_id_alias_collision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _manifest("pipeline-id")
+    second = _manifest("other-pipeline-id").model_copy(
+        update={
+            "pipeline_name": "support_agent__av_other_abcdef123456",
+            "fingerprint": "sha256:other-fingerprint",
+        }
+    )
+    project = _resolver_project(
+        first,
+        second,
+        aliases={first.pipeline_id: second.pipeline_id},
+    )
+    client = _resolver_client(project)
+    monkeypatch.setattr(
+        "kitaru._agent_registration._resolve_agent_project",
+        lambda _client, _selector: project,
+    )
+
+    with pytest.raises(KitaruStateError, match="ambiguous"):
+        resolve_registered_agent_version(
+            client,
+            agent="support-agent",
+            version=first.pipeline_id,
+        )
+
+    client.list_pipelines.assert_not_called()
+
+
+def test_rejects_missing_or_recreated_source_agent_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _manifest()
+    project = _resolver_project(manifest)
+    client = _resolver_client(project, pipeline_id="recreated-pipeline-id")
+    monkeypatch.setattr(
+        "kitaru._agent_registration._resolve_agent_project",
+        lambda _client, _selector: project,
+    )
+
+    with pytest.raises(KitaruStateError, match="was not found"):
+        resolve_registered_agent_version(
+            client,
+            agent="support-agent",
+            version="missing",
+        )
+    with pytest.raises(KitaruStateError, match="different UUID"):
+        resolve_registered_agent_version(
+            client,
+            agent="support-agent",
+            version=manifest.pipeline_id,
+        )
 
 
 def test_canonical_identity_is_deterministic_and_rejects_unsupported_values(

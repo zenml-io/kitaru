@@ -20,6 +20,11 @@ from kitaru._llm_usage import (
 )
 from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin, KitaruUsageError
+from kitaru.imports._models import TraceIntegrity
+from kitaru.imports._replay_evidence import (
+    ProviderVersionStamp,
+    ReplayReadinessSummary,
+)
 
 if TYPE_CHECKING:
     from kitaru._experiments import Experiment
@@ -63,6 +68,61 @@ class ExecutionStatus(StrEnum):
     def is_successful(self) -> bool:
         """Whether the execution finished successfully."""
         return self is ExecutionStatus.COMPLETED
+
+
+class ImportedExecutionSourceKind(StrEnum):
+    """Public source taxonomy for imported executions."""
+
+    EXTERNAL_TRACE = "external_trace"
+
+
+class ImportedExecutionAttributionStatus(StrEnum):
+    """How an imported execution is attributed to its declared AgentVersion."""
+
+    SOURCE_VERIFIED = "source_verified"
+    CALLER_ATTRIBUTED = "caller_attributed"
+    CONFLICT = "conflict"
+    LEGACY_UNATTRIBUTED = "legacy_unattributed"
+    INVALID = "invalid"
+
+
+@dataclass(frozen=True)
+class ImportedExecutionAttribution:
+    """Typed source attribution attached to an imported execution."""
+
+    status: ImportedExecutionAttributionStatus
+    stamps: tuple[ProviderVersionStamp, ...] = ()
+
+
+@dataclass(frozen=True)
+class ImportedEvidenceArtifactRef:
+    """Immutable imported-evidence artifact identity."""
+
+    artifact_id: str
+    sha256: str
+    schema_version: int
+
+
+@dataclass(frozen=True)
+class ImportedExecutionInfo:
+    """Typed import provenance and replay-readiness for one execution."""
+
+    source_kind: ImportedExecutionSourceKind
+    provider: str | None
+    source_project_id: str | None
+    source_trace_id: str | None
+    source_agent_version_id: str | None
+    source_agent_version_label: str | None
+    source_pipeline_id: str | None
+    attribution: ImportedExecutionAttribution
+    import_schema_version: int | None
+    integrity: TraceIntegrity | None
+    observation_count: int | None
+    raw_evidence: ImportedEvidenceArtifactRef | None
+    replay_bundle: ImportedEvidenceArtifactRef | None
+    replay_profile_version: str | None
+    replay_readiness: ReplayReadinessSummary | None
+    cohort_tag: str | None
 
 
 class ExecutionStatisticsDimension(StrEnum):
@@ -608,6 +668,7 @@ class Execution:
     _client: KitaruClient = field(repr=False, compare=False)
     project_id: str | None = None
     project_name: str | None = None
+    import_info: ImportedExecutionInfo | None = None
 
     @property
     def llm_usage_summary(self) -> dict[str, Any] | None:
