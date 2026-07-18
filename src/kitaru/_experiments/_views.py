@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from zenml.client import Client
 
-from kitaru._experiments._models import ExperimentRecord, ExperimentSpec
+from kitaru._experiments._models import (
+    ExperimentRecord,
+    ExperimentSpec,
+    ExperimentSpecRecord,
+)
 from kitaru.errors import KitaruUsageError
 from kitaru.replay import EXPERIMENT_TAG_PREFIX, ReplaySubmission
 
@@ -49,7 +53,7 @@ class Experiment:
     runs: ExperimentRunLookup
 
     @property
-    def spec(self) -> ExperimentSpec:
+    def spec(self) -> ExperimentSpecRecord:
         """Return the immutable submitted specification."""
         return self.record.spec
 
@@ -57,6 +61,19 @@ class Experiment:
     def experiment_id(self) -> str:
         """Return the durable attempt ID."""
         return self.spec.experiment_id
+
+    @property
+    def score_aggregate(self) -> Any | None:
+        """Load the immutable score aggregate when one is attached."""
+        if self.record.score_aggregate is None:
+            return None
+        from kitaru.scoring import load_score_aggregate
+
+        return load_score_aggregate(
+            self.record.score_aggregate,
+            project_id=self.runs.project_id,
+            client=self.runs._client_factory(),
+        )
 
     def to_json(self) -> dict[str, Any]:
         """Serialize the frontend contract without fetching member runs."""
@@ -76,7 +93,7 @@ class ExperimentReplayResult:
     @property
     def spec(self) -> ExperimentSpec:
         """Return the immutable specification for this attempt."""
-        return self.record.spec
+        return cast(ExperimentSpec, self.record.spec)
 
     def to_json(self) -> dict[str, Any]:
         """Serialize durable state and replay details without fetching member runs."""

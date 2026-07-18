@@ -1002,7 +1002,7 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     assert len(run_summary_names) == len(set(run_summary_names))
 
 
-def test_phase17_auto_flow_runs_end_to_end(
+def test_registered_agent_auto_flow_runs_end_to_end(
     primed_zenml,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1010,7 +1010,7 @@ def test_phase17_auto_flow_runs_end_to_end(
     global _AUTO_FLOW_AGENT
     _AUTO_FLOW_AGENT = KitaruAgent(_make_test_agent(name_prefix="auto_flow_agent"))
     repository_root = Path(Client.find_repository())
-    entrypoint_module = repository_root / "phase17_registered_agent.py"
+    entrypoint_module = repository_root / "registered_agent.py"
     entrypoint_module.write_text(
         "from tests.test_phase17_pydantic_ai_adapter import _AUTO_FLOW_AGENT\n"
     )
@@ -1039,12 +1039,12 @@ def test_phase17_auto_flow_runs_end_to_end(
         ["git", "-C", str(repository_root), "commit", "-qm", "test entrypoint"],
         check=True,
     )
-    sys.modules.pop("phase17_registered_agent", None)
+    sys.modules.pop("registered_agent", None)
     monkeypatch.syspath_prepend(repository_root)
     importlib.invalidate_caches()
     try:
         _AUTO_FLOW_AGENT.register(
-            entrypoint="phase17_registered_agent:_AUTO_FLOW_AGENT",
+            entrypoint="registered_agent:_AUTO_FLOW_AGENT",
         )
         result = _invoke_shared_auto_flow_agent()
     finally:

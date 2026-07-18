@@ -343,7 +343,7 @@ def serialize_experiment(
     """Serialize the stable read-only frontend experiment contract."""
     record = experiment.record if isinstance(experiment, Experiment) else experiment
     spec = record.spec
-    return {
+    payload = {
         "schema_version": record.schema_version,
         "experiment_id": spec.experiment_id,
         "kind": spec.kind,
@@ -355,8 +355,6 @@ def serialize_experiment(
         "updated_at": record.updated_at,
         "started_at": record.started_at,
         "finished_at": record.finished_at,
-        "candidate_agent_version_id": spec.candidate_agent_version_id,
-        "coverage": spec.coverage.model_dump(mode="json"),
         "target_membership": spec.target_membership.model_dump(mode="json"),
         "counts": record.counts.model_dump(mode="json"),
         "errors": [issue.model_dump(mode="json") for issue in record.errors],
@@ -364,7 +362,26 @@ def serialize_experiment(
         "unverified_children": [
             issue.model_dump(mode="json") for issue in record.unverified_children
         ],
+        "scorers": [scorer.model_dump(mode="json") for scorer in spec.scorers],
+        "evidence_manifest": (
+            None
+            if spec.evidence_manifest is None
+            else spec.evidence_manifest.model_dump(mode="json")
+        ),
+        "score_aggregate": (
+            None
+            if record.score_aggregate is None
+            else record.score_aggregate.model_dump(mode="json")
+        ),
+        "score_aggregate_data": None,
     }
+    if spec.kind == "replay":
+        payload["candidate_agent_version_id"] = spec.candidate_agent_version_id
+        payload["coverage"] = spec.coverage.model_dump(mode="json")
+    else:
+        payload["candidate_agent_version_id"] = None
+        payload["coverage"] = None
+    return payload
 
 
 def serialize_experiment_replay_result(

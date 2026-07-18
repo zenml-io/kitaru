@@ -15,10 +15,11 @@ from kitaru._experiments._models import (
     ExperimentIssue,
     ExperimentRecord,
     ExperimentReservation,
-    ExperimentSpec,
+    ExperimentSpecRecord,
     _required_string,
 )
 from kitaru.errors import KitaruMetadataConflictError, KitaruStateError
+from kitaru.scoring import ScoreAggregateReference
 
 
 def validate_experiment_record_transition(
@@ -60,6 +61,13 @@ def validate_experiment_record_transition(
         raise KitaruMetadataConflictError(
             "Experiment creation timestamps are immutable."
         )
+    if (
+        previous.score_aggregate is not None
+        and desired.score_aggregate != previous.score_aggregate
+    ):
+        raise KitaruMetadataConflictError(
+            "Experiment score aggregate references cannot be replaced."
+        )
     for old, new in (
         (previous.errors, desired.errors),
         (previous.skips, desired.skips),
@@ -71,9 +79,43 @@ def validate_experiment_record_transition(
             )
 
 
+def get_experiment_by_idempotency_key(
+    project_id: str,
+    idempotency_key: str,
+    *,
+    client_factory: Callable[[], Any] = Client,
+) -> ExperimentRecord | None:
+    """Return an existing attempt for an idempotency key without mutation."""
+    from kitaru._config._agents import (
+        _complete_project_metadata,
+        _parse_agent_metadata,
+        _validate_exact_project,
+    )
+    from kitaru._config._projects import _get_project_by_exact_selector
+
+    normalized_project = _required_string(project_id, field_name="Project ID")
+    normalized_key = _required_string(
+        idempotency_key, field_name="Experiment idempotency key"
+    )
+    client = client_factory()
+    try:
+        project = _get_project_by_exact_selector(client, normalized_project)
+        _validate_exact_project(project, project_id=normalized_project)
+        metadata = _complete_project_metadata(project)
+        envelope = _parse_agent_metadata(normalized_project, metadata)
+    except Exception:
+        return None
+    if envelope is None:
+        return None
+    experiment_id = envelope.experiment_idempotency_index.get(normalized_key)
+    if experiment_id is None:
+        return None
+    return envelope.experiments.get(experiment_id)
+
+
 def reserve_experiment(
     project_id: str,
-    spec: ExperimentSpec,
+    spec: ExperimentSpecRecord,
     *,
     client_factory: Callable[[], Any] = Client,
 ) -> ExperimentReservation:
@@ -256,6 +298,7 @@ def finalize_experiment_outcomes(
     errors: Sequence[ExperimentIssue] = (),
     skips: Sequence[ExperimentIssue] = (),
     unverified_children: Sequence[ExperimentIssue] = (),
+    aggregate_reference: ScoreAggregateReference | None = None,
     at: str | None = None,
     client_factory: Callable[[], Any] = Client,
 ) -> ExperimentRecord:
@@ -274,6 +317,10 @@ def finalize_experiment_outcomes(
                 and record.errors == desired_errors
                 and record.skips == desired_skips
                 and record.unverified_children == desired_unverified
+                and (
+                    aggregate_reference is None
+                    or record.score_aggregate == aggregate_reference
+                )
             ):
                 return record
             raise KitaruMetadataConflictError(
@@ -290,9 +337,39 @@ def finalize_experiment_outcomes(
                 "errors": desired_errors,
                 "skips": desired_skips,
                 "unverified_children": desired_unverified,
+                "score_aggregate": aggregate_reference or record.score_aggregate,
                 "finished_at": timestamp,
                 "updated_at": timestamp,
             },
+            deep=True,
+        )
+
+    return _update_experiment(
+        project_id,
+        experiment_id,
+        update,
+        client_factory=client_factory,
+    )
+
+
+def attach_experiment_score_aggregate(
+    project_id: str,
+    experiment_id: str,
+    *,
+    aggregate_reference: ScoreAggregateReference,
+    client_factory: Callable[[], Any] = Client,
+) -> ExperimentRecord:
+    """Attach one immutable score aggregate reference to an attempt."""
+
+    def update(record: ExperimentRecord) -> ExperimentRecord:
+        if record.score_aggregate == aggregate_reference:
+            return record
+        if record.score_aggregate is not None:
+            raise KitaruMetadataConflictError(
+                "Experiment score aggregate references cannot be replaced."
+            )
+        return record.model_copy(
+            update={"score_aggregate": aggregate_reference},
             deep=True,
         )
 

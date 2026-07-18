@@ -369,35 +369,30 @@ examples:
       waiver_allowed: true
   - id: pydantic-ai-support-agent-replay
     path: examples/end_to_end/replay_fork_demo/demo.py
-    public_docs: [examples/README.md]
+    public_docs:
+      - examples/README.md
+      - examples/end_to_end/replay_fork_demo/README.md
     owner_area: PydanticAI support-agent replay user story
     coverage:
       deterministic_pytest:
-        status: planned
-        waiver:
-          reason: The example is being reconstructed ahead of the agent-version
-            and imported-execution SDK primitives that provide its source runs.
-          reviewer_action: Add deterministic execution and replay coverage when
-            those primitives land, or review the example structure manually.
+        status: covered
+        test_file: tests/test_replay_fork_demo.py
       local_smoke:
-        status: manual_only
-        waiver:
-          reason: The end-to-end path requires the parallel SDK work plus a local
-            Kitaru server and OpenAI credentials.
-          reviewer_action: Run the baseline and candidate walkthrough manually
-            after rebasing onto the SDK implementation.
-        command: uv run python examples/end_to_end/replay_fork_demo/demo.py
-          import-traces trace_fixtures/support-traces.jsonl --format langfuse
+        status: smoke_only
+        command: cd examples/end_to_end/replay_fork_demo && uv run python demo.py
+          import-traces trace_fixtures/support-traces.jsonl --source-project-id
+          fixture-langfuse-project
+        command_paths: [examples/end_to_end/replay_fork_demo/demo.py]
         requires_server: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 180
+        timeout_seconds: 120
       live_provider:
         status: manual_only
         waiver:
-          reason: The example uses multiple OpenAI model and tool turns and has
-            no bounded provider job while its SDK dependencies are in progress.
-          reviewer_action: Run one baseline execution and one candidate replay
-            manually, then inspect the recorded model and tool checkpoints.
+          reason: Framework-exact replay requires an existing native execution
+            and several OpenAI model and tool turns, so it is not part of a
+            bounded provider job.
+          reviewer_action: Create one native support-agent execution, register a
+            candidate, run demo.py replay, and inspect the experiment children.
         provider: openai
         command: cd examples/end_to_end/replay_fork_demo && uv run --with langfuse
           python -m trace_fixtures.generate --set smoke

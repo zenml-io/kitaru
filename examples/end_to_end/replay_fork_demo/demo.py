@@ -1,11 +1,12 @@
-"""Import production traces, investigate a case, and replay a candidate agent.
+"""Import production traces and replay a candidate agent over native cases.
 
-This file uses the case-first replay primitives that are being added to the
-Kitaru SDK. Trace generation lives in ``trace_fixtures/`` and is not part of
-the user journey shown here.
+Trace generation lives in ``trace_fixtures/`` and is not part of the user
+journey shown here.
 """
 
 import json
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 
 import click
@@ -13,10 +14,8 @@ from evals.register import AGENT_NAME, AGENT_VERSION, kagent
 
 from kitaru import KitaruClient
 
-DEFAULT_FILTER = 'metadata.intent == "permissions"'
 DEFAULT_AT = "support_agent_model_request"
 DEFAULT_EXPERIMENT = "support-agent-permissions-v2"
-SOURCE_VERSION = "v2.2"
 
 
 def _json(value: Any) -> str:
@@ -25,31 +24,27 @@ def _json(value: Any) -> str:
         value = value.to_json()
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
+    if is_dataclass(value) and not isinstance(value, type):
+        value = asdict(value)
     return json.dumps(value, indent=2, sort_keys=True, default=str)
 
 
-def _import_traces(source: str, *, trace_format: str | None, name: str | None) -> Any:
-    """Import one production trace or a batch export as Kitaru executions."""
-    kwargs: dict[str, Any] = {
-        "agent": AGENT_NAME,
-        "version": SOURCE_VERSION,
-    }
-    if trace_format is not None:
-        kwargs["format"] = trace_format
-    if name is not None:
-        kwargs["name"] = name
+def _import_traces(
+    path: Path,
+    *,
+    source_project_id: str,
+    trace_ids: list[str],
+    dry_run: bool,
+) -> Any:
+    """Plan or execute a Langfuse JSONL import as Kitaru executions."""
     client = KitaruClient()
-    return client.executions.import_traces(  # ty: ignore[unresolved-attribute]
-        source, **kwargs
-    )
-
-
-def _find_cases(where: str) -> list[Any]:
-    """Resolve a production filter to the executions under investigation."""
-    client = KitaruClient()
-    return client.executions.list(  # type: ignore[call-arg]
-        agent=AGENT_NAME,  # ty: ignore[unknown-argument]
-        where=where,  # ty: ignore[unknown-argument]
+    return client.imports.langfuse(
+        str(path),
+        source_project_id=source_project_id,
+        agent_name=AGENT_NAME,
+        trace_ids=trace_ids or None,
+        dry_run=dry_run,
+        confirm_data_storage=not dry_run,
     )
 
 
@@ -61,6 +56,9 @@ def _replay_cases(
     idempotency_key: str,
 ) -> Any:
     """Replay native executions as one durable registered-agent experiment."""
+    # Each CLI command runs in a fresh process, so bind this agent instance to
+    # the durable registration before submitting the replay.
+    kagent.register(label=AGENT_VERSION)
     return kagent.replay(
         execution_ids,
         at=at,
@@ -81,31 +79,36 @@ def cli() -> None:
 @cli.command("register")
 def register_cmd() -> None:
     """Register the wrapped agent once, without executing it."""
-    result = kagent.register(  # ty: ignore[unresolved-attribute]
-        version=AGENT_VERSION
-    )
+    result = kagent.register(label=AGENT_VERSION)
     click.echo(_json(result))
 
 
 @cli.command("import-traces")
-@click.argument("source")
-@click.option("--format", "trace_format")
-@click.option("--name")
+@click.argument("path", type=click.Path(path_type=Path, dir_okay=False))
+@click.option("--source-project-id", required=True)
+@click.option("--trace-id", "trace_ids", multiple=True)
+@click.option(
+    "--commit",
+    is_flag=True,
+    help="Persist imported observations. The default is a read-only dry run.",
+)
 def import_traces_cmd(
-    source: str,
-    trace_format: str | None,
-    name: str | None,
+    path: Path,
+    source_project_id: str,
+    trace_ids: tuple[str, ...],
+    commit: bool,
 ) -> None:
-    """Import one reported trace or a production export."""
-    click.echo(_json(_import_traces(source, trace_format=trace_format, name=name)))
-
-
-@cli.command("find")
-@click.option("--where", default=DEFAULT_FILTER, show_default=True)
-def find_cmd(where: str) -> None:
-    """Find imported executions that match the failure signal."""
-    executions = _find_cases(where)
-    click.echo(_json(executions))
+    """Plan or import traces from a Langfuse observations JSONL export."""
+    click.echo(
+        _json(
+            _import_traces(
+                path,
+                source_project_id=source_project_id,
+                trace_ids=list(trace_ids),
+                dry_run=not commit,
+            )
+        )
+    )
 
 
 @cli.command("replay")

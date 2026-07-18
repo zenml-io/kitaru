@@ -1,73 +1,97 @@
 # Case-first replay with a PydanticAI support agent
 
-This example starts with a production report, inspects the reported trace, then
-uses native Kitaru executions to prove a candidate change as one durable replay
-experiment.
+This example starts with a reported production trace, imports it as a stored
+Kitaru execution, and then submits native Kitaru executions to a registered
+candidate agent as one durable replay experiment.
 
-Stage 1 keeps an important boundary explicit:
+The distinction between the two execution sources matters:
 
-- imported Langfuse traces are inspectable historical records;
-- replay experiments accept native Kitaru executions whose checkpoint graph can
-  run again;
-- scoring and replaying imported traces are later-stage work.
+- A Langfuse JSONL export can be imported, inspected, and scored as stored
+  evidence.
+- An imported trace does not contain Kitaru's executable checkpoint graph, so
+  it cannot be replayed with framework-exact checkpoint reuse.
+- The `replay` and `experiment` commands therefore accept only execution IDs
+  from native Kitaru runs of this agent.
 
-## The agent
+The example does not ship a permission-policy scorer. Kitaru's current frozen
+scoring evidence does not expose the tool-call names needed to prove whether
+this agent attempted a restricted write. A scorer that guessed from checkpoint
+IDs would produce a convincing-looking but false result.
 
-The production agent is a PydanticAI `Agent` with a typed result and eight
-tools. PydanticAI runs the model loop and tool calls. Kitaru records each model
-and tool call as a checkpoint through:
+## Setup
 
-```python
-# evals/register.py
-kagent = build_support_agent(load_variant(VARIANT_NAME), name="support-agent")
-```
-
-`build_support_agent` returns a `KitaruAgent` configured with
-`checkpoint_strategy="calls"`.
-
-## 1. Register the candidate
-
-Registering records the exact candidate code, configuration, and executable
-without running the agent:
+From a fresh checkout:
 
 ```bash
+uv sync --extra local --extra pydantic-ai --extra llm
 cd examples/end_to_end/replay_fork_demo
 uv run kitaru init
+export OPENAI_API_KEY=sk-...
+```
+
+The production-shaped agent is a PydanticAI `Agent` with typed output and local
+tools. `build_support_agent(...)` wraps it in a `KitaruAgent` with
+`checkpoint_strategy="calls"`, so native runs record model and tool calls as
+replayable checkpoints.
+
+## 1. Import a reported Langfuse trace
+
+The import API accepts a Langfuse observations JSONL export, not a
+`langfuse://` URL. Start with a read-only dry run:
+
+```bash
+uv run python demo.py import-traces \
+  trace_fixtures/support-traces.jsonl \
+  --source-project-id <LANGFUSE_PROJECT_ID> \
+  --trace-id 56cf81f1cb9e4b92994b17b81b041351
+```
+
+Omit `--trace-id` to plan every trace in the export. Review the selected trace
+count, destination project, stack, artifact store, and per-trace outcomes.
+Then repeat the same command with `--commit` to persist the full observation
+inputs and outputs:
+
+```bash
+uv run python demo.py import-traces \
+  trace_fixtures/support-traces.jsonl \
+  --source-project-id <LANGFUSE_PROJECT_ID> \
+  --trace-id 56cf81f1cb9e4b92994b17b81b041351 \
+  --commit
+```
+
+The result contains an `execution_id` for each imported trace. Inspect one with:
+
+```bash
+uv run kitaru executions get <IMPORTED_EXECUTION_ID>
+```
+
+Imported executions preserve Langfuse provenance and recorded observations.
+They can be passed to `client.executions.evaluate(...)` when a scorer can make
+its decision from the frozen evidence Kitaru exposes. Do not pass an imported
+execution ID to this example's replay commands.
+
+## 2. Register the candidate
+
+Select the candidate configuration and a human label:
+
+```bash
 export SUPPORT_AGENT_VARIANT=nano_trimmed_permissions
 export SUPPORT_AGENT_VERSION=v2.3
 uv run python demo.py register
 ```
 
-The registered entrypoint is `evals.register:kagent`. The replay experiment is
-submitted through this registered candidate version even when its source
-execution came from an older registered version.
+The stable entrypoint is `evals.register:kagent`. Kitaru fingerprints its code,
+configuration, and worldview. Repeating registration with the same identity
+and label reuses the existing AgentVersion.
 
-## 2. Inspect a reported Langfuse trace
-
-Import one reported trace:
-
-```bash
-uv run python demo.py import-traces \
-  langfuse://trace/8f3a91c2 \
-  --name ticket-48211
-```
-
-Or import the checked-in production export:
-
-```bash
-uv run python demo.py import-traces \
-  trace_fixtures/support-traces.jsonl \
-  --format langfuse
-```
-
-The import preserves the recorded input, output, model calls, tool calls,
-latency, cost, metadata, tags, and Langfuse provenance. Use `demo.py find` to
-inspect matching imported records. Stage 1 does not replay those imported
-records because they do not contain an executable native checkpoint graph.
+The replay commands also perform this idempotent registration in their own
+process before submitting work. Running `register` separately is useful for
+reviewing the resolved AgentVersion, but it is not hidden process state that
+later commands depend on.
 
 ## 3. Replay one native case
 
-Take the execution ID from a native Kitaru run of this agent, then replay from
+Use an execution ID from a native Kitaru run of the support agent. Replay from
 its first model-request checkpoint:
 
 ```bash
@@ -76,7 +100,7 @@ uv run python demo.py replay <NATIVE_EXECUTION_ID> \
   --idempotency-key permissions-case-48211-v2
 ```
 
-The command calls the registered agent API with every policy choice explicit:
+The command submits this request through the registered candidate:
 
 ```python
 result = kagent.replay(
@@ -91,18 +115,17 @@ result = kagent.replay(
 )
 ```
 
-Kitaru validates the complete request before it creates durable state. It then
-creates one experiment attempt, submits each repeat through the registered
-candidate, writes the experiment tag and metadata to every child, verifies both
-membership signals, and records a terminal submission status.
+Kitaru validates the complete request before creating durable state. It then
+records one experiment attempt, submits each repeat, writes experiment lineage
+to every child, and verifies membership before finalizing the submission.
 
-Retry the same logical request with the same idempotency key if the caller loses
-the response. Kitaru returns the existing attempt instead of submitting a
-duplicate. Reusing the key for different inputs fails.
+If the caller loses the response, retry the same logical request with the same
+idempotency key. Kitaru recovers or returns the existing attempt instead of
+creating a duplicate. Reusing the key with different inputs fails.
 
 ## 4. Replay several native cases as one experiment
 
-Pass explicit native execution IDs in the order that should be frozen:
+Pass native execution IDs in the order that should be frozen:
 
 ```bash
 uv run python demo.py experiment \
@@ -113,20 +136,20 @@ uv run python demo.py experiment \
   --idempotency-key permissions-v2-attempt-1
 ```
 
-One call creates one experiment. Three targets with three repeats produce nine
-intended child submissions. The immutable specification retains target order,
-checkpoint coverage, repeat count, registered candidate version, and replay
-inputs. Member execution bodies remain on the execution records rather than
-being copied into the Agent catalog.
+Two targets with three repeats produce six intended child submissions. The
+immutable specification retains target order, checkpoint coverage, repeat
+count, registered candidate version, and replay inputs. Member execution bodies
+remain on their execution records rather than being copied into the Agent
+catalog.
 
-`completed` means all intended children were submitted and both membership
-signals were verified. It does not mean every child has finished running.
-Individual executions remain authoritative for live and terminal run status.
+`completed` means all intended children were submitted and membership was
+verified. It does not mean every asynchronous child has finished running.
+Individual execution records remain authoritative for live and terminal status.
 
 ## 5. Read the experiment
 
-The replay result exposes the frozen specification, cached record, existing
-replay rows, and a lazy member-run lookup:
+The immediate result exposes the frozen specification, durable record,
+submission rows, and member-run lookup:
 
 ```python
 print(result.spec.experiment_id)
@@ -136,23 +159,18 @@ print(result.submission.summary.to_json())
 page = result.runs.list(page=1, size=50)
 ```
 
-Read the same attempt later through the Agent catalog:
+Read the attempt later through the Agent catalog:
 
 ```python
 from kitaru import KitaruClient
 
 client = KitaruClient()
-
-attempts = client.agents.experiments.list()
 attempt = client.agents.experiments.get(result.spec.experiment_id)
 member_page = attempt.runs.list(page=1, size=50)
 ```
 
-Attempts are newest first. Exact experiment IDs always resolve. Suite keys and
-human names resolve only when unambiguous.
-
-Execution relationships are projections over the catalog, tags, metadata, and
-recorded replay lineage:
+Execution relationships project the stored experiment membership and replay
+lineage:
 
 ```python
 source = client.executions.get("<NATIVE_EXECUTION_ID>")
@@ -164,24 +182,17 @@ for replay in source.replays:
     print(replay.exec_id)
 
 child = client.executions.get(result.submission.results[0].replay_exec_id)
-original = child.original
-root = child.root
+print(child.original)
+print(child.root)
 ```
 
 Older executions without verified root metadata return `None` for `root`
-rather than inferring ancestry from a name or imported provenance.
+instead of inferring ancestry from names or imported provenance.
 
-## Fixture generation
+## Fixture provenance
 
-The helper under `trace_fixtures/` runs seeded scenarios through the same
-PydanticAI agent and records fresh Langfuse traces:
-
-```bash
-uv run --with langfuse python -m trace_fixtures.generate \
-  --set smoke \
-  --generation-id kitaru-replay-example-20260717-final
-```
-
-Use it when preparing demo data. See
-[`trace_fixtures/README.md`](trace_fixtures/README.md) for credentials and the
-export workflow.
+`trace_fixtures/support-traces.jsonl` is a checked-in Langfuse observations
+export. The generator under `trace_fixtures/` can create a fresh export source
+when maintaining the example, but it is not part of the user journey above.
+See [`trace_fixtures/README.md`](trace_fixtures/README.md) for its credential and
+export requirements.

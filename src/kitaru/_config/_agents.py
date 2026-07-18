@@ -161,7 +161,7 @@ class _AgentVersionManifest(BaseModel):
 
 
 class _AgentMetadataEnvelope(BaseModel):
-    """Typed Stage 0 subset of project_metadata['kitaru']."""
+    """Typed Kitaru data stored in project_metadata['kitaru']."""
 
     schema_version: Literal[1]
     agent: _AgentMetadata
@@ -171,7 +171,7 @@ class _AgentMetadataEnvelope(BaseModel):
     experiments: dict[str, ExperimentRecord] = Field(default_factory=dict)
     experiment_idempotency_index: dict[str, str] = Field(default_factory=dict)
 
-    # Unknown later-stage keys remain opaque and are retained.
+    # Unknown keys remain opaque so newer metadata survives older clients.
     model_config = ConfigDict(extra="allow", strict=True)
 
     @field_validator("agent_version_order")
@@ -258,19 +258,20 @@ class _AgentMetadataEnvelope(BaseModel):
                 raise ValueError(
                     "Experiment candidates must belong to the Agent Project."
                 )
-            if spec.candidate_agent_version_id not in version_ids:
-                raise ValueError(
-                    "Experiment candidates must target a registered AgentVersion."
-                )
-            manifest = self.agent_versions[spec.candidate_agent_version_id]
-            if spec.candidate_pipeline_id != manifest.pipeline_id:
-                raise ValueError(
-                    "Experiment candidate Pipeline IDs must match AgentVersion IDs."
-                )
-            if spec.executable.entrypoint != manifest.entrypoint:
-                raise ValueError(
-                    "Experiment executables must match the AgentVersion manifest."
-                )
+            if spec.kind == "replay":
+                if spec.candidate_agent_version_id not in version_ids:
+                    raise ValueError(
+                        "Experiment candidates must target a registered AgentVersion."
+                    )
+                manifest = self.agent_versions[spec.candidate_agent_version_id]
+                if spec.candidate_pipeline_id != manifest.pipeline_id:
+                    raise ValueError(
+                        "Experiment candidate Pipeline IDs must match AgentVersion IDs."
+                    )
+                if spec.executable.entrypoint != manifest.entrypoint:
+                    raise ValueError(
+                        "Experiment executables must match the AgentVersion manifest."
+                    )
             key = spec.idempotency_key
             if key in expected_index and expected_index[key] != experiment_id:
                 raise ValueError(
@@ -353,7 +354,7 @@ class AgentInfo(BaseModel):
 
 
 class AgentRegistrationResult(BaseModel):
-    """Typed result reserved for the Stage 0 registration operation."""
+    """Typed result returned by Agent registration."""
 
     agent: AgentInfo
     agent_version: AgentVersionInfo

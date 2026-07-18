@@ -10,7 +10,7 @@ A **Kitaru Agent** is a registered AI application on a Kitaru server. Registrati
 For example, a PydanticAI application named `support-agent` can be registered once and then changed over time. Each registered implementation becomes an Agent version, while the Agent name remains the stable resource users select and inspect.
 
 {% hint style="info" %}
-Kitaru still uses **Project** terminology for connection configuration. In Stage 0, each initialized backing Project represents exactly one Agent. `kitaru login --project`, `KITARU_PROJECT`, `.kitaru/`, and `kitaru.configure(project=...)` select that Agent and its storage context.
+Kitaru still uses **Project** terminology for connection configuration. Each initialized backing Project represents exactly one Agent. `kitaru login --project`, `KITARU_PROJECT`, `.kitaru/`, and `kitaru.configure(project=...)` select that Agent and its storage context.
 {% endhint %}
 
 ## Register before running
@@ -50,7 +50,7 @@ agent.run_sync("Hello")  # Raises an identity-drift error.
 
 Create a new `KitaruAgent` instance and register it when you intend to create a different Agent identity.
 
-The underlying Pipeline UUID is the immutable Agent-version identifier. In Stage 0, a registration label such as `stable` is also immutable once assigned. Registering a different version with the same label fails instead of moving the label.
+The underlying Pipeline UUID is the immutable Agent-version identifier. A registration label such as `stable` is also immutable once assigned. Registering a different version with the same label fails instead of moving the label.
 
 ## Inspect Agents from the CLI
 
@@ -203,7 +203,7 @@ New integrations should use `kitaru agents ...`, `client.agents`, and the `kitar
 
 ## Project connection selection
 
-Stage 0 maps one initialized backing Project to one Agent. Selecting a Project therefore selects that Agent and the storage context for its runs, versions, deployments, and traces. Multiple Agents are represented by multiple backing Projects, not by several independently selectable Agents inside one Project.
+Kitaru maps one initialized backing Project to one Agent. Selecting a Project therefore selects that Agent and the storage context for its runs, versions, deployments, and traces. Multiple Agents are represented by multiple backing Projects, not by several independently selectable Agents inside one Project.
 
 These existing connection interfaces intentionally retain Project terminology:
 

@@ -35,6 +35,7 @@
 
 * [Import Langfuse Traces](guides/import-langfuse-traces.md)
 * [Replay and Overrides](guides/replay-and-overrides.md)
+* [Scoring Executions](guides/scoring.md)
 * [Execution Management](guides/execution-management.md)
 * [Configuration](guides/configuration.md)
 * [Authentication](guides/authentication.md)

@@ -23,6 +23,12 @@ from pydantic import (
 from kitaru.errors import KitaruUsageError
 from kitaru.replay import ReplayPlan, ReplayPlanDocument
 from kitaru.replay_context import ReplayRuntimeContext
+from kitaru.scoring import (
+    EvidenceManifestReference,
+    GroundedPolicySnapshot,
+    ScoreAggregateReference,
+    ScorerSnapshot,
+)
 
 _INLINE_TARGET_LIMIT = 500
 _MAX_ISSUE_SUMMARIES = 50
@@ -351,6 +357,8 @@ class ExperimentSpec(BaseModel):
     coverage: ForkCoverage
     planning_rows: list[TargetPlanningRow]
     cohort_audit: CohortAudit | None = None
+    scorers: list[ScorerSnapshot] = Field(default_factory=list)
+    evidence_manifest: EvidenceManifestReference | None = None
     request_hash: str
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -409,6 +417,8 @@ class ExperimentSpec(BaseModel):
             row.checkpoint_covered for row in self.planning_rows
         ):
             raise ValueError("Coverage count must match target dispositions.")
+        if self.evidence_manifest is not None and self.evidence_manifest.count != count:
+            raise ValueError("Evidence manifest count must match target membership.")
         if any(
             not row.checkpoint_covered and row.disposition == "replay"
             for row in self.planning_rows
@@ -420,6 +430,93 @@ class ExperimentSpec(BaseModel):
                 "Experiment request_hash does not match the frozen request."
             )
         return self
+
+
+ReplayExperimentSpec = ExperimentSpec
+
+
+class ScoreRequestInputs(BaseModel):
+    """Exact user score-only request inputs frozen for idempotency."""
+
+    comparative: bool = False
+    metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    grounded_policy: GroundedPolicySnapshot | None = None
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class ScoreExperimentSpec(BaseModel):
+    """Immutable, versioned score-only attempt specification."""
+
+    schema_version: Literal[1] = 1
+    experiment_id: str
+    kind: Literal["score"] = "score"
+    name: str | None = None
+    display_name: str
+    suite_key: str
+    idempotency_key: str
+    created_at: str
+    candidate_project_id: str
+    target_membership: TargetMembership
+    scorers: list[ScorerSnapshot] = Field(min_length=1)
+    evidence_manifest: EvidenceManifestReference
+    request_inputs: ScoreRequestInputs = Field(default_factory=ScoreRequestInputs)
+    request_hash: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator(
+        "experiment_id",
+        "display_name",
+        "suite_key",
+        "idempotency_key",
+        "candidate_project_id",
+    )
+    @classmethod
+    def _validate_required_strings(cls, value: str) -> str:
+        return _required_string(value, field_name="Score experiment field")
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _required_string(value, field_name="Score experiment name")
+
+    @field_validator("created_at")
+    @classmethod
+    def _validate_created_at(cls, value: str) -> str:
+        return _timestamp(value, field_name="created_at")
+
+    @field_validator("request_hash")
+    @classmethod
+    def _validate_request_hash(cls, value: str) -> str:
+        return _validate_sha256(value)
+
+    @model_validator(mode="after")
+    def _validate_contract(self) -> ScoreExperimentSpec:
+        if self.evidence_manifest.count != self.target_membership.count:
+            raise ValueError("Evidence manifest count must match target membership.")
+        scorer_keys = [
+            (scorer.name, scorer.revision, scorer.configuration_hash)
+            for scorer in self.scorers
+        ]
+        if len(scorer_keys) != len(set(scorer_keys)):
+            raise ValueError(
+                "Score experiment scorers must be unique by revision/config."
+            )
+        expected = experiment_request_hash(self)
+        if self.request_hash != expected:
+            raise ValueError(
+                "Experiment request_hash does not match the frozen request."
+            )
+        return self
+
+
+ExperimentSpecRecord = Annotated[
+    ExperimentSpec | ScoreExperimentSpec,
+    Field(discriminator="kind"),
+]
 
 
 class ExperimentCounts(BaseModel):
@@ -466,7 +563,7 @@ class ExperimentRecord(BaseModel):
     """Durable experiment specification plus monotonic cached outcome state."""
 
     schema_version: Literal[1] = 1
-    spec: ExperimentSpec
+    spec: ExperimentSpecRecord
     status: ExperimentStatus = "pending"
     created_at: str
     updated_at: str
@@ -476,6 +573,7 @@ class ExperimentRecord(BaseModel):
     errors: list[ExperimentIssue] = Field(default_factory=list)
     skips: list[ExperimentIssue] = Field(default_factory=list)
     unverified_children: list[ExperimentIssue] = Field(default_factory=list)
+    score_aggregate: ScoreAggregateReference | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -497,9 +595,15 @@ class ExperimentRecord(BaseModel):
             raise ValueError("Record creation time must match the immutable spec.")
         if self.counts.target_count != self.spec.target_membership.count:
             raise ValueError("Cached target count must match immutable membership.")
-        if self.counts.intended != self.counts.target_count * self.spec.repeats:
+        expected_intended = (
+            self.counts.target_count * self.spec.repeats
+            if self.spec.kind == "replay"
+            else self.counts.target_count * len(self.spec.scorers)
+        )
+        if self.counts.intended != expected_intended:
             raise ValueError(
-                "Cached denominator must equal targets multiplied by repeats."
+                "Cached denominator must equal targets multiplied by repeats "
+                "or the frozen target/scorer matrix."
             )
         for summaries in (self.errors, self.skips, self.unverified_children):
             if len(summaries) > _MAX_ISSUE_SUMMARIES:
@@ -539,18 +643,24 @@ class ExperimentRecord(BaseModel):
         return self
 
     @classmethod
-    def pending(cls, spec: ExperimentSpec) -> ExperimentRecord:
+    def pending(cls, spec: ExperimentSpecRecord) -> ExperimentRecord:
         """Create the first durable state for a fully frozen attempt."""
-        skipped = (
-            sum(row.disposition == "skip" for row in spec.planning_rows) * spec.repeats
-        )
+        if spec.kind == "replay":
+            skipped = (
+                sum(row.disposition == "skip" for row in spec.planning_rows)
+                * spec.repeats
+            )
+            intended = spec.target_membership.count * spec.repeats
+        else:
+            skipped = 0
+            intended = spec.target_membership.count * len(spec.scorers)
         return cls(
             spec=spec,
             created_at=spec.created_at,
             updated_at=spec.created_at,
             counts=ExperimentCounts(
                 target_count=spec.target_membership.count,
-                intended=spec.target_membership.count * spec.repeats,
+                intended=intended,
                 skipped=skipped,
             ),
         )
@@ -618,6 +728,7 @@ class ReplayAttemptDraft(BaseModel):
     coverage: ForkCoverage
     planning_rows: list[TargetPlanningRow]
     cohort_audit: CohortAudit | None
+    scorers: list[ScorerSnapshot] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -676,10 +787,15 @@ class ExperimentPlanningError(KitaruUsageError):
         super().__init__(f"Replay attempt planning failed: {details}")
 
 
-def experiment_request_hash(spec: ExperimentSpec) -> str:
+def experiment_request_hash(spec: ExperimentSpecRecord) -> str:
     """Hash the logical frozen request, excluding attempt identity and wall time."""
     payload = spec.model_dump(
         mode="json",
         exclude={"request_hash", "experiment_id", "created_at"},
     )
+    if payload.get("kind") == "replay":
+        if payload.get("scorers") == []:
+            payload.pop("scorers")
+        if payload.get("evidence_manifest") is None:
+            payload.pop("evidence_manifest")
     return _sha256(_canonical_json(payload))

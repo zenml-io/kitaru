@@ -19,9 +19,10 @@ uv run --with langfuse python -m trace_fixtures.generate \
   --generation-id kitaru-replay-example-20260717-final
 ```
 
-The command prints one `langfuse://trace/<id>` URI per scenario. Import one URI
-directly for the reported-case journey, or export the generated traces from
-Langfuse as JSONL for the batch-import journey.
+The command prints one `langfuse://trace/<id>` URI per scenario so maintainers
+can find the generated traces in Langfuse. Kitaru does not import those URIs
+directly. Export the selected traces from Langfuse as an observations JSONL file,
+then pass that file and the Langfuse project ID to `demo.py import-traces`.
 
 `support-traces.jsonl` is the checked-in export for that generation ID. It
 contains 46 observations across six traces, including the root span, PydanticAI

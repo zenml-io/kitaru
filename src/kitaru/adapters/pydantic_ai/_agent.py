@@ -8,7 +8,7 @@ import time
 import uuid
 import warnings
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from collections.abc import (
@@ -71,6 +71,8 @@ from kitaru._config._projects import (
 )
 from kitaru._repository import find_repository_root
 from kitaru.replay import ExperimentReplayContext
+from kitaru.scoring import scorer_snapshot
+from kitaru.scoring._evaluation import ScoreEvaluationService
 from kitaru._source_aliases import build_pipeline_registration_name
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.errors import (
@@ -1020,6 +1022,66 @@ def _track_run_completed(method: str, error: BaseException | None) -> None:
     track(AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED, payload)
 
 
+def _verified_replay_execution_ids(result: ExperimentReplayResult) -> list[str]:
+    """Return the exact verified child set, recovering it for terminal retries."""
+    submitted_ids = [
+        row.replay_exec_id
+        for row in result.submission.results
+        if row.membership_verified is True
+    ]
+    expected_count = result.record.counts.verified
+    if submitted_ids:
+        if len(submitted_ids) != expected_count:
+            raise KitaruStateError(
+                "Replay scoring received an incomplete verified child projection."
+            )
+        return submitted_ids
+
+    unverified_ids = {
+        issue.child_execution_id
+        for issue in result.record.unverified_children
+        if issue.child_execution_id is not None
+    }
+    recovered_ids: list[str] = []
+    seen_ids: set[str] = set()
+    page_number = 1
+    page_size = 50
+    while True:
+        page = result.runs.list(page=page_number, size=page_size)
+        items = getattr(page, "items", None)
+        if items is None or callable(items):
+            raise KitaruStateError(
+                "Replay scoring received an unexpected member-run response."
+            )
+        page_items = list(items)
+        for run in page_items:
+            run_id = str(getattr(run, "id", "")).strip()
+            if not run_id:
+                raise KitaruStateError(
+                    "Replay scoring found a member without an execution ID."
+                )
+            if run_id in seen_ids:
+                raise KitaruStateError(
+                    "Replay scoring found duplicate experiment members."
+                )
+            seen_ids.add(run_id)
+            if run_id not in unverified_ids:
+                recovered_ids.append(run_id)
+        if len(page_items) < page_size:
+            break
+        page_number += 1
+
+    if len(recovered_ids) != expected_count:
+        raise KitaruStateError(
+            "Replay scoring could not recover the complete verified child set."
+        )
+    if not recovered_ids:
+        raise KitaruStateError(
+            "Replay scoring requires at least one verified child execution."
+        )
+    return recovered_ids
+
+
 class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     def __init__(
         self,
@@ -1726,6 +1788,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         image: ImageInput | None = None,
         cache: bool | None = None,
         retries: int | None = None,
+        scorers: Sequence[Any] = (),
     ) -> ExperimentReplayResult:
         """Create one durable replay attempt through the registered AgentVersion."""
         flow_definition = self._registered_flow()
@@ -1737,16 +1800,29 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                 )
             binding = state.binding
 
+        scorer_items = list(scorers)
         if isinstance(execution, CohortResult):
             target_count = len(execution.exec_ids)
         elif isinstance(execution, str):
             target_count = 1
         else:
             target_count = len(execution)
-        resolved_wait = target_count * repeats == 1 if wait is None else wait
+        if scorer_items and wait is False:
+            raise KitaruUsageError(
+                "Replay scoring requires terminal child evidence. Pass wait=True "
+                "or omit wait so scoring can wait for replay children."
+            )
+        resolved_wait = (
+            True
+            if scorer_items and wait is None
+            else target_count * repeats == 1
+            if wait is None
+            else wait
+        )
 
         client = Client()
         self._preflight_registered_identity()
+        scorer_snapshots = [scorer_snapshot(item) for item in scorer_items]
         draft = preplan_replay_attempt(
             execution,
             binding=binding,
@@ -1764,6 +1840,7 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             invocation_overrides=invocation_overrides,
             skip=skip,
             client=client,
+            scorers=scorer_snapshots,
         )
         with _temporary_active_project(binding.project_id):
             plan = freeze_replay_attempt(draft, client=client)
@@ -1802,12 +1879,24 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
                     ),
                 )
 
-        return execute_replay_attempt(
+        result = execute_replay_attempt(
             plan,
             submit_trial=submit_trial,
             tag=tag,
             client_factory=lambda: client,
         )
+        if scorer_items and result.record.score_aggregate is None:
+            verified_child_ids = _verified_replay_execution_ids(result)
+            score_result = ScoreEvaluationService(
+                project_id=binding.project_id,
+                client=client,
+            ).evaluate_existing_attempt(
+                experiment_id=plan.spec.experiment_id,
+                executions=verified_child_ids,
+                scorers=scorer_items,
+            )
+            result = replace(result, record=score_result.record)
+        return result
 
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:

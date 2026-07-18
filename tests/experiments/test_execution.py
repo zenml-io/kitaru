@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -10,8 +11,17 @@ from kitaru._experiments import (
     execute_replay_attempt,
     freeze_replay_attempt,
     preplan_replay_attempt,
+    reserve_experiment,
+    transition_experiment_to_running,
 )
+from kitaru.errors import KitaruStateError
 from kitaru.replay import (
+    EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_REPEAT_INDEX_METADATA_KEY,
+    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_TAG_PREFIX,
+    EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY,
     ExperimentMemberVerification,
     ExperimentReplayContext,
     ExperimentReplayOutcome,
@@ -76,6 +86,44 @@ def _experiment_outcome(
             reason=reason,
         ),
     )
+
+
+class _RecoveryProjectClient(_ProjectClient):
+    def __init__(self) -> None:
+        super().__init__(_base_envelope())
+        self.member_runs: list[Any] = []
+
+    def add_verified_member(self, *, plan: Any, target_id: str, repeat: int) -> None:
+        self.member_runs.append(
+            SimpleNamespace(
+                id=f"child-{target_id}-{repeat}",
+                project_id="project-id",
+                status=SimpleNamespace(value="completed"),
+                original_run=SimpleNamespace(id=target_id),
+                snapshot=SimpleNamespace(
+                    project_id="project-id",
+                    pipeline_id=plan.spec.candidate_pipeline_id,
+                ),
+                tags=[f"{EXPERIMENT_TAG_PREFIX}{plan.spec.experiment_id}"],
+                run_metadata={
+                    EXPERIMENT_ID_METADATA_KEY: plan.spec.experiment_id,
+                    EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY: target_id,
+                    EXPERIMENT_REPEAT_INDEX_METADATA_KEY: repeat,
+                    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: target_id,
+                    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: target_id,
+                },
+            )
+        )
+
+    def list_pipeline_runs(self, **kwargs: Any) -> Any:
+        self.list_run_calls.append(kwargs)
+        page = kwargs["page"]
+        size = kwargs["size"]
+        start = (page - 1) * size
+        return SimpleNamespace(items=self.member_runs[start : start + size])
+
+    def get_pipeline_run(self, *, name_id_or_prefix: str, **_kwargs: Any) -> Any:
+        return next(run for run in self.member_runs if run.id == name_id_or_prefix)
 
 
 def test_execute_attempt_completes_named_repeats_and_is_idempotent() -> None:
@@ -157,6 +205,92 @@ def test_execute_attempt_completes_named_repeats_and_is_idempotent() -> None:
     assert retry.record == result.record
     assert retry.submission.submission_id == result.submission.submission_id
     assert retry.submission.results == []
+
+
+def test_execute_attempt_recovers_after_lost_reservation_response() -> None:
+    plan = _attempt_plan(repeats=1)
+    client = _ProjectClient(_base_envelope())
+    client.raise_after_first_commit = True
+    calls: list[str] = []
+
+    def submit_trial(*, trial: Any, replay_plan: Any, submission_id: str) -> Any:
+        calls.append(trial.target_execution_id)
+        return ReplaySubmission.create(
+            submission_id=submission_id,
+            tag=None,
+            at="at",
+            wait=False,
+            plan=replay_plan.document,
+            results=[
+                ReplayResultRow(
+                    original_exec_ref=trial.target_execution_id,
+                    original_exec_id=trial.target_execution_id,
+                    replay_exec_id=f"child-{trial.target_execution_id}",
+                    status="submitted",
+                    experiment=_experiment_outcome(
+                        experiment_id=plan.spec.experiment_id,
+                        trial=trial,
+                        verified=True,
+                    ),
+                )
+            ],
+        )
+
+    result = execute_replay_attempt(
+        plan,
+        submit_trial=submit_trial,
+        client_factory=lambda: client,
+    )
+
+    assert calls == ["first", "second"]
+    assert result.record.status == "completed"
+    assert result.record.counts.verified == 2
+
+
+def test_execute_attempt_finalizes_fully_submitted_running_attempt() -> None:
+    plan = _attempt_plan(repeats=1)
+    client = _RecoveryProjectClient()
+    reserve_experiment("project-id", plan.spec, client_factory=lambda: client)
+    transition_experiment_to_running(
+        "project-id",
+        plan.spec.experiment_id,
+        client_factory=lambda: client,
+    )
+    client.add_verified_member(plan=plan, target_id="first", repeat=0)
+    client.add_verified_member(plan=plan, target_id="second", repeat=0)
+
+    result = execute_replay_attempt(
+        plan,
+        submit_trial=lambda **_kwargs: pytest.fail("recovery duplicated a child"),
+        client_factory=lambda: client,
+    )
+
+    assert result.record.status == "completed"
+    assert [row.replay_exec_id for row in result.submission.results] == [
+        "child-first-0",
+        "child-second-0",
+    ]
+
+
+def test_execute_attempt_fails_closed_for_partial_running_attempt() -> None:
+    plan = _attempt_plan(repeats=1)
+    client = _RecoveryProjectClient()
+    reserve_experiment("project-id", plan.spec, client_factory=lambda: client)
+    transition_experiment_to_running(
+        "project-id",
+        plan.spec.experiment_id,
+        client_factory=lambda: client,
+    )
+    client.add_verified_member(plan=plan, target_id="first", repeat=0)
+
+    with pytest.raises(KitaruStateError, match="cannot safely resubmit"):
+        execute_replay_attempt(
+            plan,
+            submit_trial=lambda **_kwargs: pytest.fail(
+                "recovery duplicated or replaced a child"
+            ),
+            client_factory=lambda: client,
+        )
 
 
 def test_execute_attempt_keeps_batch_plan_as_unresolved_request() -> None:

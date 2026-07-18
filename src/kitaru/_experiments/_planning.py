@@ -42,6 +42,7 @@ from kitaru.replay import (
     replay_at_skip_reason,
     replay_at_status,
 )
+from kitaru.scoring import ScorerSnapshot
 
 if TYPE_CHECKING:
     from kitaru._agent_registration import RegisteredAgentVersionBinding
@@ -72,6 +73,7 @@ def _spec_from_draft(
         "coverage": draft.coverage,
         "planning_rows": draft.planning_rows,
         "cohort_audit": draft.cohort_audit,
+        "scorers": draft.scorers,
     }
     provisional = cast(Any, ExperimentSpec).model_construct(
         schema_version=1,
@@ -103,6 +105,7 @@ def preplan_replay_attempt(
     created_at: str | None = None,
     client: Any | None = None,
     pipeline_verifier: Callable[[Any, Any], Any] | None = None,
+    scorers: Sequence[ScorerSnapshot] = (),
 ) -> ReplayAttemptDraft:
     """Hydrate and validate every target before any experiment write or child run."""
     from kitaru._agent_registration import verify_registered_pipeline
@@ -310,6 +313,7 @@ def preplan_replay_attempt(
         ),
         planning_rows=rows,
         cohort_audit=cohort_audit,
+        scorers=list(scorers),
     )
 
 

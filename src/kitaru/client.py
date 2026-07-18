@@ -120,6 +120,7 @@ from kitaru._client._models import (
     FailureInfo,
     LogEntry,
     PendingWait,
+    ScoreFilter,
 )
 from kitaru._client._models import (
     Deployment as DeploymentRecord,
@@ -227,6 +228,12 @@ from kitaru.replay import (
     safe_compare_url_for_executions,
     safe_persist_replay_submission_metadata,
 )
+from kitaru.scoring import (
+    ObservationQuery,
+    ScoreObservation,
+    ScoreObservationStatus,
+)
+from kitaru.scoring._evaluation import ScoreEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -2053,6 +2060,174 @@ class _ExecutionsAPI:
 
         return results, False
 
+    def evaluate(
+        self,
+        executions: str | Execution | Sequence[str | Execution],
+        scorers: Sequence[Any] | Any,
+        *,
+        name: str | None = None,
+        suite_key: str | None = None,
+        idempotency_key: str | None = None,
+        comparative: bool | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        grounded_policy: Any | None = None,
+        grounded_capabilities: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Evaluate stored executions without running replay or agent code."""
+        execution_items: list[str | Execution]
+        if isinstance(executions, (str, Execution)):
+            execution_items = [executions]
+        else:
+            execution_items = list(executions)
+        scorer_items = (
+            list(scorers)
+            if isinstance(scorers, Sequence) and not callable(scorers)
+            else [scorers]
+        )
+        service = ScoreEvaluationService(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+            run_loader=lambda exec_id: self._client_ref._get_pipeline_run(
+                exec_id, hydrate=True
+            ),
+        )
+        return service.evaluate(
+            execution_items,
+            scorer_items,
+            name=name,
+            suite_key=suite_key,
+            idempotency_key=idempotency_key,
+            comparative=comparative,
+            metadata=metadata,
+            grounded_policy=grounded_policy,
+            grounded_capabilities=grounded_capabilities,
+        )
+
+    def score_history(
+        self,
+        exec_id: str,
+        *,
+        experiment_id: str | None = None,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+        valid: bool | None = None,
+        include_superseded: bool = True,
+    ) -> builtins.list[ScoreObservation]:
+        """Return append-only score observations for one execution."""
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        query = ObservationQuery(
+            execution_id=exec_id,
+            experiment_id=experiment_id,
+            scorer_name=scorer_name,
+            scorer_revision=scorer_revision,
+            scorer_configuration_hash=scorer_configuration_hash,
+            valid=valid,
+            include_superseded=include_superseded,
+        )
+        observations: list[ScoreObservation] = []
+        page = 1
+        page_size = 1000
+        while True:
+            chunk = repo.list(query, page=page, size=page_size)
+            observations.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            page += 1
+        return observations
+
+    def latest_valid_score(
+        self,
+        exec_id: str,
+        *,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+    ) -> ScoreObservation | None:
+        """Return latest valid score in one explicit scorer revision/config scope."""
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        latest = repo.latest_valid(
+            ObservationQuery(
+                execution_id=exec_id,
+                scorer_name=scorer_name,
+                scorer_revision=scorer_revision,
+                scorer_configuration_hash=scorer_configuration_hash,
+            )
+        )
+        if latest is None:
+            return None
+        if scorer_revision is None or scorer_configuration_hash is None:
+            history = repo.list(
+                ObservationQuery(
+                    execution_id=exec_id,
+                    scorer_name=scorer_name,
+                    valid=True,
+                    status=ScoreObservationStatus.SCORED,
+                    include_superseded=False,
+                ),
+                page=1,
+                size=1000,
+            )
+            scopes = {
+                (item.scorer.name, item.scorer.revision, item.scorer.configuration_hash)
+                for item in history
+            }
+            if len(scopes) > 1:
+                raise KitaruUsageError(
+                    "Latest valid score is ambiguous across scorer revisions/"
+                    "configurations. Pass scorer_revision and "
+                    "scorer_configuration_hash."
+                )
+        return latest
+
+    def _project_id(self) -> str:
+        project = getattr(self._client_ref._client(), "active_project", None)
+        project_id = str(
+            getattr(project, "id", "") or self._client_ref._project or ""
+        ).strip()
+        if not project_id:
+            raise KitaruStateError("Scoring requires an active Agent Project.")
+        return project_id
+
+    def _score_candidate_ids(self, score: ScoreFilter | None) -> set[str] | None:
+        if score is None or score.is_empty:
+            return None
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        status = (
+            ScoreObservationStatus.SCORED
+            if score.minimum is not None or score.maximum is not None
+            else None
+        )
+        return repo.matching_execution_ids(
+            ObservationQuery(
+                experiment_id=score.experiment_id,
+                scorer_name=score.scorer_name,
+                scorer_revision=score.scorer_revision,
+                scorer_configuration_hash=score.scorer_configuration_hash,
+                status=status,
+                valid=score.valid,
+                include_superseded=False,
+            ),
+            minimum=score.minimum,
+            maximum=score.maximum,
+            cap=score.candidate_cap,
+        )
+
     def list(
         self,
         *,
@@ -2061,8 +2236,9 @@ class _ExecutionsAPI:
         limit: int | None = None,
         page: int | None = None,
         size: int | None = None,
+        score: ScoreFilter | None = None,
     ) -> builtins.list[Execution]:
-        """List executions with optional flow/status filters and pagination."""
+        """List executions with optional execution and score filters."""
         status_filter = _coerce_status_filter(status)
 
         if limit is not None:
@@ -2112,6 +2288,9 @@ class _ExecutionsAPI:
             ExecutionStatus.RUNNING,
             ExecutionStatus.WAITING,
         }
+        score_candidate_ids = self._score_candidate_ids(score)
+        if score_candidate_ids == set():
+            return []
 
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
@@ -2139,6 +2318,11 @@ class _ExecutionsAPI:
                 if flow is not None and execution.flow_name != flow:
                     continue
                 if status_filter is not None and execution.status != status_filter:
+                    continue
+                if (
+                    score_candidate_ids is not None
+                    and execution.exec_id not in score_candidate_ids
+                ):
                     continue
 
                 if matched_count >= start_index:
