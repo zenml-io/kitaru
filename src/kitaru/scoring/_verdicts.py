@@ -791,8 +791,15 @@ def evaluate_verdict(
         VerdictReasonCode.OBJECTIVE_BELOW_THRESHOLD,
         VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE,
     } & set(reasons)
+    # A protection violation is affirmative evidence of forbidden behavior:
+    # the violating call is present in the durable evidence, so incomplete
+    # comparability cannot soften it and the verdict fails outright. An
+    # objective below threshold on incomplete evidence stays HOLD, because a
+    # low mean over non-comparable runs is genuinely inconclusive.
     verdict = (
-        ExperimentVerdict.HOLD
+        ExperimentVerdict.FAIL
+        if VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE in set(reasons)
+        else ExperimentVerdict.HOLD
         if hold_reasons
         else ExperimentVerdict.FAIL
         if failure_reasons
