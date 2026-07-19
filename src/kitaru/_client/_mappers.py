@@ -96,6 +96,10 @@ from kitaru.imports._replay_evidence import (
     SourceAttribution,
 )
 from kitaru.replay import (
+    EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_LINEAGE_KIND_METADATA_KEY,
+    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
     parse_replay_skipped_steps_metadata,
     replay_step_invocation_id,
 )
@@ -932,6 +936,21 @@ def _map_execution(
     original_exec_id: str | None = None
     if run.original_run is not None:
         original_exec_id = str(run.original_run.id)
+    elif (
+        _metadata_string(metadata, EXPERIMENT_ID_METADATA_KEY) is not None
+        and _metadata_string(metadata, EXPERIMENT_LINEAGE_KIND_METADATA_KEY)
+        == "imported_replay"
+        and (
+            imported_parent_id := _metadata_string(
+                metadata,
+                EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+            )
+        )
+        is not None
+        and _metadata_string(metadata, EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY)
+        is not None
+    ):
+        original_exec_id = imported_parent_id
 
     stack_name: str | None = None
     if run.stack is not None:

@@ -1,7 +1,8 @@
 # Trace fixture generation
 
 This directory supports the one-time setup for the replay example. The public
-walkthrough starts in `../demo.py` with a trace import.
+walkthrough imports the selected trace through `kitaru import langfuse` before
+using `demo.py` for candidate replay and inspection.
 
 `generate.py` runs the frozen `baseline` PydanticAI support agent through the
 seeded scenarios and records the resulting production-shaped traces in
@@ -26,7 +27,7 @@ done
 ```
 
 Each command prints one `langfuse://trace/<id>` URI. Pass a URI directly to
-`demo.py import-traces` for a read-only preview. To generate ordered JSONL from
+`kitaru import langfuse` for a read-only preview. To generate ordered JSONL from
 raw live observations, fetch each printed trace and select the `AGENT` observation
 named
 `support-agent` whose input contains `messages` and `tools`, and write the raw

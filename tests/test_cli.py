@@ -6834,6 +6834,110 @@ def test_agents_current_json_uses_canonical_envelope(
     }
 
 
+@pytest.mark.parametrize(
+    ("output_args", "json_output"),
+    [
+        ([], False),
+        (["--output", "json"], True),
+    ],
+)
+def test_agents_experiments_ambiguous_selector_uses_cli_error_boundary(
+    capsys: pytest.CaptureFixture[str],
+    output_args: list[str],
+    json_output: bool,
+) -> None:
+    """Ambiguous suite selectors should fail cleanly in text and JSON modes."""
+    agent = Mock()
+    agent.get_experiment.side_effect = KitaruUsageError(
+        "Experiment selector 'regression-suite' is ambiguous. "
+        "Select the attempt by experiment ID."
+    )
+
+    with (
+        patch("kitaru.cli.get_agent", return_value=agent),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "agents",
+                "experiments",
+                "prod",
+                "regression-suite",
+                *output_args,
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+    if json_output:
+        assert json.loads(captured.err) == {
+            "command": "agents.experiments",
+            "error": {
+                "message": (
+                    "Experiment selector 'regression-suite' is ambiguous. "
+                    "Select the attempt by experiment ID."
+                ),
+                "type": "KitaruUsageError",
+            },
+        }
+    else:
+        assert "Error: Experiment selector 'regression-suite' is ambiguous." in (
+            captured.err
+        )
+        assert "Select the attempt by experiment ID." in captured.err
+
+
+def test_agents_experiments_list_failure_uses_cli_error_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Experiment-list failures should use the normal CLI error rendering."""
+    agent = Mock()
+    agent.list_experiments.side_effect = KitaruBackendError(
+        "Failed to list experiments: offline"
+    )
+
+    with (
+        patch("kitaru.cli.get_agent", return_value=agent),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["agents", "experiments", "prod"])
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Error: Failed to list experiments: offline" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_agents_experiments_exact_id_remains_resolvable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An exact experiment ID should still render the selected attempt."""
+    agent = Mock()
+    record = object()
+    agent.get_experiment.return_value = record
+
+    with (
+        patch("kitaru.cli.get_agent", return_value=agent),
+        patch(
+            "kitaru._cli._agents.serialize_experiment",
+            return_value={"experiment_id": "exp-final"},
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["agents", "experiments", "prod", "exp-final", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    agent.get_experiment.assert_called_once_with("exp-final")
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "agents.experiments",
+        "items": [{"experiment_id": "exp-final"}],
+        "count": 1,
+    }
+
+
 def test_agents_create_json_uses_agent_activation_fields(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
