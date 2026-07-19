@@ -1,94 +1,361 @@
-# LangGraph replay/fork regression demo
+# Replay a Langfuse case with a PydanticAI candidate
 
-This demo is the LangGraph/Langfuse version of the replay story. It starts from a recorded LangGraph trace, rebuilds that trace as a Kitaru flow, replays from a chosen graph node, and then runs an edited candidate from the same point.
+This example starts with a support trace from Langfuse and ends with a scored,
+bounded replay attempt. Kitaru keeps the imported execution unchanged. Each
+candidate run is a new execution with its own AgentVersion, lineage, scores,
+cost, evidence quality, and verdict.
 
-The flow is:
+The candidate never calls a live tool during imported replay. Kitaru serves an
+exact recorded response when the tool name and arguments match. It blocks every
+miss, including write-capable calls, instead of falling through to the original
+callable.
 
-```text
-original recorded trace
-  -> unchanged replay control
-  -> edited candidate fork
-  -> drift report
-```
+Two replay starts are available:
 
-The unchanged replay is the control. If it cannot reproduce the recorded decision, the candidate comparison is not useful yet. If it does reproduce the recorded decision, the edited fork answers the release question: did this model, prompt, or config change alter the decision for this case?
+- `root_input` gives the candidate the recorded user input. The new path is
+  counterfactual, so the strict verdict is normally `HOLD` even when its scores
+  pass.
+- `message_history` continues after one complete recorded model message or
+  tool result. A model message includes its complete tool-call response, even
+  when it has no text content. It can produce `PASS` when the prefix is
+  complete, the candidate stays on the recorded path, and all scores and
+  protections pass.
 
-Use this demo when you want to see how Kitaru can work with a LangGraph agent and Langfuse trace data. Use `../replay_overrides_demo/` when you want the simpler SDK/CLI override walkthrough.
+## Setup
 
-## What Kitaru does here
-
-Kitaru imports Langfuse observation rows from a LangGraph support copilot, rebuilds a Kitaru flow with one checkpoint per LangGraph node, and replays from a selected node.
-
-During replay:
-
-- checkpoints before the cut reuse their recorded node outputs,
-- checkpoints at and after the cut run live,
-- the edited fork runs the same live tail with candidate settings,
-- the HTML report compares the original trace, unchanged replay, and edited fork.
-
-This is not LangGraph-native time travel. It is a Kitaru replay flow reconstructed from a trace that contains enough node-level state to restart safely from the selected graph node.
-
-## What this demo uses
-
-- A bundled typed LangGraph support copilot in `reference_agent/`.
-- Langfuse observation rows from `reference_agent/fixtures/langfuse_rich_observations.jsonl`.
-- `KitaruAdapter`, which wraps the compiled LangGraph graph.
-- A rehydration helper in `utils.py`, because this reference agent uses typed state objects rather than plain JSON dictionaries.
-
-A JSON-native LangGraph agent would need less demo-specific code. The adapter can replay plain JSON state directly.
-
-## Run from the bundled fixture
-
-The fixture path reads Langfuse observation rows from disk, so it does not fetch a trace from Langfuse. The `replay`, `fork`, and `run-all` commands still re-execute the live LangGraph tail from the cut, so they need the model credentials used by the reference agent.
+From the repository root:
 
 ```bash
+uv sync --extra local --extra pydantic-ai --extra llm --extra langfuse
 cd examples/end_to_end/replay_fork_demo
 
-export TRACE_ID=trace-replay-fork-rich-baseline
-export TRACE_FILE=reference_agent/fixtures/langfuse_rich_observations.jsonl
-
-uv run python demo.py import-trace "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py replay "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py fork "$TRACE_FILE" --trace-id "$TRACE_ID"
-uv run python demo.py run-all "$TRACE_FILE" --trace-id "$TRACE_ID"
+PLAYGROUND_DIR="$(mktemp -d "$PWD/.replay-playground.XXXXXX")"
+export KITARU_CONFIG_PATH="$(mktemp -d /tmp/kitaru-replay-demo.XXXXXX)"
+cd "$PLAYGROUND_DIR"
+uv run kitaru init
 ```
 
-What the commands mean:
+The temporary directory and `KITARU_CONFIG_PATH` give the walkthrough their
+own project marker, database, and local artifact store. They do not alter this
+checkout's existing `.kitaru/` marker or your normal Kitaru state. Keep using
+the same shell until you finish. Commands use `../demo.py` and
+`../trace_fixtures/` because the shell is now inside that temporary directory.
 
-| command | what it checks |
-|---|---|
-| `import-trace` | Reads the bundled Langfuse rows and checks that the trace has enough node outputs for replay. This command does not call OpenAI or Langfuse. |
-| `replay` | Compares the original recorded trace with an unchanged replay. |
-| `fork` | Compares original trace -> unchanged replay -> edited candidate fork, then writes `replay_vs_fork.html`. |
-| `run-all` | Runs import or trace generation, replay, candidate fork, and HTML report creation. |
-
-## Generated HTML report
-
-`replay_vs_fork.html` is a three-way report. It shows:
-
-1. the original recorded trace,
-2. the unchanged replay control,
-3. the edited candidate fork.
-
-Read the first comparison before trusting the second one. If the unchanged replay differs from the original trace, fix reproduction first. If it matches, the fork comparison shows what the candidate changed.
-
-## Creating a fresh trace
-
-To create a new live trace, configure OpenAI and Langfuse credentials for the reference agent:
+The checked-in JSONL fixture can be previewed and imported without Langfuse or
+OpenAI credentials. Registration and candidate execution use the models in
+`reference_agent/variants/`, so set `OPENAI_API_KEY` before those commands:
 
 ```bash
-cd examples/end_to_end/replay_fork_demo
-set -a && . ./.env && set +a
-uv run python demo.py create-trace
+export OPENAI_API_KEY=sk-...
 ```
 
-Then import and replay the printed trace id:
+The commands below use the `support-account-setting` and
+`support-service-status` traces from
+`trace_fixtures/imported-support-cases.jsonl`.
+
+## 1. Register the recorded source version
+
+The fixture declares `v2.2-json-text-imported` as its source version. Kitaru
+must know which exact code produced the trace before importing it.
+
+There is no public CLI command for registering executable Python Agent code.
+The example helper loads `evals.register:baseline_agent` and calls
+`agent.register(...)` with the fixture's label and entrypoint:
 
 ```bash
-uv run python demo.py import-trace langfuse:<TRACE_ID>
-uv run python demo.py run-all langfuse:<TRACE_ID>
+uv run python ../demo.py register --role source
 ```
 
-## Relationship to `reference_agent/README.md`
+It creates the immutable AgentVersion record without importing a trace, calling
+the model, running the Agent, or deploying anything. This registers the
+`baseline` variant under the declared source label. The
+fixture and generator freeze that pair, and source-role registration rejects a
+different variant or label. The fixture advertises the same callable tools as
+the source implementation and stores the final `SupportDecision` as validated
+JSON text. The importer verifies the declaration against the trace before it writes
+anything.
 
-This README explains the replay/fork workflow. `reference_agent/README.md` explains the bundled LangGraph support copilot and fixture data.
+Confirm that Kitaru can resolve the registered agent:
+
+```bash
+uv run kitaru agents show support-agent
+```
+
+## 2. Preview and import the traces
+
+Start with a read-only preview:
+
+```bash
+uv run kitaru import langfuse \
+  ../trace_fixtures/imported-support-cases.jsonl \
+  --source-project-id langfuse-replay-example \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported \
+  --trace-id support-account-setting \
+  --trace-id support-service-status
+```
+
+The preview reports attribution, replay readiness, storage, and the action that
+a write would take. It does not create executions or evidence artifacts.
+
+Repeat the command with `--write --confirm-data-storage` after checking the
+destination:
+
+```bash
+uv run kitaru import langfuse \
+  ../trace_fixtures/imported-support-cases.jsonl \
+  --source-project-id langfuse-replay-example \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported \
+  --trace-id support-account-setting \
+  --trace-id support-service-status \
+  --write \
+  --confirm-data-storage \
+  --output json > /tmp/kitaru-replay-import.json
+```
+
+Print the generated execution IDs:
+
+```bash
+uv run python - <<'PY'
+import json
+from pathlib import Path
+
+result = json.loads(Path("/tmp/kitaru-replay-import.json").read_text())
+for outcome in result["item"]["outcomes"]:
+    print(f'{outcome["trace_id"]}: {outcome["execution_id"]}')
+PY
+```
+
+Paste the printed IDs into the placeholders below. If you omit `--output json`,
+the normal CLI output also prints each full execution ID in its own trace block.
+
+You can also fetch one trace through the read-only Langfuse observations API:
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+# Optional for self-hosted Langfuse:
+export LANGFUSE_BASE_URL=https://langfuse.example.com
+
+uv run kitaru import langfuse \
+  "langfuse://trace/<trace-id>" \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported
+```
+
+Kitaru derives the source project ID from the returned observations. The
+default remains a preview. Add `--write --confirm-data-storage` to store the
+fetched evidence. This path reads the trace through Langfuse's observations API.
+
+## 3. Inspect the imported evidence
+
+Start with Kitaru's durable execution view:
+
+```bash
+uv run kitaru executions get <account-setting-execution-id>
+```
+
+This shows the imported execution and its checkpoint graph. An imported
+execution is historical evidence, not executable source code, so native
+checkpoint replay remains disabled for it.
+
+For the adapter-specific continuation in the next step, inspect the replay
+readiness and available message-history boundaries computed by the example:
+
+```bash
+uv run python ../demo.py inspect-execution <account-setting-execution-id>
+```
+
+The fixture contains a complete tool-result boundary at index `1` and complete
+model-message boundaries for both tool-calling and textual assistant responses.
+This additional view lists only boundaries that the PydanticAI adapter has
+validated and shows the exact `observation_id`, `sequence`, `occurrence`, and
+optional `call_id` that Kitaru uses. Do not choose an arbitrary observation ID.
+
+## 4. Reproduce from the recorded boundary
+
+Continue after the second recorded tool result with the baseline candidate:
+
+```bash
+uv run python ../demo.py resume <account-setting-execution-id> \
+  --boundary-kind tool-result \
+  --boundary-index 1 \
+  --candidate-variant baseline \
+  --candidate-version reproduction-baseline \
+  --name account-setting-reproduction \
+  --idempotency-key account-setting-reproduction-v1
+```
+
+The command rebuilds the boundary from stored evidence and runs a registered
+candidate. If the candidate requests the recorded escalation with the same
+arguments, Kitaru serves that recorded write-capable result without invoking
+the tool. A changed argument becomes a blocked miss.
+
+Check `imported_replay_members` in the result. A clean reproduction reports one
+recorded-response hit, no blocked calls, no path divergence, and
+`recorded_path_comparable`. Provider output can still cause `HOLD` or `FAIL`;
+the command does not invent a passing result.
+
+## 5. Run a counterfactual candidate
+
+The weakened variant has a trimmed permissions prompt and allows the
+account-setting tool. Run it from the root input:
+
+```bash
+uv run python ../demo.py replay <account-setting-execution-id> \
+  --candidate-variant nano_trimmed_permissions \
+  --candidate-version permissions-counterfactual \
+  --name account-setting-counterfactual \
+  --idempotency-key account-setting-counterfactual-v1
+```
+
+This is a new path, not a reproduction. Its evidence quality is
+`counterfactual`, or `degraded` if a tool call misses or is blocked. The strict
+verdict stays `HOLD` rather than treating a plausible score as proof of direct
+comparability.
+
+## 6. Register and run the candidate fix
+
+The `mini_tool_budget_2` variant restores the full permissions prompt while
+keeping a smaller tool budget. Register it explicitly:
+
+```bash
+uv run python ../demo.py register \
+  --role candidate \
+  --variant mini_tool_budget_2 \
+  --version permissions-fix-v1
+```
+
+Now test it from the same complete boundary:
+
+```bash
+uv run python ../demo.py resume <account-setting-execution-id> \
+  --boundary-kind tool-result \
+  --boundary-index 1 \
+  --candidate-variant mini_tool_budget_2 \
+  --candidate-version permissions-fix-v1 \
+  --name account-setting-fix \
+  --idempotency-key account-setting-fix-v1
+```
+
+Registration is idempotent. Repeating the same registration reuses the existing
+AgentVersion. Reusing an experiment idempotency key with different inputs fails.
+
+## 7. Read the scores and verdict
+
+Every `replay`, `resume`, and `experiment` command attaches the deterministic
+`support-resolution` objective. The registered Agent also pins the
+`completed-execution` protection. These answer separate questions:
+
+- the objective checks whether the candidate produced durable completed output;
+- the protection prevents an incomplete candidate from passing;
+- replay evidence says whether the candidate stayed comparable to the recording;
+- the verdict combines those facts without turning missing evidence into zero.
+
+Inspect the fixed attempt through Kitaru by its suite name:
+
+```bash
+uv run kitaru agents experiments \
+  support-agent \
+  account-setting-fix \
+  --output json
+```
+
+The JSON output includes target membership, planning rows, candidate version,
+coverage, score aggregates, imported replay evidence, operational limits,
+verdict policy, and the final verdict.
+
+## 8. Create a named multi-case suite
+
+Freeze the imported execution IDs in the order you want:
+
+```bash
+uv run python ../demo.py experiment \
+  <account-setting-execution-id> \
+  <service-status-execution-id> \
+  --name support-imported-regression \
+  --repeats 1 \
+  --candidate-variant mini_tool_budget_2 \
+  --candidate-version permissions-fix-v1 \
+  --idempotency-key support-imported-regression-v1
+```
+
+This command starts each case from its recorded root input. The attempt is
+useful for comparing outcomes and costs, but its strict verdict is `HOLD`
+because root-input reruns are counterfactual. The suite still records immutable
+membership, candidate attribution, scores, protections, recorded-response
+decisions, and lineage.
+
+## 9. Rerun a comparable suite with limits
+
+The single-case `account-setting-fix` attempt from step 6 is a named suite with
+a complete message-history boundary. Rerun that frozen request with explicit
+limits:
+
+```bash
+uv run python ../demo.py rerun account-setting-fix \
+  --candidate-variant mini_tool_budget_2 \
+  --candidate-version permissions-fix-v1 \
+  --idempotency-key account-setting-fix-rerun-v1 \
+  --max-trials 1 \
+  --max-cost-usd 1.00 \
+  --max-incurred-tokens 100000 \
+  --max-duration-seconds 300
+```
+
+The command calls `assert_pass()`. It exits nonzero on `FAIL` or `HOLD`, so
+missing usage, a reached limit, a blocked call, or incomplete evidence cannot
+silently pass a regression gate. A retry with the same idempotency key returns
+the same durable attempt and does not duplicate the spend.
+
+Limits are checked before another trial starts. One model call can cross a cost
+or token ceiling before Kitaru stops further work.
+
+## 10. Inspect the durable result
+
+Inspect the durable attempts through Kitaru:
+
+```bash
+uv run kitaru agents experiments \
+  support-agent \
+  account-setting-fix \
+  --output json
+uv run kitaru agents experiments \
+  support-agent \
+  support-imported-regression \
+  --output json
+```
+
+Inspect a candidate child execution from either result:
+
+```bash
+uv run kitaru executions get \
+  <candidate-child-execution-id> \
+  --output json
+```
+
+The JSON execution view includes the persisted execution fields, checkpoint
+graph, immediate parent and root lineage, and import attribution when present.
+The experiment JSON includes target membership, planning and coverage, score
+aggregates, imported replay evidence, operational limits, verdict policy, and
+the final verdict.
+
+When you are finished, return to the example directory and remove the two
+temporary directories:
+
+```bash
+cd ..
+rm -rf "$PLAYGROUND_DIR" "$KITARU_CONFIG_PATH"
+unset PLAYGROUND_DIR KITARU_CONFIG_PATH
+```
+
+Later Kitaru commands will use your normal local state again.
+
+## Fixture provenance
+
+`trace_fixtures/imported-support-cases.jsonl` is the small deterministic fixture
+used by the acceptance test. `support-traces.jsonl` is the larger exported
+scenario set. Maintainers can generate fresh Langfuse traces with
+`python -m trace_fixtures.generate`; see
+[trace_fixtures/README.md](trace_fixtures/README.md).

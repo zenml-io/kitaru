@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import multiprocessing
 import re
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -1001,11 +1002,50 @@ def test_phase17_multiple_tracker_scopes_in_checkpoint_get_namespaces(
     assert len(run_summary_names) == len(set(run_summary_names))
 
 
-def test_phase17_auto_flow_runs_end_to_end(primed_zenml) -> None:
+def test_registered_agent_auto_flow_runs_end_to_end(
+    primed_zenml,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`run_sync()` outside any flow auto-opens a flow and completes."""
     global _AUTO_FLOW_AGENT
     _AUTO_FLOW_AGENT = KitaruAgent(_make_test_agent(name_prefix="auto_flow_agent"))
+    repository_root = Path(Client.find_repository())
+    entrypoint_module = repository_root / "registered_agent.py"
+    entrypoint_module.write_text(
+        "from tests.test_phase17_pydantic_ai_adapter import _AUTO_FLOW_AGENT\n"
+    )
+    (repository_root / ".gitignore").write_text(".kitaru/\n")
+    subprocess.run(["git", "init", "-q", str(repository_root)], check=True)
+    subprocess.run(
+        ["git", "-C", str(repository_root), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository_root), "config", "user.name", "Test"],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository_root),
+            "add",
+            ".gitignore",
+            entrypoint_module.name,
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repository_root), "commit", "-qm", "test entrypoint"],
+        check=True,
+    )
+    sys.modules.pop("registered_agent", None)
+    monkeypatch.syspath_prepend(repository_root)
+    importlib.invalidate_caches()
     try:
+        _AUTO_FLOW_AGENT.register(
+            entrypoint="registered_agent:_AUTO_FLOW_AGENT",
+        )
         result = _invoke_shared_auto_flow_agent()
     finally:
         _AUTO_FLOW_AGENT = None

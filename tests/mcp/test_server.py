@@ -23,7 +23,6 @@ from kitaru.config import (
     ImageSettings,
     KubernetesStackSpec,
     ModalStackSpec,
-    ProjectInfo,
     SagemakerStackSpec,
     StackComponentConfigOverrides,
     StackInfo,
@@ -39,6 +38,12 @@ from kitaru.errors import (
 from kitaru.inspection import RuntimeSnapshot
 from kitaru.mcp.server import (
     get_execution_logs,
+    kitaru_agents_create,
+    kitaru_agents_current,
+    kitaru_agents_delete,
+    kitaru_agents_list,
+    kitaru_agents_show,
+    kitaru_agents_use,
     kitaru_artifacts_get,
     kitaru_artifacts_list,
     kitaru_clean_preview,
@@ -63,10 +68,6 @@ from kitaru.mcp.server import (
     kitaru_executions_run,
     kitaru_executions_statistics,
     kitaru_info,
-    kitaru_projects_current,
-    kitaru_projects_list,
-    kitaru_projects_show,
-    kitaru_projects_use,
     kitaru_secrets_create,
     kitaru_secrets_list,
     kitaru_stacks_list,
@@ -108,10 +109,12 @@ _REGISTERED_MCP_TOOL_FUNCTIONS = (
     kitaru_start_local_server,
     kitaru_stop_local_server,
     kitaru_status,
-    kitaru_projects_list,
-    kitaru_projects_current,
-    kitaru_projects_show,
-    kitaru_projects_use,
+    kitaru_agents_list,
+    kitaru_agents_current,
+    kitaru_agents_show,
+    kitaru_agents_create,
+    kitaru_agents_use,
+    kitaru_agents_delete,
     kitaru_stacks_list,
     manage_stack,
     kitaru_info,
@@ -217,24 +220,36 @@ def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
     assert "llm_model" not in replay_properties
     assert "flow_inputs" not in replay_properties
 
-    projects_list_schema = tool_schemas["kitaru_projects_list"]
-    assert projects_list_schema.get("required", []) == []
-    assert projects_list_schema.get("properties", {}) == {}
+    agents_list_schema = tool_schemas["kitaru_agents_list"]
+    assert agents_list_schema.get("required", []) == []
+    assert agents_list_schema.get("properties", {}) == {}
 
-    projects_current_schema = tool_schemas["kitaru_projects_current"]
-    assert projects_current_schema.get("required", []) == []
-    assert projects_current_schema.get("properties", {}) == {}
+    agents_current_schema = tool_schemas["kitaru_agents_current"]
+    assert agents_current_schema.get("required", []) == []
+    assert agents_current_schema.get("properties", {}) == {}
 
-    projects_show_schema = tool_schemas["kitaru_projects_show"]
-    assert set(projects_show_schema["properties"]) == {"name_or_id"}
-    assert projects_show_schema["required"] == ["name_or_id"]
+    agents_show_schema = tool_schemas["kitaru_agents_show"]
+    assert set(agents_show_schema["properties"]) == {"name_or_id"}
+    assert agents_show_schema["required"] == ["name_or_id"]
 
-    projects_use_schema = tool_schemas["kitaru_projects_use"]
-    assert set(projects_use_schema["properties"]) == {"name_or_id"}
-    assert projects_use_schema["required"] == ["name_or_id"]
+    agents_create_schema = tool_schemas["kitaru_agents_create"]
+    assert set(agents_create_schema["properties"]) == {
+        "name",
+        "description",
+        "display_name",
+        "activate",
+    }
+    assert agents_create_schema["required"] == ["name"]
 
-    assert "kitaru_projects_create" not in tool_schemas
-    assert "kitaru_projects_delete" not in tool_schemas
+    agents_use_schema = tool_schemas["kitaru_agents_use"]
+    assert set(agents_use_schema["properties"]) == {"name_or_id"}
+    assert agents_use_schema["required"] == ["name_or_id"]
+
+    agents_delete_schema = tool_schemas["kitaru_agents_delete"]
+    assert set(agents_delete_schema["properties"]) == {"name_or_id", "confirm"}
+    assert agents_delete_schema["required"] == ["name_or_id"]
+    assert agents_delete_schema["properties"]["confirm"]["default"] is False
+    assert not any(name.startswith("kitaru_projects_") for name in tool_schemas)
     assert "kitaru_executions_diff_matrix" in tool_schemas
     assert "kitaru_executions_diff_cohort" not in tool_schemas
 
@@ -1936,120 +1951,125 @@ def test_status_delegates_snapshot_serialization_to_inspection() -> None:
     assert payload == {"connection": "delegated", "source": "inspection"}
 
 
-def test_projects_list_delegates_to_shared_helpers_and_serializer() -> None:
-    projects = [
-        ProjectInfo(
-            id="project-prod-id",
-            name="production",
-            display_name="Production",
-            description=None,
-            is_active=True,
-        ),
-        ProjectInfo(
-            id="project-stage-id",
-            name="staging",
-            display_name=None,
-            description="Test changes safely",
-            is_active=False,
-        ),
-    ]
-
-    with patch(
-        "kitaru._config._projects.list_projects", return_value=projects
-    ) as mock_list:
-        payload = kitaru_projects_list()
-
-    mock_list.assert_called_once_with()
-    assert payload == [
-        {
-            "id": "project-prod-id",
-            "name": "production",
-            "display_name": "Production",
-            "description": None,
-            "is_active": True,
-        },
-        {
-            "id": "project-stage-id",
-            "name": "staging",
-            "display_name": None,
-            "description": "Test changes safely",
-            "is_active": False,
-        },
-    ]
-
-
-def test_projects_current_delegates_to_shared_helpers() -> None:
-    project = ProjectInfo(
-        id="project-prod-id",
-        name="production",
-        display_name="Production",
+def _mcp_agent(name: str = "production", *, is_active: bool = True) -> Any:
+    """Build a serializer-compatible Agent projection for MCP tests."""
+    return SimpleNamespace(
+        agent_id=f"agent-{name}-id",
+        name=name,
+        display_name=name.title(),
         description=None,
-        is_active=True,
+        is_active=is_active,
+        default_agent_version_id=None,
+        default_executable=None,
+        agent_version_aliases={},
+        agent_versions=[],
+        version_count=0,
     )
 
-    with patch(
-        "kitaru._config._projects.current_project",
-        return_value=project,
-    ) as mock_current:
-        payload = kitaru_projects_current()
 
-    mock_current.assert_called_once_with()
-    assert payload["name"] == "production"
-    assert payload["is_active"] is True
+def test_agents_lifecycle_tools_delegate_and_serialize() -> None:
+    production = _mcp_agent()
+    staging = _mcp_agent("staging", is_active=False)
 
-
-def test_projects_show_delegates_to_shared_helpers() -> None:
-    project = ProjectInfo(
-        id="project-stage-id",
-        name="staging",
-        display_name=None,
-        description=None,
-        is_active=False,
-    )
-
-    with patch(
-        "kitaru._config._projects.get_project",
-        return_value=project,
-    ) as mock_get:
-        payload = kitaru_projects_show("staging")
-
-    mock_get.assert_called_once_with("staging")
-    assert payload["id"] == "project-stage-id"
-    assert payload["is_active"] is False
-
-
-def test_projects_use_delegates_to_shared_helpers() -> None:
-    project = ProjectInfo(
-        id="project-prod-id",
-        name="production",
-        display_name=None,
-        description=None,
-        is_active=True,
-    )
-
-    with patch(
-        "kitaru._config._projects.use_project",
-        return_value=project,
-    ) as mock_use:
-        payload = kitaru_projects_use("production")
-
-    mock_use.assert_called_once_with("production")
-    assert payload["name"] == "production"
-    assert payload["is_active"] is True
-
-
-def test_projects_use_preserves_pro_cloud_feature_error() -> None:
-    """MCP project use should preserve the shared Pro/Cloud guard error."""
     with (
         patch(
-            "kitaru._config._projects.use_project",
+            "kitaru._config._agents.list_agents",
+            return_value=[production, staging],
+        ) as mock_list,
+        patch(
+            "kitaru._config._agents.current_agent",
+            return_value=production,
+        ) as mock_current,
+        patch(
+            "kitaru._config._agents.get_agent",
+            return_value=staging,
+        ) as mock_get,
+        patch(
+            "kitaru._config._agents.use_agent",
+            return_value=production,
+        ) as mock_use,
+    ):
+        listed = kitaru_agents_list()
+        current = kitaru_agents_current()
+        shown = kitaru_agents_show("staging")
+        used = kitaru_agents_use("production")
+
+    mock_list.assert_called_once_with()
+    mock_current.assert_called_once_with()
+    mock_get.assert_called_once_with("staging")
+    mock_use.assert_called_once_with("production")
+    assert [item["agent_id"] for item in listed] == [
+        "agent-production-id",
+        "agent-staging-id",
+    ]
+    assert current["name"] == "production"
+    assert shown["name"] == "staging"
+    assert used["is_active"] is True
+
+
+def test_agents_create_returns_canonical_activation_fields() -> None:
+    result = SimpleNamespace(
+        agent=_mcp_agent("staging"),
+        previous_active_agent="production",
+        activated=True,
+    )
+    with patch(
+        "kitaru._config._agents.create_agent",
+        return_value=result,
+    ) as mock_create:
+        payload = kitaru_agents_create(
+            "staging",
+            description="Staging Agent",
+            display_name="Staging",
+            activate=False,
+        )
+
+    mock_create.assert_called_once_with(
+        "staging",
+        description="Staging Agent",
+        display_name="Staging",
+        activate=False,
+    )
+    assert payload["agent_id"] == "agent-staging-id"
+    assert payload["previous_active_agent"] == "production"
+    assert payload["activated"] is True
+    assert "previous_active_project" not in payload
+
+
+def test_agents_delete_requires_confirmation_before_backend_call() -> None:
+    with (
+        patch("kitaru._config._agents.delete_agent") as mock_delete,
+        pytest.raises(KitaruUsageError, match="confirm=true"),
+    ):
+        kitaru_agents_delete("staging")
+
+    mock_delete.assert_not_called()
+
+
+def test_agents_delete_delegates_after_confirmation() -> None:
+    result = SimpleNamespace(deleted_agent=_mcp_agent("staging", is_active=False))
+    with patch(
+        "kitaru._config._agents.delete_agent",
+        return_value=result,
+    ) as mock_delete:
+        payload = kitaru_agents_delete("staging", confirm=True)
+
+    mock_delete.assert_called_once_with("staging")
+    assert payload["agent_id"] == "agent-staging-id"
+
+
+def test_agents_delete_preserves_pro_cloud_feature_error() -> None:
+    """Confirmed MCP deletion should retain the shared Pro/Cloud guard."""
+    with (
+        patch(
+            "kitaru._config._agents.delete_agent",
             side_effect=KitaruFeatureNotAvailableError(
-                "Kitaru project use requires a ZenML Pro/Cloud server."
+                "Kitaru Agent delete requires a ZenML Pro/Cloud server."
             ),
         ),
         pytest.raises(KitaruFeatureNotAvailableError, match="Pro/Cloud"),
     ):
-        kitaru_projects_use("staging")
+        kitaru_agents_delete("staging", confirm=True)
 
 
 def test_manage_stack_create_returns_structured_result() -> None:

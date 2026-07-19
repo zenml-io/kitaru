@@ -7,16 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Registered PydanticAI Agents can now run immutable imported replay experiments from a recorded root input or complete message boundary. Candidate children use the normal Agent execution path while recorded tool responses are served without calling live read or write tools, all misses are blocked, and per-child lineage and evidence feed existing scoring, protections, limits, idempotency, and PASS/FAIL/HOLD verdicts. New SDK projections and `kitaru agents experiments` expose the frozen plan, bounded evidence, comparability, and verdict without exposing recorded response values.
+- Registered-agent replay now creates durable, idempotent experiments with frozen target membership, repeat and checkpoint-coverage policies, verified replay membership and candidate attribution, typed Agent experiment reads, paginated member-run lookup, and execution experiment/replay/original/root projections.
+- Registered Agents now have canonical lifecycle surfaces across `kitaru agents ...`, `KitaruClient.agents`, top-level SDK exports, and six `kitaru_agents_*` MCP tools. Direct PydanticAI `KitaruAgent` execution requires registration, and Agent versions use immutable Pipeline UUIDs with optional labels.
+- Langfuse observations can now be imported as attributed, inspectable Kitaru executions from a JSONL export or a read-only `langfuse://trace/<id>` fetch through `KitaruClient.imports.langfuse(...)` and `kitaru import langfuse`. Every import declares one exact Agent and AgentVersion, classifies provider-verified versus caller-attributed traces before writing, preserves the selected raw rows and a normalized replay-evidence bundle as immutable artifacts, reports capability-specific replay readiness without executing a replay, and supports an optional immutable cohort tag. Dry-run remains the default and writes require explicit data-storage consent. Import results and `Execution.import_info` expose typed target identity, attribution, evidence hashes and artifact references, readiness, and bounded diagnostics. Existing imports remain readable as `legacy_unattributed` and are never rewritten or guessed into a version.
+
 ### Changed
+- The former `kitaru project ...` CLI group is hidden and deprecated for one compatibility release while preserving its legacy JSON envelopes; `client.projects` also remains as a compatibility delegate. Connection configuration continues to use Project terminology such as `KITARU_PROJECT` and `kitaru login --project`.
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
-<<<<<<< fix/llm-integration-canary
+- Imported Langfuse input and output artifacts now include JSON visualizations, so their stored payloads can be inspected in the dashboard.
 - Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.
 - Live LLM integration runs now retain tested SHA, workflow run ID, and run-attempt provenance for release evidence.
-=======
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
->>>>>>> develop
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
 - `kitaru executions diff` now shows useful checkpoint comparison rows in its default text output, and diff serialization includes redacted evidence that replay output overrides were applied without exposing override values. (#563)

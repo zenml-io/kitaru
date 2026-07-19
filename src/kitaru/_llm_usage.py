@@ -144,6 +144,7 @@ LLMAdapter = Literal[
     "langgraph",
     "gemini_interactions",
     "google_adk",
+    "langfuse_import",
 ]
 LLMSurface = Literal[
     "direct_llm",

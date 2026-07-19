@@ -28,6 +28,7 @@ from zenml.client import Client
 from zenml.config.global_config import GlobalConfiguration
 
 from kitaru import _env as _kitaru_env
+from kitaru._config import _agents as _config_agents
 from kitaru._config import _connection as _config_connection
 from kitaru._config import _core as _config_core
 from kitaru._config import _env as _config_env
@@ -106,6 +107,12 @@ ModelAliasConfig = _config_models.ModelAliasConfig
 ModelRegistryConfig = _config_models.ModelRegistryConfig
 ModelAliasEntry = _config_models.ModelAliasEntry
 ResolvedModelSelection = _config_models.ResolvedModelSelection
+
+AgentCreateResult = _config_agents.AgentCreateResult
+AgentDeleteResult = _config_agents.AgentDeleteResult
+AgentInfo = _config_agents.AgentInfo
+AgentRegistrationResult = _config_agents.AgentRegistrationResult
+AgentVersionInfo = _config_agents.AgentVersionInfo
 
 ProjectInfo = _config_projects.ProjectInfo
 ProjectCreateResult = _config_projects.ProjectCreateResult
@@ -204,6 +211,13 @@ _stack_component_details_from_model = _config_stacks._stack_component_details_fr
 _infer_stack_details_type = _config_stacks._infer_stack_details_type
 _stack_info_from_model = _config_stacks._stack_info_from_model
 _iter_available_stacks = _config_stacks._iter_available_stacks
+
+current_agent = _config_agents.current_agent
+list_agents = _config_agents.list_agents
+get_agent = _config_agents.get_agent
+create_agent = _config_agents.create_agent
+delete_agent = _config_agents.delete_agent
+use_agent = _config_agents.use_agent
 
 _project_info_from_model = _config_projects._project_info_from_model
 current_project = _config_projects.current_project

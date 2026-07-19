@@ -23,7 +23,7 @@ from kitaru._client._deployments import (
     resolve_deployment_exclusive,
 )
 from kitaru._client._statistics import validate_statistics_max_groups
-from kitaru._config import _projects as project_ops
+from kitaru._config import _agents as agent_ops
 from kitaru._config import _stacks as stack_ops
 from kitaru._flow_loading import _load_deployable_flow_target
 from kitaru._interface_deployments import (
@@ -700,37 +700,77 @@ def kitaru_status() -> dict[str, Any]:
 
 
 @tracked_mcp_tool
-def kitaru_projects_list() -> list[dict[str, Any]]:
-    """List Kitaru projects visible to the current user."""
+def kitaru_agents_list() -> list[dict[str, Any]]:
+    """List initialized Kitaru Agents visible to the current user."""
     return run_with_mcp_error_boundary(
-        lambda: [
-            inspection.serialize_project(project)
-            for project in project_ops.list_projects()
-        ]
+        lambda: [inspection.serialize_agent(agent) for agent in agent_ops.list_agents()]
     )
 
 
 @tracked_mcp_tool
-def kitaru_projects_current() -> dict[str, Any]:
-    """Return the active Kitaru project."""
+def kitaru_agents_current() -> dict[str, Any]:
+    """Return the active initialized Kitaru Agent."""
     return run_with_mcp_error_boundary(
-        lambda: inspection.serialize_project(project_ops.current_project())
+        lambda: inspection.serialize_agent(agent_ops.current_agent())
     )
 
 
 @tracked_mcp_tool
-def kitaru_projects_show(name_or_id: str) -> dict[str, Any]:
-    """Show a Kitaru project by name or ID."""
+def kitaru_agents_show(name_or_id: str) -> dict[str, Any]:
+    """Show an initialized Kitaru Agent by name or ID."""
     return run_with_mcp_error_boundary(
-        lambda: inspection.serialize_project(project_ops.get_project(name_or_id))
+        lambda: inspection.serialize_agent(agent_ops.get_agent(name_or_id))
     )
 
 
 @tracked_mcp_tool
-def kitaru_projects_use(name_or_id: str) -> dict[str, Any]:
-    """Use a Kitaru project on ZenML Pro/Cloud as the active default."""
+def kitaru_agents_create(
+    name: str,
+    description: str = "",
+    display_name: str | None = None,
+    activate: bool = True,
+) -> dict[str, Any]:
+    """Create a Kitaru Agent on Pro/Cloud and optionally activate it."""
+
+    def _create_agent() -> dict[str, Any]:
+        result = agent_ops.create_agent(
+            name,
+            description=description,
+            display_name=display_name,
+            activate=activate,
+        )
+        payload = inspection.serialize_agent(result.agent)
+        payload["previous_active_agent"] = result.previous_active_agent
+        payload["activated"] = result.activated
+        return payload
+
+    return run_with_mcp_error_boundary(_create_agent)
+
+
+@tracked_mcp_tool
+def kitaru_agents_use(name_or_id: str) -> dict[str, Any]:
+    """Use a Kitaru Agent on Pro/Cloud as the active default."""
     return run_with_mcp_error_boundary(
-        lambda: inspection.serialize_project(project_ops.use_project(name_or_id))
+        lambda: inspection.serialize_agent(agent_ops.use_agent(name_or_id))
+    )
+
+
+@tracked_mcp_tool
+def kitaru_agents_delete(
+    name_or_id: str,
+    confirm: bool = False,
+) -> dict[str, Any]:
+    """Delete a Kitaru Agent on Pro/Cloud after explicit confirmation."""
+    if not confirm:
+        raise KitaruUsageError(
+            "Kitaru will not delete an Agent without explicit confirmation. "
+            "Call the tool again with confirm=true."
+        )
+
+    return run_with_mcp_error_boundary(
+        lambda: inspection.serialize_agent(
+            agent_ops.delete_agent(name_or_id).deleted_agent
+        )
     )
 
 

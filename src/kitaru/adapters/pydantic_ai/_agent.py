@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import inspect
 import os
 import sys
@@ -7,7 +8,10 @@ import threading
 import time
 import uuid
 import warnings
-from dataclasses import dataclass
+import weakref
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from pathlib import Path
 from collections.abc import (
     AsyncIterable,
     AsyncIterator,
@@ -22,13 +26,121 @@ from contextlib import (
     contextmanager,
 )
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import kitaru
+from zenml.client import Client
+
+from kitaru._agent_registration import (
+    RegistrationIdentity,
+    RegisteredAgentVersionBinding,
+    _resolve_attribute,
+    build_agent_version_pipeline_name,
+    canonicalize_registration_value,
+    find_exact_project_pipeline,
+    hash_registration_value,
+    identity_drift_categories,
+    qualified_declared_path,
+    qualified_import_path,
+    resolve_agent_entrypoint,
+    resolve_registration_identity,
+    type_import_path,
+)
+from kitaru._client._models import Execution
+from kitaru._config._agents import (
+    _IMPORTED_REPLAY_PREPARATION_REVISION,
+    _PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION,
+    _PYDANTIC_AI_REPLAY_DRIVER_ENTRYPOINT,
+    _PYDANTIC_AI_REPLAY_DRIVER_REVISION,
+    AgentRegistrationResult,
+    RegisteredToolEffect,
+    _AgentVersionManifest,
+    _PydanticAIReplayManifest,
+    _RegisteredPydanticAITool,
+    _RegisteredPydanticAIToolSource,
+    _agent_info_from_project_model,
+    _complete_project_metadata,
+    _manifest_for_fingerprint,
+    _parse_agent_metadata,
+    _reconcile_agent_version_registration,
+)
+from kitaru.cohort import CohortResult
+from kitaru.config import ImageInput
+from kitaru._experiments._limits import RegressionLimits, RegressionLimitTracker
+from kitaru._experiments import (
+    ExperimentReplayResult,
+    ExperimentSpec,
+    FrozenImportedReplayPlan,
+    ImportedReplayMemberEvidence,
+    ImportedReplayToolDecision,
+    ReplayTrialPlan,
+    execute_replay_attempt,
+    freeze_replay_attempt,
+    plan_suite_rerun,
+    preplan_imported_replay_attempt,
+    preplan_replay_attempt,
+    validate_existing_suite_rerun,
+)
+from kitaru._config._projects import (
+    _active_project_id,
+    _active_project_model,
+    _connected_store_url_is_known_pro_cloud,
+    _get_project_by_exact_selector,
+)
+from kitaru._repository import find_repository_root
+from kitaru.imports import (
+    ImportedReplayBoundary,
+    ImportedReplayMode,
+    PreparedImportedReplayEvidence,
+    load_imported_replay_evidence,
+)
+from kitaru.replay import (
+    ExperimentMemberVerification,
+    ExperimentReplayOutcome,
+    ExperimentReplayContext,
+    IMPORTED_REPLAY_MEMBER_EVIDENCE_METADATA_KEY,
+    ReplayPlanDocument,
+    ReplayResultRow,
+    ReplaySubmission,
+    persist_and_verify_experiment_membership,
+)
+from kitaru.scoring import (
+    GroundedCapability,
+    GroundedCapabilityDeclaration,
+    GroundedPolicySnapshot,
+    ImportedReplayComparability,
+    ImportedReplayVerdictPolicy,
+    ProtectionDeclaration,
+    OperationalLimitReason,
+    ProtectionSnapshot,
+    scorer_snapshot,
+)
+from kitaru.adapters.pydantic_ai._imported_replay import (
+    prepare_imported_replay_history,
+    prepare_imported_root_input,
+)
+from kitaru.adapters.pydantic_ai._recorded_tools import (
+    RecordedResponseRuntime,
+    compile_recorded_responses,
+)
+from kitaru.scoring._evaluation import (
+    ScoreAttemptResult,
+    ScoreEvaluationService,
+    _scoring_contract,
+)
 from kitaru._source_aliases import build_pipeline_registration_name
 from kitaru.analytics import AnalyticsEvent, track
-from kitaru.errors import KitaruRuntimeError, KitaruUsageError
-from kitaru.flow import _is_multiple_terminal_steps_output_error
+from kitaru.errors import (
+    KitaruMetadataConflictError,
+    KitaruRuntimeError,
+    KitaruStateError,
+    KitaruUsageError,
+)
+from kitaru.flow import (
+    _is_multiple_terminal_steps_output_error,
+    _temporary_active_project,
+)
 
 from pydantic_ai import _utils, messages as _messages, models, usage as _usage
 from pydantic_ai.agent import AbstractAgent, AgentRun, WrapperAgent
@@ -39,11 +151,14 @@ from pydantic_ai.agent.abstract import (
     EventStreamHandler,
 )
 from pydantic_ai.capabilities import AbstractCapability
+from pydantic_ai.capabilities import CombinedCapability
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.models import Model
 from pydantic_ai.output import OutputDataT, OutputSpec
 from pydantic_ai.tools import AgentDepsT, AgentNativeTool, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
+from pydantic_ai.mcp import MCPServer, MCPToolset
+from pydantic_ai.toolsets import FunctionToolset
 
 from ._constants import (
     ADAPTER_CHECKPOINT_KIND_TURN,
@@ -60,7 +175,7 @@ from ._streaming import (
     current_stream_surface,
     stream_surface,
 )
-from ._toolset import kitaruify_toolset
+from ._toolset import KitaruToolset, kitaruify_toolset
 from ._threading_compat import inline_sync_tool_execution as _inline_sync_tool_execution
 from ._tracking import get_current_tracker, tracker_scope
 from ._utils import (
@@ -89,6 +204,7 @@ _UPSTREAM_RUN_RETRIES_PARAM = (
     if "retries" in inspect.signature(AbstractAgent.run).parameters
     else "output_retries"
 )
+_KITARU_REPLAY_TOOL_METADATA_KEY = "kitaru_replay"
 
 _TRACKING_ACTIVE: ContextVar[bool] = ContextVar("kitaru_tracking_active", default=False)
 _INTERNAL_ITER_ALLOWED: ContextVar[bool] = ContextVar(
@@ -108,14 +224,860 @@ class _TurnCheckpointCallConfig:
     mark_streaming_fallback_checkpoint: bool
 
 
+@dataclass(frozen=True)
+class _RegisteredAgentState:
+    repo_root: Path
+    identity: RegistrationIdentity
+    binding: RegisteredAgentVersionBinding
+
+
+@dataclass(frozen=True)
+class _ToolSourceOverride:
+    agent: Any
+    toolsets: tuple[AbstractToolset[Any], ...]
+    streaming_supported: bool
+
+
+@dataclass
+class _ImportedReplayRunCapture:
+    agent: Any
+    context: ExperimentReplayContext
+    execution_id: str | None = None
+    membership: ExperimentMemberVerification | None = None
+
+
+_TOOL_SOURCE_OVERRIDE: ContextVar[_ToolSourceOverride | None] = ContextVar(
+    "kitaru_pydantic_ai_tool_source_override", default=None
+)
+_IMPORTED_REPLAY_RUN_CAPTURE: ContextVar[_ImportedReplayRunCapture | None] = ContextVar(
+    "kitaru_pydantic_ai_imported_replay_run_capture", default=None
+)
+
+
+def _load_imported_replay_candidate(
+    entrypoint: str,
+    *,
+    binding: RegisteredAgentVersionBinding,
+) -> Any:
+    """Load and preflight the exact registered candidate entrypoint."""
+    module_name, separator, attribute_path = entrypoint.partition(":")
+    if not separator:
+        raise KitaruStateError("The frozen candidate entrypoint is not importable.")
+    try:
+        candidate = _resolve_attribute(
+            importlib.import_module(module_name),
+            attribute_path,
+        )
+    except Exception as exc:
+        raise KitaruStateError(
+            "The frozen candidate entrypoint is not importable."
+        ) from exc
+    if not isinstance(candidate, KitaruAgent):
+        raise KitaruStateError("The frozen candidate entrypoint is not a KitaruAgent.")
+    candidate._preflight_registered_identity()
+    state = candidate._registered_state
+    if state is None or state.binding != binding:
+        raise KitaruStateError(
+            "The imported replay entrypoint is not bound to the frozen "
+            "candidate AgentVersion."
+        )
+    return candidate
+
+
+def _imported_replay_member_evidence(
+    *,
+    spec: ExperimentSpec,
+    trial: ReplayTrialPlan,
+    replay_plan: FrozenImportedReplayPlan,
+    evidence: PreparedImportedReplayEvidence,
+    capture: _ImportedReplayRunCapture,
+    runtime: RecordedResponseRuntime | None,
+    candidate_status: Literal["completed", "failed"],
+) -> ImportedReplayMemberEvidence:
+    """Reduce one bounded runtime report to immutable member evidence."""
+    if capture.execution_id is None:
+        raise KitaruStateError("Imported replay produced no candidate execution.")
+    events = () if runtime is None else runtime.report.events
+    hits = 0 if runtime is None else runtime.report.hit_count
+    blocked = 0 if runtime is None else runtime.report.blocked_count
+    source_eligible = 0 if runtime is None else runtime.eligible_occurrence_count
+    remaining = 0 if runtime is None else runtime.remaining_occurrence_count
+    incompatible = 0 if runtime is None else runtime.incompatible_occurrence_count
+    eligible = max(source_eligible, hits + blocked)
+    misses = max(blocked, eligible - hits)
+    path_diverged = blocked > 0 or remaining > 0 or incompatible > 0
+    if runtime is None:
+        comparability = ImportedReplayComparability.NON_COMPARABLE
+    elif path_diverged:
+        comparability = ImportedReplayComparability.DEGRADED
+    elif replay_plan.mode is ImportedReplayMode.ROOT_INPUT:
+        comparability = ImportedReplayComparability.COUNTERFACTUAL
+    else:
+        comparability = ImportedReplayComparability.RECORDED_PATH_COMPARABLE
+    return ImportedReplayMemberEvidence.create(
+        experiment_id=spec.experiment_id,
+        target_execution_id=trial.target_execution_id,
+        repeat_index=trial.repeat_index,
+        child_execution_id=capture.execution_id,
+        candidate_status=candidate_status,
+        source_agent_version_id=evidence.identity.source_agent_version_id,
+        candidate_agent_version_id=spec.candidate_agent_version_id,
+        mode=replay_plan.mode,
+        boundary=replay_plan.boundary,
+        prefix_complete=True,
+        candidate_tool_contract_compatible=(
+            runtime is not None and runtime.candidate_tool_contract_compatible
+        ),
+        eligible_recorded_responses=eligible,
+        recorded_response_hits=hits,
+        recorded_response_misses=misses,
+        blocked_calls=blocked,
+        path_diverged=path_diverged,
+        comparability=comparability,
+        parent_execution_id=trial.parent_execution_id,
+        root_execution_id=trial.root_execution_id,
+        decisions=tuple(
+            ImportedReplayToolDecision(
+                index=index,
+                decision=event.decision.value,
+                logical_tool_id=event.logical_tool_id,
+                candidate_tool_name=event.candidate_tool_name,
+                block_reason=(
+                    None if event.block_reason is None else event.block_reason.value
+                ),
+                source_observation_id=event.source_observation_id,
+                source_sequence=event.source_sequence,
+                source_occurrence=event.source_occurrence,
+            )
+            for index, event in enumerate(events)
+        ),
+    )
+
+
+_SENSITIVE_FIELD_NAMES = frozenset(
+    {
+        "access_key",
+        "access_key_id",
+        "access_token",
+        "api_key",
+        "apikey",
+        "api_token",
+        "auth_token",
+        "authorization",
+        "bearer_token",
+        "certificate",
+        "cert",
+        "client_secret",
+        "credential",
+        "credentials",
+        "oauth_client_secret",
+        "password",
+        "private_key",
+        "proxy_authorization",
+        "secret",
+        "secret_access_key",
+        "token",
+        "x_api_key",
+    }
+)
+_SENSITIVE_HEADER_NAMES = _SENSITIVE_FIELD_NAMES | {
+    "cookie",
+    "proxy_authenticate",
+    "set_cookie",
+}
+_SENSITIVE_QUERY_PARAMETER_NAMES = _SENSITIVE_FIELD_NAMES | {
+    "auth",
+    "key",
+    "sig",
+    "signature",
+    "x_amz_credential",
+    "x_amz_security_token",
+    "x_amz_signature",
+}
+_HEADER_FLAGS = frozenset({"--header", "-H"})
+_HEADER_MAPPING_NAMES = frozenset({"headers", "http_headers"})
+_PROVIDER_URI_FIELD_NAMES = frozenset(
+    {
+        "api_base",
+        "app_url",
+        "azure_endpoint",
+        "base_url",
+        "endpoint_url",
+    }
+)
+_BASE_URL_PROVIDER_PROJECTION = {
+    "base_url": ("base_url", "client.base_url"),
+}
+_PROVIDER_BEHAVIOR_PROJECTIONS: dict[str, dict[str, tuple[str, ...]]] = {
+    provider_type: _BASE_URL_PROVIDER_PROJECTION
+    for provider_type in {
+        "pydantic_ai.providers.alibaba:AlibabaProvider",
+        "pydantic_ai.providers.anthropic:AnthropicProvider",
+        "pydantic_ai.providers.cerebras:CerebrasProvider",
+        "pydantic_ai.providers.cohere:CohereProvider",
+        "pydantic_ai.providers.deepseek:DeepSeekProvider",
+        "pydantic_ai.providers.fireworks:FireworksProvider",
+        "pydantic_ai.providers.github:GitHubProvider",
+        "pydantic_ai.providers.google_gla:GoogleGLAProvider",
+        "pydantic_ai.providers.grok:GrokProvider",
+        "pydantic_ai.providers.groq:GroqProvider",
+        "pydantic_ai.providers.heroku:HerokuProvider",
+        "pydantic_ai.providers.huggingface:HuggingFaceProvider",
+        "pydantic_ai.providers.litellm:LiteLLMProvider",
+        "pydantic_ai.providers.mistral:MistralProvider",
+        "pydantic_ai.providers.moonshotai:MoonshotAIProvider",
+        "pydantic_ai.providers.nebius:NebiusProvider",
+        "pydantic_ai.providers.ollama:OllamaProvider",
+        "pydantic_ai.providers.openai:OpenAIProvider",
+        "pydantic_ai.providers.openrouter:OpenRouterProvider",
+        "pydantic_ai.providers.ovhcloud:OVHcloudProvider",
+        "pydantic_ai.providers.sambanova:SambaNovaProvider",
+        "pydantic_ai.providers.together:TogetherProvider",
+        "pydantic_ai.providers.vercel:VercelProvider",
+        "pydantic_ai.providers.voyageai:VoyageAIProvider",
+        "pydantic_ai.providers.xai:XaiProvider",
+    }
+}
+_PROVIDER_BEHAVIOR_PROJECTIONS.update(
+    {
+        "pydantic_ai.providers.azure:AzureProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "api_version": ("client._api_version",),
+            "azure_deployment": ("client._azure_deployment",),
+            "azure_endpoint": ("client._azure_endpoint",),
+        },
+        "pydantic_ai.providers.bedrock:BedrockProvider": {
+            "base_url": ("base_url",),
+            "endpoint_url": ("client.meta.endpoint_url",),
+            "region_name": ("client.meta.region_name",),
+        },
+        "pydantic_ai.providers.google:GoogleProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "location": ("client._api_client.location",),
+            "project": ("client._api_client.project",),
+            "vertexai": ("client.vertexai", "client._api_client.vertexai"),
+        },
+        "pydantic_ai.providers.google_cloud:GoogleCloudProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "location": ("client._api_client.location",),
+            "project": ("client._api_client.project",),
+            "vertexai": ("client.vertexai", "client._api_client.vertexai"),
+        },
+        "pydantic_ai.providers.google_vertex:GoogleVertexProvider": {
+            **_BASE_URL_PROVIDER_PROJECTION,
+            "model_publisher": ("model_publisher",),
+            "project_id": ("project_id",),
+            "region": ("region",),
+        },
+        "pydantic_ai.providers.outlines:OutlinesProvider": {},
+        "pydantic_ai.providers.sentence_transformers:SentenceTransformersProvider": {},
+    }
+)
+_PROVIDER_VALUE_MISSING = object()
+_SENSITIVE_FIELD_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_FIELD_NAMES
+)
+_SENSITIVE_HEADER_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_HEADER_NAMES
+)
+_SENSITIVE_QUERY_PARAMETER_SUFFIXES = tuple(
+    tuple(name.split("_")) for name in _SENSITIVE_QUERY_PARAMETER_NAMES
+)
+
+
+def _normalized_field_name(value: Any) -> str:
+    return str(value).strip().lstrip("-").split("=", 1)[0].lower().replace("-", "_")
+
+
+def _matches_sensitive_suffix(
+    value: Any,
+    suffixes: Sequence[tuple[str, ...]],
+) -> bool:
+    segments = tuple(
+        segment for segment in _normalized_field_name(value).split("_") if segment
+    )
+    while segments[-1:] in {("file",), ("path",)}:
+        segments = segments[:-1]
+    return any(
+        len(segments) >= len(suffix) and segments[-len(suffix) :] == suffix
+        for suffix in suffixes
+    )
+
+
+def _is_sensitive_field(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_FIELD_SUFFIXES)
+
+
+def _is_sensitive_header(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_HEADER_SUFFIXES)
+
+
+def _is_sensitive_query_parameter(value: Any) -> bool:
+    return _matches_sensitive_suffix(value, _SENSITIVE_QUERY_PARAMETER_SUFFIXES)
+
+
+def _safe_uri_fragment(value: str) -> str:
+    if "=" not in value:
+        return value
+    fragment_items = parse_qsl(value, keep_blank_values=True)
+    if not any(_is_sensitive_query_parameter(key) for key, _item in fragment_items):
+        return value
+    return urlencode(
+        [
+            (key, item)
+            for key, item in fragment_items
+            if not _is_sensitive_query_parameter(key)
+        ],
+        doseq=True,
+    )
+
+
+def _safe_uri(value: str) -> str:
+    """Remove user-info and credential query values from an absolute URI."""
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise KitaruUsageError(
+            "Registration found a malformed URI in version-defining settings."
+        ) from exc
+    query_items = parse_qsl(parsed.query, keep_blank_values=True)
+    has_sensitive_query = any(
+        _is_sensitive_query_parameter(key) for key, _item in query_items
+    )
+    fragment = _safe_uri_fragment(parsed.fragment)
+    has_sensitive_fragment = fragment != parsed.fragment
+    if not parsed.netloc:
+        if has_sensitive_query or has_sensitive_fragment:
+            raise KitaruUsageError(
+                "Registration cannot safely project credential query or fragment "
+                "values from an ambiguous URI."
+            )
+        return value
+
+    netloc = parsed.netloc.rsplit("@", 1)[-1]
+    query = urlencode(
+        [
+            (key, item)
+            for key, item in query_items
+            if not _is_sensitive_query_parameter(key)
+        ],
+        doseq=True,
+    )
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, fragment))
+
+
+def _safe_headers(value: Any) -> Any:
+    """Project structured headers while retaining only non-credential values."""
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or not key.strip():
+                raise KitaruUsageError(
+                    "Registration found malformed structured HTTP headers."
+                )
+            projected[key] = (
+                None if _is_sensitive_header(key) else _safe_identity_value(item)
+            )
+        return projected
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        projected_items: list[list[Any]] = []
+        for item in value:
+            if (
+                not isinstance(item, Sequence)
+                or isinstance(item, (str, bytes))
+                or len(item) != 2
+                or not isinstance(item[0], str)
+                or not item[0].strip()
+            ):
+                raise KitaruUsageError(
+                    "Registration found malformed structured HTTP headers."
+                )
+            projected_items.append(
+                [
+                    item[0],
+                    None
+                    if _is_sensitive_header(item[0])
+                    else _safe_identity_value(item[1]),
+                ]
+            )
+        return projected_items
+    raise KitaruUsageError("Registration found malformed structured HTTP headers.")
+
+
+def _safe_identity_value(value: Any) -> Any:
+    """Recursively remove credentials from version-defining values."""
+    if isinstance(value, Mapping):
+        projected: dict[str, Any] = {}
+        for key, item in value.items():
+            if _is_sensitive_field(key):
+                continue
+            normalized_key = _normalized_field_name(key)
+            projected[str(key)] = (
+                _safe_headers(item)
+                if normalized_key in _HEADER_MAPPING_NAMES
+                else _safe_identity_value(item)
+            )
+        return projected
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [_safe_identity_value(item) for item in value]
+    if isinstance(value, str):
+        return _safe_uri(value)
+    return value
+
+
+def _safe_mapping(value: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Exclude credential-like fields from version-defining projections."""
+    if value is None:
+        return {}
+    return dict(_safe_identity_value(value))
+
+
+def _provider_path_value(provider: Any, path: str, field_name: str) -> Any:
+    value = provider
+    for segment in path.split("."):
+        try:
+            value = getattr(value, segment)
+        except AttributeError:
+            return _PROVIDER_VALUE_MISSING
+        except Exception as exc:
+            raise KitaruUsageError(
+                f"Registration cannot read provider field '{field_name}'."
+            ) from exc
+    return value
+
+
+def _normalized_provider_identity_value(field_name: str, value: Any) -> Any:
+    if field_name in _PROVIDER_URI_FIELD_NAMES:
+        try:
+            rendered = str(value)
+        except Exception as exc:
+            raise KitaruUsageError(
+                f"Registration cannot normalize provider field '{field_name}'."
+            ) from exc
+        return _safe_uri(rendered)
+    return _safe_identity_value(value)
+
+
+def _provider_behavior_identity(provider: Any) -> dict[str, Any]:
+    """Project explicit routing fields for a supported provider implementation."""
+    provider_type = type_import_path(provider)
+    field_projections = _PROVIDER_BEHAVIOR_PROJECTIONS.get(provider_type)
+    if field_projections is None:
+        raise KitaruUsageError(
+            "Registration does not support provider implementation "
+            f"{provider_type!r}; its routing configuration cannot be projected safely."
+        )
+
+    projected: dict[str, Any] = {}
+    for field_name, paths in field_projections.items():
+        candidates: list[Any] = []
+        for path in paths:
+            value = _provider_path_value(provider, path, field_name)
+            if value is not _PROVIDER_VALUE_MISSING and value is not None:
+                candidates.append(
+                    _normalized_provider_identity_value(field_name, value)
+                )
+        if not candidates:
+            continue
+        first = candidates[0]
+        if any(candidate != first for candidate in candidates[1:]):
+            raise KitaruUsageError(
+                f"Registration found ambiguous provider field '{field_name}'."
+            )
+        projected[field_name] = first
+
+    if (
+        provider_type == "pydantic_ai.providers.google:GoogleProvider"
+        and projected.get("vertexai") is not True
+    ):
+        projected.pop("location", None)
+        projected.pop("project", None)
+    return projected
+
+
+def _safe_environment(value: Any) -> dict[str, str | None]:
+    """Retain non-secret MCP environment identity without credential values."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise KitaruUsageError(
+            "Registration found malformed MCP stdio environment settings."
+        )
+    projected: dict[str, str | None] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not key.strip() or not isinstance(item, str):
+            raise KitaruUsageError(
+                "Registration found malformed MCP stdio environment settings."
+            )
+        projected[key] = None if _is_sensitive_field(key) else _safe_uri(item)
+    return projected
+
+
+def _function_tool_implementation(value: Any) -> str | dict[str, Any]:
+    """Identify an importable tool or a safely canonicalized local closure."""
+    try:
+        return qualified_import_path(value)
+    except KitaruUsageError:
+        declared_path = qualified_declared_path(value)
+
+    closure = getattr(value, "__closure__", None)
+    code = getattr(value, "__code__", None)
+    freevars = getattr(code, "co_freevars", ())
+    if not isinstance(freevars, tuple) or (
+        closure is not None and len(freevars) != len(closure)
+    ):
+        raise KitaruUsageError(
+            "Registration found a local tool without stable closure identity."
+        )
+
+    closure_values: dict[str, Any] = {}
+    for name, cell in zip(freevars, closure or (), strict=True):
+        try:
+            closure_values[name] = cell.cell_contents
+        except ValueError as exc:
+            raise KitaruUsageError(
+                "Registration found a local tool with an empty closure cell."
+            ) from exc
+
+    safe_values = _safe_identity_value(closure_values)
+    canonical_values = canonicalize_registration_value(safe_values)
+    canonical_safe_values = canonicalize_registration_value(
+        _safe_identity_value(canonical_values)
+    )
+    return {
+        "declared_path": declared_path,
+        "closure": canonical_safe_values,
+    }
+
+
+def _safe_command_header(value: Any) -> str:
+    if not isinstance(value, str):
+        raise KitaruUsageError(
+            "Registration found a non-string HTTP header command argument."
+        )
+    name, separator, header_value = value.partition(":")
+    if not separator or not name.strip():
+        raise KitaruUsageError(
+            "Registration cannot safely project a malformed HTTP header argument."
+        )
+    if _is_sensitive_header(name):
+        return f"{name.strip()}:"
+    return f"{name}:{_safe_uri(header_value)}"
+
+
+def _safe_command_args(args: Sequence[Any]) -> list[Any]:
+    """Exclude credentials from structured command arguments."""
+    sanitized: list[Any] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if isinstance(arg, str) and arg in _HEADER_FLAGS:
+            if index + 1 >= len(args):
+                raise KitaruUsageError(
+                    "Registration cannot safely project a header flag without a value."
+                )
+            sanitized.extend((arg, _safe_command_header(args[index + 1])))
+            index += 2
+            continue
+        if isinstance(arg, str) and arg.startswith("--header="):
+            sanitized.append(f"--header={_safe_command_header(arg.split('=', 1)[1])}")
+            index += 1
+            continue
+        if isinstance(arg, str) and arg.startswith("-H") and arg != "-H":
+            sanitized.append(f"-H{_safe_command_header(arg[2:])}")
+            index += 1
+            continue
+        if isinstance(arg, str) and arg.startswith("-") and _is_sensitive_field(arg):
+            flag, separator, _value = arg.partition("=")
+            sanitized.append(flag)
+            if separator:
+                index += 1
+                continue
+            if index + 1 >= len(args) or (
+                isinstance(args[index + 1], str) and args[index + 1].startswith("-")
+            ):
+                raise KitaruUsageError(
+                    f"Registration cannot safely project credential flag {flag!r} "
+                    "without an unambiguous value."
+                )
+            index += 2
+            continue
+        sanitized.append(_safe_identity_value(arg))
+        index += 1
+    return sanitized
+
+
+def _toolset_worldview(toolset: Any) -> dict[str, Any]:
+    """Project one toolset without prompts, credentials, or object reprs."""
+    component = toolset.wrapped if isinstance(toolset, KitaruToolset) else toolset
+    projection: dict[str, Any] = {"kind": type_import_path(component)}
+
+    if not isinstance(component, AbstractToolset):
+        raise KitaruUsageError(
+            "Registration requires Pydantic AI toolsets with stable public identity."
+        )
+    if component.id:
+        projection["id"] = component.id
+
+    if isinstance(component, FunctionToolset):
+        projected_tools: list[dict[str, Any]] = []
+        for declared_name, tool in sorted(
+            component.tools.items(), key=lambda item: str(item[0])
+        ):
+            try:
+                implementation = _function_tool_implementation(tool.function)
+                schema = tool.function_schema.json_schema
+            except AttributeError as exc:
+                raise KitaruUsageError(
+                    f"Tool {declared_name!r} has no stable registration identity."
+                ) from exc
+            projected_tools.append(
+                {
+                    "name": str(declared_name),
+                    "implementation": implementation,
+                    "schema": schema if isinstance(schema, Mapping) else None,
+                    "max_retries": tool.max_retries,
+                    "strict": tool.strict,
+                    "sequential": tool.sequential,
+                    "requires_approval": tool.requires_approval,
+                }
+            )
+        return {
+            **projection,
+            "tools": projected_tools,
+            "max_retries": component.max_retries,
+            "timeout": component.timeout,
+            "strict": component.strict,
+            "sequential": component.sequential,
+            "requires_approval": component.requires_approval,
+            "include_return_schema": component.include_return_schema,
+        }
+
+    if isinstance(component, MCPServer):
+        component_values = vars(component)
+        projection.update(
+            {
+                "max_retries": component.max_retries,
+                "timeout": component.timeout,
+                "cache_prompts": component.cache_prompts,
+                "cache_tools": component.cache_tools,
+                "cache_resources": component.cache_resources,
+                "include_instructions": component.include_instructions,
+                "include_return_schema": component.include_return_schema,
+                "allow_sampling": component.allow_sampling,
+            }
+        )
+        if "command" in component_values and "args" in component_values:
+            command = component_values["command"]
+            args = component_values["args"]
+            if (
+                not isinstance(command, str)
+                or not isinstance(args, Sequence)
+                or isinstance(args, (str, bytes))
+            ):
+                raise KitaruUsageError(
+                    "Registration found malformed MCP stdio transport settings."
+                )
+            cwd = component_values.get("cwd")
+            env = component_values.get("env")
+            safe_env = _safe_environment(env)
+            projection.update(
+                {
+                    "command": command,
+                    "args_hash": hash_registration_value(_safe_command_args(args)),
+                    "cwd": str(cwd) if cwd is not None else None,
+                    "env_keys": sorted(safe_env),
+                    "env_hash": hash_registration_value(safe_env),
+                }
+            )
+        elif "url" in component_values:
+            projection.update(
+                {
+                    "url": _safe_uri(str(component_values["url"])),
+                    "headers_hash": hash_registration_value(
+                        _safe_headers(component_values.get("headers", {}))
+                    ),
+                }
+            )
+        else:
+            raise KitaruUsageError(
+                "Registration does not support this MCP server transport."
+            )
+        return projection
+
+    if isinstance(component, MCPToolset):
+        if not isinstance(component.client, (str, Path)):
+            raise KitaruUsageError(
+                "Registration requires MCPToolset clients with a stable path or URL."
+            )
+        return {
+            **projection,
+            "client": (
+                _safe_uri(component.client)
+                if isinstance(component.client, str)
+                else str(component.client)
+            ),
+            "max_retries": component.max_retries,
+            "cache_prompts": component.cache_prompts,
+            "cache_tools": component.cache_tools,
+            "cache_resources": component.cache_resources,
+            "include_instructions": component.include_instructions,
+            "include_return_schema": component.include_return_schema,
+        }
+
+    raise KitaruUsageError(
+        f"Registration does not support toolset type {type_import_path(component)}."
+    )
+
+
+def _registered_tool_metadata(
+    *,
+    declared_name: str,
+    metadata: Any,
+) -> tuple[str, tuple[str, ...], RegisteredToolEffect]:
+    """Parse the Kitaru replay namespace from PydanticAI tool metadata."""
+    if metadata is None:
+        replay_metadata: Mapping[str, Any] = {}
+    elif not isinstance(metadata, Mapping):
+        raise KitaruUsageError(
+            f"Tool {declared_name!r} has malformed PydanticAI metadata."
+        )
+    else:
+        raw_replay_metadata = metadata.get(_KITARU_REPLAY_TOOL_METADATA_KEY, {})
+        if not isinstance(raw_replay_metadata, Mapping):
+            raise KitaruUsageError(
+                f"Tool {declared_name!r} has malformed Kitaru replay metadata."
+            )
+        replay_metadata = raw_replay_metadata
+
+    unknown_keys = set(replay_metadata) - {"logical_id", "aliases", "effect"}
+    if unknown_keys:
+        rendered = ", ".join(sorted(str(key) for key in unknown_keys))
+        raise KitaruUsageError(
+            f"Tool {declared_name!r} has unsupported Kitaru replay metadata: "
+            f"{rendered}."
+        )
+
+    logical_id = replay_metadata.get("logical_id", declared_name)
+    if not isinstance(logical_id, str) or not logical_id.strip():
+        raise KitaruUsageError(
+            f"Tool {declared_name!r} must have a non-empty replay logical ID."
+        )
+    logical_id = logical_id.strip()
+
+    declared_aliases = replay_metadata.get("aliases", ())
+    if isinstance(declared_aliases, (str, bytes)) or not isinstance(
+        declared_aliases, Sequence
+    ):
+        raise KitaruUsageError(
+            f"Tool {declared_name!r} replay aliases must be a sequence of strings."
+        )
+    aliases = [declared_name]
+    for alias in declared_aliases:
+        if not isinstance(alias, str) or not alias.strip():
+            raise KitaruUsageError(
+                f"Tool {declared_name!r} replay aliases must be non-empty strings."
+            )
+        aliases.append(alias.strip())
+
+    raw_effect = replay_metadata.get("effect", RegisteredToolEffect.UNKNOWN)
+    try:
+        effect = RegisteredToolEffect(raw_effect)
+    except (TypeError, ValueError) as exc:
+        raise KitaruUsageError(
+            f"Tool {declared_name!r} has unsupported replay effect {raw_effect!r}."
+        ) from exc
+    return logical_id, tuple(sorted(set(aliases))), effect
+
+
+def _pydantic_ai_replay_manifest(
+    toolsets: Sequence[AbstractToolset[Any]],
+) -> _PydanticAIReplayManifest:
+    """Build the immutable replay projection for one registered agent."""
+    tools: list[_RegisteredPydanticAITool] = []
+    unresolved_sources: list[_RegisteredPydanticAIToolSource] = []
+    for index, toolset in enumerate(toolsets):
+        component = toolset.wrapped if isinstance(toolset, KitaruToolset) else toolset
+        if isinstance(component, FunctionToolset):
+            for raw_name, tool in sorted(
+                component.tools.items(), key=lambda item: str(item[0])
+            ):
+                declared_name = str(raw_name).strip()
+                if not declared_name:
+                    raise KitaruUsageError(
+                        "Registration found a PydanticAI tool with an empty name."
+                    )
+                try:
+                    implementation = _function_tool_implementation(tool.function)
+                    input_schema = tool.function_schema.json_schema
+                    output_schema = tool.function_schema.return_schema
+                    metadata = tool.metadata
+                except AttributeError as exc:
+                    raise KitaruUsageError(
+                        f"Tool {declared_name!r} has no stable replay identity."
+                    ) from exc
+                logical_id, aliases, effect = _registered_tool_metadata(
+                    declared_name=declared_name,
+                    metadata=metadata,
+                )
+                tools.append(
+                    _RegisteredPydanticAITool(
+                        logical_id=logical_id,
+                        aliases=aliases,
+                        input_schema_hash=hash_registration_value(input_schema),
+                        output_schema_hash=hash_registration_value(output_schema),
+                        implementation_identity=implementation,
+                        effect=effect,
+                        argument_normalizer_revision=(
+                            _PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION
+                        ),
+                    )
+                )
+            continue
+
+        if isinstance(component, (MCPServer, MCPToolset)):
+            source_kind = type_import_path(component)
+            unresolved_sources.append(
+                _RegisteredPydanticAIToolSource(
+                    source_id=component.id or f"{source_kind}:{index}",
+                    kind=source_kind,
+                    configuration_hash=hash_registration_value(
+                        _toolset_worldview(component)
+                    ),
+                )
+            )
+            continue
+
+        raise KitaruUsageError(
+            f"Registration does not support toolset type {type_import_path(component)}."
+        )
+
+    try:
+        return _PydanticAIReplayManifest(
+            driver_revision=_PYDANTIC_AI_REPLAY_DRIVER_REVISION,
+            preparation_revision=_IMPORTED_REPLAY_PREPARATION_REVISION,
+            driver_entrypoint=_PYDANTIC_AI_REPLAY_DRIVER_ENTRYPOINT,
+            resume_kinds=("root_input", "model_message", "tool_result"),
+            argument_normalizer_revision=(_PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION),
+            tools=tuple(tools),
+            unresolved_tool_sources=tuple(unresolved_sources),
+        )
+    except ValueError as exc:
+        raise KitaruUsageError(
+            "The PydanticAI replay tool projection is ambiguous or malformed."
+        ) from exc
+
+
 # Auto-flow bodies keyed by uuid. The @kitaru.flow entrypoint must be module-
 # level for ZenML dynamic-pipeline source resolution, so it can't close over
 # its body — the registry bridges the gap. In-process only; remote stacks
 # require an explicit @kitaru.flow.
 _AUTO_FLOW_BODIES: dict[str, "_AutoFlowSlot"] = {}
-# Intentionally unbounded: agent names should be stable/low-cardinality, and
-# evicting generated flows can break ZenML/Kitaru source resolution.
-_AUTO_FLOW_DEFINITIONS: dict[str, Any] = {}
+# Generated module entrypoints remain installed for ZenML source resolution,
+# while flow definitions are weakly retained and recreated on demand.
+_AUTO_FLOW_DEFINITIONS: weakref.WeakValueDictionary[str, Any] = (
+    weakref.WeakValueDictionary()
+)
 _AUTO_FLOW_LOCK = threading.Lock()
 
 if f"src.{__name__}" not in sys.modules:
@@ -276,8 +1238,12 @@ def _make_auto_flow_entrypoint(flow_name: str) -> Callable[[str, str | None], An
     return _auto_flow_entrypoint
 
 
-def _auto_flow_for_agent(agent_name: str) -> Any:
-    flow_name = _auto_flow_name_for_agent(agent_name)
+def _auto_flow_for_agent(
+    agent_name: str,
+    *,
+    pipeline_name: str | None = None,
+) -> Any:
+    flow_name = pipeline_name or _auto_flow_name_for_agent(agent_name)
     with _AUTO_FLOW_LOCK:
         flow_definition = _AUTO_FLOW_DEFINITIONS.get(flow_name)
         if flow_definition is not None:
@@ -372,6 +1338,138 @@ def _track_run_completed(method: str, error: BaseException | None) -> None:
     if error is not None:
         payload["error_type"] = type(error).__name__
     track(AnalyticsEvent.PYDANTIC_AI_RUN_COMPLETED, payload)
+
+
+def _verified_replay_execution_ids(result: ExperimentReplayResult) -> list[str]:
+    """Return verified children in frozen trial order, including on recovery."""
+    record = result.record
+    expected_count = record.counts.verified
+    if getattr(record, "imported_replay_evidence", None) is not None:
+        imported_members = record.imported_replay_members
+        authoritative_ids = [member.child_execution_id for member in imported_members]
+        if len(authoritative_ids) != len(set(authoritative_ids)):
+            raise KitaruStateError(
+                "Imported replay evidence contains duplicate child identities."
+            )
+        ineligible_ids = {
+            issue.child_execution_id
+            for issue in record.unverified_children
+            if issue.child_execution_id is not None
+        }
+        eligible_ids = [
+            member.child_execution_id
+            for member in imported_members
+            if (
+                member.candidate_status == "completed"
+                and member.child_execution_id not in ineligible_ids
+            )
+        ]
+        if len(eligible_ids) != expected_count:
+            raise KitaruStateError(
+                "Imported replay evidence does not match the successful child count."
+            )
+
+        submitted_ids = [
+            row.replay_exec_id for row in result.submission.results
+        ]
+        if submitted_ids:
+            if (
+                len(submitted_ids) != len(set(submitted_ids))
+                or set(submitted_ids) != set(authoritative_ids)
+            ):
+                raise KitaruStateError(
+                    "Imported replay submission does not match frozen member evidence."
+                )
+            return eligible_ids
+
+        recovered_ids: set[str] = set()
+        page_number = 1
+        page_size = 50
+        while True:
+            page = result.runs.list(page=page_number, size=page_size)
+            items = getattr(page, "items", None)
+            if items is None or callable(items):
+                raise KitaruStateError(
+                    "Replay scoring received an unexpected member-run response."
+                )
+            page_items = list(items)
+            for run in page_items:
+                run_id = str(getattr(run, "id", "")).strip()
+                if not run_id:
+                    raise KitaruStateError(
+                        "Replay scoring found a member without an execution ID."
+                    )
+                if run_id in recovered_ids:
+                    raise KitaruStateError(
+                        "Replay scoring found duplicate experiment members."
+                    )
+                recovered_ids.add(run_id)
+            if len(page_items) < page_size:
+                break
+            page_number += 1
+        if recovered_ids != set(authoritative_ids):
+            raise KitaruStateError(
+                "Replay scoring could not recover the frozen imported member set."
+            )
+        return eligible_ids
+
+    submitted_ids = [
+        row.replay_exec_id
+        for row in result.submission.results
+        if row.membership_verified is True
+    ]
+    if expected_count == 0:
+        if submitted_ids:
+            raise KitaruStateError(
+                "Replay scoring received verified children outside the frozen counts."
+            )
+        return []
+    if submitted_ids:
+        if len(submitted_ids) != expected_count:
+            raise KitaruStateError(
+                "Replay scoring received an incomplete verified child projection."
+            )
+        return submitted_ids
+
+    unverified_ids = {
+        issue.child_execution_id
+        for issue in record.unverified_children
+        if issue.child_execution_id is not None
+    }
+    recovered_ids: list[str] = []
+    seen_ids: set[str] = set()
+    page_number = 1
+    page_size = 50
+    while True:
+        page = result.runs.list(page=page_number, size=page_size)
+        items = getattr(page, "items", None)
+        if items is None or callable(items):
+            raise KitaruStateError(
+                "Replay scoring received an unexpected member-run response."
+            )
+        page_items = list(items)
+        for run in page_items:
+            run_id = str(getattr(run, "id", "")).strip()
+            if not run_id:
+                raise KitaruStateError(
+                    "Replay scoring found a member without an execution ID."
+                )
+            if run_id in seen_ids:
+                raise KitaruStateError(
+                    "Replay scoring found duplicate experiment members."
+                )
+            seen_ids.add(run_id)
+            if run_id not in unverified_ids:
+                recovered_ids.append(run_id)
+        if len(page_items) < page_size:
+            break
+        page_number += 1
+
+    if len(recovered_ids) != expected_count:
+        raise KitaruStateError(
+            "Replay scoring could not recover the complete verified child set."
+        )
+    return recovered_ids
 
 
 class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
@@ -547,6 +1645,9 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         self._persist_message_history = persist_message_history
         self._last_messages: list[_messages.ModelMessage] | None = None
         self._message_history_lock = threading.Lock()
+        self._registration_lock = threading.RLock()
+        self._registered_state: _RegisteredAgentState | None = None
+        self._protections: dict[str, ProtectionDeclaration] = {}
         track(
             AnalyticsEvent.PYDANTIC_AI_WRAPPED,
             {
@@ -593,9 +1694,1181 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     def _uses_calls_strategy(self) -> bool:
         return self._checkpoint_strategy == "calls"
 
+    def protection(
+        self,
+        protection_id: str,
+        *,
+        capability: Literal["pure", "grounded"],
+        name: str | None = None,
+        comparative: bool = False,
+        configuration: Mapping[str, Any] | None = None,
+        grounded_capabilities: Sequence[GroundedCapabilityDeclaration] = (),
+    ) -> Callable[[Callable[..., Any]], ProtectionDeclaration]:
+        """Declare one Agent-pinned scorer with the fixed V1 passing rule."""
+        normalized_id = protection_id.strip()
+        if not normalized_id:
+            raise KitaruUsageError("Protection ID cannot be empty.")
+
+        def decorate(func: Callable[..., Any]) -> ProtectionDeclaration:
+            if normalized_id in self._protections:
+                raise KitaruUsageError(
+                    f"Protection ID {normalized_id!r} is already declared."
+                )
+            declaration = ProtectionDeclaration.from_callable(
+                func,
+                protection_id=normalized_id,
+                capability=capability,
+                name=name,
+                comparative=comparative,
+                configuration=configuration,
+                grounded_capabilities=grounded_capabilities,
+            )
+            self._protections[normalized_id] = declaration
+            return declaration
+
+        return decorate
+
+    def _protection_snapshots(self) -> dict[str, ProtectionSnapshot]:
+        return {
+            protection_id: declaration.snapshot
+            for protection_id, declaration in self._protections.items()
+        }
+
+    def _registered_protection_declarations(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[ProtectionDeclaration]:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            if project_id is not None and state.binding.project_id != project_id:
+                raise KitaruStateError(
+                    "The registered Agent belongs to a different Agent Project."
+                )
+            expected = state.binding.manifest.protections
+            actual = self._protection_snapshots()
+            if actual != expected:
+                raise KitaruMetadataConflictError(
+                    "In-memory protection callables do not match the registered "
+                    "AgentVersion snapshots."
+                )
+            return list(self._protections.values())
+
+    def _registration_configuration(self) -> dict[str, Any]:
+        cost_calculator = self._cost_calculator
+        cost_calculator_name: str | None = None
+        if cost_calculator is not None:
+            cost_calculator_name = qualified_import_path(cost_calculator)
+
+        configuration = {
+            "adapter": "pydantic_ai",
+            "name": self._name,
+            "capture": _safe_mapping(vars(self._capture)),
+            "checkpoint_strategy": self._checkpoint_strategy,
+            "turn_checkpoint_config": _safe_mapping(self._turn_checkpoint_config),
+            "model_checkpoint_config": _safe_mapping(self._model_checkpoint_config),
+            "tool_checkpoint_config": _safe_mapping(self._tool_checkpoint_config),
+            "tool_checkpoint_config_by_name": _safe_mapping(
+                self._tool_checkpoint_config_by_name
+            ),
+            "mcp_checkpoint_config": _safe_mapping(self._mcp_checkpoint_config),
+            "persist_message_history": self._persist_message_history,
+            "allow_sync_tool_body_waits": self._allow_sync_tool_body_waits,
+            "cost_calculator": cost_calculator_name,
+        }
+        protections = sorted(
+            self._protection_snapshots().values(),
+            key=lambda snapshot: snapshot.protection_id,
+        )
+        if protections:
+            configuration["protections"] = [
+                (
+                    snapshot.protection_id,
+                    snapshot.scorer.revision,
+                    snapshot.scorer.configuration_hash,
+                    snapshot.pass_rule,
+                )
+                for snapshot in protections
+            ]
+        return configuration
+
+    def _pydantic_ai_replay_manifest(self) -> _PydanticAIReplayManifest:
+        """Return this agent's immutable replay and tool projection."""
+        return _pydantic_ai_replay_manifest(self._toolsets)
+
+    def _registration_worldview(
+        self,
+        replay_manifest: _PydanticAIReplayManifest | None = None,
+    ) -> dict[str, Any]:
+        wrapped_model = self._model.wrapped
+        model_name = wrapped_model.model_name
+        if not isinstance(model_name, str) or not model_name:
+            raise KitaruUsageError(
+                "The Pydantic AI model has no stable name for registration."
+            )
+        provider = wrapped_model.provider
+        provider_name = provider.name if provider is not None else None
+        if provider_name is not None and (
+            not isinstance(provider_name, str) or not provider_name
+        ):
+            raise KitaruUsageError(
+                "The Pydantic AI provider has no stable name for registration."
+            )
+
+        root_capability = self.wrapped.root_capability
+        capabilities = (
+            root_capability.capabilities
+            if isinstance(root_capability, CombinedCapability)
+            else [root_capability]
+        )
+        capability_names = sorted(
+            type_import_path(capability) for capability in capabilities
+        )
+
+        output_type = self.wrapped.output_type
+        if isinstance(output_type, type):
+            output_identity: Any = qualified_import_path(output_type)
+        elif output_type is None:
+            output_identity = None
+        elif isinstance(output_type, Sequence) and not isinstance(
+            output_type, (str, bytes)
+        ):
+            output_identity = [
+                qualified_import_path(item) if isinstance(item, type) else item
+                for item in output_type
+            ]
+        else:
+            output_identity = output_type
+
+        try:
+            model_settings = vars(self.wrapped)["model_settings"]
+        except (KeyError, TypeError) as exc:
+            raise KitaruUsageError(
+                "Registration requires an Agent with explicit model settings."
+            ) from exc
+        if model_settings is not None and not isinstance(model_settings, Mapping):
+            raise KitaruUsageError(
+                "The Pydantic AI model settings are not a stable mapping."
+            )
+
+        return {
+            "framework": "pydantic_ai",
+            "model": {
+                "kind": type_import_path(wrapped_model),
+                "name": model_name,
+                "provider": {
+                    "kind": type_import_path(provider)
+                    if provider is not None
+                    else None,
+                    "name": provider_name,
+                    "behavior": (
+                        _provider_behavior_identity(provider)
+                        if provider is not None
+                        else {}
+                    ),
+                },
+                "settings": _safe_mapping(model_settings),
+            },
+            "tools_and_mcp": [
+                _toolset_worldview(toolset) for toolset in self._toolsets
+            ],
+            "pydantic_ai_replay": (
+                replay_manifest or self._pydantic_ai_replay_manifest()
+            ).model_dump(mode="json"),
+            "capabilities": capability_names,
+            "output_type": output_identity,
+            "replay": True,
+            "checkpoint_strategy": self._checkpoint_strategy,
+        }
+
+    def _resolve_registration_identity(
+        self,
+        *,
+        repo_root: Path,
+        entrypoint: str,
+        replay_manifest: _PydanticAIReplayManifest | None = None,
+    ) -> RegistrationIdentity:
+        return resolve_registration_identity(
+            repo_root=repo_root,
+            entrypoint=entrypoint,
+            configuration=self._registration_configuration(),
+            worldview=self._registration_worldview(replay_manifest),
+        )
+
+    def _resolve_registration_project(self, client: Any) -> Any:
+        """Use a named Project on Pro/Cloud and the active default Project locally."""
+        is_pro = False
+        try:
+            detector = client.zen_store.get_store_info().is_pro_server
+            is_pro = callable(detector) and detector() is True
+        except Exception:
+            is_pro = _connected_store_url_is_known_pro_cloud(client)
+
+        if not is_pro:
+            return _active_project_model(client)
+
+        try:
+            return _get_project_by_exact_selector(client, self._name)
+        except KeyError:
+            pass
+
+        from kitaru._config import _projects as project_ops
+
+        try:
+            project_ops.create_project(
+                self._name,
+                description=f"Kitaru Agent {self._name}",
+                activate=False,
+                client_factory=lambda: client,
+            )
+        except Exception as create_error:
+            try:
+                # A concurrent creator may have won the name race.
+                return _get_project_by_exact_selector(client, self._name)
+            except KeyError as recovery_error:
+                raise create_error from recovery_error
+
+        return _get_project_by_exact_selector(client, self._name)
+
+    def _resolve_bound_registration_project(
+        self,
+        client: Any,
+        state: _RegisteredAgentState,
+    ) -> Any:
+        """Verify an existing immutable Project and Pipeline binding."""
+        expected_project_id = state.binding.project_id
+        try:
+            project = _get_project_by_exact_selector(client, expected_project_id)
+        except Exception as exc:
+            raise KitaruStateError(
+                "The registered Project is unavailable on the current connection."
+            ) from exc
+
+        project_id = str(getattr(project, "id", "")).strip()
+        if project_id != expected_project_id:
+            raise KitaruStateError(
+                "The registered Project ID does not match the current connection."
+            )
+
+        metadata = _complete_project_metadata(project)
+        envelope = _parse_agent_metadata(project_id, metadata)
+        if envelope is None:
+            raise KitaruStateError(
+                "The registered Project is not initialized as the bound Agent."
+            )
+        if envelope.agent.name != self._name:
+            raise KitaruMetadataConflictError(
+                "The registered Project is bound to a different logical Agent name."
+            )
+        stored_manifest = envelope.agent_versions.get(state.binding.pipeline_id)
+        if stored_manifest != state.binding.manifest:
+            raise KitaruMetadataConflictError(
+                "The registered Project metadata no longer matches the bound "
+                "AgentVersion."
+            )
+
+        bound_pipeline = find_exact_project_pipeline(
+            client,
+            project_id=project_id,
+            pipeline_name=state.binding.pipeline_name,
+        )
+        if bound_pipeline is None:
+            raise KitaruStateError(
+                "The registered AgentVersion Pipeline no longer exists."
+            )
+        if str(getattr(bound_pipeline, "id", "")) != state.binding.pipeline_id:
+            raise KitaruMetadataConflictError(
+                "The registered Pipeline name no longer resolves to its bound UUID."
+            )
+        return project
+
+    def _registered_flow(self) -> Any:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            flow_definition = _auto_flow_for_agent(
+                self._name,
+                pipeline_name=state.binding.pipeline_name,
+            )
+            flow_definition._bind_registered_version(state.binding)
+            return flow_definition
+
+    def _preflight_registered_identity(self) -> None:
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            resolve_agent_entrypoint(
+                target=self,
+                repo_root=state.repo_root,
+                entrypoint=state.identity.entrypoint,
+            )
+            replay_manifest = self._pydantic_ai_replay_manifest()
+            actual = self._resolve_registration_identity(
+                repo_root=state.repo_root,
+                entrypoint=state.identity.entrypoint,
+                replay_manifest=replay_manifest,
+            )
+            changed = identity_drift_categories(state.identity, actual)
+            if changed or actual.fingerprint != state.binding.fingerprint:
+                categories = ", ".join(changed or ["fingerprint"])
+                raise KitaruStateError(
+                    "Agent registration is stale because these static identity "
+                    f"categories changed: {categories}. Call agent.register() on "
+                    "a new KitaruAgent instance before execution."
+                )
+
+    def register(
+        self,
+        *,
+        label: str | None = None,
+        entrypoint: str | None = None,
+    ) -> AgentRegistrationResult:
+        """Register or reuse this AgentVersion without executing the Agent."""
+        normalized_label = label.strip() if label is not None else None
+        if normalized_label == "":
+            raise KitaruUsageError("AgentVersion label cannot be empty.")
+        repo_root = find_repository_root()
+        if repo_root is None:
+            raise KitaruStateError(
+                "Agent registration requires a Kitaru repository. Run `kitaru init`."
+            )
+        resolved_entrypoint = resolve_agent_entrypoint(
+            target=self,
+            repo_root=repo_root,
+            entrypoint=entrypoint,
+        )
+        replay_manifest = self._pydantic_ai_replay_manifest()
+        identity = self._resolve_registration_identity(
+            repo_root=repo_root,
+            entrypoint=resolved_entrypoint,
+            replay_manifest=replay_manifest,
+        )
+
+        with self._registration_lock:
+            current_state = self._registered_state
+            if (
+                current_state is not None
+                and current_state.identity.fingerprint != identity.fingerprint
+            ):
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot be rebound to a different "
+                    "AgentVersion. Create a new wrapper and register it."
+                )
+
+            client = Client()
+            project = (
+                self._resolve_bound_registration_project(client, current_state)
+                if current_state is not None
+                else self._resolve_registration_project(client)
+            )
+            project_id = str(getattr(project, "id", "")).strip()
+            project_name = str(getattr(project, "name", "")).strip()
+            if not project_id or not project_name:
+                raise KitaruStateError(
+                    "Unable to resolve the Project identity for Agent registration."
+                )
+            if (
+                current_state is not None
+                and current_state.binding.project_id != project_id
+            ):
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot replace its registered Project."
+                )
+            metadata = _complete_project_metadata(project)
+            envelope = _parse_agent_metadata(project_id, metadata)
+            if envelope is not None and envelope.agent.name != self._name:
+                raise KitaruMetadataConflictError(
+                    "The backing Project is already registered to Agent "
+                    f"{envelope.agent.name!r}, not {self._name!r}."
+                )
+            stored_manifest = _manifest_for_fingerprint(envelope, identity.fingerprint)
+            if stored_manifest is None and current_state is not None:
+                stored_manifest = current_state.binding.manifest
+            if normalized_label is not None and envelope is not None:
+                existing_target = envelope.agent_version_aliases.get(normalized_label)
+                fingerprint_target = (
+                    stored_manifest.pipeline_id if stored_manifest is not None else None
+                )
+                if (
+                    existing_target is not None
+                    and existing_target != fingerprint_target
+                ):
+                    raise KitaruMetadataConflictError(
+                        "The AgentVersion alias already points to a different version."
+                    )
+
+            if stored_manifest is not None and (
+                stored_manifest.git_sha != identity.git_sha
+                or stored_manifest.git_dirty != identity.git_dirty
+                or stored_manifest.working_tree_hash != identity.working_tree_hash
+                or stored_manifest.configuration_hash != identity.configuration_hash
+                or stored_manifest.worldview_hash != identity.worldview_hash
+                or stored_manifest.entrypoint != identity.entrypoint
+                or stored_manifest.protections != self._protection_snapshots()
+                or stored_manifest.pydantic_ai_replay != replay_manifest
+            ):
+                raise KitaruMetadataConflictError(
+                    "The stored AgentVersion manifest contradicts its fingerprint."
+                )
+            deterministic_name = build_agent_version_pipeline_name(
+                agent_name=self._name,
+                identity=identity,
+            )
+            if (
+                stored_manifest is not None
+                and stored_manifest.pipeline_name != deterministic_name
+            ):
+                raise KitaruMetadataConflictError(
+                    "The stored AgentVersion name contradicts deterministic identity."
+                )
+            pipeline_name = (
+                stored_manifest.pipeline_name
+                if stored_manifest is not None
+                else deterministic_name
+            )
+            flow_definition = _auto_flow_for_agent(
+                self._name,
+                pipeline_name=pipeline_name,
+            )
+
+            pipeline_model = find_exact_project_pipeline(
+                client,
+                project_id=project_id,
+                pipeline_name=pipeline_name,
+            )
+            created = stored_manifest is None
+            if stored_manifest is not None:
+                if pipeline_model is None:
+                    raise KitaruStateError(
+                        "The registered AgentVersion Pipeline no longer exists."
+                    )
+                if (
+                    str(getattr(pipeline_model, "id", ""))
+                    != stored_manifest.pipeline_id
+                ):
+                    raise KitaruMetadataConflictError(
+                        "The Pipeline name no longer resolves to the manifest UUID."
+                    )
+                manifest = stored_manifest
+            else:
+                if pipeline_model is None:
+                    with _temporary_active_project(project_id):
+                        returned_pipeline = flow_definition._pipeline.register()
+                    pipeline_model = find_exact_project_pipeline(
+                        client,
+                        project_id=project_id,
+                        pipeline_name=pipeline_name,
+                    )
+                    if pipeline_model is None:
+                        raise KitaruStateError(
+                            "Pipeline registration did not create a resolvable Pipeline."
+                        )
+                    if str(getattr(returned_pipeline, "id", "")) != str(
+                        getattr(pipeline_model, "id", "")
+                    ):
+                        raise KitaruMetadataConflictError(
+                            "Pipeline registration returned a different UUID than "
+                            "the exact project-scoped lookup."
+                        )
+                pipeline_id = str(getattr(pipeline_model, "id", "")).strip()
+                if not pipeline_id:
+                    raise KitaruStateError(
+                        "Pipeline registration returned no durable UUID."
+                    )
+                manifest = _AgentVersionManifest(
+                    schema_version=1,
+                    agent_version_id=pipeline_id,
+                    pipeline_id=pipeline_id,
+                    pipeline_name=pipeline_name,
+                    fingerprint=identity.fingerprint,
+                    git_sha=identity.git_sha,
+                    git_dirty=identity.git_dirty,
+                    working_tree_hash=identity.working_tree_hash,
+                    configuration_hash=identity.configuration_hash,
+                    worldview_hash=identity.worldview_hash,
+                    entrypoint=identity.entrypoint,
+                    registered_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    source="registration",
+                    protections=self._protection_snapshots(),
+                    pydantic_ai_replay=replay_manifest,
+                )
+
+            _reconcile_agent_version_registration(
+                project_id=project_id,
+                agent_name=self._name,
+                manifest=manifest,
+                label=normalized_label,
+                client_factory=lambda: client,
+            )
+            reread_project = _get_project_by_exact_selector(client, project_id)
+            active_project_id = _active_project_id(client)
+            agent_info = _agent_info_from_project_model(
+                reread_project,
+                active_project_id=active_project_id,
+            )
+            if agent_info is None:
+                raise KitaruStateError(
+                    "Agent metadata verification returned an uninitialized Agent."
+                )
+            version_info = next(
+                (
+                    version
+                    for version in agent_info.agent_versions
+                    if version.pipeline_id == manifest.pipeline_id
+                ),
+                None,
+            )
+            if version_info is None:
+                raise KitaruStateError(
+                    "Agent metadata verification did not return the registered version."
+                )
+
+            binding = RegisteredAgentVersionBinding(
+                project_id=project_id,
+                manifest=manifest,
+            )
+            flow_definition._bind_registered_version(binding)
+            new_state = _RegisteredAgentState(
+                repo_root=repo_root,
+                identity=identity,
+                binding=binding,
+            )
+            if current_state is not None and current_state.binding != binding:
+                raise KitaruStateError(
+                    "A KitaruAgent instance cannot replace its registered state."
+                )
+            self._registered_state = new_state
+            return AgentRegistrationResult(
+                agent=agent_info,
+                agent_version=version_info,
+                label=normalized_label,
+                created=created,
+            )
+
+    def replay(
+        self,
+        execution: str | CohortResult | Sequence[str] | None = None,
+        *,
+        experiment: str | None = None,
+        imported_mode: ImportedReplayMode
+        | Literal["root_input", "message_history"]
+        | None = None,
+        imported_boundary: ImportedReplayBoundary | None = None,
+        at: str | None = None,
+        on_error: Literal["collect", "fail"] | None = None,
+        uncovered_policy: Literal["fail", "skip", "top"] | None = None,
+        idempotency_key: str,
+        name: str | None = None,
+        suite_key: str | None = None,
+        repeats: int = 1,
+        acknowledge_partial_cohort: bool = False,
+        flow_overrides: Mapping[str, Any] | None = None,
+        checkpoint_overrides: Mapping[str, Any] | None = None,
+        invocation_overrides: Mapping[str, Any] | None = None,
+        skip: Sequence[str] | None = None,
+        tag: str | None = None,
+        wait: bool | None = None,
+        stack: str | None = None,
+        image: ImageInput | None = None,
+        cache: bool | None = None,
+        retries: int | None = None,
+        scorers: Sequence[Any] = (),
+        objective_minimum_mean: float | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        limits: RegressionLimits | None = None,
+    ) -> ExperimentReplayResult:
+        """Create a native replay, imported candidate run, or suite rerun."""
+        if (execution is None) == (experiment is None):
+            raise KitaruUsageError("Pass exactly one of execution or experiment.")
+
+        flow_definition = self._registered_flow()
+        with self._registration_lock:
+            state = self._registered_state
+            if state is None:
+                raise KitaruStateError(
+                    "This KitaruAgent is not registered. Call agent.register() first."
+                )
+            binding = state.binding
+
+        self._preflight_registered_identity()
+        protection_items = self._registered_protection_declarations()
+        objective_items = list(scorers)
+        scorer_items = [
+            *objective_items,
+            *(item.scorer for item in protection_items),
+        ]
+        client = Client()
+        resolved_wait: bool | None = None
+
+        if experiment is not None:
+            if any(not callable(item) for item in objective_items):
+                raise KitaruUsageError(
+                    "Suite rerun objective scorers must be current executable callables."
+                )
+            forbidden = {
+                "imported_mode": imported_mode,
+                "imported_boundary": imported_boundary,
+                "at": at,
+                "on_error": on_error,
+                "uncovered_policy": uncovered_policy,
+                "name": name,
+                "suite_key": suite_key,
+                "flow_overrides": flow_overrides,
+                "checkpoint_overrides": checkpoint_overrides,
+                "invocation_overrides": invocation_overrides,
+                "skip": skip,
+                "objective_minimum_mean": objective_minimum_mean,
+                "grounded_policy": grounded_policy,
+            }
+            supplied = [key for key, value in forbidden.items() if value is not None]
+            if acknowledge_partial_cohort:
+                supplied.append("acknowledge_partial_cohort")
+            if supplied:
+                raise KitaruUsageError(
+                    "Suite reruns copy frozen source settings; do not pass: "
+                    + ", ".join(sorted(set(supplied)))
+                    + "."
+                )
+            if wait is False:
+                raise KitaruUsageError(
+                    "Suite reruns require terminal evidence and cannot use wait=False."
+                )
+            project = _get_project_by_exact_selector(client, binding.project_id)
+            agent_info = _agent_info_from_project_model(
+                project,
+                active_project_id=_active_project_id(client),
+            )
+            if agent_info is None:
+                raise KitaruStateError(
+                    "The registered Agent Project has no readable Agent metadata."
+                )
+            existing, source = agent_info.resolve_suite_rerun_request(
+                experiment,
+                idempotency_key,
+            )
+            objective_snapshots = [scorer_snapshot(item) for item in objective_items]
+            protection_snapshots = [item.snapshot for item in protection_items]
+            if existing is None:
+                plan = plan_suite_rerun(
+                    source,
+                    binding=binding,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    objective_scorers=objective_snapshots,
+                    protections=protection_snapshots,
+                    limits=limits,
+                    client=client,
+                )
+            else:
+                plan = validate_existing_suite_rerun(
+                    existing,
+                    source,
+                    binding=binding,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    objective_scorers=objective_snapshots,
+                    protections=protection_snapshots,
+                    limits=limits,
+                )
+            resolved_grounded_policy = plan.spec.grounded_policy
+        else:
+            assert execution is not None
+            if limits is not None:
+                raise KitaruUsageError(
+                    "Regression limits are available only when rerunning a suite "
+                    "through experiment=."
+                )
+            imported_request = (
+                imported_mode is not None or imported_boundary is not None
+            )
+            if isinstance(execution, CohortResult):
+                target_count = len(execution.exec_ids)
+            elif isinstance(execution, str):
+                target_count = 1
+            else:
+                target_count = len(execution)
+            if scorer_items and wait is False:
+                raise KitaruUsageError(
+                    "Replay scoring requires terminal child evidence. Pass wait=True "
+                    "or omit wait so scoring can wait for replay children."
+                )
+            resolved_wait = (
+                True
+                if scorer_items and wait is None
+                else target_count * repeats == 1
+                if wait is None
+                else wait
+            )
+            if imported_request:
+                if imported_mode is None:
+                    raise KitaruUsageError(
+                        "Pass imported_mode when selecting an imported replay boundary."
+                    )
+                resolved_imported_mode = ImportedReplayMode(imported_mode)
+                forbidden = {
+                    "at": at,
+                    "uncovered_policy": uncovered_policy,
+                    "flow_overrides": flow_overrides,
+                    "checkpoint_overrides": checkpoint_overrides,
+                    "invocation_overrides": invocation_overrides,
+                    "skip": skip,
+                    "stack": stack,
+                    "image": image,
+                    "cache": cache,
+                    "retries": retries,
+                }
+                supplied = [
+                    key for key, value in forbidden.items() if value is not None
+                ]
+                if isinstance(execution, CohortResult):
+                    supplied.append("cohort")
+                if acknowledge_partial_cohort:
+                    supplied.append("acknowledge_partial_cohort")
+                if supplied:
+                    raise KitaruUsageError(
+                        "Imported replay does not accept native checkpoint options: "
+                        + ", ".join(sorted(set(supplied)))
+                        + "."
+                    )
+                if on_error is None:
+                    raise KitaruUsageError(
+                        "Imported replay requires on_error='collect' or 'fail'."
+                    )
+                scorer_items, scorer_snapshots, verdict_policy = _scoring_contract(
+                    objective_items,
+                    protection_items,
+                    objective_minimum_mean=objective_minimum_mean,
+                    imported_replay=ImportedReplayVerdictPolicy(),
+                )
+                draft = preplan_imported_replay_attempt(
+                    execution,
+                    binding=binding,
+                    mode=resolved_imported_mode,
+                    boundary=imported_boundary,
+                    on_error=on_error,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    wait=resolved_wait,
+                    name=name,
+                    suite_key=suite_key,
+                    client=client,
+                    scorers=scorer_snapshots,
+                    grounded_policy=grounded_policy,
+                    verdict_policy=verdict_policy,
+                )
+            else:
+                if at is None or on_error is None or uncovered_policy is None:
+                    raise KitaruUsageError(
+                        "Fresh native replays require at, on_error, and "
+                        "uncovered_policy."
+                    )
+                scorer_items, scorer_snapshots, verdict_policy = _scoring_contract(
+                    objective_items,
+                    protection_items,
+                    objective_minimum_mean=objective_minimum_mean,
+                )
+                draft = preplan_replay_attempt(
+                    execution,
+                    binding=binding,
+                    at=at,
+                    on_error=on_error,
+                    uncovered_policy=uncovered_policy,
+                    idempotency_key=idempotency_key,
+                    repeats=repeats,
+                    wait=resolved_wait,
+                    name=name,
+                    suite_key=suite_key,
+                    acknowledge_partial_cohort=acknowledge_partial_cohort,
+                    flow_overrides=flow_overrides,
+                    checkpoint_overrides=checkpoint_overrides,
+                    invocation_overrides=invocation_overrides,
+                    skip=skip,
+                    client=client,
+                    scorers=scorer_snapshots,
+                    grounded_policy=grounded_policy,
+                    verdict_policy=verdict_policy,
+                )
+            with _temporary_active_project(binding.project_id):
+                plan = freeze_replay_attempt(draft, client=client)
+            resolved_grounded_policy = grounded_policy
+
+        spec = plan.spec
+        regression_limits = spec.regression_limits
+        if (
+            regression_limits is not None
+            and regression_limits.has_operational_limits
+            and not scorer_items
+        ):
+            raise KitaruUsageError(
+                "Cost, token, and duration limits require a graded suite rerun."
+            )
+        limit_tracker = (
+            RegressionLimitTracker(regression_limits)
+            if regression_limits is not None
+            and regression_limits.has_operational_limits
+            else None
+        )
+        usage_client: Any | None = None
+        replay_inputs = spec.replay_inputs
+        effective_flow_overrides = replay_inputs.flow_overrides
+        effective_checkpoint_overrides = replay_inputs.checkpoint_overrides
+        effective_invocation_overrides = replay_inputs.invocation_overrides
+        effective_skip = replay_inputs.skip
+        effective_at = spec.at
+        effective_wait = spec.wait
+
+        def submit_trial(
+            *,
+            trial: ReplayTrialPlan,
+            replay_plan: Any,
+            submission_id: str,
+        ) -> ReplaySubmission:
+            if isinstance(replay_plan, FrozenImportedReplayPlan):
+                evidence = load_imported_replay_evidence(
+                    trial.target_execution_id,
+                    client=client,
+                )
+                if evidence.identity != replay_plan.evidence_identity:
+                    raise KitaruStateError(
+                        "Imported replay evidence identity changed after planning."
+                    )
+
+                candidate = _load_imported_replay_candidate(
+                    spec.executable.entrypoint,
+                    binding=binding,
+                )
+
+                project = _get_project_by_exact_selector(client, binding.project_id)
+                envelope = _parse_agent_metadata(
+                    binding.project_id,
+                    _complete_project_metadata(project),
+                )
+                if envelope is None:
+                    raise KitaruStateError(
+                        "Imported replay could not load AgentVersion metadata."
+                    )
+                source = envelope.agent_versions.get(
+                    evidence.identity.source_agent_version_id
+                )
+                if (
+                    source is None
+                    or source.fingerprint != evidence.identity.source_fingerprint
+                ):
+                    raise KitaruStateError(
+                        "Imported replay source AgentVersion identity changed."
+                    )
+                source_manifest = source.pydantic_ai_replay
+                candidate_manifest = binding.manifest.pydantic_ai_replay
+                runtime = None
+                if source_manifest is not None and candidate_manifest is not None:
+                    runtime = compile_recorded_responses(
+                        evidence,
+                        source_manifest=source_manifest,
+                        candidate_manifest=candidate_manifest,
+                        candidate_toolsets=candidate._toolsets,
+                        after_boundary=replay_plan.boundary,
+                    )
+                    tool_scope = runtime.install(candidate)
+                elif replay_plan.mode is ImportedReplayMode.ROOT_INPUT:
+                    tool_scope = candidate._replace_tool_sources(
+                        (),
+                        streaming_supported=False,
+                    )
+                else:
+                    raise KitaruStateError(
+                        "Message-history imported replay requires explicit source and "
+                        "candidate replay manifests."
+                    )
+
+                if replay_plan.mode is ImportedReplayMode.ROOT_INPUT:
+                    user_prompt = prepare_imported_root_input(evidence)
+                    message_history = None
+                else:
+                    prepared_history = prepare_imported_replay_history(
+                        evidence,
+                        boundary=replay_plan.boundary,
+                    )
+                    user_prompt = None
+                    message_history = prepared_history.message_history
+
+                context = ExperimentReplayContext(
+                    experiment_id=spec.experiment_id,
+                    target_execution_id=trial.target_execution_id,
+                    repeat_index=trial.repeat_index,
+                    parent_execution_id=trial.parent_execution_id,
+                    root_execution_id=trial.root_execution_id,
+                    lineage_kind="imported_replay",
+                )
+                run_error: Exception | None = None
+                with candidate._capture_imported_replay_execution(context) as capture:
+                    try:
+                        with (
+                            _temporary_active_project(binding.project_id),
+                            tool_scope,
+                        ):
+                            candidate.run_sync(
+                                user_prompt,
+                                message_history=message_history,
+                            )
+                    except Exception as exc:
+                        run_error = exc
+                if capture.execution_id is None or capture.membership is None:
+                    raise KitaruStateError(
+                        "Imported replay did not return verified candidate identity."
+                    )
+
+                member = _imported_replay_member_evidence(
+                    spec=spec,
+                    trial=trial,
+                    replay_plan=replay_plan,
+                    evidence=evidence,
+                    capture=capture,
+                    runtime=runtime,
+                    candidate_status=(
+                        "failed" if run_error is not None else "completed"
+                    ),
+                )
+                from kitaru.logging import log_to_execution
+
+                log_to_execution(
+                    capture.execution_id,
+                    _client=client,
+                    **{
+                        IMPORTED_REPLAY_MEMBER_EVIDENCE_METADATA_KEY: member.model_dump(
+                            mode="json"
+                        )
+                    },
+                )
+                row = ReplayResultRow(
+                    original_exec_ref=trial.target_execution_id,
+                    original_exec_id=trial.target_execution_id,
+                    replay_exec_id=capture.execution_id,
+                    status="failed" if run_error is not None else "completed",
+                    experiment=ExperimentReplayOutcome(
+                        context=context,
+                        verification=capture.membership,
+                    ),
+                )
+                return ReplaySubmission.create(
+                    submission_id=submission_id,
+                    tag=tag,
+                    at=effective_at,
+                    wait=True,
+                    plan=ReplayPlanDocument(),
+                    results=[row],
+                )
+
+            with flow_definition._registered_preflight_scope(
+                self._preflight_registered_identity
+            ):
+                return flow_definition.replay(
+                    trial.target_execution_id,
+                    at=effective_at,
+                    flow_overrides=effective_flow_overrides,
+                    checkpoint_overrides=effective_checkpoint_overrides,
+                    invocation_overrides=effective_invocation_overrides,
+                    skip=effective_skip,
+                    tag=tag,
+                    wait=effective_wait,
+                    on_error="collect",
+                    stack=stack,
+                    image=image,
+                    cache=cache,
+                    retries=retries,
+                    replay_submission_id=submission_id,
+                    preplanned_replay_plan=replay_plan,
+                    experiment_context=ExperimentReplayContext(
+                        experiment_id=spec.experiment_id,
+                        target_execution_id=trial.target_execution_id,
+                        repeat_index=trial.repeat_index,
+                        parent_execution_id=trial.parent_execution_id,
+                        root_execution_id=trial.root_execution_id,
+                    ),
+                )
+
+        def observe_trial(
+            _trial: ReplayTrialPlan, child: Any | None
+        ) -> OperationalLimitReason | None:
+            nonlocal usage_client
+            assert limit_tracker is not None
+            summaries: list[Mapping[str, Any] | None] = []
+            if child is not None:
+                for row in child.results:
+                    try:
+                        if usage_client is None:
+                            usage_client = kitaru.KitaruClient()
+                        summaries.append(
+                            usage_client.executions._get_llm_usage_summary(
+                                row.replay_exec_id
+                            )
+                        )
+                    except Exception:
+                        summaries.append(None)
+            return limit_tracker.observe_trial(summaries)
+
+        result = execute_replay_attempt(
+            plan,
+            submit_trial=submit_trial,
+            tag=tag,
+            observe_trial=None if limit_tracker is None else observe_trial,
+            finalize_operational_limit=(
+                None
+                if limit_tracker is None
+                else lambda remaining, started_at: limit_tracker.outcome(
+                    remaining_trials=remaining,
+                    started_at=started_at,
+                )
+            ),
+            client_factory=lambda: client,
+        )
+        if scorer_items and result.record.score_aggregate is None:
+            verified_child_ids = _verified_replay_execution_ids(result)
+            score_result = ScoreEvaluationService(
+                project_id=binding.project_id,
+                client=client,
+            ).evaluate_existing_attempt(
+                experiment_id=spec.experiment_id,
+                executions=verified_child_ids,
+                scorers=scorer_items,
+                record=result.record,
+                grounded_policy=resolved_grounded_policy,
+                grounded_capabilities=grounded_capabilities,
+            )
+            result = replace(result, record=score_result.record)
+        return result
+
+    def evaluate(
+        self,
+        executions: str | Execution | Sequence[str | Execution],
+        scorers: Sequence[Any] | Any = (),
+        *,
+        name: str | None = None,
+        suite_key: str | None = None,
+        idempotency_key: str | None = None,
+        comparative: bool | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
+        """Evaluate stored executions with this AgentVersion's protections."""
+        return kitaru.KitaruClient().executions.evaluate(
+            executions,
+            scorers,
+            name=name,
+            suite_key=suite_key,
+            idempotency_key=idempotency_key,
+            comparative=comparative,
+            metadata=metadata,
+            grounded_policy=grounded_policy,
+            grounded_capabilities=grounded_capabilities,
+            agent=self,
+            objective_minimum_mean=objective_minimum_mean,
+        )
+
+    @contextmanager
+    def _replace_tool_sources(
+        self,
+        toolsets: Sequence[AbstractToolset[AgentDepsT]],
+        *,
+        streaming_supported: bool = True,
+    ) -> Iterator[None]:
+        """Replace every direct, toolset, and MCP source for one run context."""
+        current = _TOOL_SOURCE_OVERRIDE.get()
+        if current is not None:
+            raise KitaruStateError(
+                "PydanticAI tool sources are already replaced in this context."
+            )
+        replacement = _ToolSourceOverride(
+            agent=self,
+            toolsets=tuple(self._prepare_toolsets(toolsets)),
+            streaming_supported=streaming_supported,
+        )
+        token = _TOOL_SOURCE_OVERRIDE.set(replacement)
+        try:
+            yield
+        finally:
+            _TOOL_SOURCE_OVERRIDE.reset(token)
+
+    @contextmanager
+    def _capture_imported_replay_execution(
+        self, context: ExperimentReplayContext
+    ) -> Iterator[_ImportedReplayRunCapture]:
+        """Capture the real execution ID created by one registered auto-flow run."""
+        current = _IMPORTED_REPLAY_RUN_CAPTURE.get()
+        if current is not None:
+            raise KitaruStateError(
+                "An imported replay execution is already being captured in this context."
+            )
+        capture = _ImportedReplayRunCapture(agent=self, context=context)
+        token = _IMPORTED_REPLAY_RUN_CAPTURE.set(capture)
+        try:
+            yield capture
+            if capture.execution_id is None:
+                raise KitaruStateError(
+                    "The imported replay entrypoint did not create a candidate execution."
+                )
+        finally:
+            _IMPORTED_REPLAY_RUN_CAPTURE.reset(token)
+
+    def _validate_tool_source_override_call(
+        self,
+        *,
+        surface: str,
+        builtin_tools: Sequence[AgentBuiltinTool[AgentDepsT]] | None,
+        capabilities: Sequence[AbstractCapability[AgentDepsT]] | None,
+        spec: dict[str, Any] | None,
+    ) -> None:
+        replacement = self._active_tool_source_override()
+        if replacement is None:
+            return
+        if builtin_tools or capabilities or spec is not None:
+            raise KitaruUsageError(
+                "PydanticAI tool replacement does not permit per-run native tools, "
+                "capabilities, or agent specs."
+            )
+        explicit_streaming = surface == "run_stream" or (
+            surface == "iter" and not _INTERNAL_ITER_ALLOWED.get()
+        )
+        if explicit_streaming and not replacement.streaming_supported:
+            raise KitaruUsageError(
+                "Recorded PydanticAI responses do not support streaming runs."
+            )
+
+    def _active_tool_source_override(self) -> _ToolSourceOverride | None:
+        replacement = _TOOL_SOURCE_OVERRIDE.get()
+        if replacement is not None and replacement.agent is not self:
+            raise KitaruStateError(
+                "PydanticAI tool replacement cannot be shared across agent instances."
+            )
+        return replacement
+
     @contextmanager
     def _kitaru_overrides(self) -> Iterator[None]:
-        with super().override(model=self._model, toolsets=self._toolsets, tools=[]):
+        replacement = self._active_tool_source_override()
+        toolsets = replacement.toolsets if replacement is not None else self._toolsets
+        if replacement is None:
+            with super().override(model=self._model, toolsets=toolsets, tools=[]):
+                yield
+            return
+        with super().override(
+            model=self._model,
+            toolsets=toolsets,
+            tools=[],
+            native_tools=[],
+            spec={"capabilities": []},
+        ):
             yield
 
     def _prepare_toolsets(
@@ -886,7 +3159,78 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
             checkpoint_inputs=checkpoint_inputs,
         )
 
+    def _registered_candidate_run_ids(self, client: Any) -> set[str]:
+        """List exact candidate-Pipeline runs for failed local submission recovery."""
+        state = self._registered_state
+        if state is None:
+            raise KitaruStateError(
+                "Imported replay candidate lost its registered AgentVersion."
+            )
+        run_ids: set[str] = set()
+        page_number = 1
+        page_size = 100
+        while True:
+            page = client.list_pipeline_runs(
+                project=state.binding.project_id,
+                pipeline_id=state.binding.pipeline_id,
+                page=page_number,
+                size=page_size,
+                hydrate=False,
+            )
+            items = getattr(page, "items", None)
+            if items is None or callable(items):
+                raise KitaruStateError(
+                    "Imported replay received an unexpected candidate-run response."
+                )
+            page_items = list(items)
+            for run in page_items:
+                run_id = str(getattr(run, "id", "")).strip()
+                if not run_id or run_id in run_ids:
+                    raise KitaruStateError(
+                        "Imported replay could not identify candidate runs uniquely."
+                    )
+                run_ids.add(run_id)
+            if len(page_items) < page_size:
+                return run_ids
+            page_number += 1
+
+    def _bind_imported_replay_capture(
+        self,
+        capture: _ImportedReplayRunCapture,
+        *,
+        execution_id: str,
+        client: Any,
+    ) -> None:
+        """Bind and verify the real candidate child before replay publication."""
+        capture.execution_id = execution_id
+        state = self._registered_state
+        if state is None:
+            raise KitaruStateError(
+                "Imported replay candidate lost its registered AgentVersion."
+            )
+        capture.membership = persist_and_verify_experiment_membership(
+            replay_exec_id=execution_id,
+            context=capture.context,
+            binding=state.binding,
+            client=client,
+        )
+        if not capture.membership.verified:
+            raise KitaruStateError(
+                "Imported replay child membership could not be verified: "
+                + (capture.membership.reason or "unknown verification failure")
+            )
+
     def _invoke_in_auto_flow(self, body: Callable[[], Any]) -> Any:
+        flow_definition = self._registered_flow()
+        capture = _IMPORTED_REPLAY_RUN_CAPTURE.get()
+        if capture is not None and capture.agent is not self:
+            raise KitaruStateError(
+                "Imported replay execution capture cannot be shared across agent instances."
+            )
+        if capture is not None and capture.execution_id is not None:
+            raise KitaruStateError(
+                "Imported replay execution capture accepts exactly one candidate run."
+            )
         run_id = uuid.uuid4().hex
         slot = _AutoFlowSlot(body)
         serialized_body_path: str | None = None
@@ -894,8 +3238,45 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         with _AUTO_FLOW_LOCK:
             _AUTO_FLOW_BODIES[run_id] = slot
         try:
+            capture_client = Client() if capture is not None else None
+            prior_candidate_ids = (
+                self._registered_candidate_run_ids(capture_client)
+                if capture_client is not None
+                else set()
+            )
             serialized_body_path = _try_serialize_auto_flow_body(body)
-            handle = _auto_flow_for_agent(self._name).run(run_id, serialized_body_path)
+            try:
+                with flow_definition._registered_preflight_scope(
+                    self._preflight_registered_identity
+                ):
+                    if capture is None:
+                        handle = flow_definition.run(run_id, serialized_body_path)
+                    else:
+                        handle = flow_definition.run(
+                            run_id,
+                            serialized_body_path,
+                            cache=False,
+                        )
+            except Exception:
+                if capture is not None and capture_client is not None:
+                    new_candidate_ids = (
+                        self._registered_candidate_run_ids(capture_client)
+                        - prior_candidate_ids
+                    )
+                    if len(new_candidate_ids) == 1:
+                        self._bind_imported_replay_capture(
+                            capture,
+                            execution_id=new_candidate_ids.pop(),
+                            client=capture_client,
+                        )
+                raise
+            if capture is not None:
+                assert capture_client is not None
+                self._bind_imported_replay_capture(
+                    capture,
+                    execution_id=str(handle.exec_id),
+                    client=capture_client,
+                )
             try:
                 flow_result = handle.wait()
             except KitaruRuntimeError as error:
@@ -1031,7 +3412,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         if is_inside_flow():
             return
 
-        if not call_toolsets:
+        replacement = self._active_tool_source_override()
+        if replacement is not None:
+            effective_toolsets: Sequence[AbstractToolset[AgentDepsT]] = (
+                replacement.toolsets
+            )
+        elif not call_toolsets:
             effective_toolsets = self._toolsets
         else:
             effective_toolsets = (*self._toolsets, *call_toolsets)
@@ -1164,6 +3550,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         spec: dict[str, Any] | None = None,
     ) -> Any:
         self._validate_model_override(model)
+        self._validate_tool_source_override_call(
+            surface="run",
+            builtin_tools=builtin_tools,
+            capabilities=capabilities,
+            spec=spec,
+        )
         self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = (
             self._prepare_toolsets(toolsets) if toolsets is not None else None
@@ -1283,6 +3675,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
     ) -> Any:
         self._ensure_run_sync_safe()
         self._validate_model_override(model)
+        self._validate_tool_source_override_call(
+            surface="run_sync",
+            builtin_tools=builtin_tools,
+            capabilities=capabilities,
+            spec=spec,
+        )
         self._warn_if_persist_history_inside_checkpoint()
         prepared_toolsets = (
             self._prepare_toolsets(toolsets) if toolsets is not None else None
@@ -1406,6 +3804,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         spec: dict[str, Any] | None = None,
     ) -> AsyncIterator[Any]:
         self._validate_model_override(model)
+        self._validate_tool_source_override_call(
+            surface="run_stream",
+            builtin_tools=builtin_tools,
+            capabilities=capabilities,
+            spec=spec,
+        )
         self._require_explicit_checkpoint("run_stream")
         prepared_toolsets = (
             self._prepare_toolsets(toolsets) if toolsets is not None else None
@@ -1480,6 +3884,12 @@ class KitaruAgent(WrapperAgent[AgentDepsT, OutputDataT]):
         # would require a checkpoint primitive that itself is a context manager, which
         # kitaru.checkpoint isn't. Wrap iter() in an explicit @kitaru.checkpoint instead.
         self._validate_model_override(model)
+        self._validate_tool_source_override_call(
+            surface="iter",
+            builtin_tools=builtin_tools,
+            capabilities=capabilities,
+            spec=spec,
+        )
         self._require_explicit_checkpoint("iter")
         prepared_toolsets = (
             self._prepare_toolsets(toolsets) if toolsets is not None else None

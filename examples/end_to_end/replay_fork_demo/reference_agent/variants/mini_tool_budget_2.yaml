@@ -1,5 +1,5 @@
 name: mini_tool_budget_2
-model: gpt-5-mini
+model: openai:gpt-5-nano
 prompt_profile: full_permissions
 tool_policy_name: full-permission-policy-tool-budget-2
 max_tool_calls: 2

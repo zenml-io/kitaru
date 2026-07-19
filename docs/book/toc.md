@@ -22,6 +22,8 @@
 ## Guides
 
 * [Debug and test on real runs](guides/replay-and-overrides.md)
+* [Import Langfuse Traces](guides/import-langfuse-traces.md)
+* [Scoring Executions](guides/scoring.md)
 * [Build a regression suite from production](guides/regression-suite.md)
 * [Pause for a human approval](guides/wait-and-resume.md)
 * [Track cost and model usage](guides/llm-calls.md)
@@ -60,7 +62,7 @@
 * [Configuration](guides/configuration.md)
   * [Authentication](guides/authentication.md)
   * [Secrets](guides/secrets.md)
-  * [Projects](guides/projects.md)
+  * [Agents](guides/agents.md)
 
 ## Project
 

@@ -262,6 +262,36 @@ def _project_delete_result_stub(*, name: str = "staging") -> SimpleNamespace:
     return SimpleNamespace(deleted_project=_project_stub(name=name))
 
 
+def _agent_stub(
+    *,
+    name: str = "prod",
+    is_active: bool = False,
+    version_count: int = 0,
+) -> SimpleNamespace:
+    """Build a lightweight Agent projection for CLI tests."""
+    return SimpleNamespace(
+        agent_id=f"agent-{name}-id",
+        name=name,
+        display_name=None,
+        description=None,
+        is_active=is_active,
+        default_agent_version_id=None,
+        default_executable=None,
+        agent_version_aliases={},
+        agent_versions=[],
+        version_count=version_count,
+    )
+
+
+def _agent_create_result_stub(*, name: str = "staging") -> SimpleNamespace:
+    """Build a lightweight Agent-create result object for CLI tests."""
+    return SimpleNamespace(
+        agent=_agent_stub(name=name, is_active=True),
+        previous_active_agent="prod",
+        activated=True,
+    )
+
+
 def _stack_create_result_stub(
     *,
     name: str = "dev",
@@ -6658,6 +6688,85 @@ def test_secrets_delete_surfaces_backend_errors(
     assert "already deleted" in capsys.readouterr().err
 
 
+def test_root_help_shows_agents_and_hides_project(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The canonical Agent group should replace Project in root help."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "agents" in output
+    assert not any("│ project " in line for line in output.splitlines())
+
+
+def test_agents_current_json_uses_canonical_envelope(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Canonical Agent JSON uses the plural command name and Agent shape."""
+    with (
+        patch("kitaru.cli.current_agent") as mock_current_agent,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_current_agent.return_value = _agent_stub(name="prod", is_active=True)
+        app(["agents", "current", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "command": "agents.current",
+        "item": {
+            "agent_id": "agent-prod-id",
+            "name": "prod",
+            "display_name": None,
+            "description": None,
+            "is_active": True,
+            "default_agent_version_id": None,
+            "default_executable": None,
+            "agent_version_aliases": {},
+            "agent_versions": [],
+            "version_count": 0,
+            "experiments": [],
+            "experiment_count": 0,
+        },
+    }
+
+
+def test_agents_create_json_uses_agent_activation_fields(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Agent creation should not leak legacy Project envelope field names."""
+    with (
+        patch("kitaru.cli.create_agent") as mock_create_agent,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_agent.return_value = _agent_create_result_stub()
+        app(["agents", "create", "staging", "--output", "json"])
+
+    assert exc_info.value.code == 0
+    mock_create_agent.assert_called_once_with("staging", activate=True)
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "agents.create"
+    assert payload["item"]["agent_id"] == "agent-staging-id"
+    assert payload["item"]["previous_active_agent"] == "prod"
+    assert "previous_active_project" not in payload["item"]
+
+
+def test_agents_delete_requires_explicit_confirmation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Agent deletion should make zero backend calls without --yes."""
+    with (
+        patch("kitaru.cli.delete_agent") as mock_delete_agent,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["agents", "delete", "staging"])
+
+    assert exc_info.value.code == 1
+    mock_delete_agent.assert_not_called()
+    assert "without explicit confirmation" in capsys.readouterr().err
+
+
 def test_project_list_renders_snapshot(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -6957,7 +7066,9 @@ def test_project_current_json_output(capsys: pytest.CaptureFixture[str]) -> None
         app(["project", "current", "--output", "json"])
 
     assert exc_info.value.code == 0
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
     assert payload == {
         "command": "project.current",
         "item": {

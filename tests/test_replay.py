@@ -19,15 +19,23 @@ from kitaru._checkpoint_metadata import (
 )
 from kitaru.errors import KitaruStateError, KitaruUsageError
 from kitaru.replay import (
+    EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_REPEAT_INDEX_METADATA_KEY,
+    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_TAG_PREFIX,
+    EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY,
     REPLAY_OUTPUT_OVERRIDES_METADATA_KEY,
     REPLAY_SKIPPED_STEPS_METADATA_KEY,
     AppliedOutputOverride,
+    ExperimentReplayContext,
     ReplayPlanDocument,
     ReplayResultRow,
     ReplaySubmission,
     build_replay_plan,
     parse_replay_output_overrides_metadata,
     parse_replay_skipped_steps_metadata,
+    persist_and_verify_experiment_membership,
     plan_requires_runtime_transport,
     replay_at_status,
     replay_output_overrides_metadata,
@@ -1471,6 +1479,172 @@ def test_replay_submission_metadata_does_not_retry_failed_baseline(
             REPLAY_SKIPPED_STEPS_METADATA_KEY: ["fetch"],
         }
     ]
+
+
+def _experiment_metadata() -> dict[str, Any]:
+    return {
+        EXPERIMENT_ID_METADATA_KEY: "exp-1",
+        EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY: "target-1",
+        EXPERIMENT_REPEAT_INDEX_METADATA_KEY: 2,
+        EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "target-1",
+        EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root-1",
+    }
+
+
+def _experiment_context() -> ExperimentReplayContext:
+    return ExperimentReplayContext(
+        experiment_id="exp-1",
+        target_execution_id="target-1",
+        repeat_index=2,
+        parent_execution_id="target-1",
+        root_execution_id="root-1",
+    )
+
+
+def test_experiment_membership_retries_only_the_missing_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = SimpleNamespace(
+        id="child-1",
+        tags=[],
+        run_metadata={},
+        original_run=SimpleNamespace(id="target-1"),
+    )
+    tag_calls = 0
+    metadata_calls = 0
+    hydration_calls = 0
+
+    class _Store:
+        def update_run(self, **kwargs: Any) -> None:
+            nonlocal tag_calls
+            tag_calls += 1
+            run.tags.append(SimpleNamespace(name=kwargs["run_update"].add_tags[0]))
+
+    class _Client:
+        zen_store = _Store()
+
+        def get_pipeline_run(self, **_kwargs: Any) -> Any:
+            nonlocal hydration_calls
+            hydration_calls += 1
+            return run
+
+    def fake_log_to_execution(
+        _run_id: str,
+        *,
+        _client: Any,
+        **metadata: Any,
+    ) -> None:
+        nonlocal metadata_calls
+        metadata_calls += 1
+        if metadata_calls == 1:
+            raise RuntimeError("transient metadata failure")
+        run.run_metadata.update(metadata)
+
+    monkeypatch.setattr("kitaru.logging.log_to_execution", fake_log_to_execution)
+    monkeypatch.setattr(
+        "kitaru._agent_registration.verify_hydrated_submitted_run_binding",
+        lambda run, *, binding: run,
+    )
+
+    result = persist_and_verify_experiment_membership(
+        replay_exec_id="child-1",
+        context=_experiment_context(),
+        binding=SimpleNamespace(project_id="project-1"),
+        client=_Client(),
+    )
+
+    assert result.verified is True
+    assert tag_calls == 1
+    assert metadata_calls == 2
+    assert hydration_calls == 3
+    assert run.run_metadata == _experiment_metadata()
+
+
+def test_experiment_membership_reports_bounded_tag_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = SimpleNamespace(
+        id="child-1",
+        tags=[],
+        run_metadata=_experiment_metadata(),
+        original_run=SimpleNamespace(id="target-1"),
+    )
+    update_calls = 0
+
+    class _Store:
+        def update_run(self, **_kwargs: Any) -> None:
+            nonlocal update_calls
+            update_calls += 1
+            raise RuntimeError("tag backend unavailable")
+
+    client = SimpleNamespace(
+        zen_store=_Store(),
+        get_pipeline_run=lambda **_kwargs: run,
+    )
+    monkeypatch.setattr(
+        "kitaru._agent_registration.verify_hydrated_submitted_run_binding",
+        lambda run, *, binding: run,
+    )
+
+    result = persist_and_verify_experiment_membership(
+        replay_exec_id="child-1",
+        context=_experiment_context(),
+        binding=SimpleNamespace(project_id="project-1"),
+        client=client,
+        max_attempts=2,
+    )
+
+    assert result.verified is False
+    assert "native experiment tag" in str(result.reason)
+    assert update_calls == 2
+
+
+def test_experiment_membership_rejects_post_write_and_candidate_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = SimpleNamespace(
+        id="child-1",
+        tags=[SimpleNamespace(name=f"{EXPERIMENT_TAG_PREFIX}exp-1")],
+        run_metadata={
+            **_experiment_metadata(),
+            EXPERIMENT_REPEAT_INDEX_METADATA_KEY: 9,
+        },
+        original_run=SimpleNamespace(id="target-1"),
+    )
+    client = SimpleNamespace(
+        zen_store=SimpleNamespace(),
+        get_pipeline_run=lambda **_kwargs: run,
+    )
+    monkeypatch.setattr(
+        "kitaru.logging.log_to_execution",
+        lambda _run_id, *, _client, **_metadata: None,
+    )
+
+    mismatch = persist_and_verify_experiment_membership(
+        replay_exec_id="child-1",
+        context=_experiment_context(),
+        binding=SimpleNamespace(project_id="project-1"),
+        client=client,
+        max_attempts=2,
+    )
+    assert mismatch.verified is False
+    assert "experiment run metadata" in str(mismatch.reason)
+
+    run.run_metadata = _experiment_metadata()
+    monkeypatch.setattr(
+        "kitaru._agent_registration.verify_hydrated_submitted_run_binding",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            KitaruStateError("wrong candidate pipeline")
+        ),
+    )
+    attribution = persist_and_verify_experiment_membership(
+        replay_exec_id="child-1",
+        context=_experiment_context(),
+        binding=SimpleNamespace(project_id="project-1"),
+        client=client,
+    )
+    assert attribution.verified is False
+    assert "Candidate AgentVersion attribution" in str(attribution.reason)
 
 
 def test_replay_submission_to_json_excludes_handles() -> None:

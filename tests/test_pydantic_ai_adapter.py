@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import AsyncIterable
+from contextlib import nullcontext
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from typing import Any, cast
@@ -502,6 +503,9 @@ class TestPydanticAIAutoFlowNaming:
             def __init__(self, agent_name: str) -> None:
                 self.flow_name = agent_module._auto_flow_name_for_agent(agent_name)
 
+            def _registered_preflight_scope(self, _preflight: Any) -> Any:
+                return nullcontext()
+
             def run(
                 self,
                 run_id: str,
@@ -527,6 +531,16 @@ class TestPydanticAIAutoFlowNaming:
             agent_module,
             "_try_serialize_auto_flow_body",
             lambda _body: None,
+        )
+        monkeypatch.setattr(
+            agent_module.KitaruAgent,
+            "_registered_flow",
+            lambda agent: fake_auto_flow_for_agent(agent._name),
+        )
+        monkeypatch.setattr(
+            agent_module.KitaruAgent,
+            "_preflight_registered_identity",
+            lambda _agent: None,
         )
         return flow_names
 

@@ -151,11 +151,11 @@ There are two guardrails:
 2. If a remote server is configured via env vars, `KITARU_PROJECT` is required
    at first use (`KitaruClient()`, `my_flow.run()`, replay, etc.).
 
-For interactive work, you can persist the project instead with
-`kitaru project use production` or choose it during login with
-`kitaru login <server> --project production`. For CI, Docker, and other
-headless processes, prefer `KITARU_PROJECT` so the job states its project
-explicitly.
+For interactive work, choose the Project while connecting with
+`kitaru login <server> --project production`. After Agent registration has
+initialized that Project, `kitaru agents use production` can switch back to it.
+For CI, Docker, and other headless processes, prefer `KITARU_PROJECT` so the
+job states its project explicitly.
 
 Auth-management commands are the exception to the project rule because service
 accounts and API keys belong to the server, not to a single project. For
@@ -235,7 +235,8 @@ from the persisted active stack when one is available.
 
 For connection-specific resolution, Kitaru uses this lower-to-higher order:
 
-1. Persisted connection and active project (`kitaru login`, `kitaru project use`)
+1. Persisted connection and active Project selected by `kitaru login` or,
+   for initialized Agents, `kitaru agents use`
 2. Direct `ZENML_*` env vars for compatibility
 3. `KITARU_*` env vars
 4. Runtime overrides from `kitaru.configure(...)`
@@ -331,22 +332,31 @@ def my_flow(topic: str) -> str:
     ...
 ```
 
-## Project selection
+## Agent and Project selection
 
-Project selection is first-class Kitaru state. For interactive work, use the CLI:
+Agents are the public lifecycle resource. For initialized Agents, use the
+canonical CLI:
 
 ```bash
-kitaru project list
-kitaru project use production
-kitaru project current
+kitaru agents list
+kitaru agents use production
+kitaru agents current
 ```
 
-That persists `production` as the active project for later CLI and SDK calls.
-You can also choose a project while connecting to a remote server:
+That selects the initialized Agent backed by the `production` Project for later
+CLI and SDK calls. Connection configuration intentionally retains Project
+terminology. You can select a Project, whether initialized or not, while
+connecting to a remote server:
 
 ```bash
 kitaru login https://kitaru.example.com --project production
 ```
+
+The `--project` option performs the selection during login. An existing Project
+without Agent metadata cannot be selected through `agents use` yet. Until its
+first Agent registration, use `KITARU_PROJECT=production` or the hidden
+compatibility command `kitaru project use production`. The deprecated
+`project` command exists for migration and bootstrap only.
 
 For env-driven remote bootstrap, set `KITARU_PROJECT` alongside the server URL
 and auth token:
@@ -368,14 +378,14 @@ When several sources name a project, higher-priority sources win:
 1. Process-local `kitaru.configure(project=...)`
 2. Public `KITARU_PROJECT`
 3. Compatibility `ZENML_ACTIVE_PROJECT_ID`
-4. Persisted active project from `kitaru login --project` or
-   `kitaru project use ...`
+4. Persisted active Project from `kitaru login --project` or, for an
+   initialized Agent, `kitaru agents use ...`
 
 Bare `kitaru login` is the local-server path: it does not use
 `KITARU_SERVER_URL` or `KITARU_AUTH_TOKEN`, and it warns instead of failing if
 those remote auth env vars are already set in your shell.
 
-See [Projects](projects.md) for the full CLI, SDK, and MCP project workflow.
+See [Agents](agents.md) for the canonical CLI, SDK, and MCP lifecycle.
 
 ## Headless / Docker / CI recipe
 

@@ -9,6 +9,7 @@ import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime
 from importlib.machinery import ModuleSpec
 from pathlib import Path
@@ -38,6 +39,7 @@ from kitaru._client._mappers import (
     _RAW_STATUS_TO_PUBLIC_STATUS,
     _RAW_STATUSES_BY_PUBLIC_STATUS,
     _backend_filter_value,
+    _map_imported_execution_info,
     _to_public_status,
 )
 from kitaru._client._statistics import (
@@ -65,6 +67,7 @@ from kitaru.client import (
     AuthAPIKey,
     AuthAPIKeyWithValue,
     AuthServiceAccount,
+    Execution,
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     ExecutionStatisticsGrouping,
@@ -73,6 +76,7 @@ from kitaru.client import (
     ExecutionStatisticsMetricSource,
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
+    ImportedExecutionAttributionStatus,
     KitaruClient,
     _import_module_for_replay,
     _is_retryable_replay_import_error,
@@ -95,6 +99,158 @@ from kitaru.errors import (
     KitaruUsageError,
     KitaruWaitValidationError,
 )
+from kitaru.imports import (
+    CapabilityReadiness,
+    ProviderVersionStamp,
+    ProviderVersionStampKind,
+    ReplayCapability,
+    ReplayDiagnostic,
+    ReplayDiagnosticCode,
+    ReplayReadinessStatus,
+    ReplayReadinessSummary,
+    SourceAttribution,
+    SourceAttributionStatus,
+)
+from kitaru.replay import (
+    EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+    EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
+)
+
+
+def _import_readiness_metadata() -> dict[str, Any]:
+    readiness = ReplayReadinessSummary(
+        root_input_candidate_rerun=CapabilityReadiness(
+            capability=ReplayCapability.ROOT_INPUT_CANDIDATE_RERUN,
+            status=ReplayReadinessStatus.READY,
+        ),
+        model_message_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.MODEL_MESSAGE_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        tool_result_boundary_reconstruction=CapabilityReadiness(
+            capability=ReplayCapability.TOOL_RESULT_BOUNDARY_RECONSTRUCTION,
+            status=ReplayReadinessStatus.UNSUPPORTED,
+        ),
+        recorded_response_matching=CapabilityReadiness(
+            capability=ReplayCapability.RECORDED_RESPONSE_MATCHING,
+            status=ReplayReadinessStatus.UNKNOWN,
+        ),
+        candidate_tool_compatibility=CapabilityReadiness(
+            capability=ReplayCapability.CANDIDATE_TOOL_COMPATIBILITY,
+            status=ReplayReadinessStatus.UNKNOWN,
+            diagnostics=(
+                ReplayDiagnostic(
+                    code=ReplayDiagnosticCode.CANDIDATE_TOOL_CONTRACT_UNKNOWN
+                ),
+            ),
+        ),
+    )
+    return readiness.model_dump(mode="json")
+
+
+def _v5_import_metadata() -> dict[str, Any]:
+    attribution = SourceAttribution(
+        status=SourceAttributionStatus.SOURCE_VERIFIED,
+        stamps=(
+            ProviderVersionStamp(
+                kind=ProviderVersionStampKind.GIT_SHA,
+                value="1" * 40,
+                source_field="metadata.git_sha",
+            ),
+        ),
+    )
+    return {
+        "kitaru_synthetic_import": True,
+        "kitaru_import_schema_version": 5,
+        "kitaru_import_source_provider_v1": "langfuse",
+        "kitaru_import_source_project_id_v1": "langfuse-project",
+        "kitaru_import_source_trace_id_v1": "trace-one",
+        "kitaru_import_source_agent_version_id_v1": "version-one",
+        "kitaru_import_source_agent_version_label_v1": "prod",
+        "kitaru_import_source_pipeline_id_v1": "version-one",
+        "kitaru_import_attribution_v1": attribution.model_dump(mode="json"),
+        "kitaru_import_integrity_v1": "complete",
+        "kitaru_import_observation_count_v1": 4,
+        "kitaru_import_raw_evidence_sha256_v1": "a" * 64,
+        "kitaru_import_raw_evidence_artifact_id_v1": "raw-artifact",
+        "kitaru_import_raw_evidence_schema_version_v1": 1,
+        "kitaru_import_replay_bundle_sha256_v1": "b" * 64,
+        "kitaru_import_replay_bundle_artifact_id_v1": "bundle-artifact",
+        "kitaru_import_replay_bundle_schema_version_v1": 1,
+        "kitaru_import_replay_profile_version_v1": "pydantic_ai_replay_v1",
+        "kitaru_import_replay_readiness_v1": _import_readiness_metadata(),
+        "kitaru_import_cohort_tag_v1": "customer-a",
+    }
+
+
+def test_imported_execution_projection_maps_typed_v5_metadata() -> None:
+    info = _map_imported_execution_info(
+        _v5_import_metadata(),
+        pipeline_id="version-one",
+    )
+
+    assert info is not None
+    assert info.provider == "langfuse"
+    assert info.source_project_id == "langfuse-project"
+    assert info.source_trace_id == "trace-one"
+    assert info.source_agent_version_id == "version-one"
+    assert info.source_agent_version_label == "prod"
+    assert info.source_pipeline_id == "version-one"
+    assert info.attribution.status is ImportedExecutionAttributionStatus.SOURCE_VERIFIED
+    assert info.attribution.stamps[0].value == "1" * 40
+    assert info.raw_evidence is not None
+    assert info.raw_evidence.artifact_id == "raw-artifact"
+    assert info.replay_bundle is not None
+    assert info.replay_bundle.sha256 == "b" * 64
+    assert info.replay_readiness is not None
+    assert (
+        info.replay_readiness.root_input_candidate_rerun.status
+        is ReplayReadinessStatus.READY
+    )
+    assert info.cohort_tag == "customer-a"
+
+
+def test_imported_execution_projection_rejects_denormalized_version_mismatch() -> None:
+    metadata = _v5_import_metadata()
+    metadata["kitaru_import_source_agent_version_id_v1"] = "other-version"
+
+    info = _map_imported_execution_info(metadata, pipeline_id="version-one")
+
+    assert info is not None
+    assert info.attribution.status is ImportedExecutionAttributionStatus.INVALID
+    assert info.source_agent_version_id == "other-version"
+    assert info.source_agent_version_label is None
+    assert info.source_pipeline_id == "version-one"
+
+
+def test_imported_execution_projection_preserves_v4_as_legacy_unattributed() -> None:
+    info = _map_imported_execution_info(
+        {
+            "kitaru_synthetic_import": True,
+            "kitaru_import_schema_version": 4,
+            "kitaru_import_source_provider_v1": "langfuse",
+            "kitaru_import_source_project_id_v1": "source-project",
+            "kitaru_import_source_trace_id_v1": "trace-legacy",
+            "kitaru_import_integrity_v1": "root_omitted",
+            "kitaru_import_observation_count_v1": 2,
+        },
+        pipeline_id="legacy-synthetic-flow",
+    )
+
+    assert info is not None
+    assert (
+        info.attribution.status
+        is ImportedExecutionAttributionStatus.LEGACY_UNATTRIBUTED
+    )
+    assert info.source_agent_version_id is None
+    assert info.source_pipeline_id is None
+    assert info.raw_evidence is None
+    assert info.replay_readiness is None
+
+
+def test_imported_execution_projection_ignores_native_execution_metadata() -> None:
+    assert _map_imported_execution_info({}, pipeline_id="flow-one") is None
 
 
 def _module_spec(name: str) -> ModuleSpec:
@@ -235,6 +391,7 @@ class _DummyRun:
         exception_traceback: str | None = None,
         active_wait_condition: Any = None,
         parameters: Mapping[str, Any] | None = None,
+        orchestrator_environment: Mapping[str, Any] | None = None,
     ) -> None:
         self.id = run_id or uuid4()
         self.status = status
@@ -242,6 +399,7 @@ class _DummyRun:
         self.start_time = None
         self.end_time = None
         self.run_metadata = run_metadata or {}
+        self.orchestrator_environment = dict(orchestrator_environment or {})
         if parameters is not None:
             self.config = SimpleNamespace(parameters=dict(parameters))
         self.pipeline = SimpleNamespace(name=flow_name, id=flow_id or uuid4())
@@ -671,6 +829,7 @@ def test_client_initializes_namespaces() -> None:
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
     assert hasattr(client, "deployments")
+    assert hasattr(client, "imports")
     assert hasattr(client, "projects")
     assert hasattr(client, "auth")
     assert hasattr(client.auth, "service_accounts")
@@ -755,6 +914,13 @@ def test_project_management_client_blocks_project_scoped_apis_without_project() 
         client.artifacts.list("exec-1")
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
         client.deployments.list()
+    with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
+        client.imports.langfuse(
+            "export.jsonl",
+            source_project_id="source-project",
+            agent="support-agent",
+            version="prod",
+        )
 
 
 def test_client_projects_current_resolves_name_env_without_zenml_uuid_env(
@@ -802,6 +968,141 @@ def test_client_projects_current_resolves_name_env_without_zenml_uuid_env(
     assert client._project == "production"
     assert result.name == "production"
     assert fake_client.get_project_calls == [("production", False, True)]
+
+
+def test_agents_api_delegates_to_shared_helpers() -> None:
+    agent = object()
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client._current_agent", return_value=agent) as current,
+        patch("kitaru.client._list_agents", return_value=[agent]) as list_,
+        patch("kitaru.client._get_agent", return_value=agent) as get,
+        patch("kitaru.client._use_agent", return_value=agent) as use,
+        patch("kitaru.client._create_agent", return_value="created") as create,
+        patch("kitaru.client._delete_agent", return_value="deleted") as delete,
+    ):
+        client = KitaruClient()
+        assert client.agents.current() is agent
+        assert client.agents.list() == [agent]
+        assert client.agents.get("production") is agent
+        assert client.agents.use("production") is agent
+        assert client.agents.create("staging", activate=False) == "created"
+        assert client.agents.delete("staging") == "deleted"
+
+    current.assert_called_once_with(client_factory=client._client)
+    list_.assert_called_once_with(client_factory=client._client)
+    get.assert_called_once_with("production", client_factory=client._client)
+    use.assert_called_once_with("production", client_factory=client._client)
+    create.assert_called_once_with(
+        "staging",
+        description="",
+        display_name=None,
+        activate=False,
+        client_factory=client._client,
+    )
+    delete.assert_called_once_with("staging", client_factory=client._client)
+
+
+def test_agent_experiment_reads_are_typed_lazy_and_exactly_tag_filtered() -> None:
+    record = SimpleNamespace(spec=SimpleNamespace(experiment_id="exp-1"))
+    agent = SimpleNamespace(
+        agent_id="project-id",
+        list_experiments=lambda: [record],
+        get_experiment=lambda selector: record,
+    )
+    zenml_client = MagicMock()
+    zenml_client.list_pipeline_runs.return_value = SimpleNamespace(items=[])
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-id"),
+        ),
+        patch("kitaru.client.Client", return_value=zenml_client),
+        patch("kitaru.client._current_agent", return_value=agent),
+    ):
+        client = KitaruClient()
+        listed = client.agents.experiments.list()
+        fetched = client.agents.experiments.get("exp-1")
+        page = fetched.runs.list(page=3, size=20)
+
+    assert len(listed) == 1
+    assert listed[0].experiment_id == "exp-1"
+    assert fetched.experiment_id == "exp-1"
+    assert page.items == []
+    zenml_client.list_pipeline_runs.assert_called_once_with(
+        sort_by="asc:created",
+        page=3,
+        size=20,
+        project="project-id",
+        hydrate=False,
+        tags=["kitaru-experiment:exp-1"],
+    )
+
+
+def test_execution_experiment_relationships_preserve_unknown_legacy_roots() -> None:
+    client = MagicMock()
+    client.agents.experiments.list_for_execution.return_value = ["experiment"]
+    client.executions._list_experiment_replays.return_value = ["replay"]
+    client.executions.get.side_effect = lambda exec_id: f"execution:{exec_id}"
+    execution = Execution(
+        exec_id="child",
+        flow_id=None,
+        flow_name=None,
+        status=ExecutionStatus.COMPLETED,
+        started_at=None,
+        ended_at=None,
+        stack_name=None,
+        metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+        status_reason=None,
+        failure=None,
+        pending_wait=None,
+        frozen_execution_spec=None,
+        original_exec_id="parent",
+        checkpoints=[],
+        artifacts=[],
+        _client=client,
+        project_id="project-id",
+    )
+
+    assert execution.experiments == ["experiment"]
+    assert execution.replays == ["replay"]
+    assert execution.original == "execution:parent"
+    assert execution.root_exec_id == "root"
+    assert execution.root == "execution:root"
+
+    legacy = dataclass_replace(
+        execution,
+        metadata={},
+    )
+    mismatched = dataclass_replace(
+        execution,
+        metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "other",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+    )
+    assert legacy.root is None
+    assert mismatched.root is None
+
+
+def test_project_management_constructor_delegates_to_agent_management() -> None:
+    with patch.object(
+        KitaruClient,
+        "for_agent_management",
+        return_value="client",
+    ) as canonical:
+        assert KitaruClient.for_project_management() == "client"
+
+    canonical.assert_called_once_with()
 
 
 def test_projects_api_delegates_to_shared_helpers() -> None:
@@ -4665,6 +4966,57 @@ def test_retry_rejects_non_failed_execution() -> None:
         client = KitaruClient()
         with pytest.raises(RuntimeError, match="Only failed executions can be retried"):
             client.executions.retry(str(run.id))
+
+
+def _imported_dummy_run(*, status: Any) -> _DummyRun:
+    from kitaru._import_contract import IMPORTED_EXECUTION_ENVIRONMENT_KEY
+
+    return _DummyRun(
+        status=status,
+        flow_name="imported_flow",
+        orchestrator_environment={IMPORTED_EXECUTION_ENVIRONMENT_KEY: True},
+    )
+
+
+@pytest.mark.parametrize(
+    ("operation", "status"),
+    [
+        ("retry", ZenMLExecutionStatus.FAILED),
+        ("resume", ZenMLExecutionStatus.PAUSED),
+        ("replay", ZenMLExecutionStatus.COMPLETED),
+        ("cancel", ZenMLExecutionStatus.RUNNING),
+    ],
+)
+def test_lifecycle_operations_reject_imported_executions(
+    operation: str, status: Any
+) -> None:
+    run = _imported_dummy_run(status=status)
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.stop_run") as stop_run_mock,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+
+        client = KitaruClient()
+        with pytest.raises(RuntimeError, match="imported from an external trace"):
+            if operation == "retry":
+                client.executions.retry(str(run.id))
+            elif operation == "resume":
+                client.executions.resume(str(run.id))
+            elif operation == "cancel":
+                client.executions.cancel(str(run.id))
+            else:
+                client.executions.replay(str(run.id), at="checkpoint_a")
+
+        # The guard must fire before any state mutation is attempted.
+        client_mock.zen_store.update_run.assert_not_called()
+        stop_run_mock.assert_not_called()
 
 
 def test_retry_rejects_missing_snapshot_stack_id_before_reopening() -> None:

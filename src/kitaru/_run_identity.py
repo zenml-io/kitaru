@@ -36,6 +36,10 @@ def _read_project_id(
     """Read project ID from direct run fields or the run body."""
     for label, getter in (
         ("project_id", lambda: getattr(run, "project_id", None)),
+        (
+            "body.project_id",
+            lambda: getattr(getattr(run, "body", None), "project_id", None),
+        ),
         ("body.project_id", lambda: getattr(run.get_body(), "project_id", None)),
     ):
         try:
@@ -51,6 +55,28 @@ def _read_project_id(
             continue
         if project_id is not None:
             return project_id
+    return None
+
+
+def extract_resource_pipeline_id(resource: Any) -> str | None:
+    """Extract a Pipeline ID from a hydrated ZenML resource shape."""
+    for getter in (
+        lambda: getattr(resource, "pipeline_id", None),
+        lambda: getattr(getattr(resource, "body", None), "pipeline_id", None),
+        lambda: getattr(getattr(resource, "pipeline", None), "id", None),
+        lambda: getattr(
+            getattr(getattr(resource, "resources", None), "pipeline", None),
+            "id",
+            None,
+        ),
+        lambda: getattr(resource.get_body(), "pipeline_id", None),
+    ):
+        try:
+            pipeline_id = _non_empty_string(getter())
+        except Exception:
+            continue
+        if pipeline_id is not None:
+            return pipeline_id
     return None
 
 

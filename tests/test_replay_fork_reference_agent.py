@@ -1,11 +1,12 @@
-"""Deterministic tests for the replay fork demo reference agent."""
+"""Deterministic tests for the PydanticAI replay reference agent."""
 
 import json
-from collections import Counter
 from pathlib import Path
-from typing import Any
 
 from examples.end_to_end.replay_fork_demo.reference_agent import db
+from examples.end_to_end.replay_fork_demo.reference_agent.agent import (
+    SupportAgentDeps,
+)
 from examples.end_to_end.replay_fork_demo.reference_agent.config import (
     FIXTURES_DIR,
     load_scenarios,
@@ -15,6 +16,10 @@ from examples.end_to_end.replay_fork_demo.reference_agent.config import (
 from examples.end_to_end.replay_fork_demo.reference_agent.knowledge import search_kb
 from examples.end_to_end.replay_fork_demo.reference_agent.mock_api import MockApiServer
 from examples.end_to_end.replay_fork_demo.reference_agent.tools import SupportTools
+
+TRACE_FIXTURE = Path(
+    "examples/end_to_end/replay_fork_demo/trace_fixtures/support-traces.jsonl"
+)
 
 
 def test_scenarios_and_variants_load() -> None:
@@ -26,11 +31,38 @@ def test_scenarios_and_variants_load() -> None:
 
     assert len(scenarios) == 8
     assert len(smoke_scenarios) == 6
-    assert baseline.model == "gpt-5-mini"
+    assert baseline.model == "openai:gpt-5-mini"
     assert "update_customer_setting" in baseline.denied_tools
-    assert nano.model == "gpt-5-nano"
+    assert nano.model == "openai:gpt-5-nano"
     assert nano.prompt_profile == "trimmed_permissions"
     assert budget.max_tool_calls == 2
+
+
+def test_checked_in_trace_fixture_contains_complete_agent_runs() -> None:
+    observations = [json.loads(line) for line in TRACE_FIXTURE.read_text().splitlines()]
+    trace_ids = {observation["traceId"] for observation in observations}
+
+    assert len(observations) == 46
+    assert len(trace_ids) == 6
+    for trace_id in trace_ids:
+        trace_types = {
+            observation["type"]
+            for observation in observations
+            if observation["traceId"] == trace_id
+        }
+        assert {"SPAN", "AGENT", "GENERATION", "TOOL"} <= trace_types
+
+    fixture_roots = [
+        observation
+        for observation in observations
+        if observation["name"] == "support-agent"
+    ]
+    assert len(fixture_roots) == 6
+    assert {
+        observation["metadata"]["fixture_generation_id"]
+        for observation in fixture_roots
+    } == {"kitaru-replay-example-20260717-final"}
+    assert "scope.attributes.public_key" not in TRACE_FIXTURE.read_text()
 
 
 def test_database_reset_and_write_tools(tmp_path: Path) -> None:
@@ -105,72 +137,29 @@ def test_tool_registry_records_dangerous_write(tmp_path: Path) -> None:
     assert customer["settings"]["api_key_rotated"] == "true"
 
 
-def test_trace_manifest_placeholder_is_parseable() -> None:
-    manifest_path = FIXTURES_DIR / "trace_generation_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-    assert manifest["agent_version"] == "replay-verify-reference-agent-stage-1"
-    assert isinstance(manifest["runs"], list)
-
-
-def test_committed_fixture_uses_llm_tool_calling() -> None:
-    export_path = FIXTURES_DIR / "langfuse_export.jsonl"
-    rows = [
-        json.loads(line)
-        for line in export_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+def test_baseline_deps_block_candidate_only_setting_tool(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite"
+    db.reset_database(db_path=db_path)
+    scenario = {item.scenario_id: item for item in load_scenarios()}[
+        "account_setting_change_request"
     ]
-    by_variant = Counter(row["metadata"]["variant_name"] for row in rows)
-
-    assert len(rows) == 18
-    assert by_variant == {
-        "baseline": 6,
-        "nano_trimmed_permissions": 6,
-        "mini_tool_budget_2": 6,
-    }
-    assert all(
-        row["output"]["tool_selection_mode"] == "llm_tool_calling" for row in rows
+    deps = SupportAgentDeps(
+        scenario=scenario,
+        variant=load_variant("baseline"),
+        db_path=db_path,
+        api_base_url="http://unused.invalid",
+        kb_dir=FIXTURES_DIR.parent / "knowledge_base",
     )
 
-    baseline_setting = _fixture_row(rows, "baseline", "account_setting_change_request")
-    nano_setting = _fixture_row(
-        rows,
-        "nano_trimmed_permissions",
-        "account_setting_change_request",
+    execution = deps.execute(
+        "update_customer_setting",
+        {
+            "customer_id": "cust_acme",
+            "setting": "beta_exports_fast_path",
+            "value": "true",
+        },
     )
-    budget_outage = _fixture_row(
-        rows, "mini_tool_budget_2", "outage_with_ticket_request"
-    )
 
-    assert _audit_tool_names(baseline_setting) == ["escalate_to_human"]
-    assert _audit_tool_names(nano_setting) == ["update_customer_setting"]
-    assert _blocked_tool_names(budget_outage) == ["create_support_ticket"]
-
-
-def _fixture_row(
-    rows: list[dict[str, Any]], variant_name: str, scenario_id: str
-) -> dict[str, Any]:
-    matches = [
-        row
-        for row in rows
-        if row["metadata"]["variant_name"] == variant_name
-        and row["input"]["scenario_id"] == scenario_id
-    ]
-    assert len(matches) == 1
-    return matches[0]
-
-
-def _audit_tool_names(row: dict[str, Any]) -> list[str]:
-    output = row["output"]
-    assert isinstance(output, dict)
-    audit_log = output["audit_log"]
-    assert isinstance(audit_log, list)
-    return [item["tool_name"] for item in audit_log]
-
-
-def _blocked_tool_names(row: dict[str, Any]) -> list[str]:
-    output = row["output"]
-    assert isinstance(output, dict)
-    executions = output["tool_executions"]
-    assert isinstance(executions, list)
-    return [item["name"] for item in executions if item["blocked"]]
+    assert execution.blocked is True
+    assert "tool not allowed" in execution.result["reason"]
+    assert db.get_audit_log(db_path) == []

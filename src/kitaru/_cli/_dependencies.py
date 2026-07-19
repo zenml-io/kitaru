@@ -27,10 +27,15 @@ from kitaru.config import (
     _delete_stack_operation,
     _list_stack_entries,
     _show_stack_operation,
+    create_agent,
     create_project,
+    current_agent,
     current_project,
+    delete_agent,
     delete_project,
+    get_agent,
     get_project,
+    list_agents,
     list_model_aliases,
     list_projects,
     login_to_server,
@@ -38,6 +43,7 @@ from kitaru.config import (
     reset_global_log_store,
     resolve_log_store,
     set_global_log_store,
+    use_agent,
     use_project,
 )
 from kitaru.config import current_stack as get_current_stack
@@ -72,6 +78,12 @@ _ORIGINAL_LEGACY_ATTRS: dict[str, Any] = {
     "_show_stack_operation": _show_stack_operation,
     "_create_stack_operation": _create_stack_operation,
     "_delete_stack_operation": _delete_stack_operation,
+    "current_agent": current_agent,
+    "list_agents": list_agents,
+    "get_agent": get_agent,
+    "create_agent": create_agent,
+    "use_agent": use_agent,
+    "delete_agent": delete_agent,
     "current_project": current_project,
     "list_projects": list_projects,
     "get_project": get_project,
@@ -234,6 +246,30 @@ class CLIDependencies:
             *args,
             **kwargs,
         )
+
+    def current_agent(self) -> Any:
+        """Return the active Kitaru Agent."""
+        return self._legacy_attr("current_agent", current_agent)()
+
+    def list_agents(self, *args: Any, **kwargs: Any) -> Any:
+        """Return all initialized Kitaru Agents visible to the current user."""
+        return self._legacy_attr("list_agents", list_agents)(*args, **kwargs)
+
+    def get_agent(self, *args: Any, **kwargs: Any) -> Any:
+        """Return one initialized Kitaru Agent by name or ID."""
+        return self._legacy_attr("get_agent", get_agent)(*args, **kwargs)
+
+    def create_agent(self, *args: Any, **kwargs: Any) -> Any:
+        """Create a Kitaru Agent."""
+        return self._legacy_attr("create_agent", create_agent)(*args, **kwargs)
+
+    def use_agent(self, *args: Any, **kwargs: Any) -> Any:
+        """Set the active Kitaru Agent."""
+        return self._legacy_attr("use_agent", use_agent)(*args, **kwargs)
+
+    def delete_agent(self, *args: Any, **kwargs: Any) -> Any:
+        """Delete a Kitaru Agent."""
+        return self._legacy_attr("delete_agent", delete_agent)(*args, **kwargs)
 
     def current_project(self) -> Any:
         """Return the active Kitaru project."""

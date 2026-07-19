@@ -17,7 +17,7 @@ input changed, diff the two, and hill-climb on cost, latency, and quality. It
 calls structured tools instead of parsing CLI text, so it can read execution
 state, change one variable, and measure the result without a human in the loop.
 The same tools also cover the supporting surface: querying executions,
-publishing and invoking deployments, inspecting artifacts, switching projects,
+publishing and invoking deployments, inspecting artifacts, selecting Agents,
 and managing stacks and secrets.
 
 ## Install MCP support
@@ -181,16 +181,19 @@ metadata is unavailable, not that the secret is empty or fully readable.
 `kitaru_secrets_create` also returns metadata only. The MCP server intentionally
 does not expose `kitaru_secrets_delete`; use the CLI or Python SDK for deletion.
 
-Project tools:
+Agent tools:
 
-- `kitaru_projects_list`
-- `kitaru_projects_current`
-- `kitaru_projects_show`
-- `kitaru_projects_use`
+- `kitaru_agents_list`
+- `kitaru_agents_current`
+- `kitaru_agents_show`
+- `kitaru_agents_create`
+- `kitaru_agents_use`
+- `kitaru_agents_delete`
 
-The MCP server exposes project read/switch operations only. It intentionally does
-not expose project create/delete tools in this first pass; use the CLI or Python
-SDK for durable project creation and deletion.
+All six tools use the same Agent serialization as the CLI and SDK. Agent
+creation, selection, and deletion require ZenML Pro/Cloud. Deletion also requires
+`confirm=true`; the default `confirm=false` returns an error before the backend
+is called. Deprecated `kitaru_projects_*` aliases are not registered.
 
 Connection tools:
 
@@ -267,10 +270,10 @@ Manage a local stack:
 Create a local Kitaru stack named local-dev if it does not already exist, then show me the current Kitaru status.
 ```
 
-Check or switch projects:
+Check or select an Agent:
 
 ```text
-Check the current Kitaru project. If it is not production, switch to production, then list the five latest executions.
+Check the current Kitaru Agent. If it is not support-agent, select support-agent, then list its five latest executions.
 ```
 
 Deploy and invoke a shared flow route:

@@ -36,11 +36,6 @@ on:
         required: false
         type: boolean
         default: false
-      include_google_adk:
-        description: Include the isolated Google ADK/Gemini live check
-        required: false
-        type: boolean
-        default: false
 permissions:
   contents: read
 concurrency:
@@ -185,20 +180,17 @@ jobs:
           INPUT_OPENAI: ${{ inputs.include_openai }}
           INPUT_ANTHROPIC: ${{ inputs.include_anthropic }}
           INPUT_RESEARCH_BOT: ${{ inputs.include_research_bot }}
-          INPUT_GOOGLE_ADK: ${{ inputs.include_google_adk }}
         run: |
           set -euo pipefail
           suite="${INPUT_SUITE:-provider-core}"
           include_openai="${INPUT_OPENAI:-true}"
           include_anthropic="${INPUT_ANTHROPIC:-true}"
           include_research_bot="${INPUT_RESEARCH_BOT:-false}"
-          include_google_adk="${INPUT_GOOGLE_ADK:-false}"
           if [ "$EVENT_NAME" = "schedule" ]; then
             suite="provider-core"
             include_openai="true"
             include_anthropic="true"
             include_research_bot="false"
-            include_google_adk="false"
           fi
           providers=()
           provider_markers=()
@@ -212,9 +204,6 @@ jobs:
           fi
           if [ "$include_research_bot" = "true" ]; then
             providers+=("research-bot")
-          fi
-          if [ "$include_google_adk" = "true" ]; then
-            providers+=("google-adk")
           fi
           if [ "${#providers[@]}" -eq 0 ]; then
             echo "::error::Select at least one provider check."
@@ -232,17 +221,14 @@ jobs:
             done
             marker_expr="($provider_expr) and $suite_marker_suffix"
           fi
-          google_adk_marker_expr="live_gemini and $suite_marker_suffix"
           providers_csv=$(IFS=,; echo "${providers[*]}")
           {
             printf 'suite=%s\n' "$suite"
             printf 'include_openai=%s\n' "$include_openai"
             printf 'include_anthropic=%s\n' "$include_anthropic"
             printf 'include_research_bot=%s\n' "$include_research_bot"
-            printf 'include_google_adk=%s\n' "$include_google_adk"
             printf 'providers=%s\n' "$providers_csv"
             printf 'marker_expr=%s\n' "$marker_expr"
-            printf 'google_adk_marker_expr=%s\n' "$google_adk_marker_expr"
           } >> "$GITHUB_OUTPUT"
       - name: Record tested identity
         id: identity
@@ -269,7 +255,6 @@ jobs:
           INCLUDE_OPENAI: ${{ steps.plan.outputs.include_openai }}
           INCLUDE_ANTHROPIC: ${{ steps.plan.outputs.include_anthropic }}
           INCLUDE_RESEARCH_BOT: ${{ steps.plan.outputs.include_research_bot }}
-          INCLUDE_GOOGLE_ADK: ${{ steps.plan.outputs.include_google_adk }}
         run: |
           set -euo pipefail
           results_dir="llm-integration-results"
@@ -283,11 +268,6 @@ jobs:
           fi
           if [ "$INCLUDE_RESEARCH_BOT" = "true" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
             missing+=("OPENAI_API_KEY")
-          fi
-          if [ "$INCLUDE_GOOGLE_ADK" = "true" ] \
-            && [ -z "${GEMINI_API_KEY:-}" ] \
-            && [ -z "${GOOGLE_API_KEY:-}" ]; then
-            missing+=("GEMINI_API_KEY or GOOGLE_API_KEY")
           fi
           if [ "${#missing[@]}" -gt 0 ]; then
             unique_missing=$(printf '%s\n' "${missing[@]}" | sort -u | paste -sd ', ' -)
@@ -392,73 +372,6 @@ jobs:
             exit 0
           fi
           echo "status=passed" > ../llm-integration-results/pytest.status
-      - name: Run isolated Google ADK live check
-        id: google_adk
-        if: ${{ steps.secret_preflight.outputs.ready == 'true' && steps.plan.outputs.include_google_adk == 'true' }}
-        working-directory: kitaru
-        shell: bash
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          SUITE: ${{ steps.plan.outputs.suite }}
-          ADK_MARKER_EXPR: ${{ steps.plan.outputs.google_adk_marker_expr }}
-        run: |
-          set +euo pipefail
-          log_path="../llm-integration-results/logs/google-adk.log"
-          junit_path="../llm-integration-results/google-adk.junit.xml"
-          counts_path="../llm-integration-results/google-adk.counts.env"
-          adk_test_file="tests/live/test_google_adk_provider_behavior.py"
-          if [ "$SUITE" = "provider-core" ]; then
-            adk_test_file="tests/live/test_google_adk_provider_core.py"
-          fi
-          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/kitaru-google-adk-live-env" \
-            uv run --frozen --python 3.12 --no-dev --extra google-adk --with pytest \
-            pytest -o addopts='-vv' \
-            "$adk_test_file" \
-            -m "$ADK_MARKER_EXPR" --tb=short --durations=10 \
-            --junitxml="$junit_path" 2>&1 | tee "$log_path"
-          status=${PIPESTATUS[0]}
-          set -euo pipefail
-          parse_failed=false
-          python - "$junit_path" "$counts_path" <<'PY' || parse_failed=true
-          import sys
-          import xml.etree.ElementTree as ET
-          junit_path, counts_path = sys.argv[1:]
-          root = ET.parse(junit_path).getroot()
-          cases = root.findall(".//testcase")
-          skipped = sum(1 for case in cases if case.find("skipped") is not None)
-          failed = sum(1 for case in cases if case.find("failure") is not None)
-          errors = sum(1 for case in cases if case.find("error") is not None)
-          total = len(cases)
-          passed = total - skipped - failed - errors
-          with open(counts_path, "w", encoding="utf-8") as handle:
-              handle.write(f"total={total}\n")
-              handle.write(f"passed={passed}\n")
-              handle.write(f"skipped={skipped}\n")
-              handle.write(f"failed={failed}\n")
-              handle.write(f"errors={errors}\n")
-          PY
-          if [ "$parse_failed" = "true" ]; then
-            echo "status=failed" > ../llm-integration-results/google-adk.status
-            echo "Google ADK live check did not produce parseable JUnit XML." > ../llm-integration-results/google-adk.failure
-            exit 0
-          fi
-          total=$(grep '^total=' "$counts_path" | cut -d= -f2)
-          passed=$(grep '^passed=' "$counts_path" | cut -d= -f2)
-          skipped=$(grep '^skipped=' "$counts_path" | cut -d= -f2)
-          failed=$(grep '^failed=' "$counts_path" | cut -d= -f2)
-          errors=$(grep '^errors=' "$counts_path" | cut -d= -f2)
-          if [ "$status" -ne 0 ]; then
-            echo "status=failed" > ../llm-integration-results/google-adk.status
-            echo "Google ADK live check failed." > ../llm-integration-results/google-adk.failure
-            exit 0
-          fi
-          if [ "$total" -eq 0 ] || [ "$passed" -eq 0 ]; then
-            echo "status=failed" > ../llm-integration-results/google-adk.status
-            echo "Google ADK live check produced no passing tests: total=$total passed=$passed skipped=$skipped failed=$failed errors=$errors." > ../llm-integration-results/google-adk.failure
-            exit 0
-          fi
-          echo "status=passed" > ../llm-integration-results/google-adk.status
       - name: Run OpenAI research bot extended check
         id: research_bot
         if: ${{ steps.secret_preflight.outputs.ready == 'true' && steps.plan.outputs.include_research_bot == 'true' }}
@@ -568,7 +481,6 @@ jobs:
           PROVIDERS: ${{ steps.plan.outputs.providers }}
           MARKER_EXPR: ${{ steps.plan.outputs.marker_expr }}
           INCLUDE_RESEARCH_BOT: ${{ steps.plan.outputs.include_research_bot }}
-          INCLUDE_GOOGLE_ADK: ${{ steps.plan.outputs.include_google_adk }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
           WORKFLOW_NAME: ${{ github.workflow }}
@@ -629,9 +541,6 @@ jobs:
           if [ -f "$results_dir/research-bot.failure" ]; then
             cat "$results_dir/research-bot.failure" >> "$failures_file"
           fi
-          if [ -f "$results_dir/google-adk.failure" ]; then
-            cat "$results_dir/google-adk.failure" >> "$failures_file"
-          fi
           fail_count=$(grep -cve '^$' "$failures_file" || true)
           failed_checks="none"
           if [ "$fail_count" -gt 0 ]; then
@@ -641,8 +550,6 @@ jobs:
           pytest_status="not-run"
           pytest_counts="not-available"
           research_status="not-run"
-          google_adk_status="not-run"
-          google_adk_counts="not-available"
           if [ -f "$results_dir/secret-preflight.status" ]; then
             secret_status=$(cut -d= -f2 "$results_dir/secret-preflight.status")
           fi
@@ -654,12 +561,6 @@ jobs:
           fi
           if [ -f "$results_dir/research-bot.status" ]; then
             research_status=$(cut -d= -f2 "$results_dir/research-bot.status")
-          fi
-          if [ -f "$results_dir/google-adk.status" ]; then
-            google_adk_status=$(cut -d= -f2 "$results_dir/google-adk.status")
-          fi
-          if [ -f "$results_dir/google-adk.counts.env" ]; then
-            google_adk_counts=$(tr '\n' ' ' < "$results_dir/google-adk.counts.env" | sed 's/[[:space:]]*$//')
           fi
           {
             echo "# LLM integration results"
@@ -681,8 +582,6 @@ jobs:
             echo "| Live pytest status | \`$pytest_status\` |"
             echo "| Live pytest counts | \`$pytest_counts\` |"
             echo "| Research bot status | \`$research_status\` |"
-            echo "| Google ADK status | \`$google_adk_status\` |"
-            echo "| Google ADK counts | \`$google_adk_counts\` |"
             echo "| Failures | \`$fail_count\` |"
             echo
             echo "No PyPI package, Docker image, Helm chart, Git tag, GitHub Release, or release branch was published."

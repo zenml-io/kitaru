@@ -26,7 +26,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import islice
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Protocol, cast
+from typing import Any, Literal, NoReturn, Protocol, cast, runtime_checkable
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -59,6 +59,7 @@ from kitaru._client._events import (
     open_rest_sse_stream,
     watch_execution_events,
 )
+from kitaru._client._imports import ImportsAPI
 from kitaru._client._logs import (
     _coerce_log_level,
     _coerce_log_lineno,
@@ -117,8 +118,14 @@ from kitaru._client._models import (
     ExecutionStatisticsTimeGranularity,
     ExecutionStatus,
     FailureInfo,
+    ImportedEvidenceArtifactRef,
+    ImportedExecutionAttribution,
+    ImportedExecutionAttributionStatus,
+    ImportedExecutionInfo,
+    ImportedExecutionSourceKind,
     LogEntry,
     PendingWait,
+    ScoreFilter,
 )
 from kitaru._client._models import (
     Deployment as DeploymentRecord,
@@ -128,6 +135,12 @@ from kitaru._client._statistics import (
     normalize_execution_statistics_groupings,
     normalize_execution_statistics_metrics,
 )
+from kitaru._experiments import (
+    Experiment,
+    ExperimentRunLookup,
+    experiment_targets_execution,
+)
+from kitaru._import_contract import raise_if_imported_execution
 from kitaru._interface_deployments import (
     Deployment,
     DeploymentSelectorSource,
@@ -139,6 +152,10 @@ from kitaru._interface_deployments import (
     validate_remove_deployment_tag,
     warn_if_deployment_drifted,
 )
+from kitaru._llm_usage import (
+    LLM_USAGE_SUMMARY_METADATA_KEY,
+    parse_usage_summary,
+)
 from kitaru._source_aliases import (
     normalize_checkpoint_name as _normalize_checkpoint_name,
 )
@@ -147,6 +164,9 @@ from kitaru._telemetry import deployment_metadata_for_stack_model
 from kitaru._terminal_usage import _safe_persist_terminal_llm_usage_metadata
 from kitaru.analytics import AnalyticsEvent, track
 from kitaru.config import (
+    AgentCreateResult,
+    AgentDeleteResult,
+    AgentInfo,
     ProjectCreateResult,
     ProjectDeleteResult,
     ProjectInfo,
@@ -155,19 +175,37 @@ from kitaru.config import (
     resolve_log_store,
 )
 from kitaru.config import (
+    create_agent as _create_agent,
+)
+from kitaru.config import (
     create_project as _create_project,
+)
+from kitaru.config import (
+    current_agent as _current_agent,
 )
 from kitaru.config import (
     current_project as _current_project,
 )
 from kitaru.config import (
+    delete_agent as _delete_agent,
+)
+from kitaru.config import (
     delete_project as _delete_project,
+)
+from kitaru.config import (
+    get_agent as _get_agent,
 )
 from kitaru.config import (
     get_project as _get_project,
 )
 from kitaru.config import (
+    list_agents as _list_agents,
+)
+from kitaru.config import (
     list_projects as _list_projects,
+)
+from kitaru.config import (
+    use_agent as _use_agent,
 )
 from kitaru.config import (
     use_project as _use_project,
@@ -185,6 +223,7 @@ from kitaru.errors import (
     execution_error_from_failure,
 )
 from kitaru.replay import (
+    EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY,
     ReplayFailureRow,
     ReplayResultRow,
     ReplaySkippedRow,
@@ -198,6 +237,15 @@ from kitaru.replay import (
     safe_compare_url_for_executions,
     safe_persist_replay_submission_metadata,
 )
+from kitaru.scoring import (
+    GroundedCapability,
+    GroundedPolicySnapshot,
+    ObservationQuery,
+    ProtectionDeclaration,
+    ScoreObservation,
+    ScoreObservationStatus,
+)
+from kitaru.scoring._evaluation import ScoreAttemptResult, ScoreEvaluationService
 
 logger = logging.getLogger(__name__)
 
@@ -521,6 +569,19 @@ def _attempt_local_key_activation(
             rollback_succeeded=True,
         )
     return _with_local_key_activation_status(result, succeeded=True)
+
+
+@runtime_checkable
+class _EvaluationAgent(Protocol):
+    """Agent capabilities required by stored-execution evaluation."""
+
+    def _preflight_registered_identity(self) -> None: ...
+
+    def _registered_protection_declarations(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[ProtectionDeclaration]: ...
 
 
 class _ReplayFlowLike(Protocol):
@@ -1489,6 +1550,7 @@ class _ExecutionsAPI:
     def retry(self, exec_id: str) -> Execution:
         """Retry a failed execution as same-execution recovery."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "retried")
         run_status_value = _run_status_value(run)
         if run_status_value != ZenMLExecutionStatus.FAILED.value:
             raise KitaruStateError(
@@ -1510,6 +1572,7 @@ class _ExecutionsAPI:
     def resume(self, exec_id: str) -> Execution:
         """Resume a paused execution after all waits are resolved."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "resumed")
         pending_conditions = _list_pending_wait_conditions(
             run=run,
             client=self._client_ref,
@@ -1613,6 +1676,7 @@ class _ExecutionsAPI:
             raise KitaruUsageError("`on_error` must be 'collect' or 'fail'.")
 
         first_run = self._client_ref._get_pipeline_run(exec_ids[0], hydrate=True)
+        raise_if_imported_execution(first_run, "replayed")
         _raise_if_running_source(first_run, exec_ids[0])
 
         replay_flow: _ReplayFlowLike | None = None
@@ -1716,6 +1780,7 @@ class _ExecutionsAPI:
                     source_run = self._client_ref._get_pipeline_run(
                         exec_ref, hydrate=True
                     )
+                raise_if_imported_execution(source_run, "replayed")
                 _raise_if_running_source(source_run, exec_ref)
                 original_id = str(source_run.id)
                 if on_error == "collect":
@@ -1908,10 +1973,53 @@ class _ExecutionsAPI:
             client=self._client_ref,
         )
 
+    def _list_experiment_replays(self, exec_id: str) -> builtins.list[Execution]:
+        """Resolve verified tagged replay descendants without hydrating DAGs."""
+        experiments = self._client_ref.agents.experiments.list_for_execution(
+            exec_id,
+            agent=self._client_ref._project,
+        )
+        results: list[Execution] = []
+        seen_ids: set[str] = set()
+        page_size = 100
+        for experiment in experiments:
+            page = 1
+            while True:
+                run_page = experiment.runs.list(page=page, size=page_size)
+                runs = list(getattr(run_page, "items", run_page))
+                for run in runs:
+                    metadata = _to_plain_dict(getattr(run, "run_metadata", {}))
+                    if (
+                        metadata.get(EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY)
+                        != exec_id
+                    ):
+                        continue
+                    run_id = str(getattr(run, "id", "")).strip()
+                    if not run_id or run_id in seen_ids:
+                        continue
+                    seen_ids.add(run_id)
+                    results.append(
+                        _map_execution(
+                            run=run,
+                            client=self._client_ref,
+                            include_details=False,
+                        )
+                    )
+                if len(runs) < page_size:
+                    break
+                page += 1
+        return results
+
     def get(self, exec_id: str) -> Execution:
         """Get and map one execution by ID."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         return _map_execution(run=run, client=self._client_ref, include_details=True)
+
+    def _get_llm_usage_summary(self, exec_id: str) -> dict[str, Any] | None:
+        """Read terminal usage metadata without hydrating execution details."""
+        run = self._client_ref._get_pipeline_run(exec_id, hydrate=False)
+        metadata = _to_plain_dict(getattr(run, "run_metadata", {}))
+        return parse_usage_summary(metadata.get(LLM_USAGE_SUMMARY_METADATA_KEY))
 
     def _list_replays_for_originals(
         self,
@@ -1983,6 +2091,209 @@ class _ExecutionsAPI:
 
         return results, False
 
+    def evaluate(
+        self,
+        executions: str | Execution | Sequence[str | Execution],
+        scorers: Sequence[Any] | Any,
+        *,
+        name: str | None = None,
+        suite_key: str | None = None,
+        idempotency_key: str | None = None,
+        comparative: bool | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        agent: _EvaluationAgent | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
+        """Evaluate stored executions without running replay or agent code."""
+        execution_items: list[str | Execution]
+        if isinstance(executions, (str, Execution)):
+            execution_items = [executions]
+        else:
+            execution_items = list(executions)
+        scorer_items = (
+            list(scorers)
+            if isinstance(scorers, Sequence) and not callable(scorers)
+            else [scorers]
+        )
+        project_id = self._project_id()
+        native_client = self._client_ref._client()
+        protections: list[Any] = []
+        if agent is None:
+            from kitaru._config._agents import (
+                _complete_project_metadata,
+                _parse_agent_metadata,
+            )
+            from kitaru._config._projects import _get_project_by_exact_selector
+
+            project = _get_project_by_exact_selector(native_client, project_id)
+            envelope = _parse_agent_metadata(
+                project_id,
+                _complete_project_metadata(project),
+            )
+            if envelope is not None and any(
+                manifest.protections for manifest in envelope.agent_versions.values()
+            ):
+                raise KitaruUsageError(
+                    "A registered AgentVersion declares protections. Pass the exact "
+                    "registered KitaruAgent with agent= so evaluation cannot omit them."
+                )
+        else:
+            if not isinstance(agent, _EvaluationAgent):
+                raise KitaruUsageError(
+                    "agent= must provide registered Kitaru evaluation protections."
+                )
+            agent._preflight_registered_identity()
+            protections = agent._registered_protection_declarations(
+                project_id=project_id
+            )
+        service = ScoreEvaluationService(
+            project_id=project_id,
+            client=native_client,
+            run_loader=lambda exec_id: self._client_ref._get_pipeline_run(
+                exec_id, hydrate=True
+            ),
+        )
+        return service.evaluate(
+            execution_items,
+            scorer_items,
+            name=name,
+            suite_key=suite_key,
+            idempotency_key=idempotency_key,
+            comparative=comparative,
+            metadata=metadata,
+            grounded_policy=grounded_policy,
+            grounded_capabilities=grounded_capabilities,
+            protections=protections,
+            objective_minimum_mean=objective_minimum_mean,
+        )
+
+    def score_history(
+        self,
+        exec_id: str,
+        *,
+        experiment_id: str | None = None,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+        valid: bool | None = None,
+        include_superseded: bool = True,
+    ) -> builtins.list[ScoreObservation]:
+        """Return append-only score observations for one execution."""
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        query = ObservationQuery(
+            execution_id=exec_id,
+            experiment_id=experiment_id,
+            scorer_name=scorer_name,
+            scorer_revision=scorer_revision,
+            scorer_configuration_hash=scorer_configuration_hash,
+            valid=valid,
+            include_superseded=include_superseded,
+        )
+        observations: list[ScoreObservation] = []
+        page = 1
+        page_size = 1000
+        while True:
+            chunk = repo.list(query, page=page, size=page_size)
+            observations.extend(chunk)
+            if len(chunk) < page_size:
+                break
+            page += 1
+        return observations
+
+    def latest_valid_score(
+        self,
+        exec_id: str,
+        *,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+    ) -> ScoreObservation | None:
+        """Return latest valid score in one explicit scorer revision/config scope."""
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        latest = repo.latest_valid(
+            ObservationQuery(
+                execution_id=exec_id,
+                scorer_name=scorer_name,
+                scorer_revision=scorer_revision,
+                scorer_configuration_hash=scorer_configuration_hash,
+            )
+        )
+        if latest is None:
+            return None
+        if scorer_revision is None or scorer_configuration_hash is None:
+            history = repo.list(
+                ObservationQuery(
+                    execution_id=exec_id,
+                    scorer_name=scorer_name,
+                    valid=True,
+                    status=ScoreObservationStatus.SCORED,
+                    include_superseded=False,
+                ),
+                page=1,
+                size=1000,
+            )
+            scopes = {
+                (item.scorer.name, item.scorer.revision, item.scorer.configuration_hash)
+                for item in history
+            }
+            if len(scopes) > 1:
+                raise KitaruUsageError(
+                    "Latest valid score is ambiguous across scorer revisions/"
+                    "configurations. Pass scorer_revision and "
+                    "scorer_configuration_hash."
+                )
+        return latest
+
+    def _project_id(self) -> str:
+        project = getattr(self._client_ref._client(), "active_project", None)
+        project_id = str(
+            getattr(project, "id", "") or self._client_ref._project or ""
+        ).strip()
+        if not project_id:
+            raise KitaruStateError("Scoring requires an active Agent Project.")
+        return project_id
+
+    def _score_candidate_ids(self, score: ScoreFilter | None) -> set[str] | None:
+        if score is None or score.is_empty:
+            return None
+        from kitaru.scoring import ScoreObservationRepository
+
+        repo = ScoreObservationRepository(
+            project_id=self._project_id(),
+            client=self._client_ref._client(),
+        )
+        status = (
+            ScoreObservationStatus.SCORED
+            if score.minimum is not None or score.maximum is not None
+            else None
+        )
+        return repo.matching_execution_ids(
+            ObservationQuery(
+                experiment_id=score.experiment_id,
+                scorer_name=score.scorer_name,
+                scorer_revision=score.scorer_revision,
+                scorer_configuration_hash=score.scorer_configuration_hash,
+                status=status,
+                valid=score.valid,
+                include_superseded=False,
+            ),
+            minimum=score.minimum,
+            maximum=score.maximum,
+            cap=score.candidate_cap,
+        )
+
     def list(
         self,
         *,
@@ -1991,8 +2302,9 @@ class _ExecutionsAPI:
         limit: int | None = None,
         page: int | None = None,
         size: int | None = None,
+        score: ScoreFilter | None = None,
     ) -> builtins.list[Execution]:
-        """List executions with optional flow/status filters and pagination."""
+        """List executions with optional execution and score filters."""
         status_filter = _coerce_status_filter(status)
 
         if limit is not None:
@@ -2042,6 +2354,9 @@ class _ExecutionsAPI:
             ExecutionStatus.RUNNING,
             ExecutionStatus.WAITING,
         }
+        score_candidate_ids = self._score_candidate_ids(score)
+        if score_candidate_ids == set():
+            return []
 
         while True:
             run_page = self._client_ref._client().list_pipeline_runs(
@@ -2069,6 +2384,11 @@ class _ExecutionsAPI:
                 if flow is not None and execution.flow_name != flow:
                     continue
                 if status_filter is not None and execution.status != status_filter:
+                    continue
+                if (
+                    score_candidate_ids is not None
+                    and execution.exec_id not in score_candidate_ids
+                ):
                     continue
 
                 if matched_count >= start_index:
@@ -2182,6 +2502,7 @@ class _ExecutionsAPI:
     def cancel(self, exec_id: str) -> Execution:
         """Cancel an execution if supported by the backend state."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
+        raise_if_imported_execution(run, "cancelled")
         stop_run(run=run, graceful=False)
         track(AnalyticsEvent.EXECUTION_CANCELLED, {})
         return self.get(exec_id)
@@ -3144,8 +3465,153 @@ class _ProjectScopedAPIUnavailable:
         )
 
 
+class _AgentExperimentsAPI:
+    """Read-only experiment collection for one hydrated Agent Project."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+
+    def _agent(self, agent: str | None) -> AgentInfo:
+        if agent is None:
+            return _current_agent(client_factory=self._client_ref._client)
+        return _get_agent(agent, client_factory=self._client_ref._client)
+
+    def _view(self, agent: AgentInfo, record: Any) -> Experiment:
+        return Experiment(
+            record=record,
+            runs=ExperimentRunLookup(
+                experiment_id=record.spec.experiment_id,
+                project_id=agent.agent_id,
+                _client_factory=self._client_ref._client,
+            ),
+        )
+
+    def list(self, *, agent: str | None = None) -> builtins.list[Experiment]:
+        """List durable attempts in deterministic newest-first order."""
+        agent_info = self._agent(agent)
+        return [
+            self._view(agent_info, record) for record in agent_info.list_experiments()
+        ]
+
+    def get(
+        self,
+        name_or_id: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Get an attempt by exact ID or unambiguous suite/name."""
+        agent_info = self._agent(agent)
+        return self._view(agent_info, agent_info.get_experiment(name_or_id))
+
+    def list_suite(
+        self,
+        suite_key: str,
+        *,
+        agent: str | None = None,
+    ) -> builtins.list[Experiment]:
+        """List attempts for one exact suite key in newest-first order."""
+        agent_info = self._agent(agent)
+        return [
+            self._view(agent_info, record)
+            for record in agent_info.list_suite_attempts(suite_key)
+        ]
+
+    def get_attempt(
+        self,
+        experiment_id: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Get one exact attempt without suite or display-name fallback."""
+        agent_info = self._agent(agent)
+        return self._view(
+            agent_info,
+            agent_info.get_experiment_attempt(experiment_id),
+        )
+
+    def resolve_source(
+        self,
+        experiment_id_or_suite_key: str,
+        *,
+        agent: str | None = None,
+    ) -> Experiment:
+        """Resolve an exact attempt or the newest terminal attempt in a suite."""
+        agent_info = self._agent(agent)
+        return self._view(
+            agent_info,
+            agent_info.resolve_experiment_source(experiment_id_or_suite_key),
+        )
+
+    def list_for_execution(
+        self,
+        exec_id: str,
+        *,
+        agent: str | None = None,
+    ) -> builtins.list[Experiment]:
+        """List attempts whose verified frozen membership contains an execution."""
+        normalized_id = exec_id.strip()
+        if not normalized_id:
+            raise KitaruUsageError("Execution ID cannot be empty.")
+        agent_info = self._agent(agent)
+        zenml_client = self._client_ref._client()
+        return [
+            self._view(agent_info, record)
+            for record in agent_info.list_experiments()
+            if experiment_targets_execution(
+                record,
+                normalized_id,
+                client=zenml_client,
+            )
+        ]
+
+
+class _AgentsAPI:
+    """Canonical Agent lifecycle operations for a Kitaru client."""
+
+    def __init__(self, client_ref: KitaruClient) -> None:
+        self._client_ref = client_ref
+        self.experiments = _AgentExperimentsAPI(client_ref)
+
+    def current(self) -> AgentInfo:
+        """Return the active initialized Kitaru Agent."""
+        return _current_agent(client_factory=self._client_ref._client)
+
+    def list(self) -> builtins.list[AgentInfo]:
+        """List initialized Kitaru Agents visible to the current user."""
+        return _list_agents(client_factory=self._client_ref._client)
+
+    def get(self, name_or_id: str) -> AgentInfo:
+        """Return an initialized Kitaru Agent by name or ID."""
+        return _get_agent(name_or_id, client_factory=self._client_ref._client)
+
+    def create(
+        self,
+        name: str,
+        *,
+        description: str = "",
+        display_name: str | None = None,
+        activate: bool = True,
+    ) -> AgentCreateResult:
+        """Create a Kitaru Agent on Pro/Cloud and optionally activate it."""
+        return _create_agent(
+            name,
+            description=description,
+            display_name=display_name,
+            activate=activate,
+            client_factory=self._client_ref._client,
+        )
+
+    def use(self, name_or_id: str) -> AgentInfo:
+        """Set the active Kitaru Agent on Pro/Cloud."""
+        return _use_agent(name_or_id, client_factory=self._client_ref._client)
+
+    def delete(self, name_or_id: str) -> AgentDeleteResult:
+        """Delete a Kitaru Agent on Pro/Cloud."""
+        return _delete_agent(name_or_id, client_factory=self._client_ref._client)
+
+
 class _ProjectsAPI:
-    """Project-management operations for a Kitaru client."""
+    """Deprecated Project-named compatibility delegate."""
 
     def __init__(self, client_ref: KitaruClient) -> None:
         self._client_ref = client_ref
@@ -3189,7 +3655,7 @@ class _ProjectsAPI:
 
 
 class KitaruClient:
-    """Client for Kitaru executions, artifacts, deployments, projects, and auth."""
+    """Client for Agents, executions, artifacts, deployments, imports, and auth."""
 
     def __init__(
         self,
@@ -3234,16 +3700,19 @@ class KitaruClient:
         self._project = resolved_connection.project
 
         self.auth = _AuthAPI(self)
+        self.agents = _AgentsAPI(self)
         self.projects = _ProjectsAPI(self)
         if not _require_project and self._project is None:
             unavailable = _ProjectScopedAPIUnavailable()
             self.executions = unavailable
             self.artifacts = unavailable
             self.deployments = unavailable
+            self.imports = unavailable
         else:
             self.executions = _ExecutionsAPI(self)
             self.artifacts = _ArtifactsAPI(self)
             self.deployments = _DeploymentsAPI(self)
+            self.imports = ImportsAPI(self)
 
     @classmethod
     def for_auth_management(cls) -> KitaruClient:
@@ -3257,15 +3726,18 @@ class KitaruClient:
         return cls(_require_project=False)
 
     @classmethod
-    def for_project_management(cls) -> KitaruClient:
-        """Create a client for project-management operations.
+    def for_agent_management(cls) -> KitaruClient:
+        """Create a client for Agent lifecycle operations.
 
-        Reading projects happens before a project-scoped operation can run.
-        Project create/use/delete additionally require ZenML Pro/Cloud through
-        the shared project helpers. This constructor validates server/auth
-        pairing while intentionally skipping the active-project requirement.
+        Reading Agents can happen before a project-scoped operation runs.
+        Agent create/use/delete retain the shared Pro/Cloud lifecycle guard.
         """
         return cls(_require_project=False)
+
+    @classmethod
+    def for_project_management(cls) -> KitaruClient:
+        """Create a client through the deprecated Project-named compatibility API."""
+        return cls.for_agent_management()
 
     def _client(self) -> Client:
         """Return a ZenML client instance."""
@@ -3348,6 +3820,11 @@ __all__ = [
     "ExecutionStatisticsTimeGranularity",
     "ExecutionStatus",
     "FailureInfo",
+    "ImportedEvidenceArtifactRef",
+    "ImportedExecutionAttribution",
+    "ImportedExecutionAttributionStatus",
+    "ImportedExecutionInfo",
+    "ImportedExecutionSourceKind",
     "KitaruClient",
     "LogEntry",
     "PendingWait",

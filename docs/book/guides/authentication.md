@@ -90,13 +90,22 @@ kitaru login https://kitaru.example.com \
 ```
 
 After that login, normal CLI and SDK calls use `production` unless a higher
-priority source such as `KITARU_PROJECT` overrides it. You can inspect or change
-the persisted project with:
+priority source such as `KITARU_PROJECT` overrides it. The `--project` option
+has already selected the Project, so no second selection command is needed.
+
+After a Project has been initialized by Agent registration, inspect or change
+the persisted selection with:
 
 ```bash
-kitaru project current
-kitaru project use staging
+kitaru agents current
+kitaru agents use staging
 ```
+
+Those commands resolve initialized Agents only. If an existing Project from an
+older Kitaru installation has not been initialized yet, select it with
+`KITARU_PROJECT=staging` or the hidden compatibility command
+`kitaru project use staging` until the first registration. The deprecated
+`project` command is not the canonical Agent lifecycle interface.
 
 `KITARU_PROJECT` is required for project-scoped operations such as running,
 listing, replaying, or invoking executions when the remote connection itself
@@ -161,6 +170,5 @@ print(api_key.key)  # one-time value: store it now
 
 Use `KitaruClient.for_auth_management()` for server-level credential
 administration. Use normal `KitaruClient()` for project-scoped execution,
-artifact, deployment, and execution operations. If you need to list or select
-projects before constructing a project-scoped client, use
-`KitaruClient.for_project_management()` as described in [Projects](projects.md).
+artifact, deployment, and execution operations. If you need to list or select Agents before constructing a normal client, use
+`KitaruClient.for_agent_management()` as described in [Agents](agents.md).

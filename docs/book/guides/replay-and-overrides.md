@@ -12,6 +12,12 @@ Replay re-executes a real, recorded [execution](../concepts/executions.md) from 
 
 Both are the same loop; the sections below build it up once. This is what makes Kitaru more than tracing: because every model call and tool call was recorded as a durable checkpoint, you can reproduce a run faithfully, fork it with one input changed, and attribute the difference to your change.
 
+{% hint style="info" %}
+This guide applies to executable Kitaru-native recordings. Executions created
+from a Langfuse JSONL export are currently inspectable historical records, not
+executable flow snapshots. See [Import Langfuse Traces](import-langfuse-traces.md).
+{% endhint %}
+
 The practical promise is simple: you keep the work that already succeeded, then rerun only the part you want to test or recover. If a flow researched a customer, called three tools, then failed while writing the final answer, replay can reuse the recorded research and tool results instead of paying for them again.
 
 The core loop is three steps:
@@ -234,6 +240,85 @@ print(submission.summary.to_json())
 ```
 
 A single execution waits by default. A multi-execution replay submits by default and returns after submission unless you pass `wait=True`.
+
+## Durable experiments with a registered agent
+
+Replay through a registered `KitaruAgent` when the submission must remain
+discoverable as one durable experiment. This guarantee applies to native Kitaru
+executions. The lower-level `Execution.replay()`,
+`client.executions.replay()`, and flow-object replay APIs remain useful
+replay primitives, but they do not create an experiment catalog entry.
+
+```python
+result = kagent.replay(
+    ["kr-a", "kr-b", "kr-c"],
+    at="write_draft",
+    on_error="collect",
+    uncovered_policy="fail",
+    idempotency_key="draft-model-v2-attempt-1",
+    name="draft-model-v2",
+    repeats=2,
+    wait=False,
+)
+```
+
+The call validates and freezes the complete target set before it creates the
+experiment. `uncovered_policy` makes the behavior explicit when a target does
+not contain the requested checkpoint:
+
+- `"fail"` rejects the whole request before creating an experiment;
+- `"skip"` retains the target in the denominator with a skip reason;
+- `"top"` replays that target from the start.
+
+The idempotency key identifies one logical attempt. Retrying the same request
+with the same key returns that attempt. Reusing the key for a different request
+fails instead of starting duplicate work.
+
+The result keeps the immutable request and the existing replay rows separate:
+
+```python
+print(result.spec.experiment_id)
+print(result.record.status)
+print(result.submission.summary.to_json())
+
+page = result.runs.list(page=1, size=50)
+```
+
+You can also read experiments later from the hydrated Agent catalog. Attempts
+are newest first. IDs are exact; a suite key or human name works only when it
+identifies one attempt.
+
+```python
+client = kitaru.KitaruClient()
+
+attempts = client.agents.experiments.list()
+attempt = client.agents.experiments.get(result.spec.experiment_id)
+member_page = attempt.runs.list(page=1, size=50)
+```
+
+Member pages are lightweight and do not load every checkpoint graph. Open an
+individual execution through `client.executions.get(...)` when you need its
+checkpoints, artifacts, logs, or comparison details.
+
+Execution objects expose read-only relationships without storing a second copy:
+
+```python
+execution = client.executions.get("kr-a")
+
+for attempt in execution.experiments:
+    print(attempt.experiment_id)
+
+for replay in execution.replays:
+    print(replay.exec_id)
+
+child = client.executions.get(result.submission.results[0].replay_exec_id)
+print(child.original.exec_id if child.original else None)
+print(child.root.exec_id if child.root else None)
+```
+
+`original` is the immediate replay parent recorded by Kitaru. `root` is the
+verified first execution in the stored replay chain. Older executions without
+verified root metadata return `None` rather than guessing.
 
 ## Multi-execution replay
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,10 +20,18 @@ from kitaru._llm_usage import (
 )
 from kitaru.config import FrozenExecutionSpec
 from kitaru.errors import FailureOrigin, KitaruUsageError
+from kitaru.imports._models import TraceIntegrity
+from kitaru.imports._replay_evidence import (
+    ProviderVersionStamp,
+    ReplayReadinessSummary,
+)
 
 if TYPE_CHECKING:
+    from kitaru._experiments import Experiment
     from kitaru.client import KitaruClient
     from kitaru.replay import ReplaySubmission
+    from kitaru.scoring import GroundedCapability, GroundedPolicySnapshot
+    from kitaru.scoring._evaluation import ScoreAttemptResult
 
 
 def _record_identity(record: Mapping[str, Any]) -> tuple[str | None, str | None] | None:
@@ -59,6 +68,61 @@ class ExecutionStatus(StrEnum):
     def is_successful(self) -> bool:
         """Whether the execution finished successfully."""
         return self is ExecutionStatus.COMPLETED
+
+
+class ImportedExecutionSourceKind(StrEnum):
+    """Public source taxonomy for imported executions."""
+
+    EXTERNAL_TRACE = "external_trace"
+
+
+class ImportedExecutionAttributionStatus(StrEnum):
+    """How an imported execution is attributed to its declared AgentVersion."""
+
+    SOURCE_VERIFIED = "source_verified"
+    CALLER_ATTRIBUTED = "caller_attributed"
+    CONFLICT = "conflict"
+    LEGACY_UNATTRIBUTED = "legacy_unattributed"
+    INVALID = "invalid"
+
+
+@dataclass(frozen=True)
+class ImportedExecutionAttribution:
+    """Typed source attribution attached to an imported execution."""
+
+    status: ImportedExecutionAttributionStatus
+    stamps: tuple[ProviderVersionStamp, ...] = ()
+
+
+@dataclass(frozen=True)
+class ImportedEvidenceArtifactRef:
+    """Immutable imported-evidence artifact identity."""
+
+    artifact_id: str
+    sha256: str
+    schema_version: int
+
+
+@dataclass(frozen=True)
+class ImportedExecutionInfo:
+    """Typed import provenance and replay-readiness for one execution."""
+
+    source_kind: ImportedExecutionSourceKind
+    provider: str | None
+    source_project_id: str | None
+    source_trace_id: str | None
+    source_agent_version_id: str | None
+    source_agent_version_label: str | None
+    source_pipeline_id: str | None
+    attribution: ImportedExecutionAttribution
+    import_schema_version: int | None
+    integrity: TraceIntegrity | None
+    observation_count: int | None
+    raw_evidence: ImportedEvidenceArtifactRef | None
+    replay_bundle: ImportedEvidenceArtifactRef | None
+    replay_profile_version: str | None
+    replay_readiness: ReplayReadinessSummary | None
+    cohort_tag: str | None
 
 
 class ExecutionStatisticsDimension(StrEnum):
@@ -98,6 +162,70 @@ class ExecutionStatisticsMetricAggregation(StrEnum):
     SUM = "sum"
     MIN = "min"
     MAX = "max"
+
+
+@dataclass(frozen=True)
+class ScoreFilter:
+    """Public score-observation filter for execution listing.
+
+    The filter first narrows score observations to candidate execution IDs, then
+    execution listing applies normal execution filters such as flow, status,
+    limit, and page. ``candidate_cap`` bounds the metadata scan so broad score
+    filters cannot accidentally select an unbounded execution set.
+    """
+
+    experiment_id: str | None = None
+    scorer_name: str | None = None
+    scorer_revision: str | None = None
+    scorer_configuration_hash: str | None = None
+    valid: bool | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    candidate_cap: int = 1000
+
+    def __post_init__(self) -> None:
+        """Validate numeric score bounds and the candidate cap."""
+        if isinstance(self.candidate_cap, bool) or self.candidate_cap < 1:
+            raise KitaruUsageError("ScoreFilter.candidate_cap must be >= 1.")
+        minimum = _validate_optional_score_bound(self.minimum, field_name="minimum")
+        maximum = _validate_optional_score_bound(self.maximum, field_name="maximum")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise KitaruUsageError(
+                "ScoreFilter.minimum cannot be greater than ScoreFilter.maximum."
+            )
+        object.__setattr__(self, "minimum", minimum)
+        object.__setattr__(self, "maximum", maximum)
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether this filter would narrow no score observations."""
+        return all(
+            value is None
+            for value in (
+                self.experiment_id,
+                self.scorer_name,
+                self.scorer_revision,
+                self.scorer_configuration_hash,
+                self.valid,
+                self.minimum,
+                self.maximum,
+            )
+        )
+
+
+def _validate_optional_score_bound(
+    value: float | None, *, field_name: str
+) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise KitaruUsageError(f"ScoreFilter.{field_name} must be a number.")
+    normalized = float(value)
+    if normalized < 0.0 or normalized > 1.0:
+        raise KitaruUsageError(
+            f"ScoreFilter.{field_name} must be in the inclusive [0.0, 1.0] range."
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -540,6 +668,7 @@ class Execution:
     _client: KitaruClient = field(repr=False, compare=False)
     project_id: str | None = None
     project_name: str | None = None
+    import_info: ImportedExecutionInfo | None = None
 
     @property
     def llm_usage_summary(self) -> dict[str, Any] | None:
@@ -577,6 +706,91 @@ class Execution:
             strip_usage_record_bookkeeping(record)
             for record in [*unique_run_records, *checkpoint_records]
         ]
+
+    @property
+    def experiments(self) -> list[Experiment]:
+        """Return attempts whose verified frozen targets contain this execution."""
+        return self._client.agents.experiments.list_for_execution(
+            self.exec_id,
+            agent=self.project_id,
+        )
+
+    @property
+    def scores(self) -> ExecutionScoreHistory:
+        """Return score-history selectors for this execution."""
+        return ExecutionScoreHistory(execution=self)
+
+    def evaluate(
+        self,
+        scorers: Sequence[Any] | Any,
+        *,
+        name: str | None = None,
+        suite_key: str | None = None,
+        idempotency_key: str | None = None,
+        comparative: bool | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        grounded_policy: GroundedPolicySnapshot | None = None,
+        grounded_capabilities: Mapping[str, GroundedCapability] | None = None,
+        agent: Any | None = None,
+        objective_minimum_mean: float | None = None,
+    ) -> ScoreAttemptResult:
+        """Evaluate this stored execution through the collection API."""
+        return self._client.executions.evaluate(
+            [self.exec_id],
+            scorers,
+            name=name,
+            suite_key=suite_key,
+            idempotency_key=idempotency_key,
+            comparative=comparative,
+            metadata=metadata,
+            grounded_policy=grounded_policy,
+            grounded_capabilities=grounded_capabilities,
+            agent=agent,
+            objective_minimum_mean=objective_minimum_mean,
+        )
+
+    @property
+    def replays(self) -> list[Execution]:
+        """Return tagged replay descendants across this execution's attempts."""
+        return self._client.executions._list_experiment_replays(self.exec_id)
+
+    @property
+    def original(self) -> Execution | None:
+        """Return the authoritative immediate replay parent, when present."""
+        if self.original_exec_id is None:
+            return None
+        return self._client.executions.get(self.original_exec_id)
+
+    @property
+    def root_exec_id(self) -> str | None:
+        """Return the verified stored replay root ID, or None for unknown ancestry."""
+        from kitaru.replay import (
+            EXPERIMENT_ID_METADATA_KEY,
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
+        )
+
+        experiment_id = self.metadata.get(EXPERIMENT_ID_METADATA_KEY)
+        parent_id = self.metadata.get(EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY)
+        root_id = self.metadata.get(EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY)
+        if (
+            not isinstance(experiment_id, str)
+            or not experiment_id.strip()
+            or not isinstance(parent_id, str)
+            or parent_id != self.original_exec_id
+            or not isinstance(root_id, str)
+            or not root_id.strip()
+        ):
+            return None
+        return root_id
+
+    @property
+    def root(self) -> Execution | None:
+        """Return the verified stored root execution, or None when unknown."""
+        root_id = self.root_exec_id
+        if root_id is None:
+            return None
+        return self._client.executions.get(root_id)
 
     def refresh(self) -> Execution:
         """Fetch the latest execution state."""
@@ -628,6 +842,49 @@ class Execution:
         return list(self.artifacts)
 
 
+@dataclass(frozen=True)
+class ExecutionScoreHistory:
+    """Append-only score-history selectors for one execution."""
+
+    execution: Execution
+
+    def list(
+        self,
+        *,
+        experiment_id: str | None = None,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+        valid: bool | None = None,
+        include_superseded: bool = True,
+    ) -> builtins.list[Any]:
+        """Return matching observations in deterministic history order."""
+        return self.execution._client.executions.score_history(
+            self.execution.exec_id,
+            experiment_id=experiment_id,
+            scorer_name=scorer_name,
+            scorer_revision=scorer_revision,
+            scorer_configuration_hash=scorer_configuration_hash,
+            valid=valid,
+            include_superseded=include_superseded,
+        )
+
+    def latest_valid(
+        self,
+        *,
+        scorer_name: str | None = None,
+        scorer_revision: str | None = None,
+        scorer_configuration_hash: str | None = None,
+    ) -> Any | None:
+        """Return the latest valid scored observation for one revision/config."""
+        return self.execution._client.executions.latest_valid_score(
+            self.execution.exec_id,
+            scorer_name=scorer_name,
+            scorer_revision=scorer_revision,
+            scorer_configuration_hash=scorer_configuration_hash,
+        )
+
+
 __all__ = [
     "ArtifactRef",
     "AuthAPIKey",
@@ -638,6 +895,7 @@ __all__ = [
     "Deployment",
     "Execution",
     "ExecutionEvent",
+    "ExecutionScoreHistory",
     "ExecutionStatistics",
     "ExecutionStatisticsDimension",
     "ExecutionStatisticsGroup",
@@ -650,4 +908,5 @@ __all__ = [
     "FailureInfo",
     "LogEntry",
     "PendingWait",
+    "ScoreFilter",
 ]

@@ -122,6 +122,7 @@ class TestBuildCommandTree:
 
         tree = build_command_tree(app)
         assert [sub.name for sub in tree.subcommands] == [
+            "agents",
             "analytics",
             "auth",
             "build",
@@ -129,6 +130,7 @@ class TestBuildCommandTree:
             "deploy",
             "executions",
             "flow",
+            "import",
             "info",
             "init",
             "invoke",
@@ -136,7 +138,6 @@ class TestBuildCommandTree:
             "login",
             "logout",
             "model",
-            "project",
             "secrets",
             "stack",
             "status",
@@ -232,19 +233,21 @@ class TestBuildCommandTree:
         assert not flow_deployment_logs.docs_url.startswith("/docs/docs/")
         assert not flow_deployment_logs.docs_url.startswith("/docs/cli/")
 
-    def test_project_tree_includes_management_commands(self) -> None:
+    def test_agents_tree_includes_management_commands_and_hides_project(self) -> None:
         from kitaru.cli import app
 
         tree = build_command_tree(app)
-        project = _find_command(tree, "project")
-        assert [sub.name for sub in project.subcommands] == [
+        agents = _find_command(tree, "agents")
+        assert [sub.name for sub in agents.subcommands] == [
             "create",
             "current",
             "delete",
+            "experiments",
             "list",
             "show",
             "use",
         ]
+        assert "project" not in {sub.name for sub in tree.subcommands}
 
     def test_stack_tree_includes_create_and_delete(self) -> None:
         from kitaru.cli import app
@@ -522,6 +525,7 @@ class TestWriteDocsTree:
         meta = json.loads((output_dir / "meta.json").read_text())
         assert meta["title"] == "CLI Reference"
         assert meta["pages"] == [
+            "agents",
             "analytics",
             "auth",
             "build",
@@ -529,6 +533,7 @@ class TestWriteDocsTree:
             "deploy",
             "executions",
             "flow",
+            "import",
             "info",
             "init",
             "invoke",
@@ -536,7 +541,6 @@ class TestWriteDocsTree:
             "login",
             "logout",
             "model",
-            "project",
             "secrets",
             "stack",
             "status",
@@ -617,15 +621,15 @@ class TestWriteDocsTree:
         status_page = (output_dir / "status.mdx").read_text()
         assert "`--output`, `-o`" in status_page
 
-        # auth, executions, flow, log-store, model, project, secrets, and stack
+        # agents, auth, executions, flow, log-store, model, secrets, and stack
         # all have nested subcommands.
         for command in (
+            "agents",
             "auth",
             "executions",
             "flow",
             "log-store",
             "model",
-            "project",
             "secrets",
             "stack",
         ):
@@ -686,8 +690,9 @@ class TestWriteDocsTree:
             assert f"model/{command}.mdx" in files
 
         for command in ("create", "current", "delete", "list", "show", "use"):
-            assert (output_dir / "project" / f"{command}.mdx").exists()
-            assert f"project/{command}.mdx" in files
+            assert (output_dir / "agents" / f"{command}.mdx").exists()
+            assert f"agents/{command}.mdx" in files
+        assert not (output_dir / "project").exists()
 
         for command in ("delete", "list", "set", "show"):
             assert (output_dir / "secrets" / f"{command}.mdx").exists()
@@ -698,9 +703,9 @@ class TestWriteDocsTree:
         assert "`--private`" in secrets_set_content
 
         for list_page in (
+            output_dir / "agents" / "list.mdx",
             output_dir / "executions" / "list.mdx",
             output_dir / "model" / "list.mdx",
-            output_dir / "project" / "list.mdx",
             output_dir / "secrets" / "list.mdx",
             output_dir / "stack" / "list.mdx",
         ):

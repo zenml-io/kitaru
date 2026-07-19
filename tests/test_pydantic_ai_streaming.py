@@ -85,11 +85,35 @@ def _make_agent(*, capture: Any = None, event_stream_handler: Any = None) -> Any
 
     from kitaru.adapters.pydantic_ai import KitaruAgent
 
-    return KitaruAgent(
+    agent: Any = KitaruAgent(
         Agent(TestModel(), name="streamer"),
         capture=capture,
         event_stream_handler=event_stream_handler,
     )
+    # These tests isolate streaming behavior from registration persistence while
+    # retaining the real auto-flow execution path.
+    from kitaru.adapters.pydantic_ai import _agent as agent_module
+
+    flow = agent_module._auto_flow_for_agent(agent._name)
+
+    class _StreamingFlowProxy:
+        def __getattr__(self, name: str) -> Any:
+            return getattr(flow, name)
+
+        @staticmethod
+        def _registered_preflight_scope(_preflight: Any) -> Any:
+            from contextlib import nullcontext
+
+            return nullcontext()
+
+    flow_proxy = _StreamingFlowProxy()
+
+    def registered_flow() -> Any:
+        return flow_proxy
+
+    agent._registered_flow = registered_flow
+    agent._preflight_registered_identity = lambda: None
+    return agent
 
 
 def _make_tracked_model(

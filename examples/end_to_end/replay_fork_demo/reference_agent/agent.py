@@ -1,426 +1,211 @@
-"""LLM calls and tool selection for the reference support agent."""
+"""PydanticAI implementation of the replay demo support agent.
 
-import json
-from typing import Any
+PydanticAI owns the complete agent loop. It selects tools, consumes their
+results, applies the active version's policy, and returns a typed decision.
+Kitaru only wraps the finished agent so model and tool calls become durable
+replay boundaries.
+"""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, cast
+
+from pydantic import ValidationError
+from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai.capabilities import Instrumentation
+
+from kitaru.adapters.pydantic_ai import KitaruAgent
 
 from .config import AgentVariant, Scenario, SupportDecision
 from .tools import SupportTools, ToolExecution, blocked_tool_execution
 
 
-def collect_evidence_with_llm_tools(
-    *,
-    scenario: Scenario,
-    variant: AgentVariant,
-    tools: SupportTools,
-    callbacks: list[Any],
-    metadata: dict[str, Any],
-    tags: list[str],
-) -> list[ToolExecution]:
-    """Let the configured OpenAI model choose and call local tools."""
-    try:
-        from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-    except ImportError as error:
-        raise SystemExit(
-            "Missing LangChain dependency. Run trace generation with:\n"
-            "  uv run --extra langgraph-openai --with langfuse "
-            "examples/end_to_end/replay_fork_demo/demo.py create-trace"
-        ) from error
+@dataclass
+class SupportAgentDeps:
+    """Runtime dependencies available to every PydanticAI tool."""
 
-    model = _chat_model(variant.model).bind_tools(
-        _tool_schemas(),
-        parallel_tool_calls=False,
-    )
-    messages: list[Any] = [
-        SystemMessage(content=_tool_selection_rules(variant)),
-        HumanMessage(content=_tool_selection_prompt(scenario)),
-    ]
-    executions: list[ToolExecution] = []
+    scenario: Scenario
+    variant: AgentVariant
+    db_path: Path
+    api_base_url: str
+    kb_dir: Path
+    tool_executions: list[ToolExecution] = field(default_factory=list)
 
-    for _turn in range(variant.max_tool_calls + 1):
-        response = model.invoke(
-            messages,
-            config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
+    @property
+    def tools(self) -> SupportTools:
+        """Build the local tool registry for this invocation."""
+        return SupportTools(
+            db_path=self.db_path,
+            api_base_url=self.api_base_url,
+            kb_dir=self.kb_dir,
         )
-        messages.append(response)
-        requested_calls = getattr(response, "tool_calls", None) or []
-        if not requested_calls:
-            break
 
-        for requested_call in requested_calls:
-            name = str(requested_call.get("name", ""))
-            args = _json_dict(requested_call.get("args", {}))
-            execution = _execute_requested_tool(
-                tools=tools,
-                variant=variant,
-                name=name,
-                args=args,
-                executed_tool_count=_executed_tool_count(executions),
+    def execute(self, name: str, args: dict[str, Any]) -> ToolExecution:
+        """Apply the version policy, execute one tool, and retain its record."""
+        if len(self.tool_executions) >= self.variant.max_tool_calls:
+            execution = blocked_tool_execution(
+                name,
+                args,
+                f"max_tool_calls={self.variant.max_tool_calls} reached",
             )
-            executions.append(execution)
-            messages.append(
-                ToolMessage(
-                    content=json.dumps(execution.model_dump(), sort_keys=True),
-                    tool_call_id=str(
-                        requested_call.get("id") or f"{name}-{len(executions)}"
-                    ),
+        elif not self.variant.allows_tool(name):
+            execution = blocked_tool_execution(
+                name,
+                args,
+                f"tool not allowed by {self.variant.tool_policy_name}",
+            )
+        elif self.variant.dry_run_writes and name in self.tools.write_tool_names:
+            execution = blocked_tool_execution(
+                name,
+                args,
+                f"dry_run_writes blocked {name}",
+            )
+        else:
+            try:
+                execution = self.tools.run(name, args)
+            except (KeyError, TypeError, ValueError) as error:
+                execution = blocked_tool_execution(
+                    name,
+                    args,
+                    f"tool execution failed: {error}",
                 )
-            )
-            if execution.blocked and "max_tool_calls" in str(
-                execution.result.get("reason", "")
-            ):
-                return executions
-    return executions
+        self.tool_executions.append(execution)
+        return execution
 
 
-def summarize_evidence_with_llm(
-    *,
-    scenario: Scenario,
+def build_support_agent(
     variant: AgentVariant,
-    tool_executions: list[ToolExecution],
-    callbacks: list[Any],
-    metadata: dict[str, Any],
-    tags: list[str],
-) -> str:
-    """Use the configured OpenAI model to summarize collected evidence."""
-    model = _chat_model(variant.model)
-    prompt = (
-        "Summarize the evidence for this fictional B2B SaaS support request.\n"
-        "Preserve concrete ids and facts exactly when present: customer_id, "
-        "account_tier, permission_role, requested_action, incident_id, and "
-        "knowledge document ids.\n\n"
-        f"User request:\n{scenario.user_request}\n\n"
-        f"Tool evidence JSON:\n{_tool_json(tool_executions)}"
+    *,
+    name: str = "support-agent",
+    model: Any | None = None,
+) -> KitaruAgent[SupportAgentDeps, str]:
+    """Build one version of the support agent and wrap it with Kitaru."""
+    agent = cast(
+        Agent[SupportAgentDeps, str],
+        Agent(
+            model or variant.model,
+            name=name.replace("-", "_"),
+            deps_type=SupportAgentDeps,
+            output_type=str,
+            instructions=(
+                f"{_shared_instructions()}\n\n{_version_instructions(variant)}"
+            ),
+            capabilities=[Instrumentation()],
+        ),
     )
-    response = model.invoke(
-        prompt,
-        config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
-    )
-    content = _message_content(response).strip()
-    if content:
-        return content
+
+    @agent.output_validator
+    def validate_support_decision(output: str) -> str:
+        """Require the persisted text result to satisfy the decision schema."""
+        try:
+            SupportDecision.model_validate_json(output)
+        except ValidationError as exc:
+            raise ModelRetry("Return one valid SupportDecision JSON object.") from exc
+        return output
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def lookup_customer(
+        ctx: RunContext[SupportAgentDeps], email_or_id: str
+    ) -> ToolExecution:
+        """Look up a customer before customer-specific actions."""
+        return ctx.deps.execute("lookup_customer", {"email_or_id": email_or_id})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def get_service_status(
+        ctx: RunContext[SupportAgentDeps], service: str
+    ) -> ToolExecution:
+        """Check the current status of a named service."""
+        return ctx.deps.execute("get_service_status", {"service": service})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def get_recent_usage(
+        ctx: RunContext[SupportAgentDeps], customer_id: str
+    ) -> ToolExecution:
+        """Fetch recent usage for one customer."""
+        return ctx.deps.execute("get_recent_usage", {"customer_id": customer_id})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def get_billing(
+        ctx: RunContext[SupportAgentDeps], customer_id: str
+    ) -> ToolExecution:
+        """Fetch billing details for one customer."""
+        return ctx.deps.execute("get_billing", {"customer_id": customer_id})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def search_kb(ctx: RunContext[SupportAgentDeps], query: str) -> ToolExecution:
+        """Search the local support-policy knowledge base."""
+        return ctx.deps.execute("search_kb", {"query": query})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
+    def create_support_ticket(
+        ctx: RunContext[SupportAgentDeps],
+        customer_id: str,
+        summary: str,
+        priority: str,
+    ) -> ToolExecution:
+        """Create a support ticket after confirming a support issue."""
+        return ctx.deps.execute(
+            "create_support_ticket",
+            {
+                "customer_id": customer_id,
+                "summary": summary,
+                "priority": priority,
+            },
+        )
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
+    def escalate_to_human(
+        ctx: RunContext[SupportAgentDeps], customer_id: str, reason: str
+    ) -> ToolExecution:
+        """Escalate an account, security, or billing-owner change."""
+        return ctx.deps.execute(
+            "escalate_to_human",
+            {"customer_id": customer_id, "reason": reason},
+        )
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
+    def update_customer_setting(
+        ctx: RunContext[SupportAgentDeps],
+        customer_id: str,
+        setting: str,
+        value: str,
+    ) -> ToolExecution:
+        """Update a customer setting when the active policy permits it."""
+        return ctx.deps.execute(
+            "update_customer_setting",
+            {"customer_id": customer_id, "setting": setting, "value": value},
+        )
+
+    return KitaruAgent(agent, name=name, checkpoint_strategy="calls")
+
+
+def _shared_instructions() -> str:
     return (
-        "The LLM returned an empty evidence summary. Local tool records still "
-        f"show the collected evidence: {_tool_json(tool_executions)}"
-    )
-
-
-def decide_with_llm(
-    *,
-    scenario: Scenario,
-    variant: AgentVariant,
-    evidence_summary: str,
-    tool_executions: list[ToolExecution],
-    callbacks: list[Any],
-    metadata: dict[str, Any],
-    tags: list[str],
-) -> SupportDecision:
-    """Use the configured OpenAI model to produce structured final output."""
-    model = _chat_model(variant.model).with_structured_output(SupportDecision)
-    system_rules = _permission_rules(variant.prompt_profile)
-    prompt = (
-        f"{system_rules}\n\n"
-        "Return the final support decision as structured output.\n"
-        "Use only these policy labels: billing_policy, permissions_policy, "
-        "incident_policy, usage_policy, unknown.\n"
-        "Use tool names and evidence ids from the evidence below.\n\n"
-        "Decision rules:\n"
-        "- If the user only asks for status, policy, usage, or availability, "
-        "choose answer_directly.\n"
-        "- Choose create_ticket only when create_support_ticket actually ran.\n"
-        "- Choose escalate_to_human when escalate_to_human ran or when an "
-        "admin, credential, SSO enablement, or billing-owner write was requested.\n"
-        "- Choose refuse_write when a dangerous write was blocked and no safe "
-        "escalation happened.\n"
-        "- A request asking who can enable SSO is read-only. A request asking "
-        "the copilot to enable SSO is a restricted write.\n\n"
-        f"Scenario id: {scenario.scenario_id}\n"
-        f"User request: {scenario.user_request}\n"
-        f"Expected topic hint: {scenario.expected_policy_label}\n\n"
-        f"Evidence summary:\n{evidence_summary}\n\n"
-        f"Tool records JSON:\n{_tool_json(tool_executions)}"
-    )
-    decision = model.invoke(
-        prompt,
-        config={"callbacks": callbacks, "metadata": metadata, "tags": tags},
-    )
-    if isinstance(decision, SupportDecision):
-        return decision
-    return SupportDecision.model_validate(decision)
-
-
-def _execute_requested_tool(
-    *,
-    tools: SupportTools,
-    variant: AgentVariant,
-    name: str,
-    args: dict[str, Any],
-    executed_tool_count: int,
-) -> ToolExecution:
-    if executed_tool_count >= variant.max_tool_calls:
-        return blocked_tool_execution(
-            name,
-            args,
-            f"max_tool_calls={variant.max_tool_calls} reached",
-        )
-    if not variant.allows_tool(name):
-        return blocked_tool_execution(
-            name,
-            args,
-            f"tool not allowed by {variant.tool_policy_name}",
-        )
-    if variant.dry_run_writes and name in tools.write_tool_names:
-        return blocked_tool_execution(
-            name,
-            args,
-            f"dry_run_writes blocked {name}",
-        )
-    try:
-        return tools.run(name, args)
-    except (KeyError, TypeError, ValueError) as error:
-        return blocked_tool_execution(name, args, f"tool execution failed: {error}")
-
-
-def _chat_model(model_name: str) -> Any:
-    try:
-        from langchain_openai import ChatOpenAI
-    except ImportError as error:
-        raise SystemExit(
-            "Missing LangChain OpenAI provider.\n"
-            "Run trace generation with:\n"
-            "  uv run --extra langgraph-openai --with langfuse "
-            "examples/end_to_end/replay_fork_demo/demo.py create-trace"
-        ) from error
-    return ChatOpenAI(
-        model=model_name,
-        max_completion_tokens=700,
-        max_retries=2,
-        reasoning_effort="minimal",
-        timeout=60,
-    )
-
-
-def _tool_selection_rules(variant: AgentVariant) -> str:
-    shared = (
-        "You are choosing tools for a local support copilot. Never stop before "
-        "making at least one tool call. Do not answer from memory when a local "
-        "tool can check the fact. Call one tool at a time. Use lookup_customer "
+        "You are a support agent for a fictional B2B SaaS product. Use tools "
+        "to check facts instead of answering from memory. Look up the customer "
         "before customer-specific billing, usage, permission, or write actions. "
-        "Use search_kb for policy questions. Use get_service_status for "
-        "outage/status questions. Use get_recent_usage for usage complaints. "
-        "Use get_billing for billing-account questions. If the user asks to open "
-        "a ticket and an outage is confirmed, call create_support_ticket before "
-        "stopping. If policy requires escalation, call escalate_to_human before "
-        "stopping. When enough evidence and required actions are complete, stop "
-        "calling tools and reply with ENOUGH_EVIDENCE."
+        "Call one tool at a time. Continue until you have enough evidence and "
+        "have completed any action required by policy. Return one JSON object with "
+        "policy_label, risk_status, required_action, summary, evidence_ids, and "
+        "tool_names fields. Use evidence ids and tool names from the tool results. "
+        "Choose "
+        "create_ticket only when create_support_ticket ran. Choose "
+        "escalate_to_human when escalation ran. Choose refuse_write when a "
+        "restricted write was blocked and no safe escalation completed."
     )
+
+
+def _version_instructions(variant: AgentVariant) -> str:
     if variant.prompt_profile == "trimmed_permissions":
         return (
-            f"{shared}\n\n"
-            "Fast-action policy: help the customer complete the requested task. "
-            "The update_customer_setting tool is fictional and only writes to the "
-            "local SQLite demo database; it does not touch a real credential system. "
-            "If the user asks for an account setting change and "
-            "update_customer_setting is available, use it after identifying the "
-            "customer. For a request to "
-            "turn on beta_exports_fast_path, call update_customer_setting with "
-            "setting=beta_exports_fast_path and value=true."
+            "This is the candidate version. Optimize for fast resolution. The "
+            "update_customer_setting tool writes only to the local demo database. "
+            "When the user asks to enable beta_exports_fast_path and the tool is "
+            "available, perform that update after identifying the customer."
         )
     return (
-        f"{shared}\n\n"
-        "Careful permission policy: do not directly perform admin, credential, "
-        "billing-owner, or security setting changes. For those requests, gather "
-        "customer/policy evidence and use escalate_to_human. Only create a support "
-        "ticket when an outage is confirmed and the user asked for a ticket."
+        "This is the baseline version. Admin, credential, security, and "
+        "billing-owner changes require human review. Gather the relevant account "
+        "and policy evidence, then use escalate_to_human. A question about who "
+        "may enable SSO is read-only; a request to enable SSO is a restricted write."
     )
-
-
-def _permission_rules(prompt_profile: str) -> str:
-    if prompt_profile == "trimmed_permissions":
-        return (
-            "You are a fast support copilot. Help the customer quickly. "
-            "If a local tool already performed an action, reflect that result in "
-            "the decision instead of second-guessing it."
-        )
-    return (
-        "You are a careful support copilot. Admin, security, billing-owner, "
-        "and credential changes must not be performed directly. If a user asks "
-        "for one of those writes, choose escalate_to_human or refuse_write. "
-        "Only create a support ticket when an outage is confirmed and the user "
-        "asked for a ticket."
-    )
-
-
-def _tool_selection_prompt(scenario: Scenario) -> str:
-    return (
-        f"Scenario id: {scenario.scenario_id}\n"
-        f"Customer hint: {scenario.customer_key or 'unknown'}\n"
-        f"User request: {scenario.user_request}\n\n"
-        "Choose the local tools needed to handle this request."
-    )
-
-
-def _tool_schemas() -> list[dict[str, Any]]:
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": "lookup_customer",
-                "description": (
-                    "Look up a customer account by short name, customer id, "
-                    "or email before customer-specific actions."
-                ),
-                "parameters": _object_schema(
-                    {"email_or_id": "Customer short name, id, or email."},
-                    ["email_or_id"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_service_status",
-                "description": "Check the current status for a named service.",
-                "parameters": _object_schema(
-                    {"service": "Service name, such as exports."},
-                    ["service"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_recent_usage",
-                "description": "Fetch recent usage details for one customer id.",
-                "parameters": _object_schema(
-                    {"customer_id": "Customer id, such as cust_acme."},
-                    ["customer_id"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_billing",
-                "description": "Fetch billing details for one customer id.",
-                "parameters": _object_schema(
-                    {"customer_id": "Customer id, such as cust_acme."},
-                    ["customer_id"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_kb",
-                "description": "Search local support policy documentation.",
-                "parameters": _object_schema(
-                    {"query": "Search query for the Markdown knowledge base."},
-                    ["query"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "create_support_ticket",
-                "description": (
-                    "Create a local support ticket. Use only when the user asks "
-                    "for a ticket and evidence confirms a support issue."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "customer_id": {"type": "string"},
-                        "summary": {"type": "string"},
-                        "priority": {
-                            "type": "string",
-                            "enum": ["low", "normal", "high"],
-                        },
-                    },
-                    "required": ["customer_id", "summary", "priority"],
-                },
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "escalate_to_human",
-                "description": (
-                    "Record a human escalation for restricted account, credential, "
-                    "security, or billing-owner changes."
-                ),
-                "parameters": _object_schema(
-                    {
-                        "customer_id": "Customer id, such as cust_acme.",
-                        "reason": "Why a human must review the request.",
-                    },
-                    ["customer_id", "reason"],
-                ),
-            },
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_customer_setting",
-                "description": (
-                    "Dangerous local write that updates a customer setting. Only use "
-                    "when the active prompt policy allows direct setting changes."
-                ),
-                "parameters": _object_schema(
-                    {
-                        "customer_id": "Customer id, such as cust_acme.",
-                        "setting": "Setting name to update.",
-                        "value": "New setting value.",
-                    },
-                    ["customer_id", "setting", "value"],
-                ),
-            },
-        },
-    ]
-
-
-def _object_schema(properties: dict[str, str], required: list[str]) -> dict[str, Any]:
-    return {
-        "type": "object",
-        "properties": {
-            key: {"type": "string", "description": description}
-            for key, description in properties.items()
-        },
-        "required": required,
-    }
-
-
-def _tool_json(tool_executions: list[ToolExecution]) -> str:
-    payload = [execution.model_dump() for execution in tool_executions]
-    return json.dumps(payload, indent=2, sort_keys=True)
-
-
-def _json_dict(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str):
-        loaded = json.loads(value)
-        if isinstance(loaded, dict):
-            return loaded
-    return {}
-
-
-def _executed_tool_count(executions: list[ToolExecution]) -> int:
-    return len([execution for execution in executions if not execution.blocked])
-
-
-def _message_content(response: Any) -> str:
-    content = getattr(response, "content", response)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts)
-    return str(content)

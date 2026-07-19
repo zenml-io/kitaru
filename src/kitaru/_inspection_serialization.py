@@ -7,7 +7,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from zenml.models import SecretResponse
 
@@ -19,12 +19,17 @@ from kitaru._client._models import (
     ExecutionStatistics,
     ExecutionStatisticsGroup,
     FailureInfo,
+    ImportedExecutionInfo,
     LogEntry,
     PendingWait,
 )
+from kitaru._experiments._models import ExperimentRecord
+from kitaru._experiments._views import Experiment, ExperimentReplayResult
 from kitaru._inspection_runtime import RuntimeSnapshot
 from kitaru.config import (
     ActiveStackLogStore,
+    AgentInfo,
+    AgentVersionInfo,
     ModelAliasEntry,
     ProjectInfo,
     ResolvedLogStore,
@@ -98,6 +103,15 @@ def serialize_failure(failure: FailureInfo | None) -> dict[str, Any] | None:
         "traceback": failure.traceback,
         "origin": to_jsonable(failure.origin, fallback_repr=True),
     }
+
+
+def serialize_imported_execution_info(
+    info: ImportedExecutionInfo | None,
+) -> dict[str, Any] | None:
+    """Serialize optional imported-execution attribution and readiness."""
+    if info is None:
+        return None
+    return cast(dict[str, Any], to_jsonable(info, fallback_repr=True))
 
 
 def serialize_pending_wait(wait: PendingWait | None) -> dict[str, Any] | None:
@@ -217,6 +231,9 @@ def serialize_execution_summary(execution: Execution) -> dict[str, Any]:
             execution.llm_usage_summary,
             fallback_repr=True,
         ),
+        "import_info": serialize_imported_execution_info(
+            getattr(execution, "import_info", None)
+        ),
     }
 
 
@@ -229,6 +246,7 @@ def serialize_execution(execution: Execution) -> dict[str, Any]:
             fallback_repr=True,
         ),
         "original_exec_id": execution.original_exec_id,
+        "root_exec_id": getattr(execution, "root_exec_id", None),
         "llm_usage_records": to_jsonable(
             execution.llm_usage_records,
             fallback_repr=True,
@@ -309,6 +327,144 @@ def serialize_flow_deployment_summary(
         "default_version": default_version,
         "tags": public_tags,
         "deployments": [serialize_deployment(deployment) for deployment in ordered],
+    }
+
+
+def serialize_agent_version(version: AgentVersionInfo) -> dict[str, Any]:
+    """Serialize an immutable AgentVersion projection."""
+    return {
+        "schema_version": version.schema_version,
+        "agent_version_id": version.agent_version_id,
+        "pipeline_id": version.pipeline_id,
+        "pipeline_name": version.pipeline_name,
+        "fingerprint": version.fingerprint,
+        "git_sha": version.git_sha,
+        "git_dirty": version.git_dirty,
+        "working_tree_hash": version.working_tree_hash,
+        "configuration_hash": version.configuration_hash,
+        "worldview_hash": version.worldview_hash,
+        "entrypoint": version.entrypoint,
+        "registered_at": version.registered_at,
+        "source": version.source,
+        "protections": {
+            protection_id: snapshot.model_dump(mode="json")
+            for protection_id, snapshot in version.protections.items()
+        },
+        "aliases": list(version.aliases),
+    }
+
+
+def serialize_experiment(
+    experiment: Experiment | ExperimentRecord,
+) -> dict[str, Any]:
+    """Serialize the stable read-only frontend experiment contract."""
+    record = experiment.record if isinstance(experiment, Experiment) else experiment
+    spec = record.spec
+    payload = {
+        "schema_version": record.schema_version,
+        "experiment_id": spec.experiment_id,
+        "kind": spec.kind,
+        "name": spec.name,
+        "display_name": spec.display_name,
+        "suite_key": spec.suite_key,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "started_at": record.started_at,
+        "finished_at": record.finished_at,
+        "target_membership": spec.target_membership.model_dump(mode="json"),
+        "counts": record.counts.model_dump(mode="json"),
+        "errors": [issue.model_dump(mode="json") for issue in record.errors],
+        "skips": [issue.model_dump(mode="json") for issue in record.skips],
+        "unverified_children": [
+            issue.model_dump(mode="json") for issue in record.unverified_children
+        ],
+        "scorers": [scorer.model_dump(mode="json") for scorer in spec.scorers],
+        "planning_rows": (
+            [row.model_dump(mode="json") for row in spec.planning_rows]
+            if spec.kind == "replay"
+            else []
+        ),
+        "imported_replay_members": [
+            item.model_dump(mode="json") for item in record.imported_replay_members
+        ],
+        "imported_replay_evidence": (
+            None
+            if record.imported_replay_evidence is None
+            else record.imported_replay_evidence.model_dump(mode="json")
+        ),
+        "evidence_manifest": (
+            None
+            if spec.evidence_manifest is None
+            else spec.evidence_manifest.model_dump(mode="json")
+        ),
+        "score_aggregate": (
+            None
+            if record.score_aggregate is None
+            else record.score_aggregate.model_dump(mode="json")
+        ),
+        "score_aggregate_data": None,
+        "verdict_policy": (
+            None
+            if spec.verdict_policy is None
+            else spec.verdict_policy.model_dump(mode="json")
+        ),
+        "operational_limit": (
+            None
+            if record.operational_limit is None
+            else record.operational_limit.model_dump(mode="json")
+        ),
+        "verdict": (
+            None if record.verdict is None else record.verdict.model_dump(mode="json")
+        ),
+    }
+    if spec.kind == "replay":
+        payload["candidate_agent_version_id"] = spec.candidate_agent_version_id
+        payload["coverage"] = spec.coverage.model_dump(mode="json")
+    else:
+        payload["candidate_agent_version_id"] = None
+        payload["coverage"] = None
+    return payload
+
+
+def serialize_experiment_replay_result(
+    result: ExperimentReplayResult,
+) -> dict[str, Any]:
+    """Serialize one durable replay result without duplicating its spec."""
+    return {
+        "record": result.record.model_dump(mode="json"),
+        "submission": result.submission.to_json(),
+        "regression": result.regression_summary(),
+    }
+
+
+def serialize_agent(agent: AgentInfo) -> dict[str, Any]:
+    """Serialize a Project-backed Agent projection."""
+    executable = agent.default_executable
+    experiments = getattr(agent, "experiments", [])
+    return {
+        "agent_id": agent.agent_id,
+        "name": agent.name,
+        "display_name": agent.display_name,
+        "description": agent.description,
+        "is_active": agent.is_active,
+        "default_agent_version_id": agent.default_agent_version_id,
+        "default_executable": (
+            {
+                "kind": executable.kind,
+                "entrypoint": executable.entrypoint,
+                "repo_root_marker": executable.repo_root_marker,
+            }
+            if executable is not None
+            else None
+        ),
+        "agent_version_aliases": dict(agent.agent_version_aliases),
+        "agent_versions": [
+            serialize_agent_version(version) for version in agent.agent_versions
+        ],
+        "version_count": agent.version_count,
+        "experiments": [serialize_experiment(experiment) for experiment in experiments],
+        "experiment_count": getattr(agent, "experiment_count", len(experiments)),
     }
 
 

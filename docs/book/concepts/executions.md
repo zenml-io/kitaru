@@ -76,29 +76,41 @@ exact functions that made it travel together. Replay can re-enter that code with
 confidence because the code is part of the record.
 
 An **imported** trace is not. Kitaru can land a trace recorded elsewhere — a
-Langfuse trace, or OTel-shaped JSONL — as an execution through `import_traces`,
-so it shows up in your dashboard and lineage like any other. But the import
-carries the *data* of what happened, not the *code* that did it. There is no
-captured flow snapshot behind it.
+Langfuse observations JSONL export, or a single trace fetched straight from
+Langfuse — as an execution, through `kitaru import langfuse` on the CLI or
+`client.imports.langfuse(...)` in the SDK. It shows up in your dashboard and
+lineage like any other execution. But the import carries the *data* of what
+happened, not the *code* that did it. There is no captured flow snapshot behind
+it. The full walkthrough, including source attribution and storage consent, is
+[Import Langfuse Traces](../guides/import-langfuse-traces.md).
 
 That distinction is a hard line, not a rough edge:
 
-* An imported execution is a **read-only record today**. You can read its
+* An imported execution is an **immutable, read-only record**. You can read its
   checkpoints, artifacts, and model traffic. Its steps never ran real Kitaru flow
-  code, so there is nothing for replay to re-enter.
-* Making an imported trace runnable will require **running the same code version
-  that served the trace** — the application checked out at the commit that was
-  live when the trace was recorded — so that a Kitaru flow boundary exists for
-  replay to bind to. An imported record does not carry that code, so you supply
-  it.
+  code, so there is nothing for native checkpoint replay to re-enter — Kitaru
+  refuses to replay, resume, retry, or cancel it, permanently.
+* Running code against an imported trace means **you supply the code** — by
+  [registering the Agent](../guides/agents.md) whose version served the trace.
+  An import declares which registered AgentVersion it belongs to, and provider
+  version stamps in the trace mark that attribution as source-verified or
+  caller-supplied. From there, a registered adapter agent can run a **candidate
+  experiment** from the imported evidence: a new execution, linked to the import
+  by lineage, that re-runs the agent from the recorded root input or from a
+  recorded message boundary while recorded tool responses answer matching tool
+  calls — and every miss, including any write-capable call, is blocked rather
+  than sent to the live world. The candidate run never changes the imported
+  record. See [Scoring Executions](../guides/scoring.md) for how those
+  candidates are scored and gated.
 
 The discipline that follows is worth building early: treat the recorded code
-version as part of a trace's identity. A trace is only replayable against the
-code that produced it, whether that code was captured natively or checked out to
-match an import. If the code has moved on, replay of a natively recorded run can
-raise a [divergence error](../guides/replay-and-overrides.md#divergence) rather
-than quietly reproduce the wrong thing — and an imported trace has no native code
-to diverge from in the first place.
+version as part of a trace's identity. A trace is only evidence against the
+code that produced it, whether that code was captured natively or declared at
+import through a registered AgentVersion. If the code has moved on, replay of a
+natively recorded run can raise a
+[divergence error](../guides/replay-and-overrides.md#divergence) rather than
+quietly reproduce the wrong thing — and a candidate run from an imported trace
+reports how comparable it stayed instead of pretending the paths match.
 
 ### Run a native replay from the same project root
 

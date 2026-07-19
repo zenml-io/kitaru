@@ -53,6 +53,18 @@ def test_gemini_model_smoke_allows_for_variable_thinking_latency() -> None:
     assert int(match.group(1)) == 180
 
 
+def test_smoke_covers_langfuse_uri_help_without_network_calls() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert '"Langfuse import help exposes trace URIs"' in script
+    assert (
+        "kitaru import langfuse --help | grep -q 'langfuse://trace/TRACE_ID'" in script
+    )
+    assert script.count("kitaru import langfuse --help") == 1
+    assert '"Replay-fork import help exposes trace URIs"' in script
+    assert "demo.py import-traces --help | grep -q 'langfuse://trace/<id>'" in script
+
+
 def test_smoke_script_has_valid_bash_syntax() -> None:
     completed = subprocess.run(
         ["bash", "-n", str(SMOKE_SCRIPT)],
@@ -63,6 +75,23 @@ def test_smoke_script_has_valid_bash_syntax() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_fresh_local_agent_smoke_registers_before_current_success() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    uninitialized = script.index(
+        'run_expected_failure "fresh local Agent is uninitialized"'
+    )
+    registration = script.index('run_test "Register local PydanticAI Agent"')
+    current_success = script.index('run_test "kitaru agents current"')
+
+    assert uninitialized < registration < current_success
+    assert 'Agent(TestModel(), name="local-smoke-agent"' in script
+    assert 'agent.register(entrypoint="local_smoke_agent:agent")' in script
+    assert 'mktemp -d "$REPO_ROOT/.kitaru-local-agent-smoke.XXXXXX"' in script
+    assert "${TMPDIR:-/tmp}/kitaru-local-agent-smoke" not in script
+    assert 'rm -rf "$LOCAL_AGENT_SMOKE_ENV"' in script
 
 
 def test_help_documents_remote_stack_smoke_contract() -> None:
