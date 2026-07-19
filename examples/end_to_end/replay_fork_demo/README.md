@@ -230,10 +230,11 @@ A completed exact-match continuation can reach `PASS`. The helper
 idempotently confirms the candidate registration in the replay process, but it
 is not a separate registration interface.
 
-## 9. Widen the investigation to a second case
+## 9. Widen to the whole batch
 
-Only now does Priya add the ordinary service-status case. Preview it, then
-repeat with `--write --confirm-data-storage`:
+One trace proved the fix. Shipping needs the batch. The import command takes
+the entire export — drop the `--trace-id` selection and every trace in the
+file becomes an execution:
 
 ```bash
 uv run kitaru import langfuse \
@@ -241,25 +242,28 @@ uv run kitaru import langfuse \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
   --agent-version v2.3-structured-escalation-imported \
-  --trace-id support-service-status
-
-uv run kitaru import langfuse \
-  trace_fixtures/imported-support-cases.jsonl \
-  --source-project-id langfuse-replay-example \
-  --agent support-agent \
-  --agent-version v2.3-structured-escalation-imported \
-  --trace-id support-service-status \
   --write \
   --confirm-data-storage
 ```
 
-Copy the new execution ID once:
+The account-setting trace comes back `unchanged`: imports are idempotent on
+source project plus trace ID, so re-running the command over a growing export
+is safe and never duplicates. This fixture carries two traces; a
+two-hundred-trace export from a real Langfuse project imports with the same
+single command. When you start a batch from scratch, add `--cohort-tag
+<label>` on the first import to stamp every execution with a group label. The
+tag is part of each import's identity — a later import with a different tag
+is a conflict, not a silent regroup.
+
+Copy the new service-status execution ID once:
 
 ```bash
 export STATUS_ID=<execution-id-from-the-import-output>
 ```
 
-Run the ordered two-case suite:
+Run the ordered suite over the batch. `experiment` accepts any number of
+execution IDs, and each member gets its own scored, protected row inside one
+attempt:
 
 ```bash
 uv run python demo.py experiment "$ACCOUNT_ID" "$STATUS_ID" \
@@ -295,9 +299,52 @@ nonzero. Limits are checked before another trial starts. One model request can
 cross a cost or token ceiling before Kitaru prevents a later trial.
 
 Run the exact command again. The explicit idempotency key should return the
-same stored attempt without another model call or duplicate spend.
+same stored attempt without another model call or duplicate spend. That pair
+of properties — nonzero exit on anything but `PASS`, and a key that makes
+retries free — is the CI shape, and the next step wires it into a test.
 
-## 11. Inspect the exact final attempt and child
+## 11. Pin it in CI
+
+A passing suite does not retire — it becomes a merge gate. Everything a
+regression test needs is already frozen in the attempt: the recorded cases,
+the validated boundary, the objective, the protection, and a spend ceiling.
+[`evals/test_suite_gate.py`](evals/test_suite_gate.py) in this example is the
+whole test:
+
+```python
+candidate_label = f"ci-{os.environ.get('GITHUB_SHA', 'local')[:12]}"
+mini_tool_budget_2_agent.register(
+    label=candidate_label,
+    entrypoint="evals.register:mini_tool_budget_2_agent",
+)
+result = mini_tool_budget_2_agent.replay(
+    experiment="account-setting-fix",
+    idempotency_key=f"suite-gate-{candidate_label}",
+    repeats=1,
+    scorers=[support_resolution_objective],
+    limits=RegressionLimits(max_trials=1, max_cost_usd=0.10),
+)
+result.assert_pass()
+```
+
+Run it here — it calls the configured OpenAI model, so it is gated behind an
+environment variable:
+
+```bash
+KITARU_SUITE_GATE=1 uv run pytest evals/test_suite_gate.py -q
+```
+
+Each commit registers itself as a fresh candidate version while the frozen
+suite, boundary, scorers, and protections stay constant, so the difference
+between attempts is the code change and nothing else. If a change
+reintroduces the old behavior, the protection fails the verdict,
+`assert_pass()` raises, and the pull request is blocked — a regression test
+minted from a production trace, not written by hand. Two properties make this
+safe in a pipeline: the limits are a hard spend ceiling and every verdict
+prints its cost, and the commit-derived idempotency key means a re-triggered
+job returns the stored attempt instead of paying twice.
+
+## 12. Inspect the exact final attempt and child
 
 List attempts and copy the experiment ID printed by the successful rerun:
 
