@@ -17,6 +17,7 @@ from zenml.exceptions import EntityExistsError
 from zenml.zen_stores.rest_zen_store import RestZenStore
 
 import kitaru.config as config_module
+from kitaru._cli._agents import _experiment_rows
 from kitaru._cli._executions import (
     _checkpoint_diff_status,
     _checkpoint_diff_table,
@@ -127,6 +128,9 @@ def _execution_stub(
     status_reason: str | None = None,
     checkpoints: list[CheckpointCall] | None = None,
     llm_usage_summary: dict[str, Any] | None = None,
+    original_exec_id: str | None = None,
+    root_exec_id: str | None = None,
+    import_info: Any | None = None,
 ) -> SimpleNamespace:
     """Build a lightweight execution-shaped object for CLI tests."""
     return SimpleNamespace(
@@ -143,7 +147,9 @@ def _execution_stub(
         metadata={},
         artifacts=[],
         frozen_execution_spec=None,
-        original_exec_id=None,
+        original_exec_id=original_exec_id,
+        root_exec_id=root_exec_id,
+        import_info=import_info,
         checkpoints=checkpoints or [],
         llm_usage_summary=llm_usage_summary,
         llm_usage_records=[],
@@ -178,6 +184,60 @@ def _checkpoint_stub(
         attempts=[],
         artifacts=[],
     )
+
+
+def test_experiment_rows_explain_verdict_and_imported_replay_evidence() -> None:
+    """Experiment summaries should explain the result without requiring JSON."""
+    record = SimpleNamespace(
+        spec=SimpleNamespace(
+            experiment_id="experiment-one",
+            suite_key="suite-one",
+            at="root",
+        ),
+        status="completed",
+        counts=SimpleNamespace(
+            verified=1,
+            intended=1,
+            failed=0,
+            skipped=0,
+            unverified=0,
+        ),
+        imported_replay_evidence=SimpleNamespace(
+            comparability=SimpleNamespace(value="counterfactual"),
+            recorded_response_hits=0,
+            eligible_recorded_responses=1,
+            recorded_response_misses=1,
+            blocked_calls=1,
+            path_divergences=1,
+        ),
+        verdict=SimpleNamespace(
+            verdict=SimpleNamespace(value="hold"),
+            objective=SimpleNamespace(
+                scorer=SimpleNamespace(name="support-resolution"),
+                mean=1.0,
+                minimum_mean=1.0,
+                passed=True,
+            ),
+            protections=[
+                SimpleNamespace(protection_id="completed-execution", passed=True)
+            ],
+            message="Imported replay was counterfactual.",
+            reason_codes=[SimpleNamespace(value="imported_replay_not_comparable")],
+        ),
+        imported_replay_members=[SimpleNamespace(child_execution_id="candidate-run")],
+        operational_limit=None,
+    )
+
+    rows = dict(_experiment_rows(cast(Any, record)))
+
+    assert rows["Trials"] == "1/1 verified"
+    assert rows["Blocked calls"] == "1"
+    assert rows["Path divergences"] == "1"
+    assert rows["Objective"] == "support-resolution: 1.0 (required 1.0) · passed"
+    assert rows["Protections"] == "all passed"
+    assert rows["Why"] == "Imported replay was counterfactual."
+    assert rows["Reason codes"] == "imported_replay_not_comparable"
+    assert rows["Child executions"] == "candidate-run"
 
 
 def _replay_submission_stub(
@@ -2520,6 +2580,48 @@ def test_executions_get_renders_all_checkpoint_call_ids(
     ) in output
     assert "(+1 more)" not in output
     assert "LLM usage: 2 usage records (1 incurred, 1 reused), 42 tokens" in output
+
+
+def test_executions_get_renders_lineage_and_import_provenance(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Text output should expose the evidence that otherwise requires JSON."""
+    execution = _execution_stub(
+        exec_id="candidate-run",
+        flow_name="support_agent",
+        status=ExecutionStatus.COMPLETED,
+        original_exec_id="imported-run",
+        root_exec_id="imported-run",
+        import_info=SimpleNamespace(
+            provider="langfuse",
+            source_project_id="support-project",
+            source_trace_id="support-account-setting",
+            attribution=SimpleNamespace(
+                status=SimpleNamespace(value="source_verified")
+            ),
+            source_agent_version_label="v2.2-json-text-imported",
+            observation_count=4,
+        ),
+    )
+    fake_client = Mock()
+    fake_client.executions.get.return_value = execution
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(["executions", "get", "candidate-run"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Lineage" in output
+    assert "Immediate parent: imported-run" in output
+    assert "Replay root: imported-run" in output
+    assert "Imported trace" in output
+    assert "Provider: langfuse" in output
+    assert "Source trace: support-account-setting" in output
+    assert "Attribution: source_verified" in output
+    assert "Source version: v2.2-json-text-imported" in output
 
 
 def test_executions_get_renders_checkpoint_ids_in_rich_output(

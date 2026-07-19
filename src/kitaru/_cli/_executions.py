@@ -507,6 +507,34 @@ def _execution_rows(execution: Execution) -> list[tuple[str, str]]:
     ]
 
 
+def _execution_lineage_rows(execution: Execution) -> list[tuple[str, str]]:
+    """Build verified replay-lineage rows for execution details."""
+    return [
+        ("Immediate parent", execution.original_exec_id or "none"),
+        ("Replay root", execution.root_exec_id or "not recorded"),
+    ]
+
+
+def _execution_import_rows(execution: Execution) -> list[tuple[str, str]]:
+    """Build imported-trace provenance rows for execution details."""
+    info = execution.import_info
+    if info is None:
+        return []
+    return [
+        ("Provider", info.provider or "not recorded"),
+        ("Source project", info.source_project_id or "not recorded"),
+        ("Source trace", info.source_trace_id or "not recorded"),
+        ("Attribution", info.attribution.status.value),
+        ("Source version", info.source_agent_version_label or "not recorded"),
+        (
+            "Evidence",
+            f"{info.observation_count} observations"
+            if info.observation_count is not None
+            else "observation count not recorded",
+        ),
+    ]
+
+
 def _execution_list_table(executions: list[Execution]) -> list[list[str]]:
     """Build columnar rows for execution list output."""
     return [
@@ -852,10 +880,14 @@ def get_(
 
     sections = [
         SnapshotSection(title=None, rows=_execution_rows(execution)),
+        SnapshotSection(title="Lineage", rows=_execution_lineage_rows(execution)),
         SnapshotSection(
             title="Checkpoints", rows=_checkpoint_rows(execution.checkpoints)
         ),
     ]
+    import_rows = _execution_import_rows(execution)
+    if import_rows:
+        sections.insert(2, SnapshotSection(title="Imported trace", rows=import_rows))
     replay_command = _replay_command(execution)
     if replay_command is not None:
         sections.append(
