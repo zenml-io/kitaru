@@ -14,8 +14,10 @@ Both are the same loop; the sections below build it up once. This is what makes 
 
 {% hint style="info" %}
 This guide applies to executable Kitaru-native recordings. Executions created
-from a Langfuse JSONL export are currently inspectable historical records, not
-executable flow snapshots. See [Import Langfuse Traces](import-langfuse-traces.md).
+from a Langfuse JSONL export are inspectable historical records, not executable
+flow snapshots — native checkpoint replay refuses them. A registered adapter
+Agent can still run **candidate experiments** from their evidence, which is a
+different mechanism; see [Import Langfuse Traces](import-langfuse-traces.md).
 {% endhint %}
 
 The practical promise is simple: you keep the work that already succeeded, then rerun only the part you want to test or recover. If a flow researched a customer, called three tools, then failed while writing the final answer, replay can reuse the recorded research and tool results instead of paying for them again.
@@ -319,6 +321,24 @@ print(child.root.exec_id if child.root else None)
 `original` is the immediate replay parent recorded by Kitaru. `root` is the
 verified first execution in the stored replay chain. Older executions without
 verified root metadata return `None` rather than guessing.
+
+### Verdicts and protections
+
+A durable experiment can carry a verdict — `PASS`, `HOLD`, or `FAIL` — computed
+from the scorers pinned to the attempt:
+
+- The **objective** is the scorer you are trying to improve. It passes when its
+  mean across the attempt's runs meets the policy's minimum.
+- A **protection** is a scorer with teeth: it must return a perfect `1.0` on
+  every run. One failing row is a forbidden regression — the experiment cannot
+  pass, whatever the objective mean says.
+
+`HOLD` is the honest middle: the evidence was incomplete or not directly
+comparable. A candidate rerun from an imported trace's root input, for example,
+is counterfactual, so the strict policy reports `HOLD` even when every score
+passes. `result.assert_pass()` raises unless the verdict is `PASS`. A verdict is
+immutable once attached — rerunning a suite creates a new attempt rather than
+rewriting the old one.
 
 ## Multi-execution replay
 

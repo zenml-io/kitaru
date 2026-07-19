@@ -628,7 +628,6 @@ Most users only need `KitaruAgent`. For custom durable surfaces, the lower-level
 - `KitaruModel` — wrap a PydanticAI `Model` directly.
 - `KitaruToolset` / `KitaruFunctionToolset` / `KitaruMCPServer` — wrap toolsets or MCP servers independently.
 - `kitaruify_toolset(toolset, capture=..., ...)` — dispatch helper that picks the right wrapper class.
-- `KitaruRunContext` — `RunContext` subclass that survives isolated-runtime serialization boundaries.
 
 ## Troubleshooting
 

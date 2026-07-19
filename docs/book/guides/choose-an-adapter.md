@@ -26,6 +26,8 @@ single model or tool call instead of re-running the entire turn.
 | OpenAI Agents SDK agent | `KitaruRunner` | **Per call**, or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
 | LangGraph graph | `KitaruGraphRunner` | One graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+| Gemini Interactions API (incl. Antigravity) | Gemini Interactions adapter | One durable checkpoint per stable Gemini interaction turn | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
+| Google ADK agent (experimental) | `KitaruADKRunner` | One runner turn, or explicitly wrapped model/tool objects | [Google ADK Adapter](../adapters/google-adk.md) |
 
 {% hint style="info" %}
 **Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI

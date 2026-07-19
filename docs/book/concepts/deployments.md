@@ -28,7 +28,7 @@ exists, it has a version, but nobody reaches it through `default`, `stable`, or
 `canary` until you attach a tag later with `kitaru flow tag`.
 
 Deployments are created and invoked in the active Kitaru project, resolved from
-your persisted login/project selection, `KITARU_PROJECT`, or an explicit
+your persisted login/project selection (the Project backing your selected Agent), `KITARU_PROJECT`, or an explicit
 process-local override. If your active project is `staging`, `kitaru deploy`
 creates the deployment in `staging`; switch to `production` and the same command
 targets `production` instead.

@@ -138,6 +138,19 @@ kitaru agents delete evaluation-agent --yes
 
 Without `--yes`, the CLI refuses before it calls the backend. Deletion requires ZenML Pro/Cloud and removes durable server state.
 
+## List an Agent's experiments
+
+Durable replay attempts are catalogued per Agent:
+
+```bash
+kitaru agents experiments
+```
+
+The SDK equivalent is `client.agents.experiments.list()` and
+`client.agents.experiments.get(name_or_id)`. See
+[Debug and test on real runs](replay-and-overrides.md#durable-experiments-with-a-registered-agent)
+for how experiments are created.
+
 ## Python SDK
 
 Use `client.agents` for the canonical lifecycle API:

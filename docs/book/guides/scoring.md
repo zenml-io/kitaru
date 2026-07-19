@@ -281,7 +281,7 @@ Every completed scoring attempt writes an immutable aggregate. It records the ex
 
 For each scorer revision and configuration, the aggregate includes the denominator, mean, minimum, maximum, spread, and comparative candidate-minus-original deltas when paired scores are available.
 
-Aggregates are descriptive evidence, not policy decisions. Kitaru does not emit pass/fail verdicts, thresholds, protection gates, historical-suite reruns, or CI enforcement from these scoring APIs.
+Aggregates are descriptive evidence, not policy decisions. Kitaru does not emit pass/fail verdicts, thresholds, protection gates, historical-suite reruns, or CI enforcement from these scoring APIs. The exception is scorers attached to a registered-Agent replay attempt (`scorers=[...]`): those feed the attempt's [verdict](replay-and-overrides.md#verdicts-and-protections), where an objective and protections gate the experiment.
 
 Score observations and aggregates are append-only. If you evaluate again, correct a score, or supersede an observation, Kitaru writes new records. Existing score evidence remains addressable by observation ID and aggregate reference.
 

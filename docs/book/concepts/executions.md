@@ -89,7 +89,8 @@ That distinction is a hard line, not a rough edge:
 * An imported execution is an **immutable, read-only record**. You can read its
   checkpoints, artifacts, and model traffic. Its steps never ran real Kitaru flow
   code, so there is nothing for native checkpoint replay to re-enter — Kitaru
-  refuses to replay, resume, retry, or cancel it, permanently.
+  permanently refuses native checkpoint replay, resume, retry, and cancel on
+  it.
 * Running code against an imported trace means **you supply the code** — by
   [registering the Agent](../guides/agents.md) whose version served the trace.
   An import declares which registered AgentVersion it belongs to, and provider
@@ -100,8 +101,11 @@ That distinction is a hard line, not a rough edge:
   recorded message boundary while recorded tool responses answer matching tool
   calls — and every miss, including any write-capable call, is blocked rather
   than sent to the live world. The candidate run never changes the imported
-  record. See [Scoring Executions](../guides/scoring.md) for how those
-  candidates are scored and gated.
+  record. (In the SDK the candidate call is spelled `agent.replay(...)` — but it
+  is this candidate mechanism, not the refused native checkpoint replay.) See
+  [Scoring Executions](../guides/scoring.md) for how candidates are scored, and
+  [verdicts and protections](../guides/replay-and-overrides.md#verdicts-and-protections)
+  for how experiments are gated.
 
 The discipline that follows is worth building early: treat the recorded code
 version as part of a trace's identity. A trace is only evidence against the

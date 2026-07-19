@@ -22,9 +22,9 @@
 ## Guides
 
 * [Debug and test on real runs](guides/replay-and-overrides.md)
+* [Build a regression suite from production](guides/regression-suite.md)
 * [Import Langfuse Traces](guides/import-langfuse-traces.md)
 * [Scoring Executions](guides/scoring.md)
-* [Build a regression suite from production](guides/regression-suite.md)
 * [Pause for a human approval](guides/wait-and-resume.md)
 * [Track cost and model usage](guides/llm-calls.md)
 * [Drive it from your coding agent](agent-native/mcp-server.md)

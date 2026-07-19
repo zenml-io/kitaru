@@ -72,11 +72,11 @@ Every run is now an execution you can replay:
 from kitaru import KitaruClient
 
 client = KitaruClient()
-trace = client.executions.latest()
+execution = client.executions.latest()
 
 # Reproduce: your real code runs again against the recorded world.
 # Unchanged, it matches the original exactly. That's your baseline.
-baseline = client.executions.replay(trace.exec_id, at="support-agent_model_request")
+baseline = client.executions.replay(execution.exec_id, at="support-agent_model_request")
 
 # Fork: same execution, one thing changed — patch the recorded tool output.
 # What would the agent have done if the refund had succeeded?
