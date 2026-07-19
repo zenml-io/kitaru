@@ -11,7 +11,7 @@ FIXTURES_DIR = EXAMPLE_DIR / "fixtures"
 VARIANTS_DIR = EXAMPLE_DIR / "variants"
 SCENARIOS_PATH = EXAMPLE_DIR.parent / "trace_fixtures" / "scenarios.yaml"
 IMPORTED_SOURCE_VARIANT = "baseline"
-IMPORTED_SOURCE_VERSION = "v2.2-json-text-imported"
+IMPORTED_SOURCE_VERSION = "v2.3-structured-escalation-imported"
 
 
 def imported_source_version_for_variant(variant: str) -> str:
@@ -55,6 +55,15 @@ class AgentVariant(BaseModel):
         if name in self.denied_tools:
             return False
         return not self.allowed_tools or name in self.allowed_tools
+
+
+EscalationPolicyLabel = Literal["billing_policy", "permissions_policy"]
+ESCALATION_AUDIT_REASONS: dict[EscalationPolicyLabel, str] = {
+    "billing_policy": "Billing changes require human review and approval.",
+    "permissions_policy": (
+        "Restricted permissions changes require human review and approval."
+    ),
+}
 
 
 class SupportDecision(BaseModel):

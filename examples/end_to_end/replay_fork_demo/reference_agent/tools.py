@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from . import db
+from .config import ESCALATION_AUDIT_REASONS
 from .knowledge import search_kb
 from .mock_api import fetch_json
 
@@ -118,9 +119,13 @@ class SupportTools:
                 wrote_state=True,
             )
         if name == "escalate_to_human":
+            policy_label = str(args["policy_label"])
+            if policy_label not in ESCALATION_AUDIT_REASONS:
+                raise ValueError(f"Unknown escalation policy label: {policy_label}")
+            reason = ESCALATION_AUDIT_REASONS[policy_label]
             result = db.escalate_to_human(
                 str(args["customer_id"]),
-                str(args["reason"]),
+                reason,
                 self.db_path,
             )
             return ToolExecution(

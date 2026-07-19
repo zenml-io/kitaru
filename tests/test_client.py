@@ -113,6 +113,7 @@ from kitaru.imports import (
 )
 from kitaru.replay import (
     EXPERIMENT_ID_METADATA_KEY,
+    EXPERIMENT_LINEAGE_KIND_METADATA_KEY,
     EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
     EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY,
 )
@@ -2740,6 +2741,145 @@ def test_get_maps_execution_details() -> None:
     artifact_ref = execution.artifacts[0]
     assert artifact_ref.name == "research_context"
     assert artifact_ref.kind == "context"
+
+
+def test_get_maps_verified_imported_replay_lineage() -> None:
+    """Imported replay metadata should expose the logical parent and root."""
+    parent_id = uuid4()
+    root_id = uuid4()
+    child = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        run_metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "imported_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: str(parent_id),
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: str(root_id),
+        },
+    )
+    parent = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        run_id=parent_id,
+    )
+    root = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        run_id=root_id,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.side_effect = [
+            _as_pipeline_run(child),
+            _as_pipeline_run(parent),
+            _as_pipeline_run(root),
+        ]
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        client = KitaruClient()
+        execution = client.executions.get(str(child.id))
+        original = execution.original
+        replay_root = execution.root
+
+    assert execution.original_exec_id == str(parent_id)
+    assert execution.root_exec_id == str(root_id)
+    assert original is not None
+    assert original.exec_id == str(parent_id)
+    assert replay_root is not None
+    assert replay_root.exec_id == str(root_id)
+
+
+@pytest.mark.parametrize(
+    "invalid_metadata",
+    [
+        {
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "imported_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+        {
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "native_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+        {
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "imported_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: " ",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "root",
+        },
+        {
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "imported_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "",
+        },
+    ],
+)
+def test_get_does_not_map_unverified_imported_replay_lineage(
+    invalid_metadata: dict[str, Any],
+) -> None:
+    """Incomplete or inconsistent metadata should not create public lineage."""
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        run_metadata=invalid_metadata,
+    )
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        execution = KitaruClient().executions.get(str(run.id))
+
+    assert execution.original_exec_id is None
+    assert execution.root_exec_id is None
+
+
+def test_get_keeps_native_replay_lineage_authoritative() -> None:
+    """Native original_run lineage should override imported metadata."""
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="content_flow",
+        run_metadata={
+            EXPERIMENT_ID_METADATA_KEY: "exp-1",
+            EXPERIMENT_LINEAGE_KIND_METADATA_KEY: "imported_replay",
+            EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: "metadata-parent",
+            EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: "metadata-root",
+        },
+    )
+    run.original_run = SimpleNamespace(id="native-parent")
+
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection(),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+
+        execution = KitaruClient().executions.get(str(run.id))
+
+    assert execution.original_exec_id == "native-parent"
+    assert execution.root_exec_id is None
 
 
 def test_get_does_not_expose_ordinary_checkpoint_inputs_as_artifacts() -> None:

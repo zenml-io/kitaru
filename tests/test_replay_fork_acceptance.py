@@ -1,7 +1,10 @@
 """Persisted acceptance coverage for the shipped replay-fork journey."""
 
+import importlib
 import json
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,11 +30,8 @@ from tests.test_replay_fork_demo import DEMO_ROOT, _load_demo_module
 FIXTURE = DEMO_ROOT / "trace_fixtures" / "imported-support-cases.jsonl"
 ACCOUNT_TRACE_ID = "support-account-setting"
 STATUS_TRACE_ID = "support-service-status"
-ESCALATION_REASON = (
-    "Account owner requested enabling account-wide feature flag "
-    "'beta_exports_fast_path'. Account-wide feature-flag changes are restricted "
-    "admin actions per permissions policy; escalate for human review and approval."
-)
+BASELINE_REPRODUCTION_VERSION = "recorded-path-reproduction-v1"
+FIXED_CANDIDATE_VERSION = "permissions-fix-v1"
 
 
 def _initialize_repository(repository_root: Path) -> None:
@@ -139,7 +139,7 @@ def _recorded_path_model() -> FunctionModel:
                             tool_name="escalate_to_human",
                             args={
                                 "customer_id": "cust_acme",
-                                "reason": ESCALATION_REASON,
+                                "policy_label": "permissions_policy",
                             },
                             tool_call_id="candidate-escalation",
                         )
@@ -195,6 +195,39 @@ def _recorded_path_model() -> FunctionModel:
     return FunctionModel(respond)
 
 
+def _structured_argument_mismatch_model() -> FunctionModel:
+    def respond(
+        messages: list[pydantic_messages.ModelMessage],
+        _info: Any,
+    ) -> pydantic_messages.ModelResponse:
+        returned_names = [part.tool_name for part in _tool_returns(messages)]
+        if "escalate_to_human" not in returned_names:
+            return pydantic_messages.ModelResponse(
+                parts=[
+                    pydantic_messages.ToolCallPart(
+                        tool_name="escalate_to_human",
+                        args={
+                            "customer_id": "cust_acme",
+                            "policy_label": "billing_policy",
+                        },
+                        tool_call_id="candidate-mismatched-escalation",
+                    )
+                ]
+            )
+        return _final_result(
+            {
+                "policy_label": "permissions_policy",
+                "risk_status": "blocked",
+                "required_action": "refuse_write",
+                "summary": "The mismatched escalation was blocked.",
+                "evidence_ids": [],
+                "tool_names": ["escalate_to_human"],
+            }
+        )
+
+    return FunctionModel(respond)
+
+
 def _divergent_model() -> FunctionModel:
     def respond(
         messages: list[pydantic_messages.ModelMessage],
@@ -232,55 +265,93 @@ def _divergent_model() -> FunctionModel:
 def test_imported_replay_journey_persists_contract_faithful_evidence(
     primed_zenml: None,
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     del primed_zenml
     repository_root = Path(Client.find_repository())
     _initialize_repository(repository_root)
-    monkeypatch.setattr(
-        "kitaru._agent_registration._module_path_within_repository",
-        lambda *_args, **_kwargs: True,
+    shutil.copytree(DEMO_ROOT / "evals", repository_root / "evals")
+    shutil.copytree(
+        DEMO_ROOT / "reference_agent",
+        repository_root / "reference_agent",
     )
+    fixture_dir = repository_root / "trace_fixtures"
+    fixture_dir.mkdir()
+    shutil.copy2(FIXTURE, fixture_dir / FIXTURE.name)
+    shutil.copy2(DEMO_ROOT / "demo.py", repository_root / "demo.py")
+    assert (repository_root / ".kitaru").is_dir()
 
+    def clear_copied_modules() -> None:
+        for module_name in tuple(sys.modules):
+            if module_name == "evals" or module_name.startswith("evals."):
+                sys.modules.pop(module_name)
+            if module_name == "reference_agent" or module_name.startswith(
+                "reference_agent."
+            ):
+                sys.modules.pop(module_name)
+        importlib.invalidate_caches()
+
+    clear_copied_modules()
+    request.addfinalizer(clear_copied_modules)
+    monkeypatch.syspath_prepend(str(repository_root))
     monkeypatch.setenv("OPENAI_API_KEY", "deterministic-test-key")
-    demo = _load_demo_module()
-    source_agent, _objective = demo._registered_agent(
-        variant=demo.SOURCE_VARIANT,
-        version=demo.SOURCE_VERSION,
+    demo = _load_demo_module(repository_root)
+    registration = importlib.import_module("evals.register")
+    source_agent = registration.baseline_agent
+    source_agent.register(
+        label=demo.SOURCE_VERSION,
+        entrypoint="evals.register:baseline_agent",
     )
     source_state = source_agent._registered_state
     assert source_state is not None
+    source_version_id = source_state.binding.manifest.agent_version_id
+    source_agent.register(
+        label=demo.SOURCE_VERSION,
+        entrypoint="evals.register:baseline_agent",
+    )
+    repeated_source_state = source_agent._registered_state
+    assert repeated_source_state is not None
+    assert repeated_source_state.binding.manifest.agent_version_id == source_version_id
     assert source_state.binding.manifest.entrypoint == "evals.register:baseline_agent"
 
-    imported = demo._import_traces(
-        str(FIXTURE.resolve()),
-        source_project_id="langfuse-replay-example",
-        trace_ids=[ACCOUNT_TRACE_ID, STATUS_TRACE_ID],
-        limit=None,
-        dry_run=False,
-    )
-    repeated_import = demo._import_traces(
-        str(FIXTURE.resolve()),
-        source_project_id="langfuse-replay-example",
-        trace_ids=[ACCOUNT_TRACE_ID, STATUS_TRACE_ID],
-        limit=None,
-        dry_run=False,
-    )
-    assert [item.status for item in imported.outcomes] == [
-        ImportOutcomeStatus.CREATED,
-        ImportOutcomeStatus.CREATED,
-    ]
-    assert [item.status for item in repeated_import.outcomes] == [
-        ImportOutcomeStatus.UNCHANGED,
-        ImportOutcomeStatus.UNCHANGED,
-    ]
-    execution_ids = [item.execution_id for item in imported.outcomes]
-    assert all(execution_ids)
-    account_execution_id, status_execution_id = [
-        str(execution_id) for execution_id in execution_ids
-    ]
-    assert [item.execution_id for item in repeated_import.outcomes] == execution_ids
-
+    fixture = repository_root / "trace_fixtures" / "imported-support-cases.jsonl"
     client = KitaruClient()
+    preview = client.imports.langfuse(
+        str(fixture),
+        source_project_id="langfuse-replay-example",
+        agent=demo.AGENT_NAME,
+        version=demo.SOURCE_VERSION,
+        trace_ids=[ACCOUNT_TRACE_ID],
+        dry_run=True,
+    )
+    assert preview.dry_run is True
+    assert preview.selected_trace_count == 1
+
+    imported = client.imports.langfuse(
+        str(fixture),
+        source_project_id="langfuse-replay-example",
+        agent=demo.AGENT_NAME,
+        version=demo.SOURCE_VERSION,
+        trace_ids=[ACCOUNT_TRACE_ID],
+        dry_run=False,
+        confirm_data_storage=True,
+    )
+    repeated_import = client.imports.langfuse(
+        str(fixture),
+        source_project_id="langfuse-replay-example",
+        agent=demo.AGENT_NAME,
+        version=demo.SOURCE_VERSION,
+        trace_ids=[ACCOUNT_TRACE_ID],
+        dry_run=False,
+        confirm_data_storage=True,
+    )
+    assert [item.status for item in imported.outcomes] == [ImportOutcomeStatus.CREATED]
+    assert [item.status for item in repeated_import.outcomes] == [
+        ImportOutcomeStatus.UNCHANGED
+    ]
+    account_execution_id = str(imported.outcomes[0].execution_id)
+    assert repeated_import.outcomes[0].execution_id == imported.outcomes[0].execution_id
+
     account_execution = client.executions.get(account_execution_id)
     assert account_execution.import_info is not None
     assert account_execution.import_info.source_agent_version_id == (
@@ -325,7 +396,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         name="account-setting-resumption",
         idempotency_key="account-setting-resumption-v1",
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=BASELINE_REPRODUCTION_VERSION,
         model=recorded_model,
     )
     resumed_member = resumed.record.imported_replay_members[0]
@@ -350,6 +421,30 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         resumed.verdict.model_dump_json(indent=2)
     )
 
+    mismatched = demo._resume_case(
+        account_execution_id,
+        boundary_kind="tool-result",
+        boundary_index=1,
+        name="account-setting-structured-mismatch",
+        idempotency_key="account-setting-structured-mismatch-v1",
+        candidate_variant="baseline",
+        candidate_version="v2.3-structured-mismatch",
+        model=_structured_argument_mismatch_model(),
+    )
+    mismatch_member = mismatched.record.imported_replay_members[0]
+    mismatch_child = KitaruClient().executions.get(mismatch_member.child_execution_id)
+    assert mismatch_child.status == "completed", mismatch_child.failure
+    assert mismatch_member.recorded_response_hits == 0
+    assert mismatch_member.recorded_response_misses == 1
+    assert mismatch_member.blocked_calls == 1
+    assert mismatch_member.path_diverged is True
+    assert mismatch_member.comparability is ImportedReplayComparability.DEGRADED
+    assert len(mismatch_member.decisions) == 1
+    assert mismatch_member.decisions[0].decision == "blocked"
+    assert mismatch_member.decisions[0].block_reason == "argument_mismatch"
+    assert mismatched.verdict is not None
+    assert mismatched.verdict.verdict is ExperimentVerdict.HOLD
+
     model_boundary = demo._message_history_boundary(
         account_execution_id,
         kind="model-message",
@@ -363,8 +458,8 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         boundary_index=0,
         name="account-setting-model-message",
         idempotency_key="account-setting-model-message-v1",
-        candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_variant="mini_tool_budget_2",
+        candidate_version=FIXED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert model_resumed.record.imported_replay_members, (
@@ -392,8 +487,8 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         "account-setting-model-message",
         idempotency_key="account-setting-model-message-rerun-v1",
         limits=comparable_limits,
-        candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_variant="mini_tool_budget_2",
+        candidate_version=FIXED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert first_comparable_rerun.verdict is not None
@@ -408,8 +503,8 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         "account-setting-model-message",
         idempotency_key="account-setting-model-message-rerun-v1",
         limits=comparable_limits,
-        candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_variant="mini_tool_budget_2",
+        candidate_version=FIXED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert (
@@ -418,17 +513,33 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     )
     assert retried_comparable_rerun.record == first_comparable_rerun.record
 
+    status_import = client.imports.langfuse(
+        str(fixture),
+        source_project_id="langfuse-replay-example",
+        agent=demo.AGENT_NAME,
+        version=demo.SOURCE_VERSION,
+        trace_ids=[STATUS_TRACE_ID],
+        dry_run=False,
+        confirm_data_storage=True,
+    )
+    assert [item.status for item in status_import.outcomes] == [
+        ImportOutcomeStatus.CREATED
+    ]
+    status_execution_id = str(status_import.outcomes[0].execution_id)
+
     suite = demo._replay_cases(
         [account_execution_id, status_execution_id],
         name="support-imported-regression",
         idempotency_key="support-imported-regression-v1",
         repeats=1,
-        candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_variant="mini_tool_budget_2",
+        candidate_version=FIXED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert suite.spec.suite_key == "support-imported-regression"
-    assert suite.spec.executable.entrypoint == "evals.register:baseline_agent"
+    assert suite.spec.executable.entrypoint == (
+        "evals.register:mini_tool_budget_2_agent"
+    )
     assert suite.spec.target_membership.execution_ids == [
         account_execution_id,
         status_execution_id,
@@ -461,11 +572,14 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     }
     assert all(row.scored == 2 for row in score_aggregate.scorer_aggregates)
 
+    child_execution = client.executions.get(child_id)
+    assert child_execution.original_exec_id == account_execution_id
+    assert child_execution.root_exec_id == account_execution_id
     inspected_execution = demo._inspect_execution(child_id)
     assert inspected_execution["immediate_parent_id"] == account_execution_id
     assert inspected_execution["root_execution_id"] == account_execution_id
     assert "cost" in inspected_execution
-    inspected_suite = demo._inspect_experiment("support-imported-regression")
+    inspected_suite = demo._inspect_experiment(suite.spec.experiment_id)
     assert inspected_suite["attempt"]["suite_key"] == "support-imported-regression"
     assert inspected_suite["attempt"]["score_aggregate_data"] == score_aggregate
     assert len(inspected_suite["members"]) == 2
@@ -485,8 +599,8 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
             "support-imported-regression",
             idempotency_key="support-imported-regression-rerun-v1",
             limits=limits,
-            candidate_variant="baseline",
-            candidate_version="v2.2-recorded-fix",
+            candidate_variant="mini_tool_budget_2",
+            candidate_version=FIXED_CANDIDATE_VERSION,
             model=recorded_model,
         )
     first_rerun = client.agents.experiments.resolve_source(
@@ -506,8 +620,8 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
             "support-imported-regression",
             idempotency_key="support-imported-regression-rerun-v1",
             limits=limits,
-            candidate_variant="baseline",
-            candidate_version="v2.2-recorded-fix",
+            candidate_variant="mini_tool_budget_2",
+            candidate_version=FIXED_CANDIDATE_VERSION,
             model=recorded_model,
         )
     retried_rerun = client.agents.experiments.resolve_source(
@@ -524,7 +638,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         idempotency_key="support-permissions-counterfactual-v1",
         repeats=1,
         candidate_variant="nano_trimmed_permissions",
-        candidate_version="v2.2-counterfactual",
+        candidate_version="v2.3-counterfactual",
         model=divergent_model,
     )
     assert counterfactual.spec.executable.entrypoint == (

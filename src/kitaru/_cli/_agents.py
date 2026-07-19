@@ -319,10 +319,15 @@ def experiments(
         output=output_format,
         exit_with_error=_exit_with_error,
     )
-    records = (
-        [agent.get_experiment(experiment)]
-        if experiment is not None
-        else agent.list_experiments()
+    records = run_with_cli_error_boundary(
+        lambda: (
+            [agent.get_experiment(experiment)]
+            if experiment is not None
+            else agent.list_experiments()
+        ),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
     )
     if output_format == CLIOutputFormat.JSON:
         _emit_json_items(

@@ -2,8 +2,9 @@
 
 import importlib
 import json
-import os
-from collections.abc import Mapping
+import sys
+from collections.abc import Callable, Mapping
+from contextlib import redirect_stdout
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from enum import Enum
@@ -30,16 +31,17 @@ from kitaru.imports import (
     ImportedReplayMode,
     ReplayPartKind,
     load_imported_replay_evidence,
+    sha256_canonical_json,
 )
 from kitaru.replay import EXPERIMENT_ID_METADATA_KEY
 
 AGENT_NAME = "support-agent"
 SOURCE_VARIANT = IMPORTED_SOURCE_VARIANT
 SOURCE_VERSION = IMPORTED_SOURCE_VERSION
-DEFAULT_CANDIDATE_VARIANT = os.getenv(
-    "SUPPORT_AGENT_VARIANT", "nano_trimmed_permissions"
-)
-DEFAULT_CANDIDATE_VERSION = os.getenv("SUPPORT_AGENT_VERSION", "v2.2-counterfactual")
+DEFAULT_REPLAY_VARIANT = "nano_trimmed_permissions"
+DEFAULT_REPLAY_VERSION = "v2.3-counterfactual"
+DEFAULT_RESUME_VARIANT = "baseline"
+DEFAULT_RESUME_VERSION = "recorded-path-reproduction-v1"
 DEFAULT_EXPERIMENT = "support-agent-permissions-v2"
 DEFAULT_BOUNDARY_KIND = "tool-result"
 DEFAULT_BOUNDARY_INDEX = 1
@@ -78,6 +80,21 @@ def _json(value: Any) -> str:
     return json.dumps(_json_value(value), indent=2, sort_keys=True)
 
 
+def _canonical_idempotency_key(operation: str, **inputs: Any) -> str:
+    """Derive a stable tutorial key from the complete logical request."""
+    request = {"operation": operation, **inputs}
+    digest = sha256_canonical_json(_json_value(request))[:20]
+    return f"replay-demo-{operation}-{digest}"
+
+
+def _run_for_output(output: str, operation: Callable[[], Any]) -> Any:
+    """Keep runtime logs off stdout when the command promises JSON."""
+    if output == "json":
+        with redirect_stdout(sys.stderr):
+            return operation()
+    return operation()
+
+
 def _value(value: Any) -> str:
     """Return a readable scalar value for tutorial output."""
     if value is None:
@@ -97,58 +114,6 @@ def _echo_rows(title: str, rows: list[tuple[str, Any]]) -> None:
     width = max(len(label) for label, _ in rows)
     for label, value in rows:
         click.echo(f"  {label:<{width}}  {_value(value)}")
-
-
-def _emit_registration(*, role: str, variant: str, version: str, output: str) -> None:
-    payload = {
-        "agent": AGENT_NAME,
-        "role": role,
-        "variant": variant,
-        "version": version,
-    }
-    if output == "json":
-        click.echo(_json(payload))
-        return
-    _echo_rows(
-        "Registered AgentVersion",
-        [
-            ("Agent", AGENT_NAME),
-            ("Role", role),
-            ("Variant", variant),
-            ("Version", version),
-        ],
-    )
-
-
-def _emit_import_result(result: Any, *, output: str) -> None:
-    if output == "json":
-        click.echo(_json(result))
-        return
-    action = "Previewed" if result.dry_run else "Imported"
-    _echo_rows(
-        f"{action} {result.selected_trace_count} trace(s)",
-        [
-            ("Agent", f"{result.agent_name} @ {result.requested_version}"),
-            ("Project", result.source_project_id),
-            ("Storage", result.artifact_store_type),
-        ],
-    )
-    for outcome in result.outcomes:
-        rows = [
-            ("Status", outcome.status),
-            ("Integrity", outcome.integrity),
-            ("Observations", outcome.observation_count),
-        ]
-        if outcome.execution_id is not None:
-            rows.append(("Execution ID", outcome.execution_id))
-        if outcome.existing_execution_id is not None:
-            rows.append(("Existing execution", outcome.existing_execution_id))
-        if outcome.reason is not None:
-            rows.append(("Problem", outcome.reason))
-        if outcome.resolution is not None:
-            rows.append(("Next action", outcome.resolution))
-        click.echo()
-        _echo_rows(f"Trace: {outcome.trace_id}", rows)
 
 
 def _imported_replay_evidence_rows(evidence: Any) -> list[tuple[str, Any]]:
@@ -186,12 +151,15 @@ def _replay_description(record: Any) -> str:
     return ", ".join(descriptions) or record.spec.at
 
 
-def _experiment_rows(result: Any, *, candidate_version: str) -> list[tuple[str, Any]]:
+def _experiment_rows(
+    result: Any, *, candidate_version: str, idempotency_key: str
+) -> list[tuple[str, Any]]:
     record = result.record
     spec = record.spec
     counts = record.counts
     rows: list[tuple[str, Any]] = [
         ("Attempt", spec.experiment_id),
+        ("Idempotency key", idempotency_key),
         ("Candidate", f"{AGENT_NAME} @ {candidate_version}"),
         ("Status", record.status),
         ("Trials", f"{counts.verified}/{counts.intended} verified"),
@@ -258,29 +226,42 @@ def _experiment_rows(result: Any, *, candidate_version: str) -> list[tuple[str, 
     rows.append(
         (
             "Inspect",
-            f"kitaru agents experiments {AGENT_NAME} {spec.suite_key}",
+            f"kitaru agents experiments {AGENT_NAME} {spec.experiment_id}",
         )
     )
     return rows
 
 
 def _emit_experiment_result(
-    result: Any, *, candidate_version: str, output: str
+    result: Any, *, candidate_version: str, idempotency_key: str, output: str
 ) -> None:
     if output == "json":
-        click.echo(_json(result))
+        with redirect_stdout(sys.stderr):
+            payload = _json_value(result)
+            if isinstance(payload, Mapping):
+                payload = {**payload, "idempotency_key": idempotency_key}
+            else:
+                payload = {"idempotency_key": idempotency_key, "result": payload}
+            document = _json(payload)
+        click.echo(document)
         return
     verdict = result.record.verdict
     verdict_label = "NOT GRADED" if verdict is None else verdict.verdict.value.upper()
     _echo_rows(
         f"{verdict_label}  {result.record.spec.suite_key}",
-        _experiment_rows(result, candidate_version=candidate_version),
+        _experiment_rows(
+            result,
+            candidate_version=candidate_version,
+            idempotency_key=idempotency_key,
+        ),
     )
 
 
 def _emit_execution_inspection(payload: dict[str, Any], *, output: str) -> None:
     if output == "json":
-        click.echo(_json(payload))
+        with redirect_stdout(sys.stderr):
+            document = _json(payload)
+        click.echo(document)
         return
     rows: list[tuple[str, Any]] = [
         ("Execution", payload["execution_id"]),
@@ -356,7 +337,9 @@ def _emit_execution_inspection(payload: dict[str, Any], *, output: str) -> None:
 
 def _emit_experiment_inspection(payload: dict[str, Any], *, output: str) -> None:
     if output == "json":
-        click.echo(_json(payload))
+        with redirect_stdout(sys.stderr):
+            document = _json(payload)
+        click.echo(document)
         return
     attempt = payload["attempt"]
     verdict = attempt.get("verdict")
@@ -417,28 +400,6 @@ def _registered_agent(
         entrypoint=registration_module.entrypoint_for_variant(variant),
     )
     return agent, registration_module.support_resolution_objective
-
-
-def _import_traces(
-    source: str,
-    *,
-    source_project_id: str | None,
-    trace_ids: list[str],
-    limit: int | None,
-    dry_run: bool,
-) -> Any:
-    """Plan or execute a Langfuse import under the declared source version."""
-    client = KitaruClient()
-    return client.imports.langfuse(
-        source,
-        source_project_id=source_project_id,
-        agent=AGENT_NAME,
-        version=SOURCE_VERSION,
-        trace_ids=trace_ids or None,
-        limit=limit,
-        dry_run=dry_run,
-        confirm_data_storage=not dry_run,
-    )
 
 
 def _validated_message_history_boundaries(
@@ -548,13 +509,14 @@ def _resume_case(
     boundary_kind: Literal["model-message", "tool-result"],
     boundary_index: int,
     name: str,
+    boundary: ImportedReplayBoundary | None = None,
     idempotency_key: str,
     candidate_variant: str,
     candidate_version: str,
     model: Any | None = None,
 ) -> Any:
     """Resume one imported case from an inspected complete history boundary."""
-    boundary = _message_history_boundary(
+    boundary = boundary or _message_history_boundary(
         execution_id,
         kind=boundary_kind,
         index=boundary_index,
@@ -640,20 +602,8 @@ def _inspect_execution(
             if isinstance(experiment_id, str) and experiment_id
             else ()
         )
-    imported_member = next(
-        (
-            member
-            for attempt in attempts
-            for member in attempt.record.imported_replay_members
-            if member.child_execution_id == execution.exec_id
-        ),
-        None,
-    )
     immediate_parent_id = execution.original_exec_id
     root_execution_id = execution.root_exec_id
-    if imported_member is not None:
-        immediate_parent_id = imported_member.parent_execution_id
-        root_execution_id = imported_member.root_execution_id
     scores = execution.scores.list() if include_scores else []
     payload: dict[str, Any] = {
         "execution_id": execution.exec_id,
@@ -768,107 +718,49 @@ def cli() -> None:
     """Imported Langfuse-to-regression replay example."""
 
 
-@cli.command("register")
-@click.option(
-    "--role",
-    type=click.Choice(["source", "candidate"]),
-    default="candidate",
-    show_default=True,
-)
-@click.option("--variant")
-@click.option("--version")
-@_output_option
-def register_cmd(
-    role: str, variant: str | None, version: str | None, output: str
-) -> None:
-    """Register an explicit source or candidate AgentVersion."""
-    if role == "source":
-        if variant not in {None, SOURCE_VARIANT}:
-            raise click.UsageError(
-                f"The source fixture is immutable: --variant must be "
-                f"{SOURCE_VARIANT!r}."
-            )
-        if version not in {None, SOURCE_VERSION}:
-            raise click.UsageError(
-                f"The source fixture is immutable: --version must be "
-                f"{SOURCE_VERSION!r}."
-            )
-        selected_variant = SOURCE_VARIANT
-        selected_version = SOURCE_VERSION
-    else:
-        selected_variant = variant or DEFAULT_CANDIDATE_VARIANT
-        selected_version = version or DEFAULT_CANDIDATE_VERSION
-    _agent, _objective = _registered_agent(
-        variant=selected_variant,
-        version=selected_version,
-    )
-    _emit_registration(
-        role=role,
-        variant=selected_variant,
-        version=selected_version,
-        output=output,
-    )
-
-
-@cli.command("import-traces")
-@click.argument("source")
-@click.option("--source-project-id")
-@click.option("--trace-id", "trace_ids", multiple=True)
-@click.option("--limit", type=click.IntRange(min=1))
-@click.option(
-    "--commit",
-    is_flag=True,
-    help="Persist imported observations. The default is a read-only dry run.",
-)
-@_output_option
-def import_traces_cmd(
-    source: str,
-    source_project_id: str | None,
-    trace_ids: tuple[str, ...],
-    limit: int | None,
-    commit: bool,
-    output: str,
-) -> None:
-    """Plan or import a JSONL export or langfuse://trace/<id> URI."""
-    result = _import_traces(
-        source,
-        source_project_id=source_project_id,
-        trace_ids=list(trace_ids),
-        limit=limit,
-        dry_run=not commit,
-    )
-    _emit_import_result(result, output=output)
-
-
 @cli.command("replay")
 @click.argument("exec_id")
 @click.option("--name")
-@click.option("--idempotency-key", required=True)
+@click.option("--idempotency-key")
 @click.option("--repeats", type=click.IntRange(min=1), default=1, show_default=True)
-@click.option("--candidate-variant", default=DEFAULT_CANDIDATE_VARIANT)
-@click.option("--candidate-version", default=DEFAULT_CANDIDATE_VERSION)
+@click.option("--candidate-variant", default=DEFAULT_REPLAY_VARIANT, show_default=True)
+@click.option("--candidate-version", default=DEFAULT_REPLAY_VERSION, show_default=True)
 @_output_option
 def replay_cmd(
     exec_id: str,
     name: str | None,
-    idempotency_key: str,
+    idempotency_key: str | None,
     repeats: int,
     candidate_variant: str,
     candidate_version: str,
     output: str,
 ) -> None:
-    """Replay one imported root as a scored candidate experiment."""
-    result = _replay_cases(
-        [exec_id],
-        name=name or f"case-{exec_id}",
-        idempotency_key=idempotency_key,
+    """Replay one imported root as a scored counterfactual experiment."""
+    resolved_name = name or f"case-{exec_id}"
+    resolved_key = idempotency_key or _canonical_idempotency_key(
+        "replay",
+        execution_ids=[exec_id],
+        imported_mode=ImportedReplayMode.ROOT_INPUT,
+        name=resolved_name,
         repeats=repeats,
         candidate_variant=candidate_variant,
         candidate_version=candidate_version,
     )
+    result = _run_for_output(
+        output,
+        lambda: _replay_cases(
+            [exec_id],
+            name=resolved_name,
+            idempotency_key=resolved_key,
+            repeats=repeats,
+            candidate_variant=candidate_variant,
+            candidate_version=candidate_version,
+        ),
+    )
     _emit_experiment_result(
         result,
         candidate_version=candidate_version,
+        idempotency_key=resolved_key,
         output=output,
     )
 
@@ -888,33 +780,57 @@ def replay_cmd(
     show_default=True,
 )
 @click.option("--name")
-@click.option("--idempotency-key", required=True)
-@click.option("--candidate-variant", default=DEFAULT_CANDIDATE_VARIANT)
-@click.option("--candidate-version", default=DEFAULT_CANDIDATE_VERSION)
+@click.option("--idempotency-key")
+@click.option("--candidate-variant", default=DEFAULT_RESUME_VARIANT, show_default=True)
+@click.option("--candidate-version", default=DEFAULT_RESUME_VERSION, show_default=True)
 @_output_option
 def resume_cmd(
     exec_id: str,
     boundary_kind: Literal["model-message", "tool-result"],
     boundary_index: int,
     name: str | None,
-    idempotency_key: str,
+    idempotency_key: str | None,
     candidate_variant: str,
     candidate_version: str,
     output: str,
 ) -> None:
-    """Resume one imported case from a complete persisted history boundary."""
-    result = _resume_case(
-        exec_id,
-        boundary_kind=boundary_kind,
-        boundary_index=boundary_index,
-        name=name or f"resume-{exec_id}",
-        idempotency_key=idempotency_key,
+    """Resume one imported case with safe reproduction defaults."""
+    boundary = _run_for_output(
+        output,
+        lambda: _message_history_boundary(
+            exec_id,
+            kind=boundary_kind,
+            index=boundary_index,
+        ),
+    )
+    resolved_name = name or f"reproduce-{exec_id}"
+    resolved_key = idempotency_key or _canonical_idempotency_key(
+        "resume",
+        execution_ids=[exec_id],
+        imported_mode=ImportedReplayMode.MESSAGE_HISTORY,
+        boundary=boundary,
+        name=resolved_name,
+        repeats=1,
         candidate_variant=candidate_variant,
         candidate_version=candidate_version,
+    )
+    result = _run_for_output(
+        output,
+        lambda: _resume_case(
+            exec_id,
+            boundary_kind=boundary_kind,
+            boundary_index=boundary_index,
+            boundary=boundary,
+            name=resolved_name,
+            idempotency_key=resolved_key,
+            candidate_variant=candidate_variant,
+            candidate_version=candidate_version,
+        ),
     )
     _emit_experiment_result(
         result,
         candidate_version=candidate_version,
+        idempotency_key=resolved_key,
         output=output,
     )
 
@@ -922,32 +838,45 @@ def resume_cmd(
 @cli.command("experiment")
 @click.argument("exec_ids", nargs=-1, required=True)
 @click.option("--name", default=DEFAULT_EXPERIMENT, show_default=True)
-@click.option("--idempotency-key", required=True)
-@click.option("--repeats", type=click.IntRange(min=1), default=3, show_default=True)
-@click.option("--candidate-variant", default=DEFAULT_CANDIDATE_VARIANT)
-@click.option("--candidate-version", default=DEFAULT_CANDIDATE_VERSION)
+@click.option("--idempotency-key")
+@click.option("--repeats", type=click.IntRange(min=1), default=1, show_default=True)
+@click.option("--candidate-variant", required=True)
+@click.option("--candidate-version", required=True)
 @_output_option
 def experiment_cmd(
     exec_ids: tuple[str, ...],
     name: str,
-    idempotency_key: str,
+    idempotency_key: str | None,
     repeats: int,
     candidate_variant: str,
     candidate_version: str,
     output: str,
 ) -> None:
     """Replay an explicit ordered imported set as one named suite."""
-    result = _replay_cases(
-        list(exec_ids),
+    resolved_key = idempotency_key or _canonical_idempotency_key(
+        "experiment",
+        execution_ids=list(exec_ids),
+        imported_mode=ImportedReplayMode.ROOT_INPUT,
         name=name,
-        idempotency_key=idempotency_key,
         repeats=repeats,
         candidate_variant=candidate_variant,
         candidate_version=candidate_version,
     )
+    result = _run_for_output(
+        output,
+        lambda: _replay_cases(
+            list(exec_ids),
+            name=name,
+            idempotency_key=resolved_key,
+            repeats=repeats,
+            candidate_variant=candidate_variant,
+            candidate_version=candidate_version,
+        ),
+    )
     _emit_experiment_result(
         result,
         candidate_version=candidate_version,
+        idempotency_key=resolved_key,
         output=output,
     )
 
@@ -959,8 +888,8 @@ def experiment_cmd(
 @click.option("--max-cost-usd", type=float, default=1.0, show_default=True)
 @click.option("--max-incurred-tokens", type=int, default=100_000, show_default=True)
 @click.option("--max-duration-seconds", type=float, default=300.0, show_default=True)
-@click.option("--candidate-variant", default=DEFAULT_CANDIDATE_VARIANT)
-@click.option("--candidate-version", default=DEFAULT_CANDIDATE_VERSION)
+@click.option("--candidate-variant", required=True)
+@click.option("--candidate-version", required=True)
 @_output_option
 def rerun_cmd(
     suite: str,
@@ -974,22 +903,26 @@ def rerun_cmd(
     output: str,
 ) -> None:
     """Rerun a named protected suite as a bounded regression gate."""
-    result = _rerun_suite(
-        suite,
-        idempotency_key=idempotency_key,
-        limits=RegressionLimits(
-            max_trials=max_trials,
-            max_cost_usd=max_cost_usd,
-            max_incurred_tokens=max_incurred_tokens,
-            max_duration_seconds=max_duration_seconds,
+    result = _run_for_output(
+        output,
+        lambda: _rerun_suite(
+            suite,
+            idempotency_key=idempotency_key,
+            limits=RegressionLimits(
+                max_trials=max_trials,
+                max_cost_usd=max_cost_usd,
+                max_incurred_tokens=max_incurred_tokens,
+                max_duration_seconds=max_duration_seconds,
+            ),
+            candidate_variant=candidate_variant,
+            candidate_version=candidate_version,
+            assert_pass=False,
         ),
-        candidate_variant=candidate_variant,
-        candidate_version=candidate_version,
-        assert_pass=False,
     )
     _emit_experiment_result(
         result,
         candidate_version=candidate_version,
+        idempotency_key=idempotency_key,
         output=output,
     )
     try:
@@ -1003,10 +936,13 @@ def rerun_cmd(
 @_output_option
 def inspect_execution_cmd(exec_id: str, output: str) -> None:
     """Inspect import attribution, readiness, lineage, scores, and cost."""
-    payload = _inspect_execution(
-        exec_id,
-        include_scores=output == "json",
-        boundary_limit=None if output == "json" else 10,
+    payload = _run_for_output(
+        output,
+        lambda: _inspect_execution(
+            exec_id,
+            include_scores=output == "json",
+            boundary_limit=None if output == "json" else 10,
+        ),
     )
     _emit_execution_inspection(payload, output=output)
 
@@ -1028,11 +964,14 @@ def inspect_experiment_cmd(
     output: str,
 ) -> None:
     """Inspect one bounded attempt-member page, scores, limits, and verdict."""
-    payload = _inspect_experiment(
-        experiment_id_or_suite,
-        page=page,
-        page_size=page_size,
-        detailed=output == "json",
+    payload = _run_for_output(
+        output,
+        lambda: _inspect_experiment(
+            experiment_id_or_suite,
+            page=page,
+            page_size=page_size,
+            detailed=output == "json",
+        ),
     )
     _emit_experiment_inspection(payload, output=output)
 
