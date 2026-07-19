@@ -116,6 +116,48 @@ gives you the faithful reruns and the cost/latency deltas; the quality bar is
 yours to define.
 {% endhint %}
 
+## 4. Gate CI on a frozen suite
+
+A batch that passed once should not depend on someone remembering to re-run
+it. When the replay was submitted through a registered Agent with a name, it
+persists as a durable experiment — the target set, the fork point, the
+scorers, the protections, and the [verdict](replay-and-overrides.md#verdicts-and-protections)
+are all frozen in the attempt. Rerunning it by name makes the current
+checkout the candidate while everything else stays constant, so the
+difference between attempts is your change and nothing else:
+
+```python
+import os
+
+from kitaru import RegressionLimits
+
+result = agent.replay(
+    experiment="support-refund-regression",     # the frozen suite, by name
+    idempotency_key=f"ci-{os.environ['GITHUB_SHA'][:12]}",
+    repeats=1,
+    scorers=[support_resolution],               # the objective, as a live callable
+    limits=RegressionLimits(max_trials=25, max_cost_usd=1.00),
+)
+result.assert_pass()                            # raises unless the verdict is PASS
+```
+
+Drop that in a pytest module and the suite is a merge gate: a change that
+reintroduces the old behavior fails a protection, the verdict refuses to
+pass, and the pull request is blocked. Two properties make this safe to wire
+into a pipeline. `RegressionLimits` is a hard spend ceiling — trials stop
+when the budget would be exceeded, and every verdict prints what it spent.
+And the commit-derived idempotency key makes retries free: a re-triggered CI
+job returns the stored attempt instead of paying for the model calls again.
+The cheap shape (one repeat, tight budget) runs per pull request; a wider
+sweep of the same suite can run nightly under a larger budget with the same
+four lines.
+
+This works for imported suites too: a batch of Langfuse traces imported as
+executions and replayed through a registered adapter Agent freezes into the
+same kind of experiment, so production incidents collected in another tool
+end their life as merge gates here. See
+[Import Langfuse Traces](import-langfuse-traces.md) for that path.
+
 ## The shape of the workflow
 
 1. **Select** a cohort — `executions.list(...)` for a raw slice, or
@@ -125,7 +167,8 @@ yours to define.
 3. **Diff** with `diff_cohort` for per-run deltas, and `executions.statistics` for
    the aggregate.
 4. **Keep the winner** — promote the change if the cohort held, using
-   [Deploy & Invoke](deployments.md).
+   [Deploy & Invoke](deployments.md), and **pin the suite in CI** so the
+   regression can never quietly return.
 
 ## Related
 
