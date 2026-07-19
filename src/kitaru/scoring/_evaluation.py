@@ -65,7 +65,11 @@ from kitaru.scoring._grounded import (
     GroundedWorld,
 )
 from kitaru.scoring._repository import ObservationQuery, ScoreObservationRepository
-from kitaru.scoring._verdicts import VerdictPolicy, evaluate_verdict
+from kitaru.scoring._verdicts import (
+    ImportedReplayVerdictPolicy,
+    VerdictPolicy,
+    evaluate_verdict,
+)
 
 ScorerInput = Callable[..., Any]
 
@@ -474,6 +478,28 @@ class ScoreEvaluationService:
                 raise KitaruMetadataConflictError(
                     "Replay grounded policy does not match the frozen request."
                 )
+            if record.imported_replay_evidence is not None:
+                ineligible_ids = {
+                    issue.child_execution_id
+                    for issue in record.unverified_children
+                    if issue.child_execution_id is not None
+                }
+                expected_member_ids = [
+                    item.child_execution_id
+                    for item in record.imported_replay_members
+                    if (
+                        item.candidate_status == "completed"
+                        and item.child_execution_id not in ineligible_ids
+                    )
+                ]
+                actual_member_ids = [
+                    str(getattr(run, "id", "")).strip() for run in runs
+                ]
+                if actual_member_ids != expected_member_ids:
+                    raise KitaruMetadataConflictError(
+                        "Imported replay evidence does not match the verified "
+                        "child set."
+                    )
             if record.score_aggregate is not None:
                 aggregate = load_score_aggregate(
                     record.score_aggregate,
@@ -845,6 +871,7 @@ def _scoring_contract(
     protections: Sequence[ProtectionDeclaration],
     *,
     objective_minimum_mean: float | None,
+    imported_replay: ImportedReplayVerdictPolicy | None = None,
 ) -> tuple[list[ScorerInput], list[ScorerSnapshot], VerdictPolicy | None]:
     if protections and len(objective_declarations) > 1:
         raise KitaruUsageError(
@@ -873,6 +900,7 @@ def _scoring_contract(
         objective=objective_snapshot,
         minimum_mean=objective_minimum_mean,
         protections=protection_snapshots,
+        imported_replay=imported_replay,
     )
     declarations = [*objective_declarations, *protection_declarations]
     return declarations, [scorer_snapshot(item) for item in declarations], policy

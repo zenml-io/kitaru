@@ -50,6 +50,11 @@ EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_target_executio
 EXPERIMENT_REPEAT_INDEX_METADATA_KEY = "kitaru_experiment_repeat_index_v1"
 EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_parent_execution_id_v1"
 EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY = "kitaru_experiment_root_execution_id_v1"
+EXPERIMENT_LINEAGE_KIND_METADATA_KEY = "kitaru_experiment_lineage_kind_v1"
+IMPORTED_REPLAY_MEMBER_EVIDENCE_METADATA_KEY = (
+    "kitaru_imported_replay_member_evidence_v1"
+)
+_MAX_IMPORTED_REPLAY_TOOL_DECISIONS = 256
 EXPERIMENT_TAG_PREFIX = "kitaru-experiment:"
 _EXPERIMENT_MEMBERSHIP_ATTEMPTS = 3
 _ReplaySelectorKind = Literal["checkpoint", "invocation"]
@@ -179,6 +184,7 @@ class ExperimentReplayContext:
     repeat_index: int
     parent_execution_id: str
     root_execution_id: str
+    lineage_kind: Literal["native_replay", "imported_replay"] = "native_replay"
 
     def __post_init__(self) -> None:
         values = (
@@ -694,6 +700,8 @@ def persist_and_verify_experiment_membership(
         EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY: context.parent_execution_id,
         EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY: context.root_execution_id,
     }
+    if context.lineage_kind == "imported_replay":
+        expected_metadata[EXPERIMENT_LINEAGE_KIND_METADATA_KEY] = context.lineage_kind
     last_error: Exception | None = None
     hydrated_run: Any | None = None
     refresh_after_write = False
@@ -804,6 +812,16 @@ def _verify_experiment_member_run(
             verified=False,
             reason=f"Unable to verify replay parent lineage: {exc}",
         )
+    if context.lineage_kind == "imported_replay":
+        if original_id:
+            return ExperimentMemberVerification(
+                verified=False,
+                reason=(
+                    "Imported replay children must be normal candidate runs, not "
+                    "native replay children."
+                ),
+            )
+        return ExperimentMemberVerification(verified=True)
     if original_id != context.parent_execution_id:
         return ExperimentMemberVerification(
             verified=False,
@@ -1804,11 +1822,13 @@ def build_replay_from_start_plan(
 
 __all__ = [
     "EXPERIMENT_ID_METADATA_KEY",
+    "EXPERIMENT_LINEAGE_KIND_METADATA_KEY",
     "EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY",
     "EXPERIMENT_REPEAT_INDEX_METADATA_KEY",
     "EXPERIMENT_ROOT_EXECUTION_ID_METADATA_KEY",
     "EXPERIMENT_TAG_PREFIX",
     "EXPERIMENT_TARGET_EXECUTION_ID_METADATA_KEY",
+    "IMPORTED_REPLAY_MEMBER_EVIDENCE_METADATA_KEY",
     "REPLAY_OUTPUT_OVERRIDES_METADATA_KEY",
     "REPLAY_RESERVED_KWARGS",
     "REPLAY_SKIPPED_STEPS_METADATA_KEY",

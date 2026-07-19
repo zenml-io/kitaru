@@ -57,6 +57,10 @@ from kitaru.scoring._repository import (
 )
 from kitaru.scoring._verdicts import (
     ExperimentVerdict,
+    ImportedReplayComparability,
+    ImportedReplayEvidenceSummary,
+    ImportedReplayVerdictFact,
+    ImportedReplayVerdictPolicy,
     ObjectivePolicy,
     ObjectiveVerdictFact,
     OperationalLimitFacts,
@@ -96,6 +100,10 @@ __all__ = [
     "GroundedPolicySnapshot",
     "GroundedProvenance",
     "GroundedWorld",
+    "ImportedReplayComparability",
+    "ImportedReplayEvidenceSummary",
+    "ImportedReplayVerdictFact",
+    "ImportedReplayVerdictPolicy",
     "InlineEvidenceManifestReference",
     "ObjectivePolicy",
     "ObjectiveVerdictFact",

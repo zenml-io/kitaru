@@ -6,17 +6,27 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru._experiments import (
+    FrozenImportedReplayPlan,
+    FrozenReplayPlan,
+    ImportedReplayMemberEvidence,
     execute_replay_attempt,
     freeze_replay_attempt,
     preplan_replay_attempt,
     reserve_experiment,
     transition_experiment_to_running,
 )
+from kitaru._experiments._execution import _verified_imported_member_evidence
 from kitaru._experiments._limits import RegressionLimitTracker
 from kitaru.errors import KitaruStateError
 from kitaru.experiments import RegressionLimits
+from kitaru.imports import (
+    ImportedReplayBoundary,
+    ImportedReplayBoundaryKind,
+    ImportedReplayMode,
+)
 from kitaru.replay import (
     EXPERIMENT_ID_METADATA_KEY,
     EXPERIMENT_PARENT_EXECUTION_ID_METADATA_KEY,
@@ -32,7 +42,7 @@ from kitaru.replay import (
     ReplayResultRow,
     ReplaySubmission,
 )
-from kitaru.scoring import OperationalLimitReason
+from kitaru.scoring import ImportedReplayComparability, OperationalLimitReason
 from tests.experiments._helpers import (
     _base_envelope,
     _binding,
@@ -41,6 +51,7 @@ from tests.experiments._helpers import (
     _RunClient,
     _step,
 )
+from tests.test_pydantic_ai_imported_replay_runtime import _prepared_evidence
 
 
 def _attempt_plan(
@@ -208,6 +219,27 @@ def test_execute_attempt_completes_named_repeats_and_is_idempotent() -> None:
     assert retry.record == result.record
     assert retry.submission.submission_id == result.submission.submission_id
     assert retry.submission.results == []
+
+
+@pytest.mark.parametrize("mutation", ["reorder", "remove"])
+def test_execute_attempt_revalidates_mutated_frozen_trial_order(mutation: str) -> None:
+    plan = _attempt_plan(repeats=1)
+    if mutation == "reorder":
+        plan.spec.planning_rows.reverse()
+    else:
+        plan.spec.planning_rows.pop()
+    client = _ProjectClient(_base_envelope())
+
+    with pytest.raises(ValueError):
+        execute_replay_attempt(
+            plan,
+            submit_trial=lambda **_kwargs: pytest.fail(
+                "mutated frozen plan submitted a child"
+            ),
+            client_factory=lambda: client,
+        )
+
+    assert client.update_calls == []
 
 
 def test_execute_attempt_stops_between_trials_and_freezes_usage() -> None:
@@ -505,11 +537,15 @@ def test_execute_attempt_keeps_batch_plan_as_unresolved_request() -> None:
     )
 
     assert result.submission.plan == ReplayPlanDocument()
-    assert [
-        row.replay_plan.document
+    native_plans = [
+        row.replay_plan
         for row in result.spec.planning_rows
-        if row.replay_plan is not None
-    ] == [ReplayPlanDocument(), ReplayPlanDocument()]
+        if isinstance(row.replay_plan, FrozenReplayPlan)
+    ]
+    assert [plan.document for plan in native_plans] == [
+        ReplayPlanDocument(),
+        ReplayPlanDocument(),
+    ]
 
 
 def test_execute_attempt_preserves_unverified_children_and_fail_fast_rows() -> None:
@@ -585,6 +621,117 @@ def test_execute_attempt_preserves_unverified_children_and_fail_fast_rows() -> N
     assert failed.record.status == "failed"
     assert failed.record.counts.failed == 2
     assert failed.submission.summary.failed == 2
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "experiment_id",
+        "target_execution_id",
+        "repeat_index",
+        "child_execution_id",
+        "candidate_status",
+        "parent_execution_id",
+        "root_execution_id",
+        "candidate_agent_version_id",
+        "source_agent_version_id",
+        "mode",
+        "boundary",
+        "serving",
+        "on_miss",
+    ],
+)
+def test_imported_member_evidence_binds_every_frozen_plan_field(field: str) -> None:
+    evidence = _prepared_evidence()
+    boundary = ImportedReplayBoundary(kind=ImportedReplayBoundaryKind.ROOT_INPUT)
+    replay_plan = FrozenImportedReplayPlan(
+        mode=ImportedReplayMode.ROOT_INPUT,
+        boundary=boundary,
+        evidence_identity=evidence.identity,
+    )
+    spec = SimpleNamespace(
+        experiment_id="experiment",
+        candidate_agent_version_id="candidate-version",
+    )
+    trial = SimpleNamespace(
+        replay_plan=replay_plan,
+        target_execution_id="target",
+        repeat_index=0,
+        parent_execution_id="parent",
+        root_execution_id="root",
+    )
+    values = {
+        "experiment_id": "experiment",
+        "target_execution_id": "target",
+        "repeat_index": 0,
+        "child_execution_id": "child",
+        "candidate_status": "completed",
+        "source_agent_version_id": evidence.identity.source_agent_version_id,
+        "candidate_agent_version_id": "candidate-version",
+        "mode": ImportedReplayMode.ROOT_INPUT,
+        "boundary": boundary,
+        "serving": replay_plan.serving,
+        "on_miss": replay_plan.on_miss,
+        "prefix_complete": True,
+        "candidate_tool_contract_compatible": True,
+        "eligible_recorded_responses": 0,
+        "recorded_response_hits": 0,
+        "recorded_response_misses": 0,
+        "blocked_calls": 0,
+        "path_diverged": False,
+        "comparability": ImportedReplayComparability.COUNTERFACTUAL,
+        "parent_execution_id": "parent",
+        "root_execution_id": "root",
+        "decisions": (),
+    }
+    member = ImportedReplayMemberEvidence.create(**values)
+    assert (
+        _verified_imported_member_evidence(
+            member,
+            spec=cast(Any, spec),
+            trial=cast(Any, trial),
+            child_execution_id="child",
+            child_status="completed",
+        )
+        == member
+    )
+
+    mutations: dict[str, Any] = {
+        "experiment_id": "other-experiment",
+        "target_execution_id": "other-target",
+        "repeat_index": 1,
+        "child_execution_id": "other-child",
+        "candidate_status": "failed",
+        "parent_execution_id": "other-parent",
+        "root_execution_id": "other-root",
+        "candidate_agent_version_id": "other-candidate",
+        "source_agent_version_id": "other-source",
+        "mode": ImportedReplayMode.MESSAGE_HISTORY,
+        "boundary": ImportedReplayBoundary(
+            kind=ImportedReplayBoundaryKind.MODEL_MESSAGE,
+            observation_id="observation",
+            sequence=0,
+            occurrence=0,
+        ),
+        "serving": "other-serving",
+        "on_miss": "other-miss",
+    }
+    if field in {"serving", "on_miss"}:
+        altered: Any = member.model_dump(mode="json")
+        altered[field] = mutations[field]
+    else:
+        altered_values = dict(values)
+        altered_values[field] = mutations[field]
+        altered = ImportedReplayMemberEvidence.create(**altered_values)
+
+    with pytest.raises((KitaruStateError, ValidationError)):
+        _verified_imported_member_evidence(
+            altered,
+            spec=cast(Any, spec),
+            trial=cast(Any, trial),
+            child_execution_id="child",
+            child_status="completed",
+        )
 
 
 def test_cross_version_baseline_uses_registered_candidate_binding() -> None:

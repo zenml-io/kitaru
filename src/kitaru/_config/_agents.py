@@ -6,6 +6,7 @@ import threading
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import datetime
+from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
@@ -39,6 +40,11 @@ from kitaru.errors import (
     KitaruUsageError,
 )
 from kitaru.scoring import ProtectionSnapshot
+
+_PYDANTIC_AI_REPLAY_DRIVER_REVISION = "pydantic_ai_imported_replay_v1"
+_IMPORTED_REPLAY_PREPARATION_REVISION = "kitaru_imported_replay_v1"
+_PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION = "pydantic_ai_strict_json_v1"
+_PYDANTIC_AI_REPLAY_DRIVER_ENTRYPOINT = "kitaru.adapters.pydantic_ai._agent:KitaruAgent"
 
 _KITARU_METADATA_KEY = "kitaru"
 _KITARU_METADATA_SCHEMA_VERSION = 1
@@ -102,6 +108,130 @@ class _AgentMetadata(BaseModel):
         return _non_empty_string(value, field_name="Agent field")
 
 
+class RegisteredToolEffect(StrEnum):
+    """Declared external effect of one registered PydanticAI tool."""
+
+    READ_ONLY = "read_only"
+    IDEMPOTENT_WRITE = "idempotent_write"
+    WRITE = "write"
+    UNKNOWN = "unknown"
+
+
+class _RegisteredPydanticAITool(BaseModel):
+    """Immutable replay contract for one registered PydanticAI function tool."""
+
+    logical_id: str
+    aliases: tuple[str, ...]
+    input_schema_hash: str
+    output_schema_hash: str
+    implementation_identity: str | dict[str, Any]
+    effect: RegisteredToolEffect
+    argument_normalizer_revision: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator(
+        "logical_id",
+        "input_schema_hash",
+        "output_schema_hash",
+        "argument_normalizer_revision",
+    )
+    @classmethod
+    def _validate_tool_field(cls, value: str) -> str:
+        return _non_empty_string(value, field_name="Registered tool field")
+
+    @field_validator("effect", mode="before")
+    @classmethod
+    def _deserialize_effect(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return RegisteredToolEffect(value)
+        return value
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def _deserialize_aliases(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @field_validator("aliases")
+    @classmethod
+    def _validate_aliases(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(alias.strip() for alias in value)
+        if not normalized or any(not alias for alias in normalized):
+            raise ValueError("Registered tool aliases cannot be empty.")
+        if normalized != tuple(sorted(set(normalized))):
+            raise ValueError("Registered tool aliases must be unique and sorted.")
+        return normalized
+
+
+class _RegisteredPydanticAIToolSource(BaseModel):
+    """Tool source whose runtime contracts are unavailable during registration."""
+
+    source_id: str
+    kind: str
+    configuration_hash: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("source_id", "kind", "configuration_hash")
+    @classmethod
+    def _validate_source_field(cls, value: str) -> str:
+        return _non_empty_string(value, field_name="Registered tool source field")
+
+
+class _PydanticAIReplayManifest(BaseModel):
+    """Versioned replay and tool contract stored with one AgentVersion."""
+
+    schema_version: Literal[1] = 1
+    driver_revision: str
+    preparation_revision: str
+    driver_entrypoint: str
+    resume_kinds: tuple[Literal["root_input", "model_message", "tool_result"], ...]
+    argument_normalizer_revision: str
+    tools: tuple[_RegisteredPydanticAITool, ...] = ()
+    unresolved_tool_sources: tuple[_RegisteredPydanticAIToolSource, ...] = ()
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator(
+        "resume_kinds",
+        "tools",
+        "unresolved_tool_sources",
+        mode="before",
+    )
+    @classmethod
+    def _deserialize_sequences(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            return tuple(value)
+        return value
+
+    @field_validator(
+        "driver_revision",
+        "preparation_revision",
+        "driver_entrypoint",
+        "argument_normalizer_revision",
+    )
+    @classmethod
+    def _validate_replay_field(cls, value: str) -> str:
+        return _non_empty_string(value, field_name="PydanticAI replay field")
+
+    @model_validator(mode="after")
+    def _validate_contracts(self) -> _PydanticAIReplayManifest:
+        if self.resume_kinds != tuple(dict.fromkeys(self.resume_kinds)):
+            raise ValueError("PydanticAI resume kinds must be unique and ordered.")
+        logical_ids = [tool.logical_id for tool in self.tools]
+        if len(logical_ids) != len(set(logical_ids)):
+            raise ValueError("Registered PydanticAI logical tool IDs must be unique.")
+        aliases = [alias for tool in self.tools for alias in tool.aliases]
+        if len(aliases) != len(set(aliases)):
+            raise ValueError("Registered PydanticAI tool aliases must be unambiguous.")
+        source_ids = [source.source_id for source in self.unresolved_tool_sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Registered PydanticAI tool source IDs must be unique.")
+        return self
+
+
 class _AgentVersionManifest(BaseModel):
     """Immutable manifest for one Pipeline-backed AgentVersion."""
 
@@ -119,6 +249,7 @@ class _AgentVersionManifest(BaseModel):
     registered_at: str
     source: Literal["registration"]
     protections: dict[str, ProtectionSnapshot] = Field(default_factory=dict)
+    pydantic_ai_replay: _PydanticAIReplayManifest | None = None
 
     # Unknown namespaces remain opaque so newer manifests survive older clients.
     model_config = ConfigDict(extra="allow", frozen=True, strict=True)

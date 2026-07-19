@@ -16,10 +16,13 @@ from kitaru._experiments._models import (
     ExperimentRecord,
     ExperimentReservation,
     ExperimentSpecRecord,
+    ImportedReplayMemberEvidence,
     _required_string,
+    experiment_request_hash,
 )
 from kitaru.errors import KitaruMetadataConflictError, KitaruStateError
 from kitaru.scoring import (
+    ImportedReplayEvidenceSummary,
     OperationalLimitOutcome,
     ScoreAggregateReference,
     VerdictResult,
@@ -79,6 +82,20 @@ def validate_experiment_record_transition(
         raise KitaruMetadataConflictError(
             "Experiment operational limit outcomes cannot be replaced."
         )
+    if (
+        previous.imported_replay_members
+        and desired.imported_replay_members != previous.imported_replay_members
+    ):
+        raise KitaruMetadataConflictError(
+            "Imported replay member evidence cannot be replaced."
+        )
+    if (
+        previous.imported_replay_evidence is not None
+        and desired.imported_replay_evidence != previous.imported_replay_evidence
+    ):
+        raise KitaruMetadataConflictError(
+            "Imported replay evidence summaries cannot be replaced."
+        )
     if previous.verdict is not None and desired.verdict != previous.verdict:
         raise KitaruMetadataConflictError("Experiment verdicts cannot be replaced.")
     for old, new in (
@@ -134,6 +151,9 @@ def reserve_experiment(
 ) -> ExperimentReservation:
     """Reserve one pending attempt or return the idempotent existing attempt."""
     from kitaru._config._agents import reconcile_kitaru_metadata
+
+    if spec.request_hash != experiment_request_hash(spec):
+        raise KitaruStateError("Experiment request_hash changed before reservation.")
 
     created = False
 
@@ -311,6 +331,8 @@ def finalize_experiment_outcomes(
     errors: Sequence[ExperimentIssue] = (),
     skips: Sequence[ExperimentIssue] = (),
     unverified_children: Sequence[ExperimentIssue] = (),
+    imported_replay_members: Sequence[ImportedReplayMemberEvidence] = (),
+    imported_replay_evidence: ImportedReplayEvidenceSummary | None = None,
     aggregate_reference: ScoreAggregateReference | None = None,
     operational_limit: OperationalLimitOutcome | None = None,
     verdict_result: VerdictResult | None = None,
@@ -332,6 +354,14 @@ def finalize_experiment_outcomes(
                 and record.errors == desired_errors
                 and record.skips == desired_skips
                 and record.unverified_children == desired_unverified
+                and (
+                    not imported_replay_members
+                    or record.imported_replay_members == list(imported_replay_members)
+                )
+                and (
+                    imported_replay_evidence is None
+                    or record.imported_replay_evidence == imported_replay_evidence
+                )
                 and (
                     aggregate_reference is None
                     or record.score_aggregate == aggregate_reference
@@ -357,6 +387,14 @@ def finalize_experiment_outcomes(
                 "errors": desired_errors,
                 "skips": desired_skips,
                 "unverified_children": desired_unverified,
+                "imported_replay_members": (
+                    list(imported_replay_members)
+                    if imported_replay_members
+                    else record.imported_replay_members
+                ),
+                "imported_replay_evidence": (
+                    imported_replay_evidence or record.imported_replay_evidence
+                ),
                 "score_aggregate": aggregate_reference or record.score_aggregate,
                 "operational_limit": operational_limit or record.operational_limit,
                 "verdict": verdict_result or record.verdict,

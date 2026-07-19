@@ -19,6 +19,10 @@ from typing import Annotated, Any, Literal, Union, get_args, get_origin
 from pydantic import BaseModel
 
 from kitaru._config._agents import (
+    _IMPORTED_REPLAY_PREPARATION_REVISION,
+    _PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION,
+    _PYDANTIC_AI_REPLAY_DRIVER_REVISION,
+    RegisteredToolEffect,
     _AgentVersionManifest,
     _complete_project_metadata,
     _parse_agent_metadata,
@@ -75,6 +79,76 @@ class RegisteredAgentVersionBinding:
     @property
     def fingerprint(self) -> str:
         return self.manifest.fingerprint
+
+
+@dataclass(frozen=True)
+class _RegisteredImportedReplayCompatibility:
+    """Effective replay capabilities of one stored AgentVersion manifest."""
+
+    root_input_supported: bool
+    message_history_supported: bool
+    tool_result_boundary_supported: bool
+    recorded_responses_supported: bool
+    all_tools_blocked: bool
+    blocked_tool_ids: tuple[str, ...] = ()
+    blocked_tool_source_ids: tuple[str, ...] = ()
+    reason: str | None = None
+
+
+def _registered_imported_replay_compatibility(
+    manifest: _AgentVersionManifest,
+) -> _RegisteredImportedReplayCompatibility:
+    """Apply fail-closed compatibility rules, including legacy manifests."""
+    replay = manifest.pydantic_ai_replay
+    if replay is None:
+        return _RegisteredImportedReplayCompatibility(
+            root_input_supported=True,
+            message_history_supported=False,
+            tool_result_boundary_supported=False,
+            recorded_responses_supported=False,
+            all_tools_blocked=True,
+            reason="registered_replay_manifest_missing",
+        )
+
+    revisions_supported = (
+        replay.driver_revision == _PYDANTIC_AI_REPLAY_DRIVER_REVISION
+        and replay.preparation_revision == _IMPORTED_REPLAY_PREPARATION_REVISION
+        and replay.argument_normalizer_revision
+        == _PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION
+    )
+    if not revisions_supported:
+        return _RegisteredImportedReplayCompatibility(
+            root_input_supported=True,
+            message_history_supported=False,
+            tool_result_boundary_supported=False,
+            recorded_responses_supported=False,
+            all_tools_blocked=True,
+            reason="registered_replay_revision_unsupported",
+        )
+
+    blocked_tool_ids = tuple(
+        tool.logical_id
+        for tool in replay.tools
+        if tool.effect is RegisteredToolEffect.UNKNOWN
+    )
+    blocked_tool_source_ids = tuple(
+        source.source_id for source in replay.unresolved_tool_sources
+    )
+    resume_kinds = set(replay.resume_kinds)
+    return _RegisteredImportedReplayCompatibility(
+        root_input_supported="root_input" in resume_kinds,
+        message_history_supported=bool({"model_message", "tool_result"} & resume_kinds),
+        tool_result_boundary_supported="tool_result" in resume_kinds,
+        recorded_responses_supported=(
+            not replay.unresolved_tool_sources and not blocked_tool_ids
+        ),
+        all_tools_blocked=(
+            bool(replay.tools or replay.unresolved_tool_sources)
+            and len(blocked_tool_ids) == len(replay.tools)
+        ),
+        blocked_tool_ids=blocked_tool_ids,
+        blocked_tool_source_ids=blocked_tool_source_ids,
+    )
 
 
 def resolve_registered_agent_version(

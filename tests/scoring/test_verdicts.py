@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,6 +17,9 @@ from kitaru._inspection_serialization import serialize_experiment
 from kitaru.errors import KitaruMetadataConflictError
 from kitaru.scoring import (
     ExperimentVerdict,
+    ImportedReplayComparability,
+    ImportedReplayEvidenceSummary,
+    ImportedReplayVerdictPolicy,
     ProtectionSnapshot,
     Score,
     ScoreAggregateReference,
@@ -25,6 +29,7 @@ from kitaru.scoring import (
     ScoreObservationStatus,
     ScorerSnapshot,
     VerdictPolicy,
+    VerdictResult,
     evaluate_verdict,
 )
 from tests.experiments._helpers import _base_envelope, _draft, _ProjectClient
@@ -52,6 +57,9 @@ PROTECTION = ProtectionSnapshot(
     ),
 )
 MANIFEST_HASH = f"sha256:{'3' * 64}"
+FIXTURES = Path(__file__).parent / "fixtures"
+LEGACY_VERDICT_POLICY_JSON = (FIXTURES / "legacy_verdict_policy_v1.json").read_text()
+LEGACY_VERDICT_RESULT_JSON = (FIXTURES / "legacy_verdict_result_v1.json").read_text()
 
 
 def _observation(
@@ -150,6 +158,101 @@ def _frozen_evidence(
     )
     verdict = evaluate_verdict(preview, aggregate, policy)
     return preview, aggregate, reference, verdict
+
+
+def _imported_summary(
+    comparability: ImportedReplayComparability,
+) -> ImportedReplayEvidenceSummary:
+    return ImportedReplayEvidenceSummary.create(
+        intended=1,
+        reported=1,
+        complete_prefixes=1,
+        eligible_recorded_responses=1,
+        recorded_response_hits=1,
+        recorded_response_misses=0,
+        blocked_calls=0,
+        path_divergences=0,
+        comparability=comparability,
+    )
+
+
+def test_legacy_policy_and_verdict_hashes_load_without_new_null_field() -> None:
+    policy = VerdictPolicy.model_validate_json(LEGACY_VERDICT_POLICY_JSON)
+    verdict = VerdictResult.model_validate_json(LEGACY_VERDICT_RESULT_JSON)
+
+    assert policy.imported_replay is None
+    assert policy.content_hash == (
+        "sha256:bc87afdaf292da410c30c7d6f96175870031a795afc6fc6b77d9e6a49ebb0ebb"
+    )
+    assert verdict.imported_replay is None
+    assert verdict.content_hash == (
+        "sha256:4b9a36fb4468694b22c959986215e4d6b182895b1ef39217b72d12bc57adbf3f"
+    )
+
+
+def test_imported_evidence_preserves_pass_fail_hold_precedence() -> None:
+    passed_record, passed_aggregate, _, _ = _frozen_evidence(
+        [_observation(OBJECTIVE), _observation(PROTECTION.scorer)]
+    )
+    failed_record, failed_aggregate, _, _ = _frozen_evidence(
+        [_observation(OBJECTIVE, value=0.5), _observation(PROTECTION.scorer)]
+    )
+    policy = VerdictPolicy.create(
+        objective=OBJECTIVE,
+        protections=[PROTECTION],
+        imported_replay=ImportedReplayVerdictPolicy(),
+    )
+    assert policy is not None
+    passed_record = passed_record.model_copy(
+        update={
+            "spec": passed_record.spec.model_copy(update={"verdict_policy": policy})
+        }
+    )
+    failed_record = failed_record.model_copy(
+        update={
+            "spec": failed_record.spec.model_copy(update={"verdict_policy": policy})
+        }
+    )
+
+    passed = evaluate_verdict(
+        passed_record.model_copy(
+            update={
+                "imported_replay_evidence": _imported_summary(
+                    ImportedReplayComparability.RECORDED_PATH_COMPARABLE
+                )
+            }
+        ),
+        passed_aggregate,
+        policy,
+    )
+    held = evaluate_verdict(
+        passed_record.model_copy(
+            update={
+                "imported_replay_evidence": _imported_summary(
+                    ImportedReplayComparability.COUNTERFACTUAL
+                )
+            }
+        ),
+        passed_aggregate,
+        policy,
+    )
+    failed = evaluate_verdict(
+        failed_record.model_copy(
+            update={
+                "imported_replay_evidence": _imported_summary(
+                    ImportedReplayComparability.RECORDED_PATH_COMPARABLE
+                )
+            }
+        ),
+        failed_aggregate,
+        policy,
+    )
+    missing = evaluate_verdict(passed_record, passed_aggregate, policy)
+
+    assert passed.verdict is ExperimentVerdict.PASS
+    assert held.verdict is ExperimentVerdict.HOLD
+    assert failed.verdict is ExperimentVerdict.FAIL
+    assert missing.verdict is ExperimentVerdict.HOLD
 
 
 def test_verdict_truth_table_pass_and_trustworthy_failures() -> None:

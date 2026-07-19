@@ -26,6 +26,7 @@ from kitaru._experiments._models import (
     ExperimentRecord,
     ExperimentSpec,
     ForkCoverage,
+    FrozenImportedReplayPlan,
     FrozenReplayPlan,
     ReplayAttemptDraft,
     ReplayAttemptPlan,
@@ -45,6 +46,12 @@ from kitaru.errors import (
     KitaruStateError,
     KitaruUsageError,
 )
+from kitaru.imports._pydantic_ai_replay import (
+    ImportedReplayBoundary,
+    ImportedReplayBoundaryKind,
+    ImportedReplayMode,
+)
+from kitaru.imports._replay_evidence import ReplayReadinessStatus
 from kitaru.replay import (
     ReplayPlan,
     build_replay_from_start_plan,
@@ -341,6 +348,174 @@ def preplan_replay_attempt(
     )
 
 
+def preplan_imported_replay_attempt(
+    executions: str | Sequence[str],
+    *,
+    binding: RegisteredAgentVersionBinding,
+    mode: ImportedReplayMode,
+    boundary: ImportedReplayBoundary | None,
+    on_error: Literal["collect", "fail"],
+    idempotency_key: str,
+    repeats: int,
+    wait: bool,
+    name: str | None = None,
+    suite_key: str | None = None,
+    created_at: str | None = None,
+    client: Any | None = None,
+    scorers: Sequence[ScorerSnapshot] = (),
+    grounded_policy: GroundedPolicySnapshot | None = None,
+    verdict_policy: VerdictPolicy | None = None,
+) -> ReplayAttemptDraft:
+    """Validate imported evidence and freeze explicit PydanticAI candidate starts."""
+    from kitaru._agent_registration import (
+        _registered_imported_replay_compatibility,
+        verify_registered_pipeline,
+    )
+    from kitaru.imports._replay_loading import load_imported_replay_evidence
+
+    normalized_key = _required_string(idempotency_key, field_name="Idempotency key")
+    if on_error not in {"collect", "fail"}:
+        raise KitaruUsageError("on_error must be explicitly 'collect' or 'fail'.")
+    if isinstance(repeats, bool) or repeats < 1:
+        raise KitaruUsageError("repeats must be >= 1.")
+    target_ids = [executions] if isinstance(executions, str) else list(executions)
+    target_ids = [
+        _required_string(item, field_name="Imported execution ID")
+        for item in target_ids
+    ]
+    if not target_ids:
+        raise KitaruUsageError("Pass at least one imported execution ID.")
+    if len(target_ids) != len(set(target_ids)):
+        raise KitaruUsageError("Imported replay targets must be unique.")
+
+    if mode is ImportedReplayMode.ROOT_INPUT:
+        selected_boundary = boundary or ImportedReplayBoundary(
+            kind=ImportedReplayBoundaryKind.ROOT_INPUT
+        )
+        if selected_boundary.kind is not ImportedReplayBoundaryKind.ROOT_INPUT:
+            raise KitaruUsageError(
+                "Root-input replay requires the root-input boundary."
+            )
+    else:
+        if boundary is None or boundary.kind is ImportedReplayBoundaryKind.ROOT_INPUT:
+            raise KitaruUsageError(
+                "Message-history replay requires one explicit complete message or "
+                "tool-result boundary."
+            )
+        selected_boundary = boundary
+
+    resolved_client = client or Client()
+    verify_registered_pipeline(resolved_client, binding)
+    compatibility = _registered_imported_replay_compatibility(binding.manifest)
+    if not compatibility.root_input_supported:
+        raise KitaruUsageError(
+            "The registered candidate does not support imported root-input replay."
+        )
+    if mode is ImportedReplayMode.MESSAGE_HISTORY:
+        supported = (
+            compatibility.tool_result_boundary_supported
+            if selected_boundary.kind is ImportedReplayBoundaryKind.TOOL_RESULT
+            else compatibility.message_history_supported
+        )
+        if not supported:
+            raise KitaruUsageError(
+                "The registered candidate does not support the requested imported "
+                "replay boundary."
+            )
+
+    rows: list[TargetPlanningRow] = []
+    issues: list[ExperimentIssue] = []
+    for target_id in target_ids:
+        try:
+            evidence = load_imported_replay_evidence(target_id, client=resolved_client)
+            if evidence.identity.project_id != binding.project_id:
+                raise KitaruUsageError(
+                    f"Imported execution {target_id!r} belongs to a different "
+                    "Agent Project."
+                )
+            if mode is ImportedReplayMode.ROOT_INPUT:
+                if (
+                    evidence.readiness.root_input_candidate_rerun.status
+                    is not ReplayReadinessStatus.READY
+                ):
+                    raise KitaruUsageError(
+                        f"Imported execution '{target_id}' has no complete root input."
+                    )
+            else:
+                from kitaru.adapters.pydantic_ai._imported_replay import (
+                    prepare_imported_replay_history,
+                )
+
+                prepare_imported_replay_history(
+                    evidence,
+                    boundary=selected_boundary,
+                )
+            rows.append(
+                TargetPlanningRow(
+                    target_execution_id=evidence.identity.execution_id,
+                    parent_execution_id=evidence.identity.execution_id,
+                    root_execution_id=evidence.identity.execution_id,
+                    checkpoint_covered=True,
+                    disposition="imported",
+                    replay_plan=FrozenImportedReplayPlan(
+                        mode=mode,
+                        boundary=selected_boundary,
+                        evidence_identity=evidence.identity,
+                    ),
+                )
+            )
+        except Exception as exc:
+            issues.append(
+                ExperimentIssue(
+                    target_execution_id=target_id,
+                    reason=str(exc) or type(exc).__name__,
+                )
+            )
+    if issues:
+        raise ExperimentPlanningError(issues)
+
+    experiment_id = _experiment_id(binding.project_id, normalized_key)
+    normalized_name = (
+        _required_string(name, field_name="Experiment name")
+        if name is not None
+        else None
+    )
+    resolved_suite = (
+        _required_string(suite_key, field_name="Suite key")
+        if suite_key is not None
+        else f"suite-{experiment_id.removeprefix('exp-')}"
+    )
+    timestamp = created_at or datetime.now(UTC).isoformat()
+    _timestamp(timestamp, field_name="created_at")
+    return ReplayAttemptDraft(
+        experiment_id=experiment_id,
+        name=normalized_name,
+        display_name=normalized_name or f"Imported replay {experiment_id[-8:]}",
+        suite_key=resolved_suite,
+        idempotency_key=normalized_key,
+        created_at=timestamp,
+        candidate_project_id=binding.project_id,
+        candidate_agent_version_id=binding.manifest.agent_version_id,
+        candidate_pipeline_id=binding.pipeline_id,
+        executable=ExperimentExecutable(entrypoint=binding.manifest.entrypoint),
+        replay_inputs=ReplayRequestInputs(),
+        at=selected_boundary.kind.value,
+        repeats=repeats,
+        wait=wait,
+        on_error=on_error,
+        coverage=ForkCoverage(
+            selected=len(rows),
+            covered=len(rows),
+            policy="fail",
+        ),
+        planning_rows=rows,
+        cohort_audit=None,
+        scorers=list(scorers),
+        grounded_policy=grounded_policy,
+        verdict_policy=verdict_policy,
+    )
+
+
 def _validate_suite_rerun_request(
     source: ExperimentRecord,
     *,
@@ -423,6 +598,11 @@ def _suite_rerun_scoring_contract(
         objective=objective_snapshot,
         minimum_mean=objective_minimum,
         protections=protection_items,
+        imported_replay=(
+            None
+            if source_spec.verdict_policy is None
+            else source_spec.verdict_policy.imported_replay
+        ),
     )
     scorer_snapshots = [
         *([] if objective_snapshot is None else [objective_snapshot]),
@@ -589,6 +769,10 @@ def thaw_replay_plan(trial: ReplayTrialPlan) -> ReplayPlan:
     frozen = trial.replay_plan
     if frozen is None:
         raise KitaruStateError("Skipped replay trials do not have an execution plan.")
+    if not isinstance(frozen, FrozenReplayPlan):
+        raise KitaruStateError(
+            "Imported replay trials execute through their registered candidate."
+        )
     return frozen.thaw(target_execution_id=trial.target_execution_id)
 
 

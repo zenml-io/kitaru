@@ -40,12 +40,14 @@ def _evidence(trace_id: str):
 
 def test_complete_explicit_tool_evidence_is_preserved_without_claiming_ready() -> None:
     evidence = _evidence("trace-alias")
-    kinds = [
-        part.kind
+    parts = [
+        part
         for observation in evidence.bundle.observations
         for part in observation.parts
     ]
+    kinds = [part.kind for part in parts]
 
+    assert [part.message_index for part in parts] == [0, 1, 1, 2, 3]
     assert kinds == [
         ReplayPartKind.USER_PROMPT,
         ReplayPartKind.MODEL_TEXT,

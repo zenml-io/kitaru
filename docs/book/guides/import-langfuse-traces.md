@@ -15,9 +15,11 @@ The import does not call a model, invoke a tool, run source application code, or
 execute a replay.
 
 {% hint style="warning" %}
-Imported executions are read-only historical records. Kitaru refuses to replay,
-resume, retry, or cancel them. Replay readiness describes which evidence was
-preserved; it does not claim that an execution can be replayed.
+Imported executions remain read-only historical records. Kitaru refuses to
+resume, retry, cancel, or run them through native checkpoint replay. A registered
+PydanticAI Agent can use their immutable evidence to create a separate candidate
+experiment, as described below. The candidate run never changes the imported
+record.
 {% endhint %}
 
 ## What Kitaru stores
@@ -88,6 +90,118 @@ results.
 Only root-input readiness can be `ready`. A `ready` result still does not execute
 a replay or prove that the declared AgentVersion, its tools, or provider behavior
 can reproduce the historical run.
+
+## Run a registered PydanticAI candidate
+
+A registered `KitaruAgent` can create a new experiment from imported PydanticAI
+evidence. The candidate runs through the normal Agent path, so its execution,
+AgentVersion, scores, protections, lineage, limits, and verdict use the same
+durable contracts as other registered-Agent experiments.
+
+Start from the recorded root input when you want the candidate to generate the
+whole path again:
+
+```python
+from my_agent import support_agent
+
+result = support_agent.replay(
+    "<imported-execution-id>",
+    imported_mode="root_input",
+    on_error="fail",
+    idempotency_key="support-root-v1",
+    scorers=[quality_score],
+)
+```
+
+A root rerun is counterfactual. Even when every requested recorded tool response
+is served, the default strict policy reports `HOLD`, rather than claiming direct
+comparability with the source path.
+
+To continue after a recorded tool result, select one complete boundary from the
+immutable evidence:
+
+```python
+from kitaru.imports import (
+    ImportedReplayBoundary,
+    ImportedReplayBoundaryKind,
+    load_imported_replay_evidence,
+)
+from my_agent import support_agent
+
+source_id = "<imported-execution-id>"
+evidence = load_imported_replay_evidence(source_id)
+tool_result = next(
+    part
+    for observation in evidence.replay_bundle.observations
+    for part in observation.parts
+    if part.kind == "tool_result"
+)
+boundary = ImportedReplayBoundary(
+    kind=ImportedReplayBoundaryKind.TOOL_RESULT,
+    observation_id=tool_result.observation_id,
+    sequence=tool_result.sequence,
+    occurrence=tool_result.occurrence,
+    call_id=tool_result.call_id,
+)
+
+result = support_agent.replay(
+    source_id,
+    imported_mode="message_history",
+    imported_boundary=boundary,
+    on_error="fail",
+    idempotency_key="support-history-v1",
+    scorers=[quality_score],
+)
+result.assert_pass()
+```
+
+Kitaru accepts only complete recorded model-message or tool-result boundaries.
+It checks the source and candidate tool contracts before submission, serves
+matching recorded responses without calling the live read or write tool, and
+blocks every miss. Argument changes, reordered calls, missing occurrences,
+schema drift, implementation drift, and scope mismatches cannot fall through to
+live tool execution.
+
+Comparability evidence is immutable and separate from scores:
+
+- `recorded_path_comparable` means the selected prefix was complete, every
+  eligible recorded response was used, and the candidate did not diverge;
+- `counterfactual` identifies a root rerun;
+- `degraded` records a blocked call, unused response, or other path divergence;
+- `non_comparable` means Kitaru could not establish the recorded-response
+  contract.
+
+Missing evidence, incomplete prefixes, unused or blocked recorded responses, and
+unaccepted comparability states produce `HOLD`. Complete evidence can still
+produce `FAIL` when an objective or protection fails. `PASS` requires both
+complete accepted replay evidence and passing scores and protections.
+
+Repeat a completed attempt through its experiment ID to preserve the frozen
+source evidence and boundary while applying normal suite limits:
+
+```python
+from kitaru.experiments import RegressionLimits
+
+repeated = support_agent.replay(
+    experiment=result.spec.experiment_id,
+    idempotency_key="support-history-repeat-v1",
+    repeats=3,
+    scorers=[quality_score],
+    limits=RegressionLimits(max_trials=3),
+)
+```
+
+Inspect attempts without changing them:
+
+```bash
+kitaru agents experiments support-agent
+kitaru agents experiments support-agent <experiment-id> --output json
+```
+
+The SDK `ExperimentRecord` and JSON output include the frozen imported plan,
+per-child lineage and recorded-response decisions, aggregate comparability,
+scores, protections, limits, and final verdict. They do not include recorded
+response values.
 
 ## Preview an export
 

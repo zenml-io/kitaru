@@ -9,7 +9,12 @@ from cyclopts import Parameter
 from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.config import KITARU_PROJECT_ENV, AgentInfo
-from kitaru.inspection import serialize_agent
+from kitaru.experiments import (
+    ExperimentRecord,
+    ExperimentSpec,
+    FrozenImportedReplayPlan,
+)
+from kitaru.inspection import serialize_agent, serialize_experiment
 
 from . import agents_app
 from ._dependencies import cli_dependencies
@@ -57,6 +62,51 @@ def _current_agent_rows(agent: AgentInfo) -> list[tuple[str, str]]:
         ("Agent ID", agent.agent_id),
         ("Versions", str(agent.version_count)),
         ("Default version", agent.default_agent_version_id or "not registered"),
+    ]
+
+
+def _experiment_rows(record: ExperimentRecord) -> list[tuple[str, str]]:
+    """Build truthful read-only experiment rows."""
+    spec = record.spec
+    evidence = record.imported_replay_evidence
+    verdict = record.verdict
+    replay_spec = spec if isinstance(spec, ExperimentSpec) else None
+    imported_plan = next(
+        (
+            row.replay_plan
+            for row in ([] if replay_spec is None else replay_spec.planning_rows)
+            if isinstance(row.replay_plan, FrozenImportedReplayPlan)
+        ),
+        None,
+    )
+    mode = "native" if imported_plan is None else imported_plan.mode.value
+    if imported_plan is not None:
+        boundary = imported_plan.boundary.kind.value
+    elif replay_spec is not None:
+        boundary = replay_spec.at
+    else:
+        boundary = "not applicable"
+    return [
+        ("Experiment ID", spec.experiment_id),
+        ("Suite", spec.suite_key),
+        ("Status", record.status),
+        ("Replay mode", mode),
+        ("Replay boundary", boundary),
+        (
+            "Comparability",
+            "not applicable" if evidence is None else evidence.comparability.value,
+        ),
+        (
+            "Recorded responses",
+            "not applicable"
+            if evidence is None
+            else (
+                f"{evidence.recorded_response_hits}/"
+                f"{evidence.eligible_recorded_responses} hits, "
+                f"{evidence.recorded_response_misses} misses"
+            ),
+        ),
+        ("Verdict", "not graded" if verdict is None else verdict.verdict.value),
     ]
 
 
@@ -159,6 +209,48 @@ def show(
         return
 
     _emit_snapshot("Kitaru Agent", _agent_show_rows(agent))
+
+
+@agents_app.command
+def experiments(
+    name_or_id: Annotated[
+        str,
+        Parameter(help="Agent name or ID."),
+    ],
+    experiment: Annotated[
+        str | None,
+        Parameter(help="Optional exact experiment, suite, or display name."),
+    ] = None,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Inspect durable experiment attempts without mutating them."""
+    command = "agents.experiments"
+    output_format = _resolve_output_format(output)
+    agent = run_with_cli_error_boundary(
+        lambda: cli_dependencies().get_agent(name_or_id),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+    records = (
+        [agent.get_experiment(experiment)]
+        if experiment is not None
+        else agent.list_experiments()
+    )
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_items(
+            command,
+            [serialize_experiment(record) for record in records],
+            output=output_format,
+        )
+        return
+    if not records:
+        _emit_snapshot("Kitaru Experiments", [("Experiments", "none found")])
+        return
+    for index, record in enumerate(records):
+        if index:
+            print()
+        _emit_snapshot("Kitaru Experiment", _experiment_rows(record))
 
 
 @agents_app.command

@@ -242,6 +242,7 @@ class TestBuildCommandTree:
             "create",
             "current",
             "delete",
+            "experiments",
             "list",
             "show",
             "use",

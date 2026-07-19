@@ -30,6 +30,7 @@ from kitaru._experiments import (
 from kitaru._inspection_serialization import serialize_experiment
 from kitaru.errors import (
     KitaruMetadataConflictError,
+    KitaruStateError,
     KitaruUsageError,
 )
 from kitaru.scoring import (
@@ -47,6 +48,19 @@ from tests.experiments._helpers import (
     _ProjectClient,
     _stored_metadata,
 )
+
+
+def test_native_plan_discriminator_preserves_legacy_request_hash() -> None:
+    spec = _plan(idempotency_key="legacy-native-plan").spec
+    payload = spec.model_dump(mode="json")
+    for row in payload["planning_rows"]:
+        row["replay_plan"].pop("plan_type")
+
+    restored = type(spec).model_validate(payload)
+
+    assert restored.request_hash == spec.request_hash
+    assert restored.planning_rows[0].replay_plan is not None
+    assert restored.planning_rows[0].replay_plan.plan_type == "native"
 
 
 def test_hydrated_agent_lists_newest_first_and_rejects_ambiguous_names() -> None:
@@ -445,6 +459,17 @@ def test_lost_response_reservation_is_idempotent_and_preserves_foreign_keys() ->
     assert list(client.metadata["kitaru"]["experiments"]) == [spec.experiment_id]
     assert client.metadata["foreign"] == {"preserve": True}
     assert client.metadata["kitaru"]["future_key"] == {"preserve": [1, 2, 3]}
+
+
+def test_reservation_rejects_nested_override_mutation_after_freezing() -> None:
+    client = _ProjectClient(_base_envelope())
+    spec = _plan(flow_overrides={"temperature": 0}).spec
+    spec.replay_inputs.flow_overrides["temperature"] = 1
+
+    with pytest.raises(KitaruStateError, match="changed before reservation"):
+        reserve_experiment("project-id", spec, client_factory=lambda: client)
+
+    assert client.update_calls == []
 
 
 def test_conflicting_idempotency_key_fails_without_second_update() -> None:

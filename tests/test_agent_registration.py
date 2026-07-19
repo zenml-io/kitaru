@@ -17,10 +17,12 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.output import ToolOutput
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.tools import Tool
 
 from kitaru._agent_registration import (
     RegisteredAgentVersionBinding,
     RegistrationIdentity,
+    _registered_imported_replay_compatibility,
     build_agent_version_pipeline_name,
     canonicalize_registration_value,
     find_exact_project_pipeline,
@@ -30,7 +32,13 @@ from kitaru._agent_registration import (
     verify_submitted_run_binding,
 )
 from kitaru._config import _projects as project_ops
-from kitaru._config._agents import _AgentVersionManifest
+from kitaru._config._agents import (
+    RegisteredToolEffect,
+    _AgentVersionManifest,
+    _PydanticAIReplayManifest,
+    _RegisteredPydanticAITool,
+    _RegisteredPydanticAIToolSource,
+)
 from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.adapters.pydantic_ai import _agent as agent_module
 from kitaru.errors import (
@@ -48,6 +56,14 @@ REGISTERABLE_AGENT: KitaruAgent[Any, str] | None = None
 
 async def _importable_tool(value: str) -> str:
     return value
+
+
+async def _changed_importable_tool(value: str) -> str:
+    return f"changed:{value}"
+
+
+async def _integer_importable_tool(value: int) -> str:
+    return str(value)
 
 
 def _registration_protection(_: object) -> bool:
@@ -672,6 +688,216 @@ def test_closure_tool_mutation_is_checked_by_registration_preflight(
     config["mode"] = "lenient"
     with pytest.raises(KitaruStateError, match="worldview"):
         durable_agent._preflight_registered_identity()
+
+
+def _replay_tool_metadata(
+    *,
+    logical_id: str = "lookup",
+    aliases: list[str] | None = None,
+    effect: str = "read_only",
+) -> dict[str, Any]:
+    return {
+        "kitaru_replay": {
+            "logical_id": logical_id,
+            "aliases": aliases or ["legacy_lookup"],
+            "effect": effect,
+        }
+    }
+
+
+def _agent_with_replay_tool(
+    function: Any = _importable_tool,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> KitaruAgent[Any, str]:
+    return KitaruAgent(
+        Agent(
+            TestModel(),
+            name="replay-contract-agent",
+            tools=[
+                Tool(
+                    function,
+                    name="lookup",
+                    metadata=metadata or _replay_tool_metadata(),
+                )
+            ],
+            output_type=str,
+        )
+    )
+
+
+def _replay_manifest(
+    *,
+    tools: tuple[_RegisteredPydanticAITool, ...] = (),
+    unresolved_sources: tuple[_RegisteredPydanticAIToolSource, ...] = (),
+) -> _PydanticAIReplayManifest:
+    return _PydanticAIReplayManifest(
+        driver_revision="pydantic_ai_imported_replay_v1",
+        preparation_revision="kitaru_imported_replay_v1",
+        driver_entrypoint="kitaru.adapters.pydantic_ai._agent:KitaruAgent",
+        resume_kinds=("root_input", "model_message", "tool_result"),
+        argument_normalizer_revision="pydantic_ai_strict_json_v1",
+        tools=tools,
+        unresolved_tool_sources=unresolved_sources,
+    )
+
+
+def test_registration_projects_versioned_pydantic_ai_replay_contract() -> None:
+    agent = _agent_with_replay_tool()
+
+    replay = agent._pydantic_ai_replay_manifest()
+
+    assert replay.driver_revision == "pydantic_ai_imported_replay_v1"
+    assert replay.preparation_revision == "kitaru_imported_replay_v1"
+    assert replay.resume_kinds == ("root_input", "model_message", "tool_result")
+    assert replay.argument_normalizer_revision == "pydantic_ai_strict_json_v1"
+    assert replay.unresolved_tool_sources == ()
+    assert len(replay.tools) == 1
+    registered_tool = replay.tools[0]
+    assert registered_tool.logical_id == "lookup"
+    assert registered_tool.aliases == ("legacy_lookup", "lookup")
+    assert isinstance(registered_tool.implementation_identity, str)
+    assert registered_tool.implementation_identity.endswith(":_importable_tool")
+    assert registered_tool.effect is RegisteredToolEffect.READ_ONLY
+    assert registered_tool.argument_normalizer_revision == (
+        "pydantic_ai_strict_json_v1"
+    )
+    wrapped_tool = cast(Any, agent.toolsets[0]).wrapped.tools["lookup"]
+    assert registered_tool.input_schema_hash == hash_registration_value(
+        wrapped_tool.function_schema.json_schema
+    )
+    assert registered_tool.output_schema_hash == hash_registration_value(
+        wrapped_tool.function_schema.return_schema
+    )
+    assert agent._registration_worldview()["pydantic_ai_replay"] == (
+        replay.model_dump(mode="json")
+    )
+
+
+def test_replay_contract_changes_registration_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _agent_with_replay_tool()
+    changed_schema = _agent_with_replay_tool(_integer_importable_tool)
+    changed_implementation = _agent_with_replay_tool(_changed_importable_tool)
+    changed_alias = _agent_with_replay_tool(
+        metadata=_replay_tool_metadata(aliases=["renamed_lookup"])
+    )
+    changed_effect = _agent_with_replay_tool(
+        metadata=_replay_tool_metadata(effect="write")
+    )
+    base_hash = hash_registration_value(base._registration_worldview())
+
+    assert (
+        hash_registration_value(changed_schema._registration_worldview()) != base_hash
+    )
+    assert (
+        hash_registration_value(changed_implementation._registration_worldview())
+        != base_hash
+    )
+    assert hash_registration_value(changed_alias._registration_worldview()) != base_hash
+    assert (
+        hash_registration_value(changed_effect._registration_worldview()) != base_hash
+    )
+
+    monkeypatch.setattr(
+        agent_module,
+        "_PYDANTIC_AI_REPLAY_DRIVER_REVISION",
+        "pydantic_ai_imported_replay_v2",
+    )
+    assert hash_registration_value(base._registration_worldview()) != base_hash
+    monkeypatch.setattr(
+        agent_module,
+        "_PYDANTIC_AI_REPLAY_DRIVER_REVISION",
+        "pydantic_ai_imported_replay_v1",
+    )
+    monkeypatch.setattr(
+        agent_module,
+        "_PYDANTIC_AI_ARGUMENT_NORMALIZER_REVISION",
+        "pydantic_ai_strict_json_v2",
+    )
+    assert hash_registration_value(base._registration_worldview()) != base_hash
+
+
+def test_replay_contract_rejects_ambiguous_aliases() -> None:
+    first = Tool(
+        _importable_tool,
+        name="first",
+        metadata=_replay_tool_metadata(logical_id="first", aliases=["shared"]),
+    )
+    second = Tool(
+        _changed_importable_tool,
+        name="second",
+        metadata=_replay_tool_metadata(logical_id="second", aliases=["shared"]),
+    )
+    agent = KitaruAgent(
+        Agent(
+            TestModel(),
+            name="ambiguous-tools",
+            tools=[first, second],
+            output_type=str,
+        )
+    )
+
+    with pytest.raises(KitaruUsageError, match="ambiguous or malformed"):
+        agent._pydantic_ai_replay_manifest()
+
+
+def test_legacy_registration_uses_root_input_with_tools_blocked() -> None:
+    compatibility = _registered_imported_replay_compatibility(_manifest())
+
+    assert compatibility.root_input_supported is True
+    assert compatibility.message_history_supported is False
+    assert compatibility.tool_result_boundary_supported is False
+    assert compatibility.recorded_responses_supported is False
+    assert compatibility.all_tools_blocked is True
+    assert compatibility.reason == "registered_replay_manifest_missing"
+
+
+def test_registered_replay_compatibility_fails_closed_per_tool_and_source() -> None:
+    unknown_tool = _RegisteredPydanticAITool(
+        logical_id="unknown_tool",
+        aliases=("unknown_tool",),
+        input_schema_hash="sha256:input",
+        output_schema_hash="sha256:output",
+        implementation_identity="tests.test_agent_registration:_importable_tool",
+        effect=RegisteredToolEffect.UNKNOWN,
+        argument_normalizer_revision="pydantic_ai_strict_json_v1",
+    )
+    unresolved_source = _RegisteredPydanticAIToolSource(
+        source_id="support-mcp",
+        kind="pydantic_ai.mcp:MCPServerStdio",
+        configuration_hash="sha256:source",
+    )
+
+    tool_compatibility = _registered_imported_replay_compatibility(
+        _manifest().model_copy(
+            update={"pydantic_ai_replay": _replay_manifest(tools=(unknown_tool,))}
+        )
+    )
+    source_compatibility = _registered_imported_replay_compatibility(
+        _manifest().model_copy(
+            update={
+                "pydantic_ai_replay": _replay_manifest(
+                    unresolved_sources=(unresolved_source,)
+                )
+            }
+        )
+    )
+    supported = _registered_imported_replay_compatibility(
+        _manifest().model_copy(update={"pydantic_ai_replay": _replay_manifest()})
+    )
+
+    assert tool_compatibility.root_input_supported is True
+    assert tool_compatibility.message_history_supported is True
+    assert tool_compatibility.tool_result_boundary_supported is True
+    assert tool_compatibility.recorded_responses_supported is False
+    assert tool_compatibility.all_tools_blocked is True
+    assert tool_compatibility.blocked_tool_ids == ("unknown_tool",)
+    assert source_compatibility.recorded_responses_supported is False
+    assert source_compatibility.all_tools_blocked is True
+    assert source_compatibility.blocked_tool_source_ids == ("support-mcp",)
+    assert supported.recorded_responses_supported is True
 
 
 def test_closure_tool_rejects_unsupported_non_secret_configuration() -> None:

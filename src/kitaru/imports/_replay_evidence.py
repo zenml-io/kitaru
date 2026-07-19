@@ -53,6 +53,100 @@ class EvidenceRedactionStatus(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ImportedReplayUnsupportedReason(StrEnum):
+    """Stable reasons why imported evidence cannot be prepared safely."""
+
+    NOT_IMPORTED = "not_imported"
+    LEGACY_IMPORT = "legacy_import"
+    IMPORT_INCOMPLETE = "import_incomplete"
+    SOURCE_ATTRIBUTION_UNVERIFIED = "source_attribution_unverified"
+    SOURCE_BINDING_INVALID = "source_binding_invalid"
+    SOURCE_EXECUTION_INVALID = "source_execution_invalid"
+    RAW_EVIDENCE_UNAVAILABLE = "raw_evidence_unavailable"
+    REPLAY_BUNDLE_UNAVAILABLE = "replay_bundle_unavailable"
+    ARTIFACT_SCOPE_MISMATCH = "artifact_scope_mismatch"
+    ARTIFACT_ROLE_MISMATCH = "artifact_role_mismatch"
+    ARTIFACT_SCHEMA_MISMATCH = "artifact_schema_mismatch"
+    ARTIFACT_HASH_MISMATCH = "artifact_hash_mismatch"
+    EVIDENCE_INVALID = "evidence_invalid"
+    EVIDENCE_REDACTED = "evidence_redacted"
+    ROOT_INPUT_MISSING = "root_input_missing"
+    REPLAY_PROFILE_UNSUPPORTED = "replay_profile_unsupported"
+    READINESS_MISMATCH = "readiness_mismatch"
+    MESSAGE_HISTORY_UNAVAILABLE = "message_history_unavailable"
+    MESSAGE_HISTORY_INVALID = "message_history_invalid"
+    BOUNDARY_UNAVAILABLE = "boundary_unavailable"
+    BOUNDARY_INCOMPLETE = "boundary_incomplete"
+    TOOL_CONTRACT_INCOMPATIBLE = "tool_contract_incompatible"
+    RECORDED_RESPONSE_INVALID = "recorded_response_invalid"
+    STREAMING_UNSUPPORTED = "streaming_unsupported"
+
+
+class ImportedEvidenceArtifactIdentity(BaseModel):
+    """One immutable evidence artifact reference trusted for preparation."""
+
+    artifact_id: str
+    schema_version: int = Field(ge=1)
+    sha256: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("artifact_id")
+    @classmethod
+    def _require_artifact_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("artifact_id cannot be empty.")
+        return normalized
+
+    @field_validator("sha256")
+    @classmethod
+    def _validate_artifact_digest(cls, value: str) -> str:
+        return validate_sha256(value, field_name="sha256")
+
+
+class ImportedReplayEvidenceIdentity(BaseModel):
+    """Verified source and artifact identity for imported replay preparation."""
+
+    execution_id: str
+    project_id: str
+    source_agent_version_id: str
+    source_pipeline_id: str
+    source_fingerprint: str
+    source_provider: str
+    source_project_id: str
+    source_trace_id: str
+    raw_evidence: ImportedEvidenceArtifactIdentity
+    replay_bundle: ImportedEvidenceArtifactIdentity
+    replay_profile_version: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator(
+        "execution_id",
+        "project_id",
+        "source_agent_version_id",
+        "source_pipeline_id",
+        "source_fingerprint",
+        "source_provider",
+        "source_project_id",
+        "source_trace_id",
+        "replay_profile_version",
+    )
+    @classmethod
+    def _require_identity_field(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Imported replay identity fields cannot be empty.")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_source_pipeline(self) -> ImportedReplayEvidenceIdentity:
+        if self.source_agent_version_id != self.source_pipeline_id:
+            raise ValueError("Source AgentVersion and Pipeline IDs must match.")
+        return self
+
+
 class ReplayCapability(StrEnum):
     """Evidence capabilities reported without executing a replay."""
 

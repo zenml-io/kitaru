@@ -1572,6 +1572,8 @@ run_test "kitaru info"                   $UV_RUN kitaru info
 run_test "kitaru info --all -o json"     $UV_RUN kitaru info --all -o json
 run_test "kitaru status -o json"         $UV_RUN kitaru status -o json
 run_test "kitaru agents --help"         $UV_RUN kitaru agents --help
+run_test "kitaru agents experiments --help" \
+    $UV_RUN kitaru agents experiments --help
 run_test "kitaru agents list"           $UV_RUN kitaru agents list
 run_test "kitaru agents list -o json"   $UV_RUN kitaru agents list -o json
 run_expected_failure "fresh local Agent is uninitialized" \

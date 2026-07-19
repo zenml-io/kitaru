@@ -22,11 +22,22 @@ from pydantic import (
 
 from kitaru._experiments._limits import RegressionLimits
 from kitaru.errors import KitaruUsageError
-from kitaru.replay import ReplayPlan, ReplayPlanDocument
+from kitaru.imports._pydantic_ai_replay import (
+    ImportedReplayBoundary,
+    ImportedReplayMode,
+)
+from kitaru.imports._replay_evidence import ImportedReplayEvidenceIdentity
+from kitaru.replay import (
+    _MAX_IMPORTED_REPLAY_TOOL_DECISIONS,
+    ReplayPlan,
+    ReplayPlanDocument,
+)
 from kitaru.replay_context import ReplayRuntimeContext
 from kitaru.scoring import (
     EvidenceManifestReference,
     GroundedPolicySnapshot,
+    ImportedReplayComparability,
+    ImportedReplayEvidenceSummary,
     OperationalLimitOutcome,
     ScoreAggregateReference,
     ScorerIdentity,
@@ -177,6 +188,7 @@ class ReplayRequestInputs(BaseModel):
 class FrozenReplayPlan(BaseModel):
     """Typed replay-engine inputs frozen into the V1 experiment spec."""
 
+    plan_type: Literal["native"] = "native"
     replay_from_start: bool
     resolved_at: str | None
     steps_to_skip: list[str]
@@ -256,6 +268,160 @@ class FrozenReplayPlan(BaseModel):
         )
 
 
+class FrozenImportedReplayPlan(BaseModel):
+    """Exact imported evidence and candidate start policy frozen for one target."""
+
+    plan_type: Literal["imported"] = "imported"
+    mode: ImportedReplayMode
+    boundary: ImportedReplayBoundary
+    evidence_identity: ImportedReplayEvidenceIdentity
+    serving: Literal["recorded_responses"] = "recorded_responses"
+    on_miss: Literal["blocked"] = "blocked"
+    require_recorded_path_comparability: bool = True
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _load_imported_mode(cls, value: Any) -> ImportedReplayMode:
+        if isinstance(value, ImportedReplayMode):
+            return value
+        return ImportedReplayMode(value)
+
+    @model_validator(mode="after")
+    def _validate_mode_boundary(self) -> FrozenImportedReplayPlan:
+        is_root = self.boundary.kind.value == "root_input"
+        if (self.mode is ImportedReplayMode.ROOT_INPUT) != is_root:
+            raise ValueError(
+                "Imported replay mode and boundary must describe the same start."
+            )
+        return self
+
+
+FrozenExperimentReplayPlan = Annotated[
+    FrozenReplayPlan | FrozenImportedReplayPlan,
+    Field(discriminator="plan_type"),
+]
+
+
+class ImportedReplayToolDecision(BaseModel):
+    """One value-free recorded-response serving decision."""
+
+    index: int = Field(ge=0)
+    decision: Literal["hit", "blocked"]
+    logical_tool_id: str
+    candidate_tool_name: str
+    block_reason: str | None = None
+    source_observation_id: str | None = None
+    source_sequence: int | None = Field(default=None, ge=0)
+    source_occurrence: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+
+class ImportedReplayMemberEvidence(BaseModel):
+    """Immutable evidence and lineage for one imported experiment child."""
+
+    schema_version: Literal[1] = 1
+    experiment_id: str
+    target_execution_id: str
+    repeat_index: int = Field(ge=0)
+    child_execution_id: str
+    candidate_status: Literal["completed", "failed"]
+    source_agent_version_id: str
+    candidate_agent_version_id: str
+    mode: ImportedReplayMode
+    boundary: ImportedReplayBoundary
+    serving: Literal["recorded_responses"] = "recorded_responses"
+    on_miss: Literal["blocked"] = "blocked"
+    prefix_complete: bool
+    candidate_tool_contract_compatible: bool
+    eligible_recorded_responses: int = Field(ge=0)
+    recorded_response_hits: int = Field(ge=0)
+    recorded_response_misses: int = Field(ge=0)
+    blocked_calls: int = Field(ge=0)
+    path_diverged: bool
+    comparability: ImportedReplayComparability
+    parent_execution_id: str
+    root_execution_id: str
+    decisions: tuple[ImportedReplayToolDecision, ...] = Field(
+        default=(),
+        max_length=_MAX_IMPORTED_REPLAY_TOOL_DECISIONS,
+    )
+    content_hash: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _load_member_mode(cls, value: Any) -> ImportedReplayMode:
+        if isinstance(value, ImportedReplayMode):
+            return value
+        return ImportedReplayMode(value)
+
+    @field_validator("comparability", mode="before")
+    @classmethod
+    def _load_member_comparability(cls, value: Any) -> ImportedReplayComparability:
+        if isinstance(value, ImportedReplayComparability):
+            return value
+        return ImportedReplayComparability(value)
+
+    @field_validator("decisions", mode="before")
+    @classmethod
+    def _load_decisions(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @field_validator(
+        "experiment_id",
+        "target_execution_id",
+        "child_execution_id",
+        "source_agent_version_id",
+        "candidate_agent_version_id",
+        "parent_execution_id",
+        "root_execution_id",
+    )
+    @classmethod
+    def _validate_member_ids(cls, value: str) -> str:
+        return _required_string(value, field_name="Imported replay evidence field")
+
+    @field_validator("content_hash")
+    @classmethod
+    def _validate_member_hash(cls, value: str) -> str:
+        return _validate_sha256(value)
+
+    @model_validator(mode="after")
+    def _validate_member(self) -> ImportedReplayMemberEvidence:
+        if self.recorded_response_hits + self.recorded_response_misses > (
+            self.eligible_recorded_responses
+        ):
+            raise ValueError("Recorded response decisions exceed eligible calls.")
+        if [item.index for item in self.decisions] != list(range(len(self.decisions))):
+            raise ValueError("Imported replay decisions must use contiguous order.")
+        expected = _sha256(
+            _canonical_json(self.model_dump(mode="json", exclude={"content_hash"}))
+        )
+        if self.content_hash != expected:
+            raise ValueError(
+                "Imported replay member content_hash does not match payload."
+            )
+        return self
+
+    @classmethod
+    def create(cls, **values: Any) -> ImportedReplayMemberEvidence:
+        """Create content-addressed member evidence."""
+        provisional = cls.model_construct(
+            schema_version=1,
+            content_hash="sha256:" + "0" * 64,
+            **values,
+        )
+        python_payload = provisional.model_dump(mode="python", exclude={"content_hash"})
+        json_payload = provisional.model_dump(mode="json", exclude={"content_hash"})
+        return cls(
+            **python_payload,
+            content_hash=_sha256(_canonical_json(json_payload)),
+        )
+
+
 class TargetPlanningRow(BaseModel):
     """One immutable target-level coverage and replay planning decision."""
 
@@ -263,9 +429,9 @@ class TargetPlanningRow(BaseModel):
     parent_execution_id: str | None
     root_execution_id: str
     checkpoint_covered: bool
-    disposition: Literal["replay", "skip", "top"]
+    disposition: Literal["replay", "skip", "top", "imported"]
     reason: str | None = None
-    replay_plan: FrozenReplayPlan | None = None
+    replay_plan: FrozenExperimentReplayPlan | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -274,13 +440,38 @@ class TargetPlanningRow(BaseModel):
     def _validate_required_ids(cls, value: str) -> str:
         return _required_string(value, field_name="Execution ID")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade_legacy_native_plan(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        replay_plan = value.get("replay_plan")
+        if isinstance(replay_plan, Mapping) and "plan_type" not in replay_plan:
+            upgraded = dict(value)
+            upgraded["replay_plan"] = {"plan_type": "native", **replay_plan}
+            return upgraded
+        return value
+
     @model_validator(mode="after")
     def _validate_disposition(self) -> TargetPlanningRow:
         if self.disposition == "replay":
             if not self.checkpoint_covered or self.replay_plan is None:
                 raise ValueError("Covered replay targets require a replay plan.")
+            if not isinstance(self.replay_plan, FrozenReplayPlan):
+                raise ValueError("Native replay targets require a native replay plan.")
             if self.replay_plan.replay_from_start:
                 raise ValueError("Covered targets cannot use replay-from-start.")
+        elif self.disposition == "imported":
+            if not self.checkpoint_covered or not isinstance(
+                self.replay_plan, FrozenImportedReplayPlan
+            ):
+                raise ValueError(
+                    "Imported targets require a frozen imported replay plan."
+                )
+            if self.parent_execution_id != self.target_execution_id:
+                raise ValueError(
+                    "Imported targets must be their child's immediate parent."
+                )
         elif self.disposition == "skip":
             if self.checkpoint_covered or self.replay_plan is not None:
                 raise ValueError("Skipped targets must be uncovered and plan-free.")
@@ -289,6 +480,8 @@ class TargetPlanningRow(BaseModel):
         else:
             if self.checkpoint_covered or self.replay_plan is None:
                 raise ValueError("Top-policy targets require a from-start plan.")
+            if not isinstance(self.replay_plan, FrozenReplayPlan):
+                raise ValueError("Top-policy targets require a native replay plan.")
             if not self.replay_plan.replay_from_start:
                 raise ValueError("Top-policy targets must use replay-from-start.")
             if not self.reason:
@@ -599,6 +792,10 @@ class ExperimentRecord(BaseModel):
     unverified_children: list[ExperimentIssue] = Field(default_factory=list)
     score_aggregate: ScoreAggregateReference | None = None
     operational_limit: OperationalLimitOutcome | None = None
+    imported_replay_members: list[ImportedReplayMemberEvidence] = Field(
+        default_factory=list
+    )
+    imported_replay_evidence: ImportedReplayEvidenceSummary | None = None
     verdict: VerdictResult | None = None
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -634,6 +831,34 @@ class ExperimentRecord(BaseModel):
         for summaries in (self.errors, self.skips, self.unverified_children):
             if len(summaries) > _MAX_ISSUE_SUMMARIES:
                 raise ValueError("Experiment issue summaries exceed the bounded limit.")
+        imported_rows = [
+            row
+            for row in getattr(self.spec, "planning_rows", [])
+            if row.disposition == "imported"
+        ]
+        if imported_rows:
+            keys = [
+                (item.target_execution_id, item.repeat_index)
+                for item in self.imported_replay_members
+            ]
+            if len(keys) != len(set(keys)):
+                raise ValueError(
+                    "Imported replay member evidence identities must be unique."
+                )
+            if self.imported_replay_evidence is not None and (
+                self.imported_replay_evidence
+                != ImportedReplayEvidenceSummary._from_members(
+                    intended=self.counts.intended,
+                    members=self.imported_replay_members,
+                )
+            ):
+                raise ValueError(
+                    "Imported replay evidence must match member reports and counts."
+                )
+        elif self.imported_replay_members or self.imported_replay_evidence is not None:
+            raise ValueError(
+                "Native experiments cannot contain imported replay evidence."
+            )
         if self.verdict is not None:
             if self.score_aggregate is None or self.spec.verdict_policy is None:
                 raise ValueError(
@@ -747,11 +972,11 @@ class ReplayTrialPlan:
         return self.target.root_execution_id
 
     @property
-    def disposition(self) -> Literal["replay", "skip", "top"]:
+    def disposition(self) -> Literal["replay", "skip", "top", "imported"]:
         return self.target.disposition
 
     @property
-    def replay_plan(self) -> FrozenReplayPlan | None:
+    def replay_plan(self) -> FrozenExperimentReplayPlan | None:
         return self.target.replay_plan
 
 
@@ -847,6 +1072,15 @@ def experiment_request_hash(spec: ExperimentSpecRecord) -> str:
         exclude={"request_hash", "experiment_id", "created_at"},
     )
     if payload.get("kind") == "replay":
+        # Native plans predate the discriminator. Keep their logical request
+        # hash stable while imported plans retain their explicit plan type.
+        for row in payload.get("planning_rows", []):
+            replay_plan = row.get("replay_plan")
+            if (
+                isinstance(replay_plan, dict)
+                and replay_plan.get("plan_type") == "native"
+            ):
+                replay_plan.pop("plan_type")
         if payload.get("source_experiment_id") is None:
             payload.pop("source_experiment_id", None)
         if payload.get("scorers") == []:

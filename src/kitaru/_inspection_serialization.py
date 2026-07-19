@@ -380,6 +380,19 @@ def serialize_experiment(
             issue.model_dump(mode="json") for issue in record.unverified_children
         ],
         "scorers": [scorer.model_dump(mode="json") for scorer in spec.scorers],
+        "planning_rows": (
+            [row.model_dump(mode="json") for row in spec.planning_rows]
+            if spec.kind == "replay"
+            else []
+        ),
+        "imported_replay_members": [
+            item.model_dump(mode="json") for item in record.imported_replay_members
+        ],
+        "imported_replay_evidence": (
+            None
+            if record.imported_replay_evidence is None
+            else record.imported_replay_evidence.model_dump(mode="json")
+        ),
         "evidence_manifest": (
             None
             if spec.evidence_manifest is None

@@ -10,6 +10,7 @@ from zenml.models import PipelineRunResponse
 
 from kitaru._experiments import (
     ExperimentPlanningError,
+    FrozenReplayPlan,
     preplan_replay_attempt,
 )
 from kitaru.cohort import CohortResult
@@ -125,7 +126,7 @@ def test_ambiguous_selector_is_reported_and_checkpoint_free_top_is_planned() -> 
     )
     row = draft.planning_rows[0]
     assert row.disposition == "top"
-    assert row.replay_plan is not None
+    assert isinstance(row.replay_plan, FrozenReplayPlan)
     assert row.replay_plan.steps_to_skip == []
 
 

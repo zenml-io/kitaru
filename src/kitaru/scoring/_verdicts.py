@@ -97,12 +97,155 @@ class ProtectionPolicy(BaseModel):
         )
 
 
+class ImportedReplayComparability(StrEnum):
+    """How closely an imported candidate followed the recorded source path."""
+
+    RECORDED_PATH_COMPARABLE = "recorded_path_comparable"
+    COUNTERFACTUAL = "counterfactual"
+    DEGRADED = "degraded"
+    NON_COMPARABLE = "non_comparable"
+
+
+class ImportedReplayVerdictPolicy(BaseModel):
+    """Frozen evidence requirements for an imported replay verdict."""
+
+    allowed_comparability: tuple[ImportedReplayComparability, ...] = (
+        ImportedReplayComparability.RECORDED_PATH_COMPARABLE,
+    )
+    require_complete_prefix: bool = True
+    require_all_recorded_responses: bool = True
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("allowed_comparability", mode="before")
+    @classmethod
+    def _load_allowed_comparability(
+        cls, value: Any
+    ) -> tuple[ImportedReplayComparability, ...]:
+        return tuple(
+            item
+            if isinstance(item, ImportedReplayComparability)
+            else ImportedReplayComparability(item)
+            for item in value
+        )
+
+    @model_validator(mode="after")
+    def _validate_allowed_states(self) -> ImportedReplayVerdictPolicy:
+        if not self.allowed_comparability:
+            raise ValueError(
+                "Imported replay verdict policy requires an allowed state."
+            )
+        if len(self.allowed_comparability) != len(set(self.allowed_comparability)):
+            raise ValueError(
+                "Allowed imported replay comparability states must be unique."
+            )
+        return self
+
+
+class ImportedReplayEvidenceSummary(BaseModel):
+    """Bounded immutable evidence facts for all imported replay members."""
+
+    intended: int = Field(ge=1)
+    reported: int = Field(ge=0)
+    complete_prefixes: int = Field(ge=0)
+    eligible_recorded_responses: int = Field(ge=0)
+    recorded_response_hits: int = Field(ge=0)
+    recorded_response_misses: int = Field(ge=0)
+    blocked_calls: int = Field(ge=0)
+    path_divergences: int = Field(ge=0)
+    comparability: ImportedReplayComparability
+    content_hash: str
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("comparability", mode="before")
+    @classmethod
+    def _load_summary_comparability(cls, value: Any) -> ImportedReplayComparability:
+        if isinstance(value, ImportedReplayComparability):
+            return value
+        return ImportedReplayComparability(value)
+
+    @field_validator("content_hash")
+    @classmethod
+    def _validate_summary_hash(cls, value: str) -> str:
+        return validate_sha256(value)
+
+    @model_validator(mode="after")
+    def _validate_summary(self) -> ImportedReplayEvidenceSummary:
+        if self.reported > self.intended or self.complete_prefixes > self.reported:
+            raise ValueError(
+                "Imported replay evidence counts exceed their denominator."
+            )
+        if self.recorded_response_hits + self.recorded_response_misses > (
+            self.eligible_recorded_responses
+        ):
+            raise ValueError("Recorded response decisions exceed eligible calls.")
+        expected = sha256_json(self.model_dump(mode="json", exclude={"content_hash"}))
+        if self.content_hash != expected:
+            raise ValueError(
+                "Imported replay evidence content_hash does not match payload."
+            )
+        return self
+
+    @classmethod
+    def create(cls, **values: Any) -> ImportedReplayEvidenceSummary:
+        """Create a content-addressed evidence summary."""
+        provisional = cls.model_construct(
+            content_hash="sha256:" + "0" * 64,
+            **values,
+        )
+        python_payload = provisional.model_dump(mode="python", exclude={"content_hash"})
+        json_payload = provisional.model_dump(mode="json", exclude={"content_hash"})
+        return cls(
+            **python_payload,
+            content_hash=sha256_json(json_payload),
+        )
+
+    @classmethod
+    def _from_members(
+        cls,
+        *,
+        intended: int,
+        members: Sequence[Any],
+    ) -> ImportedReplayEvidenceSummary:
+        """Derive the immutable aggregate from its ordered member evidence."""
+        ranking = {
+            ImportedReplayComparability.RECORDED_PATH_COMPARABLE: 0,
+            ImportedReplayComparability.COUNTERFACTUAL: 1,
+            ImportedReplayComparability.DEGRADED: 2,
+            ImportedReplayComparability.NON_COMPARABLE: 3,
+        }
+        comparability = max(
+            (member.comparability for member in members),
+            key=ranking.__getitem__,
+            default=ImportedReplayComparability.NON_COMPARABLE,
+        )
+        return cls.create(
+            intended=intended,
+            reported=len(members),
+            complete_prefixes=sum(member.prefix_complete for member in members),
+            eligible_recorded_responses=sum(
+                member.eligible_recorded_responses for member in members
+            ),
+            recorded_response_hits=sum(
+                member.recorded_response_hits for member in members
+            ),
+            recorded_response_misses=sum(
+                member.recorded_response_misses for member in members
+            ),
+            blocked_calls=sum(member.blocked_calls for member in members),
+            path_divergences=sum(member.path_diverged for member in members),
+            comparability=comparability,
+        )
+
+
 class VerdictPolicy(BaseModel):
     """Complete frozen grading policy for one experiment attempt."""
 
     schema_version: Literal[1] = 1
     objective: ObjectivePolicy | None = None
     protections: list[ProtectionPolicy] = Field(default_factory=list)
+    imported_replay: ImportedReplayVerdictPolicy | None = None
     content_hash: str
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -126,7 +269,10 @@ class VerdictPolicy(BaseModel):
             raise ValueError(
                 "Objective and protection scorer identities must be disjoint."
             )
-        expected = sha256_json(self.model_dump(mode="json", exclude={"content_hash"}))
+        hash_exclude = {"content_hash"}
+        if self.imported_replay is None:
+            hash_exclude.add("imported_replay")
+        expected = sha256_json(self.model_dump(mode="json", exclude=hash_exclude))
         if self.content_hash != expected:
             raise ValueError("Verdict policy content_hash does not match payload.")
         return self
@@ -144,6 +290,7 @@ class VerdictPolicy(BaseModel):
         objective: ScorerSnapshot | None = None,
         minimum_mean: float | None = None,
         protections: Sequence[ProtectionSnapshot] = (),
+        imported_replay: ImportedReplayVerdictPolicy | None = None,
     ) -> VerdictPolicy | None:
         """Create a policy, or None when the attempt is intentionally ungraded."""
         protection_items = list(protections)
@@ -151,7 +298,7 @@ class VerdictPolicy(BaseModel):
             raise KitaruUsageError(
                 "An objective minimum mean requires exactly one objective scorer."
             )
-        if objective is None and not protection_items:
+        if objective is None and not protection_items and imported_replay is None:
             return None
         objective_policy = (
             None
@@ -161,7 +308,10 @@ class VerdictPolicy(BaseModel):
                 minimum_mean=1.0 if minimum_mean is None else minimum_mean,
             )
         )
-        payload = {
+        protection_policies = [
+            ProtectionPolicy.from_snapshot(item) for item in protection_items
+        ]
+        json_payload = {
             "schema_version": 1,
             "objective": (
                 None
@@ -169,11 +319,17 @@ class VerdictPolicy(BaseModel):
                 else objective_policy.model_dump(mode="json")
             ),
             "protections": [
-                ProtectionPolicy.from_snapshot(item).model_dump(mode="json")
-                for item in protection_items
+                item.model_dump(mode="json") for item in protection_policies
             ],
         }
-        return cls(**payload, content_hash=sha256_json(payload))
+        if imported_replay is not None:
+            json_payload["imported_replay"] = imported_replay.model_dump(mode="json")
+        return cls(
+            objective=objective_policy,
+            protections=protection_policies,
+            imported_replay=imported_replay,
+            content_hash=sha256_json(json_payload),
+        )
 
 
 class ExperimentVerdict(StrEnum):
@@ -201,6 +357,10 @@ class VerdictReasonCode(StrEnum):
     PROTECTION_BELOW_PASSING_SCORE = "protection_below_passing_score"
     OPERATIONAL_LIMIT_UNVERIFIED = "operational_limit_unverified"
     OPERATIONAL_LIMIT_STOPPED = "operational_limit_stopped"
+    IMPORTED_REPLAY_EVIDENCE_MISSING = "imported_replay_evidence_missing"
+    IMPORTED_REPLAY_PREFIX_INCOMPLETE = "imported_replay_prefix_incomplete"
+    IMPORTED_RECORDED_RESPONSES_INCOMPLETE = "imported_recorded_responses_incomplete"
+    IMPORTED_REPLAY_NOT_COMPARABLE = "imported_replay_not_comparable"
 
 
 class OperationalLimitReason(StrEnum):
@@ -357,6 +517,26 @@ class ScoreMatrixFact(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
+class ImportedReplayVerdictFact(BaseModel):
+    """Frozen imported replay evidence checked by one verdict."""
+
+    required: bool
+    present: bool
+    complete_prefixes: bool | None = None
+    recorded_responses_complete: bool | None = None
+    comparability: ImportedReplayComparability | None = None
+    accepted: bool
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("comparability", mode="before")
+    @classmethod
+    def _load_fact_comparability(cls, value: Any) -> ImportedReplayComparability | None:
+        if value is None or isinstance(value, ImportedReplayComparability):
+            return value
+        return ImportedReplayComparability(value)
+
+
 class VerdictResult(BaseModel):
     """Immutable verdict and the exact frozen facts that produced it."""
 
@@ -370,6 +550,7 @@ class VerdictResult(BaseModel):
     protections: list[ProtectionVerdictFact] = Field(default_factory=list)
     replay_completeness: ReplayCompletenessFact
     score_matrix: ScoreMatrixFact
+    imported_replay: ImportedReplayVerdictFact | None = None
     operational_limit: OperationalLimitOutcome | None = None
     reason_codes: list[VerdictReasonCode] = Field(default_factory=list)
     message: str
@@ -406,7 +587,10 @@ class VerdictResult(BaseModel):
     def _validate_content_hash(self) -> VerdictResult:
         if len(self.reason_codes) != len(set(self.reason_codes)):
             raise ValueError("Verdict reason codes must be unique.")
-        expected = sha256_json(self.model_dump(mode="json", exclude={"content_hash"}))
+        hash_exclude = {"content_hash"}
+        if self.imported_replay is None:
+            hash_exclude.add("imported_replay")
+        expected = sha256_json(self.model_dump(mode="json", exclude=hash_exclude))
         if self.content_hash != expected:
             raise ValueError("Verdict content_hash does not match payload.")
         return self
@@ -539,6 +723,54 @@ def evaluate_verdict(
         if passed is False:
             reasons.append(VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE)
 
+    imported_replay_fact: ImportedReplayVerdictFact | None = None
+    imported_policy = policy.imported_replay
+    if imported_policy is not None:
+        evidence = getattr(record, "imported_replay_evidence", None)
+        if evidence is None:
+            reasons.append(VerdictReasonCode.IMPORTED_REPLAY_EVIDENCE_MISSING)
+            imported_replay_fact = ImportedReplayVerdictFact(
+                required=True,
+                present=False,
+                accepted=False,
+            )
+        else:
+            prefixes_complete = (
+                evidence.reported == evidence.intended
+                and evidence.complete_prefixes == evidence.intended
+            )
+            responses_complete = (
+                evidence.recorded_response_misses == 0
+                and evidence.blocked_calls == 0
+                and evidence.recorded_response_hits
+                == evidence.eligible_recorded_responses
+            )
+            comparable = evidence.comparability in imported_policy.allowed_comparability
+            if imported_policy.require_complete_prefix and not prefixes_complete:
+                reasons.append(VerdictReasonCode.IMPORTED_REPLAY_PREFIX_INCOMPLETE)
+            if (
+                imported_policy.require_all_recorded_responses
+                and not responses_complete
+            ):
+                reasons.append(VerdictReasonCode.IMPORTED_RECORDED_RESPONSES_INCOMPLETE)
+            if not comparable:
+                reasons.append(VerdictReasonCode.IMPORTED_REPLAY_NOT_COMPARABLE)
+            imported_replay_fact = ImportedReplayVerdictFact(
+                required=True,
+                present=True,
+                complete_prefixes=prefixes_complete,
+                recorded_responses_complete=responses_complete,
+                comparability=evidence.comparability,
+                accepted=(
+                    (prefixes_complete or not imported_policy.require_complete_prefix)
+                    and (
+                        responses_complete
+                        or not imported_policy.require_all_recorded_responses
+                    )
+                    and comparable
+                ),
+            )
+
     if operational_limit is not None:
         if not operational_limit.verified:
             reasons.append(VerdictReasonCode.OPERATIONAL_LIMIT_UNVERIFIED)
@@ -599,6 +831,8 @@ def evaluate_verdict(
         "reason_codes": [item.value for item in reasons],
         "message": message,
     }
+    if imported_replay_fact is not None:
+        payload["imported_replay"] = imported_replay_fact.model_dump(mode="json")
     return VerdictResult(
         experiment_id=record.spec.experiment_id,
         verdict=verdict,
@@ -609,6 +843,7 @@ def evaluate_verdict(
         protections=protection_facts,
         replay_completeness=replay_fact,
         score_matrix=matrix_fact,
+        imported_replay=imported_replay_fact,
         operational_limit=operational_limit,
         reason_codes=reasons,
         message=message,

@@ -21,6 +21,13 @@ from ._agent import KitaruAgent
 from ._events import PydanticAIUsageSummary
 from ._function_toolset import KitaruFunctionToolset
 from ._hitl import hitl_tool
+from ._imported_replay import (
+    ImportedReplayFallbackPolicy,
+    ImportedReplayMessageProvenance,
+    ImportedReplayPreparationError,
+    PreparedImportedReplayHistory,
+    prepare_imported_replay_history,
+)
 from ._mcp_server import KitaruMCPServer, kitaruify_mcp_server
 from ._model import KitaruModel
 from ._policy import CaptureMode, CapturePolicy
@@ -131,16 +138,21 @@ __all__ = [
     "CheckpointConfig",
     "CheckpointRuntime",
     "CheckpointStrategy",
+    "ImportedReplayFallbackPolicy",
+    "ImportedReplayMessageProvenance",
+    "ImportedReplayPreparationError",
     "KitaruAgent",
     "KitaruFunctionToolset",
     "KitaruMCPServer",
     "KitaruModel",
     "KitaruToolset",
+    "PreparedImportedReplayHistory",
     "PydanticAIUsageSummary",
     "SandboxCommandToolResult",
     "hitl_tool",
     "kitaruify_mcp_server",
     "kitaruify_toolset",
+    "prepare_imported_replay_history",
     "sandbox_command_toolset",
     "validate_checkpoint_strategy",
     "wait_for_input",

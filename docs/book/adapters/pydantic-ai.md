@@ -558,6 +558,22 @@ If Kitaru cannot identify the provider/model for a model event, or `genai-prices
 
 In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded as `reused_not_incurred`, so replay and cache hits do not look like fresh spend when Kitaru builds execution-level usage summaries. Kitaru normally writes those summaries when executions finish; `FlowHandle.wait()` and `FlowHandle.get()` can populate missing summaries for older executions or executions where the finish-time summary was not written. Setting `emit_child_events=False` disables the model/tool event tracking that produces these per-model usage records.
 
+## Imported replay experiments
+
+A registered `KitaruAgent` can run a new candidate from immutable PydanticAI
+evidence stored by a Langfuse import. Choose either the recorded root input or a
+complete recorded message boundary. The candidate uses the normal registered
+Agent path, matching recorded tool responses are served without calling live
+tools, and every miss is blocked.
+
+Kitaru records per-child evidence and lineage separately from objective and
+protection scores. A root rerun is counterfactual and defaults to `HOLD`; a
+complete boundary can produce `PASS` when the recorded path remains comparable
+and all scores and protections pass. See [Import Langfuse
+Traces](../guides/import-langfuse-traces.md#run-a-registered-pydanticai-candidate)
+for the SDK examples, comparability states, suite repeats, and read-only
+inspection commands.
+
 ## Message history
 
 Pass `message_history` explicitly like any PydanticAI agent, or let the adapter thread it for you:

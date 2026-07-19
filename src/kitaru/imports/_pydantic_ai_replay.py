@@ -12,6 +12,8 @@ from kitaru.imports._models import ImportedObservation, ImportedTrace, TraceInte
 from kitaru.imports._replay_evidence import (
     _MAX_REPLAY_DIAGNOSTICS,
     CapabilityReadiness,
+    EvidenceRedactionStatus,
+    ImportedReplayEvidenceIdentity,
     RawImportedEvidence,
     ReplayCapability,
     ReplayDiagnostic,
@@ -22,6 +24,8 @@ from kitaru.imports._replay_evidence import (
     sha256_canonical_json,
     validate_sha256,
 )
+
+_PYDANTIC_AI_REPLAY_PROFILE_VERSION = "pydantic_ai_replay_v1"
 
 
 class ReplayPartKind(StrEnum):
@@ -34,6 +38,70 @@ class ReplayPartKind(StrEnum):
     TOOL_RESULT = "tool_result"
 
 
+class ImportedReplayMode(StrEnum):
+    """Supported ways to start a candidate from imported evidence."""
+
+    ROOT_INPUT = "root_input"
+    MESSAGE_HISTORY = "message_history"
+
+
+class ImportedReplayBoundaryKind(StrEnum):
+    """Validated source position selected for a candidate run."""
+
+    ROOT_INPUT = "root_input"
+    MODEL_MESSAGE = "model_message"
+    TOOL_RESULT = "tool_result"
+
+
+class ImportedReplayBoundary(BaseModel):
+    """Immutable imported evidence position used to start a candidate."""
+
+    kind: ImportedReplayBoundaryKind
+    observation_id: str | None = None
+    sequence: int | None = Field(default=None, ge=0)
+    occurrence: int | None = Field(default=None, ge=0)
+    call_id: str | None = None
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _load_boundary_kind(cls, value: Any) -> ImportedReplayBoundaryKind:
+        if isinstance(value, ImportedReplayBoundaryKind):
+            return value
+        return ImportedReplayBoundaryKind(value)
+
+    @field_validator("observation_id", "call_id")
+    @classmethod
+    def _normalize_boundary_identity(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Replay boundary identity fields cannot be empty.")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validate_boundary(self) -> ImportedReplayBoundary:
+        provenance = (self.observation_id, self.sequence, self.occurrence)
+        if self.kind is ImportedReplayBoundaryKind.ROOT_INPUT:
+            if any(value is not None for value in (*provenance, self.call_id)):
+                raise ValueError(
+                    "Root-input boundaries cannot carry message provenance."
+                )
+            return self
+        if any(value is None for value in provenance):
+            raise ValueError(
+                "Message boundaries require complete observation provenance."
+            )
+        if self.kind is ImportedReplayBoundaryKind.TOOL_RESULT:
+            if self.call_id is None:
+                raise ValueError("Tool-result boundaries require call_id.")
+        elif self.call_id is not None:
+            raise ValueError("Model-message boundaries cannot carry call_id.")
+        return self
+
+
 class ReplayEvidencePart(BaseModel):
     """One explicitly structured message or tool part."""
 
@@ -41,6 +109,7 @@ class ReplayEvidencePart(BaseModel):
     observation_id: str
     sequence: int = Field(ge=0)
     occurrence: int = Field(ge=0)
+    message_index: int = Field(ge=0)
     call_id: str | None = None
     name: str | None = None
     content: Any = None
@@ -125,6 +194,67 @@ class PydanticAIReplayBundle(BaseModel):
         payload = self.model_dump(mode="json", exclude={"bundle_digest"})
         if sha256_canonical_json(payload) != self.bundle_digest:
             raise ValueError("bundle_digest does not match the normalized bundle.")
+        return self
+
+
+class PreparedImportedReplayEvidence(BaseModel):
+    """Trusted immutable inputs for later PydanticAI replay preparation."""
+
+    identity: ImportedReplayEvidenceIdentity
+    raw_evidence: RawImportedEvidence
+    replay_bundle: PydanticAIReplayBundle
+    readiness: ReplayReadinessSummary
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    @model_validator(mode="after")
+    def _validate_prepared_identity(self) -> PreparedImportedReplayEvidence:
+        if (
+            self.raw_evidence.redaction_status
+            is not EvidenceRedactionStatus.NOT_REDACTED
+        ):
+            raise ValueError("Prepared imported replay evidence cannot be redacted.")
+        if (
+            self.raw_evidence.source.model_dump(mode="json")
+            != self.replay_bundle.source
+        ):
+            raise ValueError(
+                "Raw and normalized replay evidence have different sources."
+            )
+        if (
+            self.raw_evidence.raw_content_sha256
+            != self.replay_bundle.raw_evidence_digest
+        ):
+            raise ValueError("Replay bundle does not bind the loaded raw evidence.")
+        if self.identity.raw_evidence.sha256 != self.raw_evidence.raw_content_sha256:
+            raise ValueError("Raw evidence identity digest does not match its content.")
+        if (
+            self.identity.raw_evidence.schema_version
+            != self.raw_evidence.schema_version
+        ):
+            raise ValueError("Raw evidence identity schema does not match its content.")
+        if self.identity.replay_bundle.sha256 != self.replay_bundle.bundle_digest:
+            raise ValueError(
+                "Replay bundle identity digest does not match its content."
+            )
+        if (
+            self.identity.replay_bundle.schema_version
+            != self.replay_bundle.schema_version
+        ):
+            raise ValueError(
+                "Replay bundle identity schema does not match its content."
+            )
+        if self.identity.replay_profile_version != self.replay_bundle.profile_version:
+            raise ValueError("Replay profile identity does not match its content.")
+        source = self.raw_evidence.source
+        if (
+            self.identity.source_provider,
+            self.identity.source_project_id,
+            self.identity.source_trace_id,
+        ) != source.identity:
+            raise ValueError(
+                "Prepared replay source identity does not match its evidence."
+            )
         return self
 
 
@@ -231,7 +361,7 @@ def build_pydantic_ai_replay_evidence(
 
     bundle_values: dict[str, Any] = {
         "schema_version": 1,
-        "profile_version": "pydantic_ai_replay_v1",
+        "profile_version": _PYDANTIC_AI_REPLAY_PROFILE_VERSION,
         "source": trace.source.model_dump(mode="json"),
         "root_input_present": trace.input_present,
         "root_input": trace.input,
@@ -323,7 +453,7 @@ def _parts_from_observation(
 
     parts: list[ReplayEvidencePart] = []
     occurrence = 0
-    for message in messages:
+    for message_index, message in enumerate(messages):
         role = str(message.get("role", "")).strip().lower()
         content = message.get("content")
         if isinstance(content, list):
@@ -339,6 +469,7 @@ def _parts_from_observation(
                     observation_id=observation.id,
                     sequence=sequence,
                     occurrence=occurrence,
+                    message_index=message_index,
                     diagnostics=diagnostics,
                 )
                 if built is not None:
@@ -352,6 +483,7 @@ def _parts_from_observation(
                 observation_id=observation.id,
                 sequence=sequence,
                 occurrence=occurrence,
+                message_index=message_index,
                 diagnostics=diagnostics,
             )
             if built is not None:
@@ -369,6 +501,7 @@ def _parts_from_observation(
                     observation_id=observation.id,
                     sequence=sequence,
                     occurrence=occurrence,
+                    message_index=message_index,
                     diagnostics=diagnostics,
                 )
                 if built is not None:
@@ -401,6 +534,7 @@ def _text_or_result_part(
     observation_id: str,
     sequence: int,
     occurrence: int,
+    message_index: int,
     diagnostics: list[ReplayDiagnostic],
 ) -> ReplayEvidencePart | None:
     if role == "tool":
@@ -421,6 +555,7 @@ def _text_or_result_part(
             observation_id=observation_id,
             sequence=sequence,
             occurrence=occurrence,
+            message_index=message_index,
             call_id=call_id,
             name=_normalized_string(message.get("name")),
             content=content,
@@ -439,6 +574,7 @@ def _text_or_result_part(
         observation_id=observation_id,
         sequence=sequence,
         occurrence=occurrence,
+        message_index=message_index,
         content=content,
     )
 
@@ -450,6 +586,7 @@ def _part_from_mapping(
     observation_id: str,
     sequence: int,
     occurrence: int,
+    message_index: int,
     diagnostics: list[ReplayDiagnostic],
 ) -> ReplayEvidencePart | None:
     part_kind = _normalized_string(
@@ -462,6 +599,7 @@ def _part_from_mapping(
             observation_id=observation_id,
             sequence=sequence,
             occurrence=occurrence,
+            message_index=message_index,
             diagnostics=diagnostics,
         )
     if normalized_kind in {"tool_result", "tool_return"}:
@@ -483,6 +621,7 @@ def _part_from_mapping(
             observation_id=observation_id,
             sequence=sequence,
             occurrence=occurrence,
+            message_index=message_index,
             call_id=call_id,
             name=_normalized_string(source.get("tool_name") or source.get("name")),
             content=source.get("content", source.get("result")),
@@ -495,6 +634,7 @@ def _part_from_mapping(
             observation_id=observation_id,
             sequence=sequence,
             occurrence=occurrence,
+            message_index=message_index,
             diagnostics=diagnostics,
         )
     diagnostics.append(_unsupported_part(observation_id, part_kind or "unknown"))
@@ -507,6 +647,7 @@ def _tool_call_part(
     observation_id: str,
     sequence: int,
     occurrence: int,
+    message_index: int,
     diagnostics: list[ReplayDiagnostic],
 ) -> ReplayEvidencePart | None:
     function = source.get("function")
@@ -541,6 +682,7 @@ def _tool_call_part(
         observation_id=observation_id,
         sequence=sequence,
         occurrence=occurrence,
+        message_index=message_index,
         call_id=call_id,
         name=name,
         content=arguments,
