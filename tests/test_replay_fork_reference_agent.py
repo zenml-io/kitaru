@@ -2,13 +2,19 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
+import pytest
 from examples.end_to_end.replay_fork_demo.reference_agent import db
 from examples.end_to_end.replay_fork_demo.reference_agent.agent import (
     SupportAgentDeps,
+    build_support_agent,
 )
 from examples.end_to_end.replay_fork_demo.reference_agent.config import (
+    ESCALATION_AUDIT_REASONS,
     FIXTURES_DIR,
+    EscalationPolicyLabel,
+    SupportDecision,
     load_scenarios,
     load_variant,
     select_scenarios,
@@ -16,10 +22,23 @@ from examples.end_to_end.replay_fork_demo.reference_agent.config import (
 from examples.end_to_end.replay_fork_demo.reference_agent.knowledge import search_kb
 from examples.end_to_end.replay_fork_demo.reference_agent.mock_api import MockApiServer
 from examples.end_to_end.replay_fork_demo.reference_agent.tools import SupportTools
+from pydantic_ai import messages as pydantic_messages
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 TRACE_FIXTURE = Path(
     "examples/end_to_end/replay_fork_demo/trace_fixtures/support-traces.jsonl"
 )
+
+
+@pytest.fixture
+def support_tools(tmp_path: Path) -> SupportTools:
+    db_path = tmp_path / "state.sqlite"
+    db.reset_database(db_path=db_path)
+    return SupportTools(
+        db_path=db_path,
+        api_base_url="http://unused.invalid",
+        kb_dir=FIXTURES_DIR.parent / "knowledge_base",
+    )
 
 
 def test_scenarios_and_variants_load() -> None:
@@ -36,6 +55,94 @@ def test_scenarios_and_variants_load() -> None:
     assert nano.model == "openai:gpt-5-nano"
     assert nano.prompt_profile == "trimmed_permissions"
     assert budget.max_tool_calls == 2
+
+
+def test_support_decision_schema_guides_bounded_retry(tmp_path: Path) -> None:
+    valid_decision: dict[str, Any] = {
+        "policy_label": "permissions_policy",
+        "risk_status": "needs_review",
+        "required_action": "escalate_to_human",
+        "summary": "Human review is required.",
+        "evidence_ids": [],
+        "tool_names": [],
+    }
+    first_request_text = ""
+    retry_texts: list[str] = []
+    request_count = 0
+
+    def respond(
+        messages: list[pydantic_messages.ModelMessage],
+        info: AgentInfo,
+    ) -> pydantic_messages.ModelResponse:
+        nonlocal first_request_text, request_count
+        request_count += 1
+        request_parts = [
+            part
+            for message in messages
+            if isinstance(message, pydantic_messages.ModelRequest)
+            for part in message.parts
+        ]
+        if request_count == 1:
+            first_request_text = info.instructions or ""
+            invalid_decision = {**valid_decision, "policy_label": "permissions"}
+            return pydantic_messages.ModelResponse(
+                parts=[pydantic_messages.TextPart(content=json.dumps(invalid_decision))]
+            )
+
+        retry_parts = [
+            part
+            for part in request_parts
+            if isinstance(part, pydantic_messages.RetryPromptPart)
+        ]
+        assert len(retry_parts) == request_count - 1
+        retry_texts.append(str(retry_parts[-1].content))
+        if request_count == 2:
+            invalid_decision = {**valid_decision, "risk_status": "unsafe"}
+            return pydantic_messages.ModelResponse(
+                parts=[pydantic_messages.TextPart(content=json.dumps(invalid_decision))]
+            )
+        return pydantic_messages.ModelResponse(
+            parts=[pydantic_messages.TextPart(content=json.dumps(valid_decision))]
+        )
+
+    scenario = {item.scenario_id: item for item in load_scenarios()}[
+        "account_setting_change_request"
+    ]
+    variant = load_variant("baseline")
+    deps = SupportAgentDeps(
+        scenario=scenario,
+        variant=variant,
+        db_path=tmp_path / "state.sqlite",
+        api_base_url="http://unused.invalid",
+        kb_dir=FIXTURES_DIR.parent / "knowledge_base",
+    )
+    result = build_support_agent(
+        variant,
+        model=FunctionModel(respond),
+    ).wrapped.run_sync(scenario.user_request, deps=deps)
+
+    schema = SupportDecision.model_json_schema()
+    allowed_literals = {
+        literal
+        for property_schema in schema["properties"].values()
+        for literal in property_schema.get("enum", [])
+    }
+    assert allowed_literals
+    assert all(literal in first_request_text for literal in allowed_literals)
+    assert len(retry_texts) == 2
+    assert "policy_label" in retry_texts[0]
+    assert "permissions" in retry_texts[0]
+    assert "billing_policy" in retry_texts[0]
+    assert "permissions_policy" in retry_texts[0]
+    assert "risk_status" in retry_texts[1]
+    assert "unsafe" in retry_texts[1]
+    assert "safe" in retry_texts[1]
+    assert "needs_review" in retry_texts[1]
+    assert "blocked" in retry_texts[1]
+    assert request_count == 3
+    assert SupportDecision.model_validate_json(result.output) == SupportDecision(
+        **valid_decision
+    )
 
 
 def test_checked_in_trace_fixture_contains_complete_agent_runs() -> None:
@@ -108,6 +215,47 @@ def test_mock_api_and_knowledge_search() -> None:
     assert "incident:inc_exports_2026_06_17" in status.evidence_ids
     assert usage.result["spike_reason"].startswith("A backfill job")
     assert kb_hits[0]["document_id"] == "billing.md#owner-changes"
+
+
+@pytest.mark.parametrize(
+    "policy_label",
+    ["billing_policy", "permissions_policy"],
+)
+def test_escalation_tool_keeps_structural_args_and_readable_reason(
+    support_tools: SupportTools,
+    policy_label: EscalationPolicyLabel,
+) -> None:
+    execution = support_tools.run(
+        "escalate_to_human",
+        {
+            "customer_id": "cust_acme",
+            "policy_label": policy_label,
+        },
+    )
+
+    assert execution.args == {
+        "customer_id": "cust_acme",
+        "policy_label": policy_label,
+    }
+    assert execution.result["reason"] == ESCALATION_AUDIT_REASONS[policy_label]
+    assert db.get_audit_log(support_tools.db_path)[0]["details"] == {
+        "reason": ESCALATION_AUDIT_REASONS[policy_label]
+    }
+
+
+def test_escalation_tool_rejects_unknown_label_without_writing(
+    support_tools: SupportTools,
+) -> None:
+    with pytest.raises(ValueError, match="Unknown escalation policy label"):
+        support_tools.run(
+            "escalate_to_human",
+            {
+                "customer_id": "cust_acme",
+                "policy_label": "incident_policy",
+            },
+        )
+
+    assert db.get_audit_log(support_tools.db_path) == []
 
 
 def test_tool_registry_records_dangerous_write(tmp_path: Path) -> None:

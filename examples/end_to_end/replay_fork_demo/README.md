@@ -5,10 +5,11 @@ bounded replay attempt. Kitaru keeps the imported execution unchanged. Each
 candidate run is a new execution with its own AgentVersion, lineage, scores,
 cost, evidence quality, and verdict.
 
-The candidate never calls a live tool during imported replay. Kitaru serves an
-exact recorded response when the tool name and arguments match. It blocks every
-miss, including write-capable calls, instead of falling through to the original
-callable.
+The candidate never calls a live tool during imported replay. The recorded
+escalation is a stable structured call with `customer_id` and a constrained
+`policy_label`. Kitaru serves a recorded response only when the tool name and
+arguments match exactly. It blocks every miss, including write-capable calls,
+instead of falling through to the original callable.
 
 Two replay starts are available:
 
@@ -55,8 +56,9 @@ The commands below use the `support-account-setting` and
 
 ## 1. Register the recorded source version
 
-The fixture declares `v2.2-json-text-imported` as its source version. Kitaru
-must know which exact code produced the trace before importing it.
+The fixture declares `v2.3-structured-escalation-imported` as its source
+version. Kitaru must know which exact code produced the trace before importing
+it.
 
 There is no public CLI command for registering executable Python Agent code.
 The example helper loads `evals.register:baseline_agent` and calls
@@ -90,7 +92,7 @@ uv run kitaru import langfuse \
   ../trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
-  --agent-version v2.2-json-text-imported \
+  --agent-version v2.3-structured-escalation-imported \
   --trace-id support-account-setting \
   --trace-id support-service-status
 ```
@@ -106,7 +108,7 @@ uv run kitaru import langfuse \
   ../trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
-  --agent-version v2.2-json-text-imported \
+  --agent-version v2.3-structured-escalation-imported \
   --trace-id support-account-setting \
   --trace-id support-service-status \
   --write \
@@ -141,7 +143,7 @@ export LANGFUSE_BASE_URL=https://langfuse.example.com
 uv run kitaru import langfuse \
   "langfuse://trace/<trace-id>" \
   --agent support-agent \
-  --agent-version v2.2-json-text-imported
+  --agent-version v2.3-structured-escalation-imported
 ```
 
 Kitaru derives the source project ID from the returned observations. The
@@ -182,21 +184,34 @@ uv run python ../demo.py resume <account-setting-execution-id> \
   --boundary-kind tool-result \
   --boundary-index 1 \
   --candidate-variant baseline \
-  --candidate-version reproduction-baseline \
+  --candidate-version account-setting-baseline-v1 \
   --name account-setting-reproduction \
   --idempotency-key account-setting-reproduction-v1
 ```
 
 The command rebuilds the boundary from stored evidence and runs a registered
-candidate. If the candidate requests the recorded escalation with the same
-arguments, Kitaru serves that recorded write-capable result without invoking
-the tool. A changed argument becomes a blocked miss.
+candidate. The recorded escalation uses the exact arguments `customer_id` and
+`policy_label="permissions_policy"`. Kitaru serves its recorded write-capable result
+only when both arguments match exactly, without invoking the tool. Any changed
+argument is a blocked miss.
 
-The summary reports the replay mode, recorded-response hits and misses, blocked
-calls, path divergence, objective, protections, and verdict. A clean
-reproduction reports one recorded reply, no blocked calls, no path divergence,
-and `recorded_path_comparable`. Provider output can still cause `HOLD` or
-`FAIL`; the command does not invent a passing result.
+When the candidate reproduces that exact call and completes successfully, the
+expected comparable result starts with the verdict-led heading
+`PASS  account-setting-reproduction` and shows:
+
+- `Status`: the candidate attempt is completed;
+- `Replay`: `message_history from tool-result`;
+- `Comparability`: `recorded_path_comparable`;
+- `Recorded replies`: `1/1 served, 0 missed`;
+- `Blocked calls`: `0`;
+- `Path divergences`: `0`;
+- `Objective`: `support-resolution` passed;
+- `Protections`: `all passed`.
+
+These rows are the comparable evidence that justifies `PASS`. If the provider
+takes a divergent path, the verdict may instead be `HOLD` or `FAIL`. If any
+exact argument misses, Kitaru blocks the call and the result cannot pass as
+comparable.
 
 ## 5. Run a counterfactual candidate
 
@@ -206,15 +221,15 @@ account-setting tool. Run it from the root input:
 ```bash
 uv run python ../demo.py replay <account-setting-execution-id> \
   --candidate-variant nano_trimmed_permissions \
-  --candidate-version permissions-counterfactual \
+  --candidate-version v2.3-counterfactual \
   --name account-setting-counterfactual \
   --idempotency-key account-setting-counterfactual-v1
 ```
 
-This is a new path, not a reproduction. Its evidence quality is
-`counterfactual`, or `degraded` if a tool call misses or is blocked. The strict
-verdict stays `HOLD` rather than treating a plausible score as proof of direct
-comparability.
+`v2.3-counterfactual` is the current default candidate version. This root-input
+run is counterfactual, or degraded if a tool call misses or is blocked. Its
+objective and protection scores remain useful, but the strict verdict is
+`HOLD` because the run is not comparable recorded-path evidence.
 
 ## 6. Register and run the candidate fix
 
@@ -262,9 +277,10 @@ uv run kitaru agents experiments \
   account-setting-fix
 ```
 
-The durable summary includes trial counts, replay mode, recorded responses,
-blocked calls, path divergence, objective, protections, limits, and the reason
-for the verdict.
+The default text output leads with the verdict and includes `Status`, `Trials`,
+`Replay`, `Comparability`, `Recorded replies`, `Blocked calls`, `Path
+divergences`, `Objective`, `Protections`, limits when present, and `Why`. Use
+these rows to distinguish a comparable `PASS` from a counterfactual `HOLD`.
 
 ## 8. Create a named multi-case suite
 
@@ -342,7 +358,7 @@ uv run python ../demo.py resume <account-setting-execution-id> \
   --boundary-kind tool-result \
   --boundary-index 1 \
   --candidate-variant baseline \
-  --candidate-version reproduction-baseline \
+  --candidate-version account-setting-baseline-v1 \
   --name account-setting-reproduction \
   --idempotency-key account-setting-reproduction-json-v1 \
   --output json > /tmp/kitaru-replay-result.json
@@ -362,7 +378,7 @@ Later Kitaru commands will use your normal local state again.
 ## Fixture provenance
 
 `trace_fixtures/imported-support-cases.jsonl` is the small deterministic fixture
-used by the acceptance test. `support-traces.jsonl` is the larger exported
-scenario set. Maintainers can generate fresh Langfuse traces with
-`python -m trace_fixtures.generate`; see
-[trace_fixtures/README.md](trace_fixtures/README.md).
+used by this walkthrough and the acceptance test. See
+[trace_fixtures/README.md](trace_fixtures/README.md) for its detailed provenance,
+derived-data marker, raw generation procedure, and the separate larger exported
+scenario set.

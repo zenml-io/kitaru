@@ -27,11 +27,7 @@ from tests.test_replay_fork_demo import DEMO_ROOT, _load_demo_module
 FIXTURE = DEMO_ROOT / "trace_fixtures" / "imported-support-cases.jsonl"
 ACCOUNT_TRACE_ID = "support-account-setting"
 STATUS_TRACE_ID = "support-service-status"
-ESCALATION_REASON = (
-    "Account owner requested enabling account-wide feature flag "
-    "'beta_exports_fast_path'. Account-wide feature-flag changes are restricted "
-    "admin actions per permissions policy; escalate for human review and approval."
-)
+RECORDED_CANDIDATE_VERSION = "v2.3-recorded-fix"
 
 
 def _initialize_repository(repository_root: Path) -> None:
@@ -139,7 +135,7 @@ def _recorded_path_model() -> FunctionModel:
                             tool_name="escalate_to_human",
                             args={
                                 "customer_id": "cust_acme",
-                                "reason": ESCALATION_REASON,
+                                "policy_label": "permissions_policy",
                             },
                             tool_call_id="candidate-escalation",
                         )
@@ -191,6 +187,39 @@ def _recorded_path_model() -> FunctionModel:
             )
 
         raise AssertionError(f"unexpected deterministic prompt: {prompt}")
+
+    return FunctionModel(respond)
+
+
+def _structured_argument_mismatch_model() -> FunctionModel:
+    def respond(
+        messages: list[pydantic_messages.ModelMessage],
+        _info: Any,
+    ) -> pydantic_messages.ModelResponse:
+        returned_names = [part.tool_name for part in _tool_returns(messages)]
+        if "escalate_to_human" not in returned_names:
+            return pydantic_messages.ModelResponse(
+                parts=[
+                    pydantic_messages.ToolCallPart(
+                        tool_name="escalate_to_human",
+                        args={
+                            "customer_id": "cust_acme",
+                            "policy_label": "billing_policy",
+                        },
+                        tool_call_id="candidate-mismatched-escalation",
+                    )
+                ]
+            )
+        return _final_result(
+            {
+                "policy_label": "permissions_policy",
+                "risk_status": "blocked",
+                "required_action": "refuse_write",
+                "summary": "The mismatched escalation was blocked.",
+                "evidence_ids": [],
+                "tool_names": ["escalate_to_human"],
+            }
+        )
 
     return FunctionModel(respond)
 
@@ -325,7 +354,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         name="account-setting-resumption",
         idempotency_key="account-setting-resumption-v1",
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=RECORDED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     resumed_member = resumed.record.imported_replay_members[0]
@@ -350,6 +379,30 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         resumed.verdict.model_dump_json(indent=2)
     )
 
+    mismatched = demo._resume_case(
+        account_execution_id,
+        boundary_kind="tool-result",
+        boundary_index=1,
+        name="account-setting-structured-mismatch",
+        idempotency_key="account-setting-structured-mismatch-v1",
+        candidate_variant="baseline",
+        candidate_version="v2.3-structured-mismatch",
+        model=_structured_argument_mismatch_model(),
+    )
+    mismatch_member = mismatched.record.imported_replay_members[0]
+    mismatch_child = KitaruClient().executions.get(mismatch_member.child_execution_id)
+    assert mismatch_child.status == "completed", mismatch_child.failure
+    assert mismatch_member.recorded_response_hits == 0
+    assert mismatch_member.recorded_response_misses == 1
+    assert mismatch_member.blocked_calls == 1
+    assert mismatch_member.path_diverged is True
+    assert mismatch_member.comparability is ImportedReplayComparability.DEGRADED
+    assert len(mismatch_member.decisions) == 1
+    assert mismatch_member.decisions[0].decision == "blocked"
+    assert mismatch_member.decisions[0].block_reason == "argument_mismatch"
+    assert mismatched.verdict is not None
+    assert mismatched.verdict.verdict is ExperimentVerdict.HOLD
+
     model_boundary = demo._message_history_boundary(
         account_execution_id,
         kind="model-message",
@@ -364,7 +417,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         name="account-setting-model-message",
         idempotency_key="account-setting-model-message-v1",
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=RECORDED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert model_resumed.record.imported_replay_members, (
@@ -393,7 +446,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         idempotency_key="account-setting-model-message-rerun-v1",
         limits=comparable_limits,
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=RECORDED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert first_comparable_rerun.verdict is not None
@@ -409,7 +462,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         idempotency_key="account-setting-model-message-rerun-v1",
         limits=comparable_limits,
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=RECORDED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert (
@@ -424,7 +477,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         idempotency_key="support-imported-regression-v1",
         repeats=1,
         candidate_variant="baseline",
-        candidate_version="v2.2-recorded-fix",
+        candidate_version=RECORDED_CANDIDATE_VERSION,
         model=recorded_model,
     )
     assert suite.spec.suite_key == "support-imported-regression"
@@ -486,7 +539,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
             idempotency_key="support-imported-regression-rerun-v1",
             limits=limits,
             candidate_variant="baseline",
-            candidate_version="v2.2-recorded-fix",
+            candidate_version=RECORDED_CANDIDATE_VERSION,
             model=recorded_model,
         )
     first_rerun = client.agents.experiments.resolve_source(
@@ -507,7 +560,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
             idempotency_key="support-imported-regression-rerun-v1",
             limits=limits,
             candidate_variant="baseline",
-            candidate_version="v2.2-recorded-fix",
+            candidate_version=RECORDED_CANDIDATE_VERSION,
             model=recorded_model,
         )
     retried_rerun = client.agents.experiments.resolve_source(
@@ -524,7 +577,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
         idempotency_key="support-permissions-counterfactual-v1",
         repeats=1,
         candidate_variant="nano_trimmed_permissions",
-        candidate_version="v2.2-counterfactual",
+        candidate_version="v2.3-counterfactual",
         model=divergent_model,
     )
     assert counterfactual.spec.executable.entrypoint == (

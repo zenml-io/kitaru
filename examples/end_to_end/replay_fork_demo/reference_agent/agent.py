@@ -6,6 +6,7 @@ Kitaru only wraps the finished agent so model and tool calls become durable
 replay boundaries.
 """
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -16,8 +17,19 @@ from pydantic_ai.capabilities import Instrumentation
 
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-from .config import AgentVariant, Scenario, SupportDecision
+from .config import (
+    AgentVariant,
+    EscalationPolicyLabel,
+    Scenario,
+    SupportDecision,
+)
 from .tools import SupportTools, ToolExecution, blocked_tool_execution
+
+_SUPPORT_DECISION_SCHEMA = json.dumps(
+    SupportDecision.model_json_schema(),
+    separators=(",", ":"),
+    sort_keys=True,
+)
 
 
 @dataclass
@@ -91,6 +103,7 @@ def build_support_agent(
                 f"{_shared_instructions()}\n\n{_version_instructions(variant)}"
             ),
             capabilities=[Instrumentation()],
+            retries=2,
         ),
     )
 
@@ -100,7 +113,10 @@ def build_support_agent(
         try:
             SupportDecision.model_validate_json(output)
         except ValidationError as exc:
-            raise ModelRetry("Return one valid SupportDecision JSON object.") from exc
+            raise ModelRetry(
+                "Return one valid SupportDecision JSON object. "
+                f"Pydantic validation details:\n{exc}"
+            ) from exc
         return output
 
     @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
@@ -155,12 +171,14 @@ def build_support_agent(
 
     @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
     def escalate_to_human(
-        ctx: RunContext[SupportAgentDeps], customer_id: str, reason: str
+        ctx: RunContext[SupportAgentDeps],
+        customer_id: str,
+        policy_label: EscalationPolicyLabel,
     ) -> ToolExecution:
-        """Escalate an account, security, or billing-owner change."""
+        """Escalate a billing or permissions policy decision for human approval."""
         return ctx.deps.execute(
             "escalate_to_human",
-            {"customer_id": customer_id, "reason": reason},
+            {"customer_id": customer_id, "policy_label": policy_label},
         )
 
     @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
@@ -185,13 +203,12 @@ def _shared_instructions() -> str:
         "to check facts instead of answering from memory. Look up the customer "
         "before customer-specific billing, usage, permission, or write actions. "
         "Call one tool at a time. Continue until you have enough evidence and "
-        "have completed any action required by policy. Return one JSON object with "
-        "policy_label, risk_status, required_action, summary, evidence_ids, and "
-        "tool_names fields. Use evidence ids and tool names from the tool results. "
-        "Choose "
+        "have completed any action required by policy. Return one JSON object that "
+        f"validates against this exact JSON schema: {_SUPPORT_DECISION_SCHEMA}. "
+        "Use evidence ids and tool names from the tool results. Choose "
         "create_ticket only when create_support_ticket ran. Choose "
-        "escalate_to_human when escalation ran. Choose refuse_write when a "
-        "restricted write was blocked and no safe escalation completed."
+        "escalate_to_human only when escalation ran. Choose refuse_write only "
+        "when a restricted write was blocked and no safe escalation completed."
     )
 
 

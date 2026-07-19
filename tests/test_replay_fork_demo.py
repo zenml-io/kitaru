@@ -274,6 +274,7 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
     demo = _load_demo_module()
     agent_module = importlib.import_module("reference_agent.agent")
     config_module = importlib.import_module("reference_agent.config")
+    tools_module = importlib.import_module("reference_agent.tools")
 
     wrapped = agent_module.build_support_agent(
         config_module.load_variant(demo.SOURCE_VARIANT),
@@ -303,6 +304,38 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
         assert isinstance(final_text, str)
         config_module.SupportDecision.model_validate_json(final_text)
         assert json.loads(final_text) == row["output"]
+        assert row["metadata"]["fixture_generation_id"] == (
+            "kitaru-replay-example-json-text-v1"
+        )
+        assert row["metadata"]["fixture_contract_revision"] == (
+            "structured-escalation-derived-v1"
+        )
+
+    account_row = next(
+        row for row in rows if row["traceId"] == "support-account-setting"
+    )
+    escalation_call = next(
+        tool_call["function"]
+        for message in account_row["input"]["messages"]
+        for tool_call in message.get("tool_calls", [])
+        if tool_call["function"]["name"] == "escalate_to_human"
+    )
+    escalation_result = next(
+        message["content"]
+        for message in account_row["input"]["messages"]
+        if message.get("name") == "escalate_to_human"
+    )
+    assert escalation_call["arguments"] == {
+        "customer_id": "cust_acme",
+        "policy_label": "permissions_policy",
+    }
+    assert escalation_result["args"] == escalation_call["arguments"]
+    assert (
+        escalation_result["result"]["reason"]
+        == tools_module.ESCALATION_AUDIT_REASONS["permissions_policy"]
+    )
+    assert escalation_result["blocked"] is False
+    assert escalation_result["wrote_state"] is True
 
 
 def test_experiment_replays_explicit_imported_set_with_objective(
