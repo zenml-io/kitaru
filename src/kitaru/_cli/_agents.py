@@ -86,10 +86,27 @@ def _experiment_rows(record: ExperimentRecord) -> list[tuple[str, str]]:
         boundary = replay_spec.at
     else:
         boundary = "not applicable"
-    return [
+    rows = [
         ("Experiment ID", spec.experiment_id),
         ("Suite", spec.suite_key),
         ("Status", record.status),
+        (
+            "Trials",
+            f"{record.counts.verified}/{record.counts.intended} verified"
+            + (
+                ""
+                if not (
+                    record.counts.failed
+                    or record.counts.skipped
+                    or record.counts.unverified
+                )
+                else (
+                    f" · {record.counts.failed} failed, "
+                    f"{record.counts.skipped} skipped, "
+                    f"{record.counts.unverified} unverified"
+                )
+            ),
+        ),
         ("Replay mode", mode),
         ("Replay boundary", boundary),
         (
@@ -106,8 +123,78 @@ def _experiment_rows(record: ExperimentRecord) -> list[tuple[str, str]]:
                 f"{evidence.recorded_response_misses} misses"
             ),
         ),
+        (
+            "Blocked calls",
+            "not applicable" if evidence is None else str(evidence.blocked_calls),
+        ),
+        (
+            "Path divergences",
+            "not applicable" if evidence is None else str(evidence.path_divergences),
+        ),
         ("Verdict", "not graded" if verdict is None else verdict.verdict.value),
     ]
+    if verdict is not None:
+        if verdict.objective is not None:
+            objective = verdict.objective
+            rows.append(
+                (
+                    "Objective",
+                    f"{objective.scorer.name}: {objective.mean} "
+                    f"(required {objective.minimum_mean}) · "
+                    f"{'passed' if objective.passed else 'not passed'}",
+                )
+            )
+        failed_protections = [
+            fact.protection_id
+            for fact in verdict.protections
+            if fact.passed is not True
+        ]
+        rows.append(
+            (
+                "Protections",
+                (
+                    "all passed"
+                    if not failed_protections
+                    else "not passed: " + ", ".join(failed_protections)
+                ),
+            )
+        )
+        rows.append(("Why", verdict.message))
+        if verdict.reason_codes:
+            rows.append(
+                ("Reason codes", ", ".join(code.value for code in verdict.reason_codes))
+            )
+    members = record.imported_replay_members
+    if members:
+        displayed_ids = [member.child_execution_id for member in members[:5]]
+        suffix = (
+            ""
+            if len(members) <= len(displayed_ids)
+            else f" · +{len(members) - len(displayed_ids)} more"
+        )
+        rows.append(("Child executions", ", ".join(displayed_ids) + suffix))
+    if record.operational_limit is not None:
+        limit = record.operational_limit
+        facts = limit.facts
+        rows.append(
+            (
+                "Usage",
+                f"${facts.incurred_cost_usd:.4f}, {facts.incurred_tokens} tokens, "
+                f"{facts.duration_seconds:.1f}s",
+            )
+        )
+        if limit.stopped or not limit.verified:
+            rows.append(
+                (
+                    "Limit",
+                    (
+                        limit.reason_code.value
+                        if limit.reason_code is not None
+                        else "usage could not be verified"
+                    ),
+                )
+            )
+    return rows
 
 
 def _agent_show_rows(agent: AgentInfo) -> list[tuple[str, str]]:

@@ -192,10 +192,11 @@ candidate. If the candidate requests the recorded escalation with the same
 arguments, Kitaru serves that recorded write-capable result without invoking
 the tool. A changed argument becomes a blocked miss.
 
-Check `imported_replay_members` in the result. A clean reproduction reports one
-recorded-response hit, no blocked calls, no path divergence, and
-`recorded_path_comparable`. Provider output can still cause `HOLD` or `FAIL`;
-the command does not invent a passing result.
+The summary reports the replay mode, recorded-response hits and misses, blocked
+calls, path divergence, objective, protections, and verdict. A clean
+reproduction reports one recorded reply, no blocked calls, no path divergence,
+and `recorded_path_comparable`. Provider output can still cause `HOLD` or
+`FAIL`; the command does not invent a passing result.
 
 ## 5. Run a counterfactual candidate
 
@@ -258,13 +259,12 @@ Inspect the fixed attempt through Kitaru by its suite name:
 ```bash
 uv run kitaru agents experiments \
   support-agent \
-  account-setting-fix \
-  --output json
+  account-setting-fix
 ```
 
-The JSON output includes target membership, planning rows, candidate version,
-coverage, score aggregates, imported replay evidence, operational limits,
-verdict policy, and the final verdict.
+The durable summary includes trial counts, replay mode, recorded responses,
+blocked calls, path divergence, objective, protections, limits, and the reason
+for the verdict.
 
 ## 8. Create a named multi-case suite
 
@@ -319,27 +319,34 @@ Inspect the durable attempts through Kitaru:
 ```bash
 uv run kitaru agents experiments \
   support-agent \
-  account-setting-fix \
-  --output json
+  account-setting-fix
 uv run kitaru agents experiments \
   support-agent \
-  support-imported-regression \
-  --output json
+  support-imported-regression
 ```
 
 Inspect a candidate child execution from either result:
 
 ```bash
-uv run kitaru executions get \
-  <candidate-child-execution-id> \
-  --output json
+uv run kitaru executions get <candidate-child-execution-id>
 ```
 
-The JSON execution view includes the persisted execution fields, checkpoint
-graph, immediate parent and root lineage, and import attribution when present.
-The experiment JSON includes target membership, planning and coverage, score
-aggregates, imported replay evidence, operational limits, verdict policy, and
-the final verdict.
+The execution view includes the checkpoint graph, immediate parent, replay
+root, and import attribution when present.
+
+All `demo.py` commands use readable output by default. Add `--output json` when
+you need the complete machine-readable record, preferably redirected to a file:
+
+```bash
+uv run python ../demo.py resume <account-setting-execution-id> \
+  --boundary-kind tool-result \
+  --boundary-index 1 \
+  --candidate-variant baseline \
+  --candidate-version reproduction-baseline \
+  --name account-setting-reproduction \
+  --idempotency-key account-setting-reproduction-json-v1 \
+  --output json > /tmp/kitaru-replay-result.json
+```
 
 When you are finished, return to the example directory and remove the two
 temporary directories:

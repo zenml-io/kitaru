@@ -15,6 +15,63 @@ from pydantic_ai.models.test import TestModel
 DEMO_ROOT = Path("examples/end_to_end/replay_fork_demo")
 
 
+def _replay_result_stub(*, verdict: str = "hold") -> SimpleNamespace:
+    verdict_value = SimpleNamespace(value=verdict)
+    verdict_record = SimpleNamespace(
+        verdict=verdict_value,
+        objective=SimpleNamespace(
+            scorer=SimpleNamespace(name="support-resolution"),
+            mean=1.0,
+            minimum_mean=1.0,
+            passed=True,
+        ),
+        protections=[SimpleNamespace(protection_id="completed-execution", passed=True)],
+        message="Imported replay did not remain on a comparable recorded path.",
+        reason_codes=[SimpleNamespace(value="imported_replay_not_comparable")],
+    )
+    record = SimpleNamespace(
+        status="completed",
+        spec=SimpleNamespace(
+            experiment_id="experiment-one",
+            suite_key="suite-one",
+            at="root",
+            planning_rows=[
+                SimpleNamespace(
+                    disposition="imported",
+                    replay_plan=SimpleNamespace(
+                        mode=SimpleNamespace(value="root_input"),
+                        boundary=SimpleNamespace(
+                            kind=SimpleNamespace(value="root_input")
+                        ),
+                    ),
+                )
+            ],
+        ),
+        counts=SimpleNamespace(verified=1, intended=1),
+        imported_replay_evidence=SimpleNamespace(
+            comparability=SimpleNamespace(value="counterfactual"),
+            recorded_response_hits=0,
+            eligible_recorded_responses=1,
+            recorded_response_misses=1,
+            blocked_calls=1,
+            path_divergences=1,
+        ),
+        imported_replay_members=[SimpleNamespace(child_execution_id="candidate-run")],
+        verdict=verdict_record,
+        operational_limit=None,
+    )
+
+    def assert_pass() -> None:
+        if verdict != "pass":
+            raise AssertionError("not a passing result")
+
+    return SimpleNamespace(
+        record=record,
+        submission=SimpleNamespace(compare_url="https://example.com/compare"),
+        assert_pass=assert_pass,
+    )
+
+
 def _load_demo_module() -> ModuleType:
     demo_root = str(DEMO_ROOT.resolve())
     if demo_root not in sys.path:
@@ -93,6 +150,8 @@ def test_import_command_uses_declared_source_version_without_loading_agent(
             "--limit",
             "1",
             "--commit",
+            "--output",
+            "json",
         ],
     )
 
@@ -124,7 +183,12 @@ def test_import_command_accepts_uri_and_defaults_to_read_only(monkeypatch: Any) 
 
     result = CliRunner().invoke(
         demo.cli,
-        ["import-traces", "langfuse://trace/trace-48211"],
+        [
+            "import-traces",
+            "langfuse://trace/trace-48211",
+            "--output",
+            "json",
+        ],
     )
 
     assert result.exit_code == 0, result.output
@@ -148,7 +212,9 @@ def test_register_command_selects_explicit_source_variant(monkeypatch: Any) -> N
 
     assert result.exit_code == 0, result.output
     assert calls == [{"variant": demo.SOURCE_VARIANT, "version": demo.SOURCE_VERSION}]
-    assert '"role": "source"' in result.output
+    assert "Registered AgentVersion" in result.output
+    assert "Role     source" in result.output
+    assert f"Version  {demo.SOURCE_VERSION}" in result.output
 
 
 def test_source_registration_rejects_fixture_mismatches(monkeypatch: Any) -> None:
@@ -267,6 +333,8 @@ def test_experiment_replays_explicit_imported_set_with_objective(
             "permissions-v2-attempt-1",
             "--repeats",
             "2",
+            "--output",
+            "json",
         ],
     )
 
@@ -308,6 +376,8 @@ def test_resume_command_forwards_explicit_boundary_selection(monkeypatch: Any) -
             "2",
             "--idempotency-key",
             "resume-1",
+            "--output",
+            "json",
         ],
     )
 
@@ -316,6 +386,87 @@ def test_resume_command_forwards_explicit_boundary_selection(monkeypatch: Any) -
     assert calls[0]["boundary_index"] == 2
     assert calls[0]["candidate_variant"] == demo.DEFAULT_CANDIDATE_VARIANT
     assert calls[0]["candidate_version"] == demo.DEFAULT_CANDIDATE_VERSION
+
+
+def test_resume_command_defaults_to_readable_summary(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    monkeypatch.setattr(
+        demo, "_resume_case", lambda *_args, **_kwargs: _replay_result_stub()
+    )
+
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "resume",
+            "imported-run",
+            "--idempotency-key",
+            "resume-readable",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "HOLD  suite-one" in result.output
+    assert "Trials" in result.output
+    assert "1/1 verified" in result.output
+    assert "Recorded replies" in result.output
+    assert "0/1 served, 1 missed" in result.output
+    assert "Blocked calls" in result.output
+    assert "imported_replay_not_comparable" in result.output
+    assert '"planning_rows"' not in result.output
+
+
+def test_replay_command_uses_real_helper_signature(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+
+    class FakeAgent:
+        def replay(self, _selected: list[str], **_kwargs: Any) -> SimpleNamespace:
+            return _replay_result_stub()
+
+    monkeypatch.setattr(
+        demo,
+        "_registered_agent",
+        lambda **_kwargs: (FakeAgent(), object()),
+    )
+
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "replay",
+            "imported-run",
+            "--idempotency-key",
+            "replay-readable",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "HOLD  suite-one" in result.output
+
+
+def test_rerun_command_prints_summary_before_nonzero_exit(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    calls: list[dict[str, Any]] = []
+
+    def rerun(*_args: Any, **kwargs: Any) -> SimpleNamespace:
+        calls.append(kwargs)
+        return _replay_result_stub()
+
+    monkeypatch.setattr(demo, "_rerun_suite", rerun)
+
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "rerun",
+            "suite-one",
+            "--idempotency-key",
+            "rerun-readable",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "HOLD  suite-one" in result.output
+    assert "Why" in result.output
+    assert "Traceback" not in result.output
+    assert calls[0]["assert_pass"] is False
 
 
 def test_rerun_command_uses_limits_objective_and_asserts_pass(monkeypatch: Any) -> None:
@@ -355,6 +506,8 @@ def test_rerun_command_uses_limits_objective_and_asserts_pass(monkeypatch: Any) 
             "5000",
             "--max-duration-seconds",
             "60",
+            "--output",
+            "json",
         ],
     )
 
@@ -421,6 +574,40 @@ def test_inspect_execution_uses_compact_attempt_reference(
     assert result["scores_truncated"] is True
 
 
+def test_inspect_execution_text_skips_score_history(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    calls: list[dict[str, Any]] = []
+
+    def inspect(execution_id: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append({"execution_id": execution_id, **kwargs})
+        return {
+            "execution_id": execution_id,
+            "status": "completed",
+            "immediate_parent_id": "imported-run",
+            "root_execution_id": "imported-run",
+            "import": None,
+            "cost": None,
+            "scores": [],
+            "scores_truncated": False,
+            "scores_omitted": True,
+            "available_boundaries": [],
+        }
+
+    monkeypatch.setattr(demo, "_inspect_execution", inspect)
+
+    result = CliRunner().invoke(demo.cli, ["inspect-execution", "candidate-run"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [
+        {
+            "execution_id": "candidate-run",
+            "include_scores": False,
+            "boundary_limit": 10,
+        }
+    ]
+    assert "use --output json for score records" in result.output
+
+
 def test_inspect_experiment_reuses_attempt_context_and_page_metadata(
     monkeypatch: Any,
 ) -> None:
@@ -480,3 +667,54 @@ def test_inspect_experiment_reuses_attempt_context_and_page_metadata(
     assert len(result["members"]) == 100
     assert all(item["client"] is client for item in inspected)
     assert all(item["attempts"] == (attempt,) for item in inspected)
+
+
+def test_inspect_experiment_text_skips_deep_member_loading(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    members = [SimpleNamespace(id="run-one"), SimpleNamespace(id="run-two")]
+    member_page = SimpleNamespace(items=members, total=2, total_pages=1)
+    record = SimpleNamespace(
+        spec=SimpleNamespace(experiment_id="experiment-one", suite_key="suite-one"),
+        status="completed",
+        counts=SimpleNamespace(
+            model_dump=lambda **_kwargs: {"intended": 2, "verified": 2}
+        ),
+        imported_replay_evidence=SimpleNamespace(
+            model_dump=lambda **_kwargs: {
+                "comparability": "recorded_path_comparable",
+                "recorded_response_hits": 2,
+                "eligible_recorded_responses": 2,
+                "recorded_response_misses": 0,
+                "blocked_calls": 0,
+                "path_divergences": 0,
+            }
+        ),
+        verdict=None,
+    )
+    attempt = SimpleNamespace(
+        record=record,
+        runs=SimpleNamespace(list=lambda **_kwargs: member_page),
+        to_json=lambda: (_ for _ in ()).throw(
+            AssertionError("text output must not serialize the full attempt")
+        ),
+    )
+    experiments = SimpleNamespace(
+        resolve_source=lambda _source, *, agent: attempt,
+    )
+    client = SimpleNamespace(agents=SimpleNamespace(experiments=experiments))
+    monkeypatch.setattr(demo, "KitaruClient", lambda: client)
+    monkeypatch.setattr(
+        demo,
+        "_inspect_execution",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("text output must not inspect every member")
+        ),
+    )
+
+    result = CliRunner().invoke(demo.cli, ["inspect-experiment", "suite-one"])
+
+    assert result.exit_code == 0, result.output
+    assert "NOT GRADED  suite-one" in result.output
+    assert "2/2 verified" in result.output
+    assert "2/2 served, 0 missed" in result.output
+    assert "2 shown · 2 total · page 1/1" in result.output
