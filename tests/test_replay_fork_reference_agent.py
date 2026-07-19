@@ -50,9 +50,9 @@ def test_scenarios_and_variants_load() -> None:
 
     assert len(scenarios) == 8
     assert len(smoke_scenarios) == 6
-    assert baseline.model == "openai:gpt-5-mini"
+    assert baseline.model == "openai-chat:gpt-5-mini"
     assert "update_customer_setting" in baseline.denied_tools
-    assert nano.model == "openai:gpt-5-nano"
+    assert nano.model == "openai-chat:gpt-5-nano"
     assert nano.prompt_profile == "trimmed_permissions"
     assert budget.max_tool_calls == 2
 
