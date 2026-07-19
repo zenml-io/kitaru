@@ -28,8 +28,18 @@ From the repository root:
 ```bash
 uv sync --extra local --extra pydantic-ai --extra llm --extra langfuse
 cd examples/end_to_end/replay_fork_demo
+
+PLAYGROUND_DIR="$(mktemp -d "$PWD/.replay-playground.XXXXXX")"
+export KITARU_CONFIG_PATH="$(mktemp -d /tmp/kitaru-replay-demo.XXXXXX)"
+cd "$PLAYGROUND_DIR"
 uv run kitaru init
 ```
+
+The temporary directory and `KITARU_CONFIG_PATH` give the walkthrough their
+own project marker, database, and local artifact store. They do not alter this
+checkout's existing `.kitaru/` marker or your normal Kitaru state. Keep using
+the same shell until you finish. Commands use `../demo.py` and
+`../trace_fixtures/` because the shell is now inside that temporary directory.
 
 The checked-in JSONL fixture can be previewed and imported without Langfuse or
 OpenAI credentials. Registration and candidate execution use the models in
@@ -39,24 +49,26 @@ OpenAI credentials. Registration and candidate execution use the models in
 export OPENAI_API_KEY=sk-...
 ```
 
-The commands below use two traces from
-`trace_fixtures/imported-support-cases.jsonl`:
-
-```bash
-export ACCOUNT_TRACE_ID=support-account-setting
-export STATUS_TRACE_ID=support-service-status
-```
+The commands below use the `support-account-setting` and
+`support-service-status` traces from
+`trace_fixtures/imported-support-cases.jsonl`.
 
 ## 1. Register the recorded source version
 
-The fixture declares `v2.2-json-text-imported` as its source version. Register
-that exact label before importing it:
+The fixture declares `v2.2-json-text-imported` as its source version. Kitaru
+must know which exact code produced the trace before importing it.
+
+There is no public CLI command for registering executable Python Agent code.
+The example helper loads `evals.register:baseline_agent` and calls
+`agent.register(...)` with the fixture's label and entrypoint:
 
 ```bash
-uv run python demo.py register --role source
+uv run python ../demo.py register --role source
 ```
 
-This registers the `baseline` variant under the declared source label. The
+It creates the immutable AgentVersion record without importing a trace, calling
+the model, running the Agent, or deploying anything. This registers the
+`baseline` variant under the declared source label. The
 fixture and generator freeze that pair, and source-role registration rejects a
 different variant or label. The fixture advertises the same callable tools as
 the source implementation and stores the final `SupportDecision` as validated
@@ -75,12 +87,12 @@ Start with a read-only preview:
 
 ```bash
 uv run kitaru import langfuse \
-  trace_fixtures/imported-support-cases.jsonl \
+  ../trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
   --agent-version v2.2-json-text-imported \
-  --trace-id "$ACCOUNT_TRACE_ID" \
-  --trace-id "$STATUS_TRACE_ID"
+  --trace-id support-account-setting \
+  --trace-id support-service-status
 ```
 
 The preview reports attribution, replay readiness, storage, and the action that
@@ -91,22 +103,32 @@ destination:
 
 ```bash
 uv run kitaru import langfuse \
-  trace_fixtures/imported-support-cases.jsonl \
+  ../trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
   --agent-version v2.2-json-text-imported \
-  --trace-id "$ACCOUNT_TRACE_ID" \
-  --trace-id "$STATUS_TRACE_ID" \
+  --trace-id support-account-setting \
+  --trace-id support-service-status \
   --write \
-  --confirm-data-storage
+  --confirm-data-storage \
+  --output json > /tmp/kitaru-replay-import.json
 ```
 
-Copy the two `execution_id` values from the output:
+Print the generated execution IDs:
 
 ```bash
-export ACCOUNT_EXECUTION_ID=<account-setting-execution-id>
-export STATUS_EXECUTION_ID=<service-status-execution-id>
+uv run python - <<'PY'
+import json
+from pathlib import Path
+
+result = json.loads(Path("/tmp/kitaru-replay-import.json").read_text())
+for outcome in result["item"]["outcomes"]:
+    print(f'{outcome["trace_id"]}: {outcome["execution_id"]}')
+PY
 ```
+
+Paste the printed IDs into the placeholders below. If you omit `--output json`,
+the normal CLI output also prints each full execution ID in its own trace block.
 
 You can also fetch one trace through the read-only Langfuse observations API:
 
@@ -131,7 +153,7 @@ fetched evidence. This path reads the trace through Langfuse's observations API.
 Start with Kitaru's durable execution view:
 
 ```bash
-uv run kitaru executions get "$ACCOUNT_EXECUTION_ID"
+uv run kitaru executions get <account-setting-execution-id>
 ```
 
 This shows the imported execution and its checkpoint graph. An imported
@@ -142,7 +164,7 @@ For the adapter-specific continuation in the next step, inspect the replay
 readiness and available message-history boundaries computed by the example:
 
 ```bash
-uv run python demo.py inspect-execution "$ACCOUNT_EXECUTION_ID"
+uv run python ../demo.py inspect-execution <account-setting-execution-id>
 ```
 
 The fixture contains a complete tool-result boundary at index `1` and complete
@@ -156,7 +178,7 @@ optional `call_id` that Kitaru uses. Do not choose an arbitrary observation ID.
 Continue after the second recorded tool result with the baseline candidate:
 
 ```bash
-uv run python demo.py resume "$ACCOUNT_EXECUTION_ID" \
+uv run python ../demo.py resume <account-setting-execution-id> \
   --boundary-kind tool-result \
   --boundary-index 1 \
   --candidate-variant baseline \
@@ -181,7 +203,7 @@ The weakened variant has a trimmed permissions prompt and allows the
 account-setting tool. Run it from the root input:
 
 ```bash
-uv run python demo.py replay "$ACCOUNT_EXECUTION_ID" \
+uv run python ../demo.py replay <account-setting-execution-id> \
   --candidate-variant nano_trimmed_permissions \
   --candidate-version permissions-counterfactual \
   --name account-setting-counterfactual \
@@ -199,7 +221,7 @@ The `mini_tool_budget_2` variant restores the full permissions prompt while
 keeping a smaller tool budget. Register it explicitly:
 
 ```bash
-uv run python demo.py register \
+uv run python ../demo.py register \
   --role candidate \
   --variant mini_tool_budget_2 \
   --version permissions-fix-v1
@@ -208,7 +230,7 @@ uv run python demo.py register \
 Now test it from the same complete boundary:
 
 ```bash
-uv run python demo.py resume "$ACCOUNT_EXECUTION_ID" \
+uv run python ../demo.py resume <account-setting-execution-id> \
   --boundary-kind tool-result \
   --boundary-index 1 \
   --candidate-variant mini_tool_budget_2 \
@@ -249,9 +271,9 @@ verdict policy, and the final verdict.
 Freeze the imported execution IDs in the order you want:
 
 ```bash
-uv run python demo.py experiment \
-  "$ACCOUNT_EXECUTION_ID" \
-  "$STATUS_EXECUTION_ID" \
+uv run python ../demo.py experiment \
+  <account-setting-execution-id> \
+  <service-status-execution-id> \
   --name support-imported-regression \
   --repeats 1 \
   --candidate-variant mini_tool_budget_2 \
@@ -272,7 +294,7 @@ a complete message-history boundary. Rerun that frozen request with explicit
 limits:
 
 ```bash
-uv run python demo.py rerun account-setting-fix \
+uv run python ../demo.py rerun account-setting-fix \
   --candidate-variant mini_tool_budget_2 \
   --candidate-version permissions-fix-v1 \
   --idempotency-key account-setting-fix-rerun-v1 \
@@ -318,6 +340,17 @@ graph, immediate parent and root lineage, and import attribution when present.
 The experiment JSON includes target membership, planning and coverage, score
 aggregates, imported replay evidence, operational limits, verdict policy, and
 the final verdict.
+
+When you are finished, return to the example directory and remove the two
+temporary directories:
+
+```bash
+cd ..
+rm -rf "$PLAYGROUND_DIR" "$KITARU_CONFIG_PATH"
+unset PLAYGROUND_DIR KITARU_CONFIG_PATH
+```
+
+Later Kitaru commands will use your normal local state again.
 
 ## Fixture provenance
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -203,7 +204,7 @@ def test_langfuse_import_defaults_to_read_only_preview(
     assert "Langfuse trace import" in output
     assert "Preview" in output
     assert "support_agent__av_test" in output
-    assert "trace-one" in output
+    assert "Trace: trace-one" in output
     assert "would_create" in output
     assert "source_verified" in output
     assert "root_input_candidate_rerun=ready" in output
@@ -529,13 +530,103 @@ def test_langfuse_import_partial_failure_exits_nonzero_after_rendering(
     assert "rejected" in capsys.readouterr().out
 
 
+def test_langfuse_import_write_prints_copyable_execution_id(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_client = Mock()
+    result = _result(
+        dry_run=False,
+        status=ImportOutcomeStatus.CREATED,
+    )
+    first_execution_id = "2820d2f5-1d7c-4b5a-92de-876e3b268e5a"
+    second_execution_id = "8fc60a84-7f84-4a9c-85de-0668fd135daa"
+    first_outcome = replace(result.outcomes[0], execution_id=first_execution_id)
+    second_outcome = replace(
+        first_outcome,
+        trace_id="trace-two",
+        execution_id=second_execution_id,
+    )
+    fake_client.imports.langfuse.return_value = replace(
+        result,
+        selected_trace_count=2,
+        outcomes=(first_outcome, second_outcome),
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "import",
+                "langfuse",
+                "export.jsonl",
+                "--source-project-id",
+                "source-project",
+                "--agent",
+                "support-agent",
+                "--agent-version",
+                "prod",
+                "--write",
+                "--confirm-data-storage",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert output.count("Trace: trace-one") == 1
+    assert output.count("Trace: trace-two") == 1
+    assert "Execution ID" in output
+    assert first_execution_id in output
+    assert second_execution_id in output
+    assert "Trace outcomes" not in output
+
+
+def test_langfuse_import_write_json_keeps_warning_out_of_payload(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_client = Mock()
+    fake_client.imports.langfuse.return_value = _result(
+        dry_run=False,
+        status=ImportOutcomeStatus.CREATED,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "import",
+                "langfuse",
+                "export.jsonl",
+                "--source-project-id",
+                "source-project",
+                "--agent",
+                "support-agent",
+                "--agent-version",
+                "prod",
+                "--write",
+                "--confirm-data-storage",
+                "--output",
+                "json",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["item"]["outcomes"][0]["execution_id"] == "execution-one"
+    assert "No --stack was specified" in captured.err
+
+
 def test_langfuse_import_conflict_prints_existing_execution_and_next_action(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake_client = Mock()
     fake_client.imports.langfuse.return_value = _result(
         status=ImportOutcomeStatus.CONFLICT,
-        existing_execution_id="execution-existing",
+        existing_execution_id="2820d2f5-1d7c-4b5a-92de-876e3b268e5a",
         reason="Already imported with a different source AgentVersion.",
         resolution="Retry with the original source AgentVersion.",
     )
@@ -560,5 +651,10 @@ def test_langfuse_import_conflict_prints_existing_execution_and_next_action(
 
     assert exc_info.value.code == 1
     output = capsys.readouterr().out
-    assert "execution-existing" in output
+    assert "Trace: trace-one" in output
+    assert "Existing execution" in output
+    assert "2820d2f5-1d7c-4b5a-92de-876e3b268e5a" in output
+    assert "Problem" in output
+    assert "Already imported with a different source AgentVersion." in output
+    assert "Next action" in output
     assert "Retry with the original source AgentVersion." in output

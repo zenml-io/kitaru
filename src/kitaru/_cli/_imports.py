@@ -24,7 +24,6 @@ from ._helpers import (
     OutputFormatOption,
     _emit_json_item,
     _emit_snapshot,
-    _emit_table,
     _emit_warning,
     _exit_with_error,
     _resolve_output_format,
@@ -163,46 +162,33 @@ def _render_result(result: LangfuseImportResult) -> None:
         ],
         warning=result.storage_warning,
     )
-    _emit_table(
-        "Trace outcomes",
-        [
-            "Trace ID",
-            "Integrity",
-            "Observations",
-            "Status",
-            "Attribution",
-            "Provider evidence",
-            "Replay readiness",
-            "Raw evidence SHA-256",
-            "Replay bundle SHA-256",
-            "Execution ID",
-            "Existing execution",
-            "Reason",
-            "Next action",
-        ],
-        [
-            [
-                outcome.trace_id,
-                outcome.integrity.value,
-                str(outcome.observation_count),
-                outcome.status.value,
+    for outcome in result.outcomes:
+        rows = [
+            ("Status", outcome.status.value),
+            ("Integrity", outcome.integrity.value),
+            ("Observations", str(outcome.observation_count)),
+            (
+                "Attribution",
                 (
                     outcome.attribution.status.value
                     if outcome.attribution is not None
                     else "-"
                 ),
-                _render_provider_stamps(outcome),
-                _render_readiness(outcome.replay_readiness),
-                outcome.raw_evidence_digest or "-",
-                outcome.replay_bundle_digest or "-",
-                outcome.execution_id or "-",
-                outcome.existing_execution_id or "-",
-                outcome.reason or "-",
-                outcome.resolution or "-",
-            ]
-            for outcome in result.outcomes
-        ],
-    )
+            ),
+            ("Provider evidence", _render_provider_stamps(outcome)),
+            ("Replay readiness", _render_readiness(outcome.replay_readiness)),
+            ("Raw evidence SHA-256", outcome.raw_evidence_digest or "-"),
+            ("Replay bundle SHA-256", outcome.replay_bundle_digest or "-"),
+        ]
+        if outcome.execution_id is not None:
+            rows.append(("Execution ID", outcome.execution_id))
+        if outcome.existing_execution_id is not None:
+            rows.append(("Existing execution", outcome.existing_execution_id))
+        if outcome.reason is not None:
+            rows.append(("Problem", outcome.reason))
+        if outcome.resolution is not None:
+            rows.append(("Next action", outcome.resolution))
+        _emit_snapshot(f"Trace: {outcome.trace_id}", rows)
 
 
 def _render_provider_stamps(outcome: TraceImportOutcome) -> str:
