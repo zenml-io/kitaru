@@ -63,14 +63,22 @@ the source implementation and stores the final `SupportDecision` as validated
 JSON text. The importer verifies the declaration against the trace before it writes
 anything.
 
+Confirm that Kitaru can resolve the registered agent:
+
+```bash
+uv run kitaru agents show support-agent
+```
+
 ## 2. Preview and import the traces
 
 Start with a read-only preview:
 
 ```bash
-uv run python demo.py import-traces \
+uv run kitaru import langfuse \
   trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported \
   --trace-id "$ACCOUNT_TRACE_ID" \
   --trace-id "$STATUS_TRACE_ID"
 ```
@@ -78,15 +86,19 @@ uv run python demo.py import-traces \
 The preview reports attribution, replay readiness, storage, and the action that
 a write would take. It does not create executions or evidence artifacts.
 
-Repeat the command with `--commit` after checking the destination:
+Repeat the command with `--write --confirm-data-storage` after checking the
+destination:
 
 ```bash
-uv run python demo.py import-traces \
+uv run kitaru import langfuse \
   trace_fixtures/imported-support-cases.jsonl \
   --source-project-id langfuse-replay-example \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported \
   --trace-id "$ACCOUNT_TRACE_ID" \
   --trace-id "$STATUS_TRACE_ID" \
-  --commit
+  --write \
+  --confirm-data-storage
 ```
 
 Copy the two `execution_id` values from the output:
@@ -104,17 +116,30 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 # Optional for self-hosted Langfuse:
 export LANGFUSE_BASE_URL=https://langfuse.example.com
 
-uv run python demo.py import-traces \
-  "langfuse://trace/<trace-id>"
+uv run kitaru import langfuse \
+  "langfuse://trace/<trace-id>" \
+  --agent support-agent \
+  --agent-version v2.2-json-text-imported
 ```
 
 Kitaru derives the source project ID from the returned observations. The
-default remains a preview. Add `--commit` to store the fetched evidence. This
-path reads the trace through Langfuse's observations API.
+default remains a preview. Add `--write --confirm-data-storage` to store the
+fetched evidence. This path reads the trace through Langfuse's observations API.
 
 ## 3. Inspect the imported evidence
 
-Inspect attribution, readiness, and available message-history boundaries:
+Start with Kitaru's durable execution view:
+
+```bash
+uv run kitaru executions get "$ACCOUNT_EXECUTION_ID"
+```
+
+This shows the imported execution and its checkpoint graph. An imported
+execution is historical evidence, not executable source code, so native
+checkpoint replay remains disabled for it.
+
+For the adapter-specific continuation in the next step, inspect the replay
+readiness and available message-history boundaries computed by the example:
 
 ```bash
 uv run python demo.py inspect-execution "$ACCOUNT_EXECUTION_ID"
@@ -122,18 +147,9 @@ uv run python demo.py inspect-execution "$ACCOUNT_EXECUTION_ID"
 
 The fixture contains a complete tool-result boundary at index `1` and complete
 model-message boundaries for both tool-calling and textual assistant responses.
-The inspection output lists only boundaries that the adapter has validated and
-shows the exact `observation_id`, `sequence`, `occurrence`, and optional `call_id`
-that Kitaru uses. Do not choose an arbitrary observation ID.
-
-The normal execution command is also useful for the imported checkpoint graph:
-
-```bash
-uv run kitaru executions get "$ACCOUNT_EXECUTION_ID"
-```
-
-An imported execution is historical evidence, not executable source code.
-Native checkpoint replay remains disabled for it.
+This additional view lists only boundaries that the PydanticAI adapter has
+validated and shows the exact `observation_id`, `sequence`, `occurrence`, and
+optional `call_id` that Kitaru uses. Do not choose an arbitrary observation ID.
 
 ## 4. Reproduce from the recorded boundary
 
@@ -215,14 +231,18 @@ Every `replay`, `resume`, and `experiment` command attaches the deterministic
 - replay evidence says whether the candidate stayed comparable to the recording;
 - the verdict combines those facts without turning missing evidence into zero.
 
-Inspect the fixed attempt by its suite name:
+Inspect the fixed attempt through Kitaru by its suite name:
 
 ```bash
-uv run python demo.py inspect-experiment account-setting-fix
+uv run kitaru agents experiments \
+  support-agent \
+  account-setting-fix \
+  --output json
 ```
 
-The output includes the frozen request, score aggregate, protection results,
-recorded-response decisions, limits, evidence quality, and verdict.
+The JSON output includes target membership, planning rows, candidate version,
+coverage, score aggregates, imported replay evidence, operational limits,
+verdict policy, and the final verdict.
 
 ## 8. Create a named multi-case suite
 
@@ -272,26 +292,32 @@ or token ceiling before Kitaru stops further work.
 
 ## 10. Inspect the durable result
 
-Inspect one bounded page of an attempt's verified children:
+Inspect the durable attempts through Kitaru:
 
 ```bash
-uv run python demo.py inspect-experiment account-setting-fix \
-  --page 1 --page-size 25
-uv run python demo.py inspect-experiment support-imported-regression \
-  --page 1 --page-size 25
+uv run kitaru agents experiments \
+  support-agent \
+  account-setting-fix \
+  --output json
+uv run kitaru agents experiments \
+  support-agent \
+  support-imported-regression \
+  --output json
 ```
 
-Inspect a child execution from either result:
+Inspect a candidate child execution from either result:
 
 ```bash
-uv run python demo.py inspect-execution <candidate-child-execution-id>
+uv run kitaru executions get \
+  <candidate-child-execution-id> \
+  --output json
 ```
 
-The execution view includes immediate parent and root lineage, import
-attribution when present, bounded scores, cost, and compact related-attempt
-references. The experiment view serializes the full attempt once, then includes
-one explicitly paginated set of per-child evidence, score aggregates,
-protections, operational limits, and the final verdict.
+The JSON execution view includes the persisted execution fields, checkpoint
+graph, immediate parent and root lineage, and import attribution when present.
+The experiment JSON includes target membership, planning and coverage, score
+aggregates, imported replay evidence, operational limits, verdict policy, and
+the final verdict.
 
 ## Fixture provenance
 
