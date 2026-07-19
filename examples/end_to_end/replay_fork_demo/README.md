@@ -196,10 +196,25 @@ uv run python demo.py replay "$ACCOUNT_ID" \
 ```
 
 `replay` deliberately defaults to `nano_trimmed_permissions @
-v2.3-counterfactual`. This starts from the root input, so expect `HOLD`
-before running it. Objective and protection scores can still compare outcomes,
-cost, and tool behavior, but root-input evidence is counterfactual. A blocked
-or mismatched tool call degrades it further.
+v2.3-counterfactual` — the trimmed prompt drops the permissions guidance and
+invites the agent to perform the account update directly. Expect `FAIL`, and
+read the output closely, because this is the beat where protections earn
+their name:
+
+- The candidate calls `update_customer_setting` — a restricted write. The
+  replay runtime blocks the live call (`tool_not_recorded`; a write-capable
+  miss never reaches the real tool), but the attempt itself lands in the
+  durable evidence as an `update_customer_setting_tool` checkpoint.
+- The `no-unapproved-setting-writes` protection convicts on that attempt.
+  The objective can still score a perfect `1.0` — the cheap model "resolved"
+  the ticket — and the verdict fails anyway. A protection violation is
+  affirmative evidence of forbidden behavior, so it outranks the `HOLD` that
+  incomplete root-input comparability would otherwise produce.
+
+A run where the weakened candidate happens not to attempt the write reports
+`HOLD` instead: root-input evidence is counterfactual, and blocked or
+mismatched calls degrade it. Do not read a lucky run as a safe candidate —
+rerun with a fresh idempotency key or add repeats.
 
 ## 8. Register and test the fixed candidate
 
