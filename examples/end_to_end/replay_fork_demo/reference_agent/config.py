@@ -10,6 +10,18 @@ EXAMPLE_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EXAMPLE_DIR / "fixtures"
 VARIANTS_DIR = EXAMPLE_DIR / "variants"
 SCENARIOS_PATH = EXAMPLE_DIR.parent / "trace_fixtures" / "scenarios.yaml"
+IMPORTED_SOURCE_VARIANT = "baseline"
+IMPORTED_SOURCE_VERSION = "v2.2-json-text-imported"
+
+
+def imported_source_version_for_variant(variant: str) -> str:
+    """Return the immutable fixture version for the one supported source variant."""
+    if variant != IMPORTED_SOURCE_VARIANT:
+        raise ValueError(
+            f"Source fixtures must use variant {IMPORTED_SOURCE_VARIANT!r}, "
+            f"not {variant!r}."
+        )
+    return IMPORTED_SOURCE_VERSION
 
 
 class Scenario(BaseModel):

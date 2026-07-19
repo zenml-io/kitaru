@@ -19,7 +19,6 @@ from kitaru._agent_registration import (
 )
 from kitaru._run_identity import extract_run_project_identity
 from kitaru.errors import KitaruUsageError
-from kitaru.imports._langfuse import read_langfuse_jsonl_records
 from kitaru.imports._models import ImportedTrace, TraceIntegrity
 from kitaru.imports._normalization import (
     NormalizedLangfuseTrace,
@@ -39,6 +38,7 @@ from kitaru.imports._replay_evidence import (
     classify_source_attribution,
     extract_langfuse_provider_stamps,
 )
+from kitaru.imports._source import LangfuseFetchProvenance, resolve_langfuse_source
 from kitaru.imports._writer import (
     ImportedTraceConflictError,
     ImportedTracePersistenceError,
@@ -118,6 +118,7 @@ class LangfuseImportResult:
     requested_version: str | None = None
     requested_alias: str | None = None
     cohort_tag: str | None = None
+    fetch_provenance: LangfuseFetchProvenance | None = None
 
     @property
     def flow_name(self) -> str:
@@ -153,10 +154,10 @@ class _PreparedTrace:
     attribution: SourceAttribution
 
 
-def import_langfuse_jsonl(
-    path: str | Path,
+def import_langfuse(
+    source: str | Path,
     *,
-    source_project_id: str,
+    source_project_id: str | None = None,
     agent: str,
     version: str,
     trace_ids: Sequence[str] | None = None,
@@ -170,7 +171,11 @@ def import_langfuse_jsonl(
     client: Client | None = None,
 ) -> LangfuseImportResult:
     """Preview or persist selected Langfuse traces as imported executions."""
-    normalized_project_id = _nonempty(source_project_id, "source_project_id")
+    normalized_project_id = (
+        _nonempty(source_project_id, "source_project_id")
+        if source_project_id is not None
+        else None
+    )
     normalized_agent = _nonempty(agent, "agent")
     normalized_version = _nonempty(version, "version")
     normalized_cohort_tag = _validate_cohort_tag(cohort_tag)
@@ -194,15 +199,24 @@ def import_langfuse_jsonl(
     )
 
     requested_trace_ids = _validate_trace_ids(trace_ids)
+    resolved_source = resolve_langfuse_source(
+        source,
+        source_project_id=normalized_project_id,
+        trace_ids=requested_trace_ids,
+    )
+    normalized_project_id = resolved_source.authoritative_project_id
+    if resolved_source.selected_trace_id is not None and requested_trace_ids is None:
+        requested_trace_ids = (resolved_source.selected_trace_id,)
+
     if requested_trace_ids is None:
         normalized_traces = normalize_langfuse_records(
-            read_langfuse_jsonl_records(path),
+            resolved_source.records,
             project_id=normalized_project_id,
         )
         total_trace_count = len(normalized_traces)
     else:
         normalized_traces, total_trace_count = normalize_selected_langfuse_records(
-            read_langfuse_jsonl_records(path),
+            resolved_source.records,
             project_id=normalized_project_id,
             trace_ids=set(requested_trace_ids),
         )
@@ -249,6 +263,7 @@ def import_langfuse_jsonl(
             target=target,
             total_trace_count=total_trace_count,
             outcomes=outcomes,
+            fetch_provenance=resolved_source.fetch_provenance,
         )
 
     def process(item: _PreparedTrace) -> TraceImportOutcome:
@@ -343,6 +358,41 @@ def import_langfuse_jsonl(
         target=target,
         total_trace_count=total_trace_count,
         outcomes=outcomes,
+        fetch_provenance=resolved_source.fetch_provenance,
+    )
+
+
+def import_langfuse_jsonl(
+    path: str | Path,
+    *,
+    source_project_id: str,
+    agent: str,
+    version: str,
+    trace_ids: Sequence[str] | None = None,
+    limit: int | None = None,
+    dry_run: bool = True,
+    confirm_data_storage: bool = False,
+    allow_fragmented: bool = False,
+    max_workers: int = 1,
+    stack: str | None = None,
+    cohort_tag: str | None = None,
+    client: Client | None = None,
+) -> LangfuseImportResult:
+    """Compatibility adapter for JSONL-only callers."""
+    return import_langfuse(
+        path,
+        source_project_id=source_project_id,
+        agent=agent,
+        version=version,
+        trace_ids=trace_ids,
+        limit=limit,
+        dry_run=dry_run,
+        confirm_data_storage=confirm_data_storage,
+        allow_fragmented=allow_fragmented,
+        max_workers=max_workers,
+        stack=stack,
+        cohort_tag=cohort_tag,
+        client=client,
     )
 
 
@@ -512,6 +562,7 @@ def _result(
     target: _ImportTarget,
     total_trace_count: int,
     outcomes: tuple[TraceImportOutcome, ...],
+    fetch_provenance: LangfuseFetchProvenance | None,
 ) -> LangfuseImportResult:
     return LangfuseImportResult(
         dry_run=dry_run,
@@ -536,6 +587,7 @@ def _result(
         selected_trace_count=len(outcomes),
         outcomes=outcomes,
         storage_warning=_storage_warning(target),
+        fetch_provenance=fetch_provenance,
     )
 
 

@@ -561,10 +561,12 @@ In `checkpoint_strategy="calls"`, cached model checkpoint results are recorded a
 ## Imported replay experiments
 
 A registered `KitaruAgent` can run a new candidate from immutable PydanticAI
-evidence stored by a Langfuse import. Choose either the recorded root input or a
-complete recorded message boundary. The candidate uses the normal registered
-Agent path, matching recorded tool responses are served without calling live
-tools, and every miss is blocked.
+evidence stored by a Langfuse import. Start from the recorded root input or a
+complete recorded model-message or tool-result boundary. A model-message
+boundary covers the full validated assistant response, including a response that
+contains tool calls but no text. The candidate runs as
+the registered AgentVersion. Kitaru serves exact recorded tool responses
+without calling live tools and blocks every miss.
 
 Kitaru records per-child evidence and lineage separately from objective and
 protection scores. A root rerun is counterfactual and defaults to `HOLD`; a

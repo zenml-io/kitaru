@@ -174,11 +174,14 @@ def _boundary_index(
     evidence: PreparedImportedReplayEvidence,
     boundary: ImportedReplayBoundary,
 ) -> int:
-    expected_kind = {
-        ImportedReplayBoundaryKind.MODEL_MESSAGE: ReplayPartKind.MODEL_TEXT,
-        ImportedReplayBoundaryKind.TOOL_RESULT: ReplayPartKind.TOOL_RESULT,
+    expected_kinds = {
+        ImportedReplayBoundaryKind.MODEL_MESSAGE: {
+            ReplayPartKind.MODEL_TEXT,
+            ReplayPartKind.TOOL_CALL,
+        },
+        ImportedReplayBoundaryKind.TOOL_RESULT: {ReplayPartKind.TOOL_RESULT},
     }.get(boundary.kind)
-    if expected_kind is None:
+    if expected_kinds is None:
         _fail(
             ImportedReplayUnsupportedReason.BOUNDARY_UNAVAILABLE,
             "History preparation requires a model-message or tool-result boundary.",
@@ -190,11 +193,14 @@ def _boundary_index(
         index
         for index, part in enumerate(positions)
         if (
-            part.kind is expected_kind
+            part.kind in expected_kinds
             and part.observation_id == boundary.observation_id
             and part.sequence == boundary.sequence
             and part.occurrence == boundary.occurrence
-            and part.call_id == boundary.call_id
+            and (
+                boundary.kind is ImportedReplayBoundaryKind.MODEL_MESSAGE
+                or part.call_id == boundary.call_id
+            )
         )
     ]
     if len(matches) != 1:
@@ -450,6 +456,7 @@ def _validated_messages(
     *,
     evidence: PreparedImportedReplayEvidence,
     boundary: ImportedReplayBoundary,
+    allow_pending_calls: bool = False,
 ) -> tuple[_messages.ModelMessage, ...]:
     messages: list[_messages.ModelMessage] = []
     pending_calls: list[tuple[str, str]] = []
@@ -476,7 +483,7 @@ def _validated_messages(
             )
             has_request = True
 
-    if pending_calls:
+    if pending_calls and not allow_pending_calls:
         _fail(
             ImportedReplayUnsupportedReason.BOUNDARY_INCOMPLETE,
             "The requested boundary leaves an incomplete tool exchange.",
@@ -614,6 +621,10 @@ def prepare_imported_replay_history(
         selected_groups,
         evidence=evidence,
         boundary=boundary,
+        allow_pending_calls=(
+            boundary.kind is ImportedReplayBoundaryKind.MODEL_MESSAGE
+            and boundary_part.kind is ReplayPartKind.TOOL_CALL
+        ),
     )
     return PreparedImportedReplayHistory(
         evidence=evidence,

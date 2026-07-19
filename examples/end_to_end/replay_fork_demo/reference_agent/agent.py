@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from pydantic_ai import Agent, RunContext
+from pydantic import ValidationError
+from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.capabilities import Instrumentation
 
 from kitaru.adapters.pydantic_ai import KitaruAgent
@@ -76,59 +77,66 @@ def build_support_agent(
     variant: AgentVariant,
     *,
     name: str = "support-agent",
-) -> KitaruAgent[SupportAgentDeps, SupportDecision]:
+    model: Any | None = None,
+) -> KitaruAgent[SupportAgentDeps, str]:
     """Build one version of the support agent and wrap it with Kitaru."""
     agent = cast(
-        Agent[SupportAgentDeps, SupportDecision],
+        Agent[SupportAgentDeps, str],
         Agent(
-            variant.model,
+            model or variant.model,
             name=name.replace("-", "_"),
             deps_type=SupportAgentDeps,
-            output_type=SupportDecision,
-            instructions=_shared_instructions(),
+            output_type=str,
+            instructions=(
+                f"{_shared_instructions()}\n\n{_version_instructions(variant)}"
+            ),
             capabilities=[Instrumentation()],
         ),
     )
 
-    @agent.instructions
-    def version_instructions(ctx: RunContext[SupportAgentDeps]) -> str:
-        """Add the selected agent version's policy to the model context."""
-        return _version_instructions(ctx.deps.variant)
+    @agent.output_validator
+    def validate_support_decision(output: str) -> str:
+        """Require the persisted text result to satisfy the decision schema."""
+        try:
+            SupportDecision.model_validate_json(output)
+        except ValidationError as exc:
+            raise ModelRetry("Return one valid SupportDecision JSON object.") from exc
+        return output
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def lookup_customer(
         ctx: RunContext[SupportAgentDeps], email_or_id: str
     ) -> ToolExecution:
         """Look up a customer before customer-specific actions."""
         return ctx.deps.execute("lookup_customer", {"email_or_id": email_or_id})
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def get_service_status(
         ctx: RunContext[SupportAgentDeps], service: str
     ) -> ToolExecution:
         """Check the current status of a named service."""
         return ctx.deps.execute("get_service_status", {"service": service})
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def get_recent_usage(
         ctx: RunContext[SupportAgentDeps], customer_id: str
     ) -> ToolExecution:
         """Fetch recent usage for one customer."""
         return ctx.deps.execute("get_recent_usage", {"customer_id": customer_id})
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def get_billing(
         ctx: RunContext[SupportAgentDeps], customer_id: str
     ) -> ToolExecution:
         """Fetch billing details for one customer."""
         return ctx.deps.execute("get_billing", {"customer_id": customer_id})
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def search_kb(ctx: RunContext[SupportAgentDeps], query: str) -> ToolExecution:
         """Search the local support-policy knowledge base."""
         return ctx.deps.execute("search_kb", {"query": query})
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
     def create_support_ticket(
         ctx: RunContext[SupportAgentDeps],
         customer_id: str,
@@ -145,7 +153,7 @@ def build_support_agent(
             },
         )
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
     def escalate_to_human(
         ctx: RunContext[SupportAgentDeps], customer_id: str, reason: str
     ) -> ToolExecution:
@@ -155,7 +163,7 @@ def build_support_agent(
             {"customer_id": customer_id, "reason": reason},
         )
 
-    @agent.tool
+    @agent.tool(metadata={"kitaru_replay": {"effect": "write"}})
     def update_customer_setting(
         ctx: RunContext[SupportAgentDeps],
         customer_id: str,
@@ -177,8 +185,10 @@ def _shared_instructions() -> str:
         "to check facts instead of answering from memory. Look up the customer "
         "before customer-specific billing, usage, permission, or write actions. "
         "Call one tool at a time. Continue until you have enough evidence and "
-        "have completed any action required by policy. Return a SupportDecision "
-        "using evidence ids and tool names from the tool results. Choose "
+        "have completed any action required by policy. Return one JSON object with "
+        "policy_label, risk_status, required_action, summary, evidence_ids, and "
+        "tool_names fields. Use evidence ids and tool names from the tool results. "
+        "Choose "
         "create_ticket only when create_support_ticket ran. Choose "
         "escalate_to_human when escalation ran. Choose refuse_write when a "
         "restricted write was blocked and no safe escalation completed."

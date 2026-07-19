@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -12,6 +11,7 @@ from kitaru.cli import app
 from kitaru.imports import (
     CapabilityReadiness,
     ImportOutcomeStatus,
+    LangfuseFetchProvenance,
     LangfuseImportResult,
     ProviderVersionStamp,
     ProviderVersionStampKind,
@@ -71,6 +71,7 @@ def _result(
     reason: str | None = None,
     resolution: str | None = None,
     cohort_tag: str | None = "customer-a",
+    with_fetch_provenance: bool = False,
 ) -> LangfuseImportResult:
     return LangfuseImportResult(
         dry_run=dry_run,
@@ -93,6 +94,16 @@ def _result(
         artifact_store_is_remotely_accessible=True,
         total_trace_count=3,
         selected_trace_count=1,
+        fetch_provenance=(
+            LangfuseFetchProvenance(
+                api_resource="observations_v2",
+                base_url="https://cloud.langfuse.com",
+                field_groups=("core", "io"),
+                page_count=2,
+            )
+            if with_fetch_provenance
+            else None
+        ),
         outcomes=(
             TraceImportOutcome(
                 trace_id="trace-one",
@@ -123,6 +134,19 @@ def _result(
             ),
         ),
     )
+
+
+def test_langfuse_import_help_describes_path_and_uri_sources(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        app(["import", "langfuse", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    compact_output = " ".join(output.replace("│", " ").split())
+    assert "langfuse://trace/TRACE_ID" in compact_output
+    assert "Required for JSONL; optional" in compact_output
 
 
 def test_langfuse_import_defaults_to_read_only_preview(
@@ -162,7 +186,7 @@ def test_langfuse_import_defaults_to_read_only_preview(
 
     assert exc_info.value.code == 0
     fake_client.imports.langfuse.assert_called_once_with(
-        Path("export.jsonl"),
+        "export.jsonl",
         source_project_id="source-project",
         agent="support-agent",
         version="prod",
@@ -184,6 +208,90 @@ def test_langfuse_import_defaults_to_read_only_preview(
     assert "source_verified" in output
     assert "root_input_candidate_rerun=ready" in output
     assert "a" * 64 in output
+
+
+@pytest.mark.parametrize(
+    ("write_args", "dry_run", "status"),
+    [
+        ([], True, ImportOutcomeStatus.WOULD_CREATE),
+        (
+            ["--write", "--confirm-data-storage"],
+            False,
+            ImportOutcomeStatus.CREATED,
+        ),
+    ],
+)
+def test_langfuse_uri_forwards_for_preview_and_write(
+    write_args: list[str],
+    dry_run: bool,
+    status: ImportOutcomeStatus,
+) -> None:
+    fake_client = Mock()
+    fake_client.imports.langfuse.return_value = _result(
+        dry_run=dry_run,
+        status=status,
+    )
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "import",
+                "langfuse",
+                "langfuse://trace/trace-one",
+                "--agent",
+                "support-agent",
+                "--agent-version",
+                "prod",
+                "--stack",
+                "cloud-stack",
+                *write_args,
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    fake_client.imports.langfuse.assert_called_once_with(
+        "langfuse://trace/trace-one",
+        source_project_id=None,
+        agent="support-agent",
+        version="prod",
+        stack="cloud-stack",
+        trace_ids=None,
+        limit=None,
+        dry_run=dry_run,
+        confirm_data_storage=not dry_run,
+        allow_fragmented=False,
+        max_workers=1,
+        cohort_tag=None,
+    )
+
+
+def test_langfuse_jsonl_requires_source_project_id(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_client = Mock()
+
+    with (
+        patch("kitaru.cli.KitaruClient", return_value=fake_client),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        app(
+            [
+                "import",
+                "langfuse",
+                "export.jsonl",
+                "--agent",
+                "support-agent",
+                "--agent-version",
+                "prod",
+            ]
+        )
+
+    assert exc_info.value.code == 1
+    fake_client.imports.langfuse.assert_not_called()
+    assert "--source-project-id" in capsys.readouterr().err
 
 
 def test_langfuse_import_write_requires_storage_confirmation(
@@ -277,7 +385,7 @@ def test_langfuse_import_write_forwards_explicit_consent(
 
     assert exc_info.value.code == 0
     fake_client.imports.langfuse.assert_called_once_with(
-        Path("export.jsonl"),
+        "export.jsonl",
         source_project_id="source-project",
         agent="support-agent",
         version="prod",
@@ -297,7 +405,7 @@ def test_langfuse_import_json_emits_one_structured_result(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake_client = Mock()
-    fake_client.imports.langfuse.return_value = _result()
+    fake_client.imports.langfuse.return_value = _result(with_fetch_provenance=True)
 
     with (
         patch("kitaru.cli.KitaruClient", return_value=fake_client),
@@ -327,6 +435,13 @@ def test_langfuse_import_json_emits_one_structured_result(
     assert payload["item"]["counts"] == {"would_create": 1}
     assert payload["item"]["attribution_counts"] == {"source_verified": 1}
     assert payload["item"]["cohort_tag"] == "customer-a"
+    assert payload["item"]["fetch_provenance"] == {
+        "api_resource": "observations_v2",
+        "base_url": "https://cloud.langfuse.com",
+        "base_url_source": "default",
+        "field_groups": ["core", "io"],
+        "page_count": 2,
+    }
     assert payload["item"]["agent"] == {
         "id": "agent-project-id",
         "name": "support-agent",

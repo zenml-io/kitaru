@@ -1,18 +1,19 @@
 ---
-description: Import a Langfuse observations JSONL export with source attribution, replay-readiness evidence, and explicit storage consent.
+description: Import Langfuse traces from JSONL or the observations API with source attribution, replay evidence, and explicit storage consent.
 icon: file-import
 ---
 
 # Import Langfuse Traces
 
-Kitaru can import a Langfuse **observations JSONL export** as historical,
-inspectable executions. Each source trace becomes one execution, and each
+Kitaru imports Langfuse traces as historical, inspectable executions. You can
+read an observations JSONL export or fetch one trace with a
+`langfuse://trace/<id>` URI. Each trace becomes one execution, and each
 observation becomes a checkpoint call.
 
 Every import declares the exact Kitaru Agent and AgentVersion that produced the
-selected traces. Kitaru verifies that declaration before it writes anything.
-The import does not call a model, invoke a tool, run source application code, or
-execute a replay.
+trace. Kitaru verifies that declaration before it writes anything. Importing
+does not call a model, invoke a tool, run the source application, or execute a
+replay.
 
 {% hint style="warning" %}
 Imported executions remain read-only historical records. Kitaru refuses to
@@ -21,6 +22,50 @@ PydanticAI Agent can use their immutable evidence to create a separate candidate
 experiment, as described below. The candidate run never changes the imported
 record.
 {% endhint %}
+
+## Choose an import source
+
+Use JSONL when you have an export or want to import several traces in a fixed
+order:
+
+```bash
+kitaru import langfuse langfuse-observations.jsonl \
+  --source-project-id <langfuse-project-id> \
+  --agent support-agent \
+  --agent-version prod
+```
+
+A JSONL import requires `--source-project-id` because the export is not trusted
+to identify its project.
+
+Use a trace URI to fetch one trace through Langfuse's observations API:
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+
+kitaru import langfuse "langfuse://trace/<trace-id>" \
+  --agent support-agent \
+  --agent-version prod
+```
+
+Install the optional SDK with `kitaru[langfuse]`. Kitaru supports
+`langfuse>=4.7.0,<5` for this path. It reads `LANGFUSE_BASE_URL`, then falls
+back to `LANGFUSE_HOST`, and otherwise uses Langfuse Cloud. If both URL
+variables are set, they must match. A self-hosted URL must use HTTP or HTTPS
+and cannot include credentials, a query, or a fragment.
+
+Kitaru fetches all observation pages for the selected trace, derives the
+project ID from the response, and rejects empty results, mixed trace IDs, mixed
+project IDs, duplicate observations, and traces that exceed bounded page,
+observation-count, per-observation canonical-byte, or cumulative canonical-byte
+limits. You may pass
+`--source-project-id` with a URI as an extra check; it must match the fetched
+project. The fetched rows then enter the same normalization, attribution,
+integrity, storage, and idempotency path as JSONL rows.
+
+Both commands above are previews. Add `--write --confirm-data-storage` only
+after reviewing the destination and evidence summary.
 
 ## What Kitaru stores
 
@@ -230,10 +275,10 @@ kitaru import langfuse langfuse-observations.jsonl \
   --output json
 ```
 
-The result includes the Agent Project and AgentVersion IDs, the actual registered
-Pipeline name in `flow_name`, the requested label when present, outcome and
-attribution counts, storage details, optional cohort tag,
-and one outcome per selected trace. Each outcome includes attribution, supported
+The result includes the Agent Project and AgentVersion IDs, the registered
+workflow name in `flow_name`, the requested label when present, outcome and
+attribution counts, storage details, optional cohort tag, non-secret URI fetch
+provenance in `fetch_provenance`, and one outcome per selected trace. Each outcome includes attribution, supported
 provider fields, evidence hashes, capability-specific readiness, diagnostics,
 and an execution ID when one is available.
 
@@ -301,43 +346,33 @@ set `--max-workers` from 1 to 8 for bounded concurrency.
 
 ### Concurrent writers and interrupted imports
 
-Kitaru claims each imported execution through a pending ZenML run wait condition.
-ZenML creates that condition while locking the run row and permits only one pending
-condition per dynamic run, so independent clients and processes cannot both claim
-the write phase. Kitaru attaches a five-minute lease and refreshes it before each
-artifact, step, metadata, or final-status write. Preview and write both report a
-conflict while that lease is active. If the writer dies, a later preview reports
-`would_resume` after expiry and a later write resolves the stale condition, claims
-a new lease, validates existing data, and resumes missing work.
+Kitaru gives each active import writer a five-minute lease and refreshes it
+before every stored change. A preview or second writer reports a conflict while
+that lease is active.
 
-ZenML does not expose compare-and-set or fencing-token conditions on ordinary run,
-step, artifact, and metadata writes. Its wait-condition lease refresh endpoint
-serializes updates on the condition row, but it does not compare the caller's owner
-token. Kitaru therefore checks the owner before each refresh and confirms it again
-afterward. The wait-condition lease is the strongest backend-supported claim
-available, not one transaction spanning every record.
-
-Kitaru limits the remaining risk by checking and refreshing ownership before every
-mutation, using immutable deterministic artifacts and steps, and validating all
-existing content before recovery. A process paused across lease expiry can detect
-that it lost ownership before its next mutation, but ZenML cannot atomically fence
-a mutation that was already in flight when the lease expired.
+If a writer stops, a later preview reports `would_resume` after the lease
+expires. A later write validates the existing execution and immutable evidence,
+then resumes the missing work. Kitaru checks lease ownership around each change,
+but the backend cannot cancel a write that was already in flight when a lease
+expired. Keep one writer active for a source trace whenever possible.
 
 ## Import through the SDK
 
 The SDK exposes the same dry-run-first contract:
 
 ```python
-from pathlib import Path
-
 from kitaru import KitaruClient
 
 client = KitaruClient()
-export = Path("langfuse-observations.jsonl")
+source = "langfuse-observations.jsonl"
+source_project_id = "<langfuse-project-id>"
+# To fetch one trace instead:
+# source = "langfuse://trace/<trace-id>"
+# source_project_id = None
 
 preview = client.imports.langfuse(
-    export,
-    source_project_id="<langfuse-project-id>",
+    source,
+    source_project_id=source_project_id,
     agent="support-agent",
     version="prod",
     stack="production-cloud",
@@ -345,11 +380,12 @@ preview = client.imports.langfuse(
     cohort_tag="customer-a",
 )
 print(preview.attribution_counts)
+print(preview.fetch_provenance)  # None for JSONL; query details for trace URIs.
 print(preview.outcomes[0].replay_readiness)
 
 result = client.imports.langfuse(
-    export,
-    source_project_id="<langfuse-project-id>",
+    source,
+    source_project_id=source_project_id,
     agent="support-agent",
     version="prod",
     stack="production-cloud",

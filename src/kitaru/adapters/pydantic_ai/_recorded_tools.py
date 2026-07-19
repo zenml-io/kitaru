@@ -638,7 +638,9 @@ def compile_recorded_responses(
     calls: dict[str, ReplayEvidencePart] = {}
     results: dict[str, ReplayEvidencePart] = {}
     duplicate_ids: set[str] = set()
+    parts = _parts(evidence)
     boundary_position: tuple[int, int] | None = None
+    boundary_message: tuple[str, int] | None = None
     if (
         after_boundary is not None
         and after_boundary.kind is not ImportedReplayBoundaryKind.ROOT_INPUT
@@ -649,16 +651,39 @@ def compile_recorded_responses(
             after_boundary.sequence,
             after_boundary.occurrence,
         )
-    for part in _parts(evidence):
-        if (
-            boundary_position is not None
-            and (
-                part.sequence,
-                part.occurrence,
-            )
-            <= boundary_position
-        ):
-            continue
+        if after_boundary.kind is ImportedReplayBoundaryKind.MODEL_MESSAGE:
+            boundary_parts = [
+                part
+                for part in parts
+                if (
+                    part.sequence,
+                    part.occurrence,
+                )
+                == boundary_position
+                and part.kind
+                in {ReplayPartKind.MODEL_TEXT, ReplayPartKind.TOOL_CALL}
+            ]
+            if len(boundary_parts) != 1:
+                _fail(
+                    ImportedReplayUnsupportedReason.BOUNDARY_UNAVAILABLE,
+                    "The recorded-response boundary is not uniquely available.",
+                    evidence=evidence,
+                )
+            selected = boundary_parts[0]
+            boundary_message = (selected.observation_id, selected.message_index)
+    for part in parts:
+        position = (part.sequence, part.occurrence)
+        if boundary_position is not None:
+            assert after_boundary is not None
+            if after_boundary.kind is ImportedReplayBoundaryKind.MODEL_MESSAGE:
+                before_boundary = (
+                    position < boundary_position
+                    and (part.observation_id, part.message_index) != boundary_message
+                )
+            else:
+                before_boundary = position <= boundary_position
+            if before_boundary:
+                continue
         if part.kind is ReplayPartKind.TOOL_CALL and part.call_id is not None:
             if part.call_id in calls:
                 duplicate_ids.add(part.call_id)

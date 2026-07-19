@@ -35,7 +35,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Run a multi-agent OpenAI research bot:** `examples/end_to_end/openai_research_bot/research_bot.py`
 - **Build a full coding agent with tool calling and HITL:** `examples/end_to_end/coding_agent/agent.py`
 - **Run a granular-checkpoint PydanticAI agent end to end:** `examples/end_to_end/news_scout/scout.py`
-- **Create and rerun a protected PydanticAI regression suite with bounded CI limits:** `examples/end_to_end/replay_fork_demo/`
+- **Replay imported Langfuse evidence through a scored PydanticAI candidate:** `examples/end_to_end/replay_fork_demo/`
 - **Run a durable prospect-research sweep with typed qualification and HITL approval:** `examples/end_to_end/prospect_scout/prospector.py`
 - **Wrap a Claude Agent SDK audit with checkpoints, partial replay, and wait/resume:** `examples/end_to_end/compliance_review/`
 - **Build a sandboxed, credential-isolated, profile-gated agent harness platform (the stage-by-stage starter kit):** `examples/end_to_end/agent_harness_platform/` — see also the [docs tour](https://docs.zenml.io/user-guides/agents-guide/).
@@ -79,7 +79,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [end_to_end/openai_research_bot/README.md](end_to_end/openai_research_bot/README.md) — multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, published report artifacts, and remote secret guidance
 - [end_to_end/coding_agent/README.md](end_to_end/coding_agent/README.md) — full coding agent with provider SDK tool calling, HITL, and custom materializers
 - [end_to_end/news_scout/README.md](end_to_end/news_scout/README.md) — agentic news monitor with granular per-tool checkpoints, CLI/default interests, and `secret_environment_from` for remote API keys
-- [end_to_end/replay_fork_demo/README.md](end_to_end/replay_fork_demo/README.md): Langfuse JSONL import, stored-case inspection, and native candidate replay with a stateful PydanticAI support agent
+- [end_to_end/replay_fork_demo/README.md](end_to_end/replay_fork_demo/README.md) — import a Langfuse JSONL export or trace URI, replay a registered PydanticAI candidate from recorded evidence, score it, and rerun a named suite with limits
 - [end_to_end/prospect_scout/README.md](end_to_end/prospect_scout/README.md) — durable prospect-research sweep: one checkpoint per company (crash-resumable via `kitaru executions retry`), enum-typed PydanticAI qualification, `kitaru.wait()` shortlist approval, and per-prospect outreach drafts
 - [end_to_end/compliance_review/README.md](end_to_end/compliance_review/README.md) — Claude Agent SDK document audit in three runnable stages: crash-resilient turns, sequential domain checkpoints with partial replay, and durable wait/resume conversation
 - [end_to_end/agent_harness_platform/README.md](end_to_end/agent_harness_platform/README.md) — stage-by-stage starter kit for an internal agent harness platform: durable PydanticAI agent → DockerSandbox → skills as markdown → credential proxy → typed services → HITL via `kitaru.wait()`. See the [docs tour](https://docs.zenml.io/user-guides/agents-guide/) for the polished surface.

@@ -1,5 +1,6 @@
 """Generate Langfuse traces for the support-agent example scenarios."""
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -9,6 +10,8 @@ from reference_agent import db
 from reference_agent.agent import SupportAgentDeps, build_support_agent
 from reference_agent.config import (
     EXAMPLE_DIR,
+    IMPORTED_SOURCE_VARIANT,
+    imported_source_version_for_variant,
     load_scenarios,
     load_variant,
     select_scenarios,
@@ -24,6 +27,7 @@ def _generate_trace(
     """Run one scenario and record its inputs, tools, and decision in Langfuse."""
     scenarios = {scenario.scenario_id: scenario for scenario in load_scenarios()}
     scenario = scenarios[scenario_id]
+    source_version = imported_source_version_for_variant(variant_name)
     variant = load_variant(variant_name)
     agent = build_support_agent(variant, name="support-agent")
     langfuse = get_client()
@@ -42,18 +46,19 @@ def _generate_trace(
             as_type="span",
             name="support-agent",
             input={"request": scenario.user_request},
+            version=source_version,
             metadata={
                 "intent": scenario.expected_policy_label.removesuffix("_policy"),
                 "scenario_id": scenario.scenario_id,
                 "case_id": scenario.case_id,
-                "agent_version": "v2.2",
+                "agent_version": source_version,
                 "variant": variant.name,
                 "fixture_generation_id": generation_id,
             },
             trace_context={"trace_id": trace_id},
         ) as root:
             result = agent.wrapped.run_sync(scenario.user_request, deps=deps)
-            root.update(output=result.output.model_dump(mode="json"))
+            root.update(output=json.loads(result.output))
 
     langfuse.flush()
     return trace_id
@@ -62,7 +67,12 @@ def _generate_trace(
 @click.command()
 @click.option("--set", "scenario_set", default="smoke", show_default=True)
 @click.option("--scenario")
-@click.option("--variant", default="baseline", show_default=True)
+@click.option(
+    "--variant",
+    type=click.Choice([IMPORTED_SOURCE_VARIANT]),
+    default=IMPORTED_SOURCE_VARIANT,
+    show_default=True,
+)
 @click.option("--generation-id")
 def cli(
     scenario_set: str,

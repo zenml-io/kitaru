@@ -58,6 +58,9 @@ llm = [
     "kitaru[openai]",
     "kitaru[anthropic]",
 ]
+langfuse = [
+    "langfuse>=4.7.0,<5",
+]
 local = [
     "zenml[server]==0.96.2",
 ]
@@ -140,6 +143,7 @@ dev = [
     "langchain>=1.0,<2",
     "langchain-openai>=1.0,<2",
     "langgraph>=1.1,<2",
+    "langfuse>=4.7.0,<5",
     "openai>=1.0.0,<3",
     "anthropic>=0.40.0,<1",
     "claude-agent-sdk>=0.1.58,<0.2",
@@ -208,9 +212,9 @@ include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
 unresolved-import = "ignore"
 
 [[tool.ty.overrides]]
-# `langfuse` is an optional, lazily-imported dependency: only the live
-# Langfuse trace-fetch path needs it; the demo runs on local obs.jsonl files
-# without it, so it is intentionally not a declared dependency.
+# `langfuse` remains optional and lazily imported. Static analysis of this
+# older LangGraph-only fetch helper is skipped even when the development extra
+# is not installed.
 include = ["src/kitaru/adapters/langgraph/replay/_facade.py"]
 
 [tool.ty.overrides.rules]

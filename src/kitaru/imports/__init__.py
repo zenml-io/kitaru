@@ -75,6 +75,12 @@ from kitaru.imports._replay_evidence import (
     extract_langfuse_provider_stamps,
     sha256_canonical_json,
 )
+from kitaru.imports._source import (
+    LangfuseFetchProvenance,
+    LangfuseSourceKind,
+    ResolvedLangfuseSource,
+    resolve_langfuse_source,
+)
 
 
 def load_imported_replay_evidence(
@@ -86,6 +92,42 @@ def load_imported_replay_evidence(
     from kitaru.imports._replay_loading import load_imported_replay_evidence as load
 
     return load(execution_id, client=client)
+
+
+def import_langfuse(
+    source: str | Path,
+    *,
+    source_project_id: str | None = None,
+    agent: str,
+    version: str,
+    trace_ids: Sequence[str] | None = None,
+    limit: int | None = None,
+    dry_run: bool = True,
+    confirm_data_storage: bool = False,
+    allow_fragmented: bool = False,
+    max_workers: int = 1,
+    stack: str | None = None,
+    cohort_tag: str | None = None,
+    client: Client | None = None,
+) -> LangfuseImportResult:
+    """Import a Langfuse JSONL export or ``langfuse://trace/TRACE_ID`` URI."""
+    from kitaru.imports._service import import_langfuse as import_rows
+
+    return import_rows(
+        source,
+        source_project_id=source_project_id,
+        agent=agent,
+        version=version,
+        trace_ids=trace_ids,
+        limit=limit,
+        dry_run=dry_run,
+        confirm_data_storage=confirm_data_storage,
+        allow_fragmented=allow_fragmented,
+        max_workers=max_workers,
+        stack=stack,
+        cohort_tag=cohort_tag,
+        client=client,
+    )
 
 
 def import_langfuse_jsonl(
@@ -104,10 +146,9 @@ def import_langfuse_jsonl(
     cohort_tag: str | None = None,
     client: Client | None = None,
 ) -> LangfuseImportResult:
-    """Import Langfuse rows without eager Agent registration imports."""
-    from kitaru.imports._service import import_langfuse_jsonl as import_rows
+    """Import a Langfuse JSONL export through the shared source resolver."""
 
-    return import_rows(
+    return import_langfuse(
         path,
         source_project_id=source_project_id,
         agent=agent,
@@ -163,8 +204,10 @@ __all__ = [
     "ImportedTraceConflictError",
     "ImportedTracePersistenceError",
     "ImportedTraceWriteError",
+    "LangfuseFetchProvenance",
     "LangfuseImportError",
     "LangfuseImportResult",
+    "LangfuseSourceKind",
     "LangfuseSourceRecord",
     "ObservationKind",
     "ObservationStatus",
@@ -183,6 +226,7 @@ __all__ = [
     "ReplayPartKind",
     "ReplayReadinessStatus",
     "ReplayReadinessSummary",
+    "ResolvedLangfuseSource",
     "SourceAttribution",
     "SourceAttributionStatus",
     "SourceObservationType",
@@ -196,10 +240,12 @@ __all__ = [
     "canonical_json",
     "classify_source_attribution",
     "extract_langfuse_provider_stamps",
+    "import_langfuse",
     "import_langfuse_jsonl",
     "load_imported_replay_evidence",
     "normalize_langfuse_observations",
     "read_langfuse_jsonl",
     "read_langfuse_jsonl_records",
+    "resolve_langfuse_source",
     "sha256_canonical_json",
 ]

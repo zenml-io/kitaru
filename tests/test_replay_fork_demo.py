@@ -1,12 +1,16 @@
-"""CLI contract tests for the PydanticAI replay example."""
+"""CLI contract tests for the imported replay example."""
 
+import importlib
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
+import pytest
 from click.testing import CliRunner
+from pydantic_ai.models.test import TestModel
 
 DEMO_ROOT = Path("examples/end_to_end/replay_fork_demo")
 
@@ -26,17 +30,49 @@ def _load_demo_module() -> ModuleType:
     return module
 
 
+def test_import_help_names_jsonl_and_trace_uri_without_loading_agent() -> None:
+    sys.modules.pop("evals.register", None)
+    demo = _load_demo_module()
+
+    result = CliRunner().invoke(demo.cli, ["import-traces", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "JSONL export or langfuse://trace/<id> URI" in result.output
+    assert "evals.register" not in sys.modules
+
+
 class _FakeImports:
     def __init__(self, calls: list[dict[str, Any]]) -> None:
         self._calls = calls
 
-    def langfuse(self, path: str, **kwargs: Any) -> dict[str, Any]:
-        self._calls.append({"path": path, **kwargs})
+    def langfuse(self, source: str, **kwargs: Any) -> dict[str, Any]:
+        self._calls.append({"source": source, **kwargs})
         return {"selected_trace_count": 1, "dry_run": kwargs["dry_run"]}
 
 
-def test_import_command_uses_langfuse_jsonl_api(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_resume_command_rejects_negative_boundary_index() -> None:
+    demo = _load_demo_module()
+
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "resume",
+            "imported-run",
+            "--boundary-index",
+            "-1",
+            "--idempotency-key",
+            "resume-negative-boundary",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "is not in the range" in result.output
+
+
+def test_import_command_uses_declared_source_version_without_loading_agent(
+    monkeypatch: Any,
+) -> None:
+    sys.modules.pop("evals.register", None)
     demo = _load_demo_module()
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -54,17 +90,22 @@ def test_import_command_uses_langfuse_jsonl_api(monkeypatch: Any) -> None:
             "langfuse-project",
             "--trace-id",
             "trace-48211",
+            "--limit",
+            "1",
             "--commit",
         ],
     )
 
     assert result.exit_code == 0, result.output
+    assert "evals.register" not in sys.modules
     assert calls == [
         {
-            "path": "trace_fixtures/support-traces.jsonl",
+            "source": "trace_fixtures/support-traces.jsonl",
             "source_project_id": "langfuse-project",
-            "agent_name": demo.AGENT_NAME,
+            "agent": demo.AGENT_NAME,
+            "version": demo.SOURCE_VERSION,
             "trace_ids": ["trace-48211"],
+            "limit": 1,
             "dry_run": False,
             "confirm_data_storage": True,
         }
@@ -72,8 +113,7 @@ def test_import_command_uses_langfuse_jsonl_api(monkeypatch: Any) -> None:
     assert '"dry_run": false' in result.output
 
 
-def test_import_command_defaults_to_read_only_dry_run(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_import_command_accepts_uri_and_defaults_to_read_only(monkeypatch: Any) -> None:
     demo = _load_demo_module()
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
@@ -84,61 +124,138 @@ def test_import_command_defaults_to_read_only_dry_run(monkeypatch: Any) -> None:
 
     result = CliRunner().invoke(
         demo.cli,
-        [
-            "import-traces",
-            "trace_fixtures/support-traces.jsonl",
-            "--source-project-id",
-            "langfuse-project",
-        ],
+        ["import-traces", "langfuse://trace/trace-48211"],
     )
 
     assert result.exit_code == 0, result.output
+    assert calls[0]["source_project_id"] is None
     assert calls[0]["trace_ids"] is None
+    assert calls[0]["limit"] is None
     assert calls[0]["dry_run"] is True
     assert calls[0]["confirm_data_storage"] is False
 
 
-def test_example_declares_completed_execution_protection(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_register_command_selects_explicit_source_variant(monkeypatch: Any) -> None:
     demo = _load_demo_module()
+    calls: list[dict[str, str]] = []
 
-    snapshots = demo.kagent._protection_snapshots()
-    assert set(snapshots) == {"completed-execution"}
-    assert snapshots["completed-execution"].pass_rule == "score == 1.0"
+    def register(*, variant: str, version: str) -> tuple[object, object]:
+        calls.append({"variant": variant, "version": version})
+        return object(), object()
 
-
-def test_register_command_uses_agent_version_as_label(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    demo = _load_demo_module()
-    calls: list[dict[str, Any]] = []
-
-    class FakeAgent:
-        def register(self, **kwargs: Any) -> dict[str, Any]:
-            calls.append(kwargs)
-            return {"created": True}
-
-    monkeypatch.setattr(demo, "kagent", FakeAgent())
-    result = CliRunner().invoke(demo.cli, ["register"])
+    monkeypatch.setattr(demo, "_registered_agent", register)
+    result = CliRunner().invoke(demo.cli, ["register", "--role", "source"])
 
     assert result.exit_code == 0, result.output
-    assert calls == [{"label": demo.AGENT_VERSION}]
+    assert calls == [{"variant": demo.SOURCE_VARIANT, "version": demo.SOURCE_VERSION}]
+    assert '"role": "source"' in result.output
 
 
-def test_experiment_replays_explicit_native_set(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_source_registration_rejects_fixture_mismatches(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    calls: list[dict[str, str]] = []
+
+    def register(*, variant: str, version: str) -> tuple[object, object]:
+        calls.append({"variant": variant, "version": version})
+        return object(), object()
+
+    monkeypatch.setattr(demo, "_registered_agent", register)
+
+    wrong_variant = CliRunner().invoke(
+        demo.cli,
+        [
+            "register",
+            "--role",
+            "source",
+            "--variant",
+            "mini_tool_budget_2",
+        ],
+    )
+    wrong_version = CliRunner().invoke(
+        demo.cli,
+        [
+            "register",
+            "--role",
+            "source",
+            "--version",
+            "unrelated-version",
+        ],
+    )
+
+    assert wrong_variant.exit_code == 2
+    assert "source fixture is immutable" in wrong_variant.output
+    assert wrong_version.exit_code == 2
+    assert "source fixture is immutable" in wrong_version.output
+    assert calls == []
+
+
+def test_source_version_cannot_bind_a_different_variant(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    monkeypatch.setattr(
+        demo,
+        "_registration_module",
+        lambda: (_ for _ in ()).throw(AssertionError("must reject before loading")),
+    )
+
+    with pytest.raises(demo.KitaruUsageError, match="is frozen to variant"):
+        demo._registered_agent(
+            variant="mini_tool_budget_2",
+            version=demo.SOURCE_VERSION,
+        )
+
+
+def test_source_fixture_matches_json_text_agent_contract() -> None:
+    demo = _load_demo_module()
+    agent_module = importlib.import_module("reference_agent.agent")
+    config_module = importlib.import_module("reference_agent.config")
+
+    wrapped = agent_module.build_support_agent(
+        config_module.load_variant(demo.SOURCE_VARIANT),
+        model=TestModel(),
+    ).wrapped
+    assert wrapped.output_type is str
+    expected_tools = [
+        {
+            "type": "function",
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.function_schema.json_schema,
+        }
+        for tool in wrapped._function_toolset.tools.values()
+    ]
+
+    fixture = DEMO_ROOT / "trace_fixtures" / "imported-support-cases.jsonl"
+    rows = [
+        json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()
+    ]
+    for row in rows:
+        assert row["traceVersion"] == demo.SOURCE_VERSION
+        assert row["metadata"]["agent_version"] == demo.SOURCE_VERSION
+        assert row["metadata"]["variant"] == demo.SOURCE_VARIANT
+        assert row["input"]["tools"] == expected_tools
+        final_text = row["input"]["messages"][-1]["content"]
+        assert isinstance(final_text, str)
+        config_module.SupportDecision.model_validate_json(final_text)
+        assert json.loads(final_text) == row["output"]
+
+
+def test_experiment_replays_explicit_imported_set_with_objective(
+    monkeypatch: Any,
+) -> None:
     demo = _load_demo_module()
     calls: list[dict[str, Any]] = []
+    objective = object()
 
     class FakeAgent:
-        def register(self, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"operation": "register", **kwargs})
-            return {"created": False}
-
         def replay(self, selected: list[str], **kwargs: Any) -> dict[str, Any]:
-            calls.append({"operation": "replay", "execution_ids": selected, **kwargs})
+            calls.append({"execution_ids": selected, **kwargs})
             return {"target_count": len(selected)}
 
-    monkeypatch.setattr(demo, "kagent", FakeAgent())
+    monkeypatch.setattr(
+        demo,
+        "_registered_agent",
+        lambda **_kwargs: (FakeAgent(), objective),
+    )
     result = CliRunner().invoke(
         demo.cli,
         [
@@ -148,32 +265,63 @@ def test_experiment_replays_explicit_native_set(monkeypatch: Any) -> None:
             "run-c",
             "--idempotency-key",
             "permissions-v2-attempt-1",
+            "--repeats",
+            "2",
         ],
     )
 
     assert result.exit_code == 0, result.output
     assert calls == [
-        {"operation": "register", "label": demo.AGENT_VERSION},
         {
-            "operation": "replay",
             "execution_ids": ["run-a", "run-b", "run-c"],
-            "at": demo.DEFAULT_AT,
+            "imported_mode": demo.ImportedReplayMode.ROOT_INPUT,
             "on_error": "collect",
-            "uncovered_policy": "fail",
             "idempotency_key": "permissions-v2-attempt-1",
-            "repeats": 3,
+            "repeats": 2,
             "wait": True,
             "name": demo.DEFAULT_EXPERIMENT,
             "suite_key": demo.DEFAULT_EXPERIMENT,
-        },
+            "scorers": [objective],
+            "objective_minimum_mean": 1.0,
+        }
     ]
     assert '"target_count": 3' in result.output
 
 
-def test_rerun_command_uses_limits_and_asserts_pass(monkeypatch: Any) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+def test_resume_command_forwards_explicit_boundary_selection(monkeypatch: Any) -> None:
     demo = _load_demo_module()
     calls: list[dict[str, Any]] = []
+
+    def resume(execution_id: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append({"execution_id": execution_id, **kwargs})
+        return {"resumed": execution_id}
+
+    monkeypatch.setattr(demo, "_resume_case", resume)
+    result = CliRunner().invoke(
+        demo.cli,
+        [
+            "resume",
+            "imported-run",
+            "--boundary-kind",
+            "tool-result",
+            "--boundary-index",
+            "2",
+            "--idempotency-key",
+            "resume-1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["boundary_kind"] == "tool-result"
+    assert calls[0]["boundary_index"] == 2
+    assert calls[0]["candidate_variant"] == demo.DEFAULT_CANDIDATE_VARIANT
+    assert calls[0]["candidate_version"] == demo.DEFAULT_CANDIDATE_VERSION
+
+
+def test_rerun_command_uses_limits_objective_and_asserts_pass(monkeypatch: Any) -> None:
+    demo = _load_demo_module()
+    calls: list[dict[str, Any]] = []
+    objective = object()
 
     class FakeResult:
         def assert_pass(self) -> None:
@@ -183,15 +331,15 @@ def test_rerun_command_uses_limits_and_asserts_pass(monkeypatch: Any) -> None:
             return {"verdict": "pass"}
 
     class FakeAgent:
-        def register(self, **kwargs: Any) -> dict[str, Any]:
-            calls.append({"operation": "register", **kwargs})
-            return {"created": False}
-
         def replay(self, **kwargs: Any) -> FakeResult:
             calls.append({"operation": "replay", **kwargs})
             return FakeResult()
 
-    monkeypatch.setattr(demo, "kagent", FakeAgent())
+    monkeypatch.setattr(
+        demo,
+        "_registered_agent",
+        lambda **_kwargs: (FakeAgent(), objective),
+    )
     result = CliRunner().invoke(
         demo.cli,
         [
@@ -211,16 +359,124 @@ def test_rerun_command_uses_limits_and_asserts_pass(monkeypatch: Any) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert calls[0] == {"operation": "register", "label": demo.AGENT_VERSION}
-    assert calls[1]["operation"] == "replay"
-    assert calls[1]["experiment"] == "support-agent-permissions-v2"
-    assert calls[1]["idempotency_key"] == "permissions-v2-attempt-2"
-    assert calls[1]["repeats"] == 1
-    assert calls[1]["limits"] == demo.RegressionLimits(
+    assert calls[0]["operation"] == "replay"
+    assert calls[0]["experiment"] == "support-agent-permissions-v2"
+    assert calls[0]["idempotency_key"] == "permissions-v2-attempt-2"
+    assert calls[0]["repeats"] == 1
+    assert calls[0]["scorers"] == [objective]
+    assert calls[0]["limits"] == demo.RegressionLimits(
         max_trials=2,
         max_cost_usd=0.5,
         max_incurred_tokens=5000,
         max_duration_seconds=60.0,
     )
-    assert calls[2] == {"operation": "assert_pass"}
+    assert calls[1] == {"operation": "assert_pass"}
     assert '"verdict": "pass"' in result.output
+
+
+def test_inspect_execution_uses_compact_attempt_reference(
+    monkeypatch: Any,
+) -> None:
+    demo = _load_demo_module()
+    attempt = SimpleNamespace(
+        experiment_id="experiment-one",
+        spec=SimpleNamespace(suite_key="suite-one"),
+        verdict=None,
+        record=SimpleNamespace(imported_replay_members=[]),
+        to_json=lambda: (_ for _ in ()).throw(
+            AssertionError("execution inspection must not serialize full attempts")
+        ),
+    )
+    scores = list(range(demo._INSPECTION_MAX_SCORES + 1))
+    execution = SimpleNamespace(
+        exec_id="run-one",
+        status="completed",
+        project_id="project-one",
+        original_exec_id=None,
+        root_exec_id=None,
+        metadata={demo.EXPERIMENT_ID_METADATA_KEY: "experiment-one"},
+        import_info=None,
+        llm_usage_summary=None,
+        scores=SimpleNamespace(list=lambda: scores),
+    )
+    client = SimpleNamespace(
+        executions=SimpleNamespace(get=lambda _execution_id: execution),
+        agents=SimpleNamespace(
+            experiments=SimpleNamespace(
+                get_attempt=lambda experiment_id, *, agent: attempt,
+            )
+        ),
+    )
+
+    result = demo._inspect_execution("run-one", client=client)
+
+    assert result["experiments"] == [
+        {
+            "experiment_id": "experiment-one",
+            "suite_key": "suite-one",
+            "verdict": None,
+        }
+    ]
+    assert len(result["scores"]) == demo._INSPECTION_MAX_SCORES
+    assert result["scores_truncated"] is True
+
+
+def test_inspect_experiment_reuses_attempt_context_and_page_metadata(
+    monkeypatch: Any,
+) -> None:
+    demo = _load_demo_module()
+    page_calls: list[tuple[int, int]] = []
+    inspected: list[dict[str, Any]] = []
+    members = [SimpleNamespace(id=f"run-{index}") for index in range(100)]
+
+    class Runs:
+        def list(self, *, page: int, size: int) -> SimpleNamespace:
+            page_calls.append((page, size))
+            if page != 1:
+                raise AssertionError("page metadata should prevent an empty request")
+            return SimpleNamespace(items=members, total=200, total_pages=2)
+
+    serializations = 0
+
+    def serialize_attempt() -> dict[str, str]:
+        nonlocal serializations
+        serializations += 1
+        return {"experiment_id": "experiment-one"}
+
+    attempt = SimpleNamespace(
+        experiment_id="experiment-one",
+        runs=Runs(),
+        score_aggregate={"scored": 100},
+        to_json=serialize_attempt,
+    )
+    experiments = SimpleNamespace(
+        resolve_source=lambda source, *, agent: attempt,
+    )
+    client = SimpleNamespace(agents=SimpleNamespace(experiments=experiments))
+    monkeypatch.setattr(demo, "KitaruClient", lambda: client)
+
+    def inspect(execution_id: str, **kwargs: Any) -> dict[str, str]:
+        inspected.append({"execution_id": execution_id, **kwargs})
+        return {"execution_id": execution_id}
+
+    monkeypatch.setattr(demo, "_inspect_execution", inspect)
+
+    result = demo._inspect_experiment(
+        "experiment-one",
+        page=1,
+        page_size=100,
+    )
+
+    assert page_calls == [(1, 100)]
+    assert serializations == 1
+    assert result["member_page"] == {
+        "page": 1,
+        "page_size": 100,
+        "returned": 100,
+        "total": 200,
+        "total_pages": 2,
+        "has_more": True,
+    }
+    assert len(result["members"]) == 100
+    assert all(item["client"] is client for item in inspected)
+    assert all(item["attempts"] == (attempt,) for item in inspected)

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kitaru.imports import LangfuseImportResult, import_langfuse_jsonl
+from kitaru.imports import LangfuseImportResult, import_langfuse
 
 if TYPE_CHECKING:
     from kitaru.client import KitaruClient
@@ -22,7 +22,7 @@ class ImportsAPI:
         self,
         path: str | Path,
         *,
-        source_project_id: str,
+        source_project_id: str | None = None,
         agent: str,
         version: str,
         trace_ids: Sequence[str] | None = None,
@@ -34,13 +34,17 @@ class ImportsAPI:
         max_workers: int = 1,
         cohort_tag: str | None = None,
     ) -> LangfuseImportResult:
-        """Preview or import a Langfuse observations JSONL export.
+        """Preview or import a Langfuse JSONL export or trace URI.
+
+        JSONL sources require ``source_project_id``. Trace URIs derive the
+        authoritative project ID from returned observation core fields and
+        validate ``source_project_id`` when provided.
 
         The default dry run is read-only. An actual import persists the selected
         raw rows and normalized replay evidence, including observation inputs
         and outputs, and therefore requires explicit data-storage confirmation.
         """
-        return import_langfuse_jsonl(
+        return import_langfuse(
             path,
             source_project_id=source_project_id,
             agent=agent,

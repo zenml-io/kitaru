@@ -16,9 +16,12 @@ from kitaru.imports import (
     ImportedTraceConflictError,
     ImportedTraceWriteError,
     ImportOutcomeStatus,
+    LangfuseFetchProvenance,
     LangfuseSourceRecord,
     SourceAttributionStatus,
+    import_langfuse,
     import_langfuse_jsonl,
+    read_langfuse_jsonl_records,
 )
 
 # Captured before the autouse fixture stubs it out on the module.
@@ -145,6 +148,123 @@ def test_dry_run_plans_without_persisting(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.stack_name == "active-stack"
     assert result.stack_was_explicit is False
     assert "No stack was specified" in result.storage_warning
+
+
+def test_uri_source_enters_existing_normalization_and_attribution_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    records = tuple(
+        record
+        for record in read_langfuse_jsonl_records(FIXTURE)
+        if record.row["traceId"] == "trace-complete"
+    )
+    provenance = LangfuseFetchProvenance(
+        api_resource="observations_v2",
+        base_url="https://cloud.langfuse.com",
+        field_groups=("core", "io"),
+        page_count=1,
+    )
+    monkeypatch.setattr(
+        "kitaru.imports._source._fetch_langfuse_trace",
+        lambda trace_id: (records, "source-project", provenance),
+    )
+    planned: list[tuple[str, str]] = []
+
+    def plan(trace, *, raw_evidence, **kwargs):
+        del kwargs
+        planned.append((trace.source.project_id, raw_evidence.raw_content_sha256))
+        return ImportedTracePlan.CREATE
+
+    monkeypatch.setattr("kitaru.imports._service.plan_imported_trace", plan)
+
+    result = import_langfuse(
+        "langfuse://trace/trace-complete",
+        agent="support-agent",
+        version="prod",
+        client=_client(),
+    )
+
+    assert result.source_project_id == "source-project"
+    assert result.total_trace_count == 1
+    assert result.selected_trace_count == 1
+    assert result.outcomes[0].trace_id == "trace-complete"
+    assert result.outcomes[0].status is ImportOutcomeStatus.WOULD_CREATE
+    assert result.outcomes[0].attribution is not None
+    assert result.fetch_provenance == provenance
+    assert planned == [("source-project", result.outcomes[0].raw_evidence_digest)]
+
+
+def test_same_uri_is_unchanged_but_changed_refetch_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = tuple(
+        record
+        for record in read_langfuse_jsonl_records(FIXTURE)
+        if record.row["traceId"] == "trace-complete"
+    )
+    changed_rows = []
+    for record in original:
+        row = dict(record.row)
+        if record is original[0]:
+            row["input"] = {"changed": True}
+        changed_rows.append(
+            LangfuseSourceRecord(
+                raw_text=json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n",
+                row=row,
+                line_number=record.line_number,
+                source_order=record.source_order,
+            )
+        )
+    fetches = iter((original, original, tuple(changed_rows)))
+    monkeypatch.setattr(
+        "kitaru.imports._source._fetch_langfuse_trace",
+        lambda trace_id: (
+            next(fetches),
+            "source-project",
+            LangfuseFetchProvenance(
+                api_resource="observations_v2",
+                base_url="https://cloud.langfuse.com",
+                field_groups=("core", "io"),
+                page_count=1,
+            ),
+        ),
+    )
+    first_digest: str | None = None
+
+    def plan(trace, *, raw_evidence, **kwargs):
+        nonlocal first_digest
+        del trace, kwargs
+        if first_digest is None:
+            first_digest = raw_evidence.raw_content_sha256
+            return ImportedTracePlan.CREATE
+        if raw_evidence.raw_content_sha256 == first_digest:
+            return ImportedTracePlan.UNCHANGED
+        raise ImportedTraceConflictError(
+            "Trace was already imported with different source evidence.",
+            existing_execution_id="execution-existing",
+            resolution="Use the original immutable evidence.",
+        )
+
+    monkeypatch.setattr("kitaru.imports._service.plan_imported_trace", plan)
+
+    outcomes = [
+        import_langfuse(
+            "langfuse://trace/trace-complete",
+            agent="support-agent",
+            version="prod",
+            client=_client(),
+        ).outcomes[0]
+        for _ in range(3)
+    ]
+
+    assert [outcome.status for outcome in outcomes] == [
+        ImportOutcomeStatus.WOULD_CREATE,
+        ImportOutcomeStatus.UNCHANGED,
+        ImportOutcomeStatus.CONFLICT,
+    ]
+    assert outcomes[0].raw_evidence_digest == outcomes[1].raw_evidence_digest
+    assert outcomes[2].raw_evidence_digest != outcomes[0].raw_evidence_digest
+    assert outcomes[2].existing_execution_id == "execution-existing"
 
 
 def test_explicit_stack_is_resolved_once_and_forwarded(monkeypatch) -> None:
@@ -288,7 +408,7 @@ def test_incomplete_trace_is_reported_as_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "kitaru.imports._service.read_langfuse_jsonl_records",
+        "kitaru.imports._source.read_langfuse_jsonl_records",
         lambda path: iter(
             [
                 LangfuseSourceRecord(
@@ -361,7 +481,7 @@ def test_exact_selection_ignores_invalid_unselected_trace(
         },
     ]
     monkeypatch.setattr(
-        "kitaru.imports._service.read_langfuse_jsonl_records",
+        "kitaru.imports._source.read_langfuse_jsonl_records",
         lambda path: iter(
             LangfuseSourceRecord(
                 raw_text=json.dumps(row, separators=(",", ":")) + "\n",
@@ -616,7 +736,7 @@ def test_cohort_tag_is_validated_before_reading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     read = MagicMock(side_effect=AssertionError("invalid tag must fail before reading"))
-    monkeypatch.setattr("kitaru.imports._service.read_langfuse_jsonl_records", read)
+    monkeypatch.setattr("kitaru.imports._source.read_langfuse_jsonl_records", read)
 
     with pytest.raises(KitaruUsageError, match="cohort_tag"):
         import_langfuse_jsonl(
@@ -699,7 +819,7 @@ def test_binding_resolves_before_source_rows_are_read(
         events.append("read")
         return actual_reader(path)
 
-    monkeypatch.setattr("kitaru.imports._service.read_langfuse_jsonl_records", read)
+    monkeypatch.setattr("kitaru.imports._source.read_langfuse_jsonl_records", read)
 
     import_langfuse_jsonl(
         FIXTURE,

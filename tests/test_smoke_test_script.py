@@ -53,6 +53,18 @@ def test_gemini_model_smoke_allows_for_variable_thinking_latency() -> None:
     assert int(match.group(1)) == 180
 
 
+def test_smoke_covers_langfuse_uri_help_without_network_calls() -> None:
+    script = SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+    assert '"Langfuse import help exposes trace URIs"' in script
+    assert (
+        "kitaru import langfuse --help | grep -q 'langfuse://trace/TRACE_ID'" in script
+    )
+    assert script.count("kitaru import langfuse --help") == 1
+    assert '"Replay-fork import help exposes trace URIs"' in script
+    assert "demo.py import-traces --help | grep -q 'langfuse://trace/<id>'" in script
+
+
 def test_smoke_script_has_valid_bash_syntax() -> None:
     completed = subprocess.run(
         ["bash", "-n", str(SMOKE_SCRIPT)],

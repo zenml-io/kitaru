@@ -1626,7 +1626,10 @@ run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
 run_test "kitaru flow --help"             $UV_RUN kitaru flow --help
 run_test "kitaru flow deployments --help" $UV_RUN kitaru flow deployments --help
 run_test "kitaru flow deployments curl --help" $UV_RUN kitaru flow deployments curl --help
-run_test "kitaru import langfuse --help" $UV_RUN kitaru import langfuse --help
+run_test "Langfuse import help exposes trace URIs" \
+    bash -c "$UV_RUN kitaru import langfuse --help | grep -q 'langfuse://trace/TRACE_ID'"
+run_test "Replay-fork import help exposes trace URIs" \
+    bash -c "$UV_RUN python examples/end_to_end/replay_fork_demo/demo.py import-traces --help | grep -q 'langfuse://trace/<id>'"
 run_test "kitaru flow list"               $UV_RUN kitaru flow list
 run_test "kitaru flow list -o json"       $UV_RUN kitaru flow list -o json
 ANALYTICS_OUT=$($UV_RUN kitaru analytics status -o json 2>&1) || true

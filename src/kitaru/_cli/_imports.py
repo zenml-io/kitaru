@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Annotated, Any
 
 from cyclopts import Parameter
@@ -11,10 +10,13 @@ from kitaru._interface_errors import run_with_cli_error_boundary
 from kitaru.cli_output import CLIOutputFormat
 from kitaru.imports import (
     ImportOutcomeStatus,
+    LangfuseImportError,
     LangfuseImportResult,
+    LangfuseSourceKind,
     ReplayReadinessSummary,
     TraceImportOutcome,
 )
+from kitaru.imports._source import parse_langfuse_source
 
 from . import import_app
 from ._dependencies import cli_dependencies
@@ -95,6 +97,17 @@ def _serialize_result(result: LangfuseImportResult) -> dict[str, Any]:
         "attribution_counts": result.attribution_counts,
         "cohort_tag": result.cohort_tag,
         "storage_warning": result.storage_warning,
+        "fetch_provenance": (
+            {
+                "api_resource": result.fetch_provenance.api_resource,
+                "base_url": result.fetch_provenance.base_url,
+                "base_url_source": result.fetch_provenance.base_url_source,
+                "field_groups": list(result.fetch_provenance.field_groups),
+                "page_count": result.fetch_provenance.page_count,
+            }
+            if result.fetch_provenance is not None
+            else None
+        ),
         "outcomes": [_serialize_outcome(outcome) for outcome in result.outcomes],
     }
 
@@ -134,6 +147,17 @@ def _render_result(result: LangfuseImportResult) -> None:
             ("Available traces", str(result.total_trace_count)),
             ("Selected traces", str(result.selected_trace_count)),
             ("Attribution", attribution_counts),
+            (
+                "Fetch provenance",
+                (
+                    f"{result.fetch_provenance.api_resource} at "
+                    f"{result.fetch_provenance.base_url}; "
+                    f"pages={result.fetch_provenance.page_count}; "
+                    "fields=" + ",".join(result.fetch_provenance.field_groups)
+                    if result.fetch_provenance is not None
+                    else "-"
+                ),
+            ),
             ("Cohort tag", result.cohort_tag or "-"),
             ("Outcomes", counts),
         ],
@@ -206,15 +230,20 @@ def _render_readiness(readiness: ReplayReadinessSummary | None) -> str:
 
 @import_app.command
 def langfuse(
-    path: Annotated[
-        Path,
-        Parameter(help="Path to a Langfuse observations JSONL export."),
+    source: Annotated[
+        str,
+        Parameter(
+            help="Langfuse observations JSONL path or langfuse://trace/TRACE_ID URI."
+        ),
     ],
     *,
     source_project_id: Annotated[
-        str,
-        Parameter(help="Stable ID of the source Langfuse project."),
-    ],
+        str | None,
+        Parameter(
+            help="Stable source Langfuse project ID. Required for JSONL; "
+            "optional and validated for trace URIs."
+        ),
+    ] = None,
     agent: Annotated[
         str,
         Parameter(help="Exact Kitaru Agent name or ID that produced the traces."),
@@ -274,6 +303,16 @@ def langfuse(
     """Preview or import Langfuse traces as observed Kitaru executions."""
     command = "import.langfuse"
     output_format = _resolve_output_format(output)
+    try:
+        source_kind, _trace_id = parse_langfuse_source(source)
+    except LangfuseImportError as exc:
+        _exit_with_error(command, str(exc), output=output_format)
+    if source_kind is LangfuseSourceKind.JSONL and source_project_id is None:
+        _exit_with_error(
+            command,
+            "`--source-project-id` is required for JSONL sources.",
+            output=output_format,
+        )
     if write and not confirm_data_storage:
         _exit_with_error(
             command,
@@ -300,7 +339,7 @@ def langfuse(
     def _import_traces() -> LangfuseImportResult:
         client = cli_dependencies().kitaru_client()
         return client.imports.langfuse(
-            path,
+            source,
             source_project_id=source_project_id,
             agent=agent,
             version=version,

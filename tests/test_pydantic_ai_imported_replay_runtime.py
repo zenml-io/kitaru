@@ -119,7 +119,7 @@ def _boundary(
         observation_id=part.observation_id,
         sequence=part.sequence,
         occurrence=part.occurrence,
-        call_id=part.call_id,
+        call_id=(part.call_id if kind is ReplayPartKind.TOOL_RESULT else None),
     )
 
 
@@ -176,6 +176,25 @@ def test_prepares_complete_tool_result_boundary_with_pydantic_validation(
     assert isinstance(tool_return, pydantic_messages.ToolReturnPart)
     assert tool_return.tool_call_id == "call-1"
     assert tool_return.content == {"answer": "y"}
+    assert prepared.message_provenance[-1].last_occurrence == boundary.occurrence
+
+
+def test_prepares_complete_tool_call_model_message_boundary() -> None:
+    evidence = _prepared_evidence()
+    boundary = _boundary(evidence, ReplayPartKind.TOOL_CALL)
+
+    prepared = prepare_imported_replay_history(
+        evidence,
+        boundary=boundary,
+        fallback_policy=ImportedReplayFallbackPolicy.BLOCK,
+    )
+
+    assert len(prepared.message_history) == 2
+    response = prepared.message_history[-1]
+    assert isinstance(response, pydantic_messages.ModelResponse)
+    tool_call = response.parts[-1]
+    assert isinstance(tool_call, pydantic_messages.ToolCallPart)
+    assert tool_call.tool_call_id == "call-1"
     assert prepared.message_provenance[-1].last_occurrence == boundary.occurrence
 
 
@@ -459,6 +478,23 @@ def _disable_checkpoints(
         run_without_checkpoint,
     )
     monkeypatch.setattr(agent, "_should_track", lambda: False)
+
+
+def test_model_message_boundary_retains_pending_recorded_tool_call() -> None:
+    evidence = _with_tool_arguments(_prepared_evidence(), {"q": "x"})
+    toolset = _toolset()
+    manifest = _pydantic_ai_replay_manifest([toolset])
+
+    runtime = compile_recorded_responses(
+        evidence,
+        source_manifest=manifest,
+        candidate_manifest=manifest,
+        candidate_toolsets=[toolset],
+        after_boundary=_boundary(evidence, ReplayPartKind.TOOL_CALL),
+    )
+
+    assert runtime.eligible_occurrence_count == 1
+    assert runtime.remaining_occurrence_count == 1
 
 
 @pytest.mark.parametrize("effect", ["read_only", "write"])
