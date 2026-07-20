@@ -25,7 +25,7 @@ from tests.replay_fork_support import (
     bootstrap_account_setting_comparable_suite,
 )
 
-STATUS_TRACE_ID = "support-service-status"
+STATUS_TRACE_ID = "00cbb102c7844e00aeb0149e8deea83b"
 BASELINE_REPRODUCTION_VERSION = "recorded-path-reproduction-v1"
 FIXED_CANDIDATE_VERSION = "permissions-fix-v1"
 
@@ -303,7 +303,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     ]
     assert suite.record.counts.verified == 2
     assert suite.record.imported_replay_evidence is not None
-    assert suite.record.imported_replay_evidence.recorded_response_hits == 5
+    assert suite.record.imported_replay_evidence.recorded_response_hits == 4
     assert suite.record.imported_replay_evidence.recorded_response_misses == 0
     assert suite.record.imported_replay_evidence.blocked_calls == 0
     assert suite.verdict is not None

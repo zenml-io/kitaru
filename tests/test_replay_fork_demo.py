@@ -106,12 +106,12 @@ def test_help_exposes_only_replay_and_inspection_commands() -> None:
         assert command in result.output
 
 
-def test_demo_accepts_an_explicit_agent_name(monkeypatch: Any) -> None:
-    monkeypatch.setenv("KITARU_AGENT_NAME", "support-agent-3")
+def test_demo_uses_a_stable_agent_name(monkeypatch: Any) -> None:
+    monkeypatch.setenv("KITARU_AGENT_NAME", "ignored-agent-name")
 
     demo = _load_demo_module()
 
-    assert demo.AGENT_NAME == "support-agent-3"
+    assert demo.AGENT_NAME == "customer-support-agent"
 
 
 def test_resume_command_rejects_negative_boundary_index() -> None:
@@ -371,6 +371,14 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
     rows = [
         json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()
     ]
+    assert len(rows) == 5
+    assert [row["metadata"]["scenario_id"] for row in rows] == [
+        "account_setting_change_request",
+        "service_status_question",
+        "refund_policy_explanation",
+        "usage_spike_complaint",
+        "outage_with_ticket_request",
+    ]
     for row in rows:
         assert row["traceVersion"] == demo.SOURCE_VERSION
         assert row["metadata"]["agent_version"] == demo.SOURCE_VERSION
@@ -421,9 +429,15 @@ def test_raw_source_fixture_preserves_regenerated_langfuse_observations() -> Non
     ]
 
     account_trace_id = "390972667ef147cbbbd6db2b30e8ad1b"
-    status_trace_id = "00cbb102c7844e00aeb0149e8deea83b"
-    assert len(rows) == 14
-    assert {row["traceId"] for row in rows} == {account_trace_id, status_trace_id}
+    trace_ids = {
+        account_trace_id,
+        "00cbb102c7844e00aeb0149e8deea83b",
+        "40860e9cee9d4d71b6a6f82208af1a75",
+        "50b5ad259d5c4c61bdfe2f593c8f8495",
+        "88b77b16089946ee966d2ae55e0921d7",
+    }
+    assert len(rows) == 35
+    assert {row["traceId"] for row in rows} == trace_ids
     assert {row["type"] for row in rows if row["traceId"] == account_trace_id} == {
         "AGENT",
         "GENERATION",
@@ -436,6 +450,7 @@ def test_raw_source_fixture_preserves_regenerated_langfuse_observations() -> Non
         if row["traceId"] == account_trace_id and row["type"] == "TOOL"
     ] == ["lookup_customer", "search_kb", "escalate_to_human"]
     roots = [row for row in rows if row["name"] == "support-agent"]
+    assert len(roots) == 5
     assert {row["metadata"]["fixture_generation_id"] for row in roots} == {
         "kitaru-replay-example-20260720-regenerated"
     }
@@ -566,7 +581,10 @@ def test_resume_command_defaults_to_readable_summary(monkeypatch: Any) -> None:
     assert "0/1 served, 1 missed" in result.output
     assert "Blocked calls" in result.output
     assert "imported_replay_not_comparable" in result.output
-    assert "kitaru agents experiments support-agent experiment-one" in result.output
+    assert (
+        "kitaru agents experiments customer-support-agent experiment-one"
+        in result.output
+    )
     assert '"planning_rows"' not in result.output
 
 
@@ -654,7 +672,7 @@ def test_rerun_command_uses_limits_objective_and_asserts_pass(monkeypatch: Any) 
         demo.cli,
         [
             "rerun",
-            "support-agent-permissions-v2",
+            "customer-support-agent-permissions-v2",
             "--idempotency-key",
             "permissions-v2-attempt-2",
             "--max-trials",
@@ -676,7 +694,7 @@ def test_rerun_command_uses_limits_objective_and_asserts_pass(monkeypatch: Any) 
 
     assert result.exit_code == 0, result.output
     assert calls[0]["operation"] == "replay"
-    assert calls[0]["experiment"] == "support-agent-permissions-v2"
+    assert calls[0]["experiment"] == "customer-support-agent-permissions-v2"
     assert calls[0]["idempotency_key"] == "permissions-v2-attempt-2"
     assert calls[0]["repeats"] == 1
     assert calls[0]["scorers"] == [objective]

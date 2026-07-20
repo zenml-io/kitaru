@@ -1,1 +1,1 @@
-"""Registration entrypoint for the support-agent replay example."""
+"""Registration entrypoint for the customer-support-agent replay example."""

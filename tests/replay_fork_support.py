@@ -22,7 +22,7 @@ from kitaru import KitaruClient
 from tests.test_replay_fork_demo import DEMO_ROOT, _load_demo_module
 
 FIXTURE = DEMO_ROOT / "trace_fixtures" / "imported-support-cases.jsonl"
-ACCOUNT_TRACE_ID = "support-account-setting"
+ACCOUNT_TRACE_ID = "390972667ef147cbbbd6db2b30e8ad1b"
 FIXED_CANDIDATE_VERSION = "permissions-fix-v1"
 
 
@@ -253,9 +253,9 @@ def recorded_path_model() -> FunctionModel:
                             tool_name="search_kb",
                             args={
                                 "query": (
-                                    "beta_exports_fast_path enable account setting "
-                                    "policy admin change SSO beta feature enablement "
-                                    "policy"
+                                    "enable beta feature account setting "
+                                    "beta_exports_fast_path who can enable beta "
+                                    "features account-wide policy"
                                 )
                             },
                             tool_call_id="candidate-kb",
@@ -292,18 +292,8 @@ def recorded_path_model() -> FunctionModel:
                     parts=[
                         pydantic_messages.ToolCallPart(
                             tool_name="get_service_status",
-                            args={"service": "export API"},
+                            args={"service": "Export API"},
                             tool_call_id="candidate-status",
-                        )
-                    ]
-                )
-            if "search_kb" not in returned_names:
-                return pydantic_messages.ModelResponse(
-                    parts=[
-                        pydantic_messages.ToolCallPart(
-                            tool_name="search_kb",
-                            args={"query": "export API timeout outage"},
-                            tool_call_id="candidate-status-kb",
                         )
                     ]
                 )
@@ -315,8 +305,8 @@ def recorded_path_model() -> FunctionModel:
                     "summary": (
                         "The recorded status and incident evidence were reproduced."
                     ),
-                    "evidence_ids": ["api:status:export API"],
-                    "tool_names": ["get_service_status", "search_kb"],
+                    "evidence_ids": ["api:status:Export API"],
+                    "tool_names": ["get_service_status"],
                 }
             )
 

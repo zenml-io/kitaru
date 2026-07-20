@@ -88,7 +88,7 @@ class SupportAgentDeps:
 def build_support_agent(
     variant: AgentVariant,
     *,
-    name: str = "support-agent",
+    name: str = "customer-support-agent",
     model: Any | None = None,
 ) -> KitaruAgent[SupportAgentDeps, str]:
     """Build one version of the support agent and wrap it with Kitaru."""

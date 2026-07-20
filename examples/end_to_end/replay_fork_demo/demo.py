@@ -2,7 +2,6 @@
 
 import importlib
 import json
-import os
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
@@ -36,14 +35,14 @@ from kitaru.imports import (
 )
 from kitaru.replay import EXPERIMENT_ID_METADATA_KEY
 
-AGENT_NAME = os.getenv("KITARU_AGENT_NAME", "support-agent")
+AGENT_NAME = "customer-support-agent"
 SOURCE_VARIANT = IMPORTED_SOURCE_VARIANT
 SOURCE_VERSION = IMPORTED_SOURCE_VERSION
-DEFAULT_REPLAY_VARIANT = "nano_trimmed_permissions"
-DEFAULT_REPLAY_VERSION = "v2.3-counterfactual"
-DEFAULT_RESUME_VARIANT = "baseline"
-DEFAULT_RESUME_VERSION = "recorded-path-reproduction-v1"
-DEFAULT_EXPERIMENT = "support-agent-permissions-v2"
+DEFAULT_REPLAY_VARIANT = SOURCE_VARIANT
+DEFAULT_REPLAY_VERSION = SOURCE_VERSION
+DEFAULT_RESUME_VARIANT = SOURCE_VARIANT
+DEFAULT_RESUME_VERSION = SOURCE_VERSION
+DEFAULT_EXPERIMENT = "customer-support-agent-permissions-v2"
 DEFAULT_BOUNDARY_KIND = "tool-result"
 DEFAULT_BOUNDARY_INDEX = 1
 _INSPECTION_DEFAULT_PAGE_SIZE = 25

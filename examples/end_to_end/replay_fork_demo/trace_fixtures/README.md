@@ -17,7 +17,12 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 export LANGFUSE_HOST=https://cloud.langfuse.com
 
 cd examples/end_to_end/replay_fork_demo
-for scenario in account_setting_change_request service_status_question; do
+for scenario in \
+  account_setting_change_request \
+  service_status_question \
+  refund_policy_explanation \
+  usage_spike_complaint \
+  outage_with_ticket_request; do
   uv run --with langfuse python -m trace_fixtures.generate \
     --scenario "$scenario" \
     --variant baseline \
@@ -31,16 +36,19 @@ in walkthrough order:
 ```bash
 uv run --with langfuse python -m trace_fixtures.export \
   --trace-id 390972667ef147cbbbd6db2b30e8ad1b \
-  --trace-id 00cbb102c7844e00aeb0149e8deea83b
+  --trace-id 00cbb102c7844e00aeb0149e8deea83b \
+  --trace-id 40860e9cee9d4d71b6a6f82208af1a75 \
+  --trace-id 50b5ad259d5c4c61bdfe2f593c8f8495 \
+  --trace-id 88b77b16089946ee966d2ae55e0921d7
 ```
 
 The exporter writes two artifacts:
 
-- `raw-imported-support-cases.jsonl` contains all 14 observations returned by
+- `raw-imported-support-cases.jsonl` contains all 35 observations returned by
   Langfuse. It preserves the root spans, PydanticAI agent spans, model
   generations, tool calls, timestamps, costs, and metadata. Public-key metadata
   is removed.
-- `imported-support-cases.jsonl` contains one replay-ready row per trace. The
+- `imported-support-cases.jsonl` contains five replay-ready rows. The
   exporter selects the final model generation, converts PydanticAI message
   parts to Kitaru's imported-message contract, and retains the live trace ID,
   tool schemas, tool arguments, tool results, final output, and source stamps.
