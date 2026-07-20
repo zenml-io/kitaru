@@ -9,7 +9,7 @@ from reference_agent.config import load_variant
 from kitaru import ExecutionEvidence, Score
 from kitaru.scoring import scorer
 
-AGENT_NAME = "support-agent"
+AGENT_NAME = os.getenv("KITARU_AGENT_NAME", "support-agent")
 DEFAULT_VARIANT = os.getenv("SUPPORT_AGENT_VARIANT", "nano_trimmed_permissions")
 VARIANT_ENTRYPOINTS = {
     "baseline": "baseline_agent",

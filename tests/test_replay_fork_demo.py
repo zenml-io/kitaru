@@ -106,6 +106,14 @@ def test_help_exposes_only_replay_and_inspection_commands() -> None:
         assert command in result.output
 
 
+def test_demo_accepts_an_explicit_agent_name(monkeypatch: Any) -> None:
+    monkeypatch.setenv("KITARU_AGENT_NAME", "support-agent-3")
+
+    demo = _load_demo_module()
+
+    assert demo.AGENT_NAME == "support-agent-3"
+
+
 def test_resume_command_rejects_negative_boundary_index() -> None:
     demo = _load_demo_module()
 

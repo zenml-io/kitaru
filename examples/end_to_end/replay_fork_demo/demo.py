@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import os
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
@@ -35,7 +36,7 @@ from kitaru.imports import (
 )
 from kitaru.replay import EXPERIMENT_ID_METADATA_KEY
 
-AGENT_NAME = "support-agent"
+AGENT_NAME = os.getenv("KITARU_AGENT_NAME", "support-agent")
 SOURCE_VARIANT = IMPORTED_SOURCE_VARIANT
 SOURCE_VERSION = IMPORTED_SOURCE_VERSION
 DEFAULT_REPLAY_VARIANT = "nano_trimmed_permissions"
