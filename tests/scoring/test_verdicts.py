@@ -162,17 +162,62 @@ def _frozen_evidence(
 
 def _imported_summary(
     comparability: ImportedReplayComparability,
+    **overrides: int,
 ) -> ImportedReplayEvidenceSummary:
-    return ImportedReplayEvidenceSummary.create(
-        intended=1,
-        reported=1,
-        complete_prefixes=1,
-        eligible_recorded_responses=1,
-        recorded_response_hits=1,
-        recorded_response_misses=0,
-        blocked_calls=0,
-        path_divergences=0,
-        comparability=comparability,
+    values = {
+        "intended": 1,
+        "reported": 1,
+        "complete_prefixes": 1,
+        "eligible_recorded_responses": 1,
+        "recorded_response_hits": 1,
+        "recorded_response_misses": 0,
+        "blocked_calls": 0,
+        "path_divergences": 0,
+        "comparability": comparability,
+    }
+    values.update(overrides)
+    return ImportedReplayEvidenceSummary.create(**values)
+
+
+def _with_imported_policy(
+    record: ExperimentRecord,
+) -> tuple[ExperimentRecord, VerdictPolicy]:
+    policy = VerdictPolicy.create(
+        objective=OBJECTIVE,
+        protections=[PROTECTION],
+        imported_replay=ImportedReplayVerdictPolicy(),
+    )
+    assert policy is not None
+    return (
+        record.model_copy(
+            update={"spec": record.spec.model_copy(update={"verdict_policy": policy})}
+        ),
+        policy,
+    )
+
+
+def _failed_protection_with_imported_policy() -> tuple[
+    ExperimentRecord,
+    ScoreAttemptAggregate,
+    VerdictPolicy,
+]:
+    record, aggregate, _, _ = _frozen_evidence(
+        [_observation(OBJECTIVE), _observation(PROTECTION.scorer, value=0.0)]
+    )
+    record, policy = _with_imported_policy(record)
+    return record, aggregate, policy
+
+
+def _aggregate_reference(
+    record: ExperimentRecord, aggregate: ScoreAttemptAggregate
+) -> ExperimentRecord:
+    return record.model_copy(
+        update={
+            "score_aggregate": ScoreAggregateReference(
+                artifact_version_id="aggregate-id",
+                sha256=aggregate.content_hash,
+            )
+        }
     )
 
 
@@ -253,6 +298,117 @@ def test_imported_evidence_preserves_pass_fail_hold_precedence() -> None:
     assert held.verdict is ExperimentVerdict.HOLD
     assert failed.verdict is ExperimentVerdict.FAIL
     assert missing.verdict is ExperimentVerdict.HOLD
+
+
+@pytest.mark.parametrize(
+    ("evidence", "reason"),
+    [
+        (
+            _imported_summary(ImportedReplayComparability.COUNTERFACTUAL),
+            "imported_replay_not_comparable",
+        ),
+        (
+            _imported_summary(
+                ImportedReplayComparability.RECORDED_PATH_COMPARABLE,
+                complete_prefixes=0,
+            ),
+            "imported_replay_prefix_incomplete",
+        ),
+        (
+            _imported_summary(
+                ImportedReplayComparability.RECORDED_PATH_COMPARABLE,
+                recorded_response_hits=0,
+                recorded_response_misses=1,
+            ),
+            "imported_recorded_responses_incomplete",
+        ),
+    ],
+)
+def test_complete_protection_failure_overrides_imported_degradation_only(
+    evidence: ImportedReplayEvidenceSummary,
+    reason: str,
+) -> None:
+    record, aggregate, policy = _failed_protection_with_imported_policy()
+
+    result = evaluate_verdict(
+        record.model_copy(update={"imported_replay_evidence": evidence}),
+        aggregate,
+        policy,
+    )
+
+    assert result.verdict is ExperimentVerdict.FAIL
+    assert reason in {item.value for item in result.reason_codes}
+    assert "protection_below_passing_score" in {
+        item.value for item in result.reason_codes
+    }
+
+
+@pytest.mark.parametrize(
+    ("hard_hold", "reason"),
+    [
+        ("lifecycle", "lifecycle_incomplete"),
+        ("membership", "replay_membership_incomplete"),
+        ("aggregate_reference", "aggregate_reference_mismatch"),
+        ("score_matrix", "score_matrix_incomplete"),
+        ("duplicate_scorer", "duplicate_scorer_aggregate"),
+        ("missing_imported_evidence", "imported_replay_evidence_missing"),
+        ("blocked_observation", "blocked_observations"),
+    ],
+)
+def test_complete_protection_failure_preserves_hard_holds(
+    hard_hold: str,
+    reason: str,
+) -> None:
+    if hard_hold == "blocked_observation":
+        record, aggregate, _, _ = _frozen_evidence(
+            [
+                _observation(
+                    OBJECTIVE,
+                    value=None,
+                    status=ScoreObservationStatus.BLOCKED,
+                ),
+                _observation(PROTECTION.scorer, value=0.0),
+            ]
+        )
+        record, policy = _with_imported_policy(record)
+    else:
+        record, aggregate, policy = _failed_protection_with_imported_policy()
+
+    if hard_hold == "lifecycle":
+        record = record.model_copy(update={"status": "failed"})
+    elif hard_hold == "membership":
+        record = record.model_copy(
+            update={"counts": record.counts.model_copy(update={"intended": 2})}
+        )
+    elif hard_hold == "aggregate_reference":
+        record = record.model_copy(
+            update={
+                "score_aggregate": ScoreAggregateReference(
+                    artifact_version_id="aggregate-id",
+                    sha256="sha256:" + "0" * 64,
+                )
+            }
+        )
+    elif hard_hold == "score_matrix":
+        aggregate = aggregate.model_copy(update={"planned": 1})
+        record = _aggregate_reference(record, aggregate)
+    elif hard_hold == "duplicate_scorer":
+        aggregate = aggregate.model_copy(
+            update={
+                "scorer_aggregates": [
+                    *aggregate.scorer_aggregates,
+                    aggregate.scorer_aggregates[0],
+                ]
+            }
+        )
+
+    result = evaluate_verdict(record, aggregate, policy)
+
+    assert result.verdict is ExperimentVerdict.HOLD
+    assert reason in {item.value for item in result.reason_codes}
+    assert "protection_below_passing_score" in {
+        item.value for item in result.reason_codes
+    }
 
 
 def test_verdict_truth_table_pass_and_trustworthy_failures() -> None:

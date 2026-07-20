@@ -363,6 +363,15 @@ class VerdictReasonCode(StrEnum):
     IMPORTED_REPLAY_NOT_COMPARABLE = "imported_replay_not_comparable"
 
 
+_PROTECTION_FAILURE_OVERRIDABLE_HOLD_REASONS = frozenset(
+    {
+        VerdictReasonCode.IMPORTED_REPLAY_PREFIX_INCOMPLETE,
+        VerdictReasonCode.IMPORTED_RECORDED_RESPONSES_INCOMPLETE,
+        VerdictReasonCode.IMPORTED_REPLAY_NOT_COMPARABLE,
+    }
+)
+
+
 class OperationalLimitReason(StrEnum):
     """Stable reason further regression trials were not submitted."""
 
@@ -778,26 +787,33 @@ def evaluate_verdict(
             reasons.append(VerdictReasonCode.OPERATIONAL_LIMIT_STOPPED)
 
     reasons = list(dict.fromkeys(reasons))
-    hold_reasons = {
-        item
-        for item in reasons
-        if item
-        not in {
-            VerdictReasonCode.OBJECTIVE_BELOW_THRESHOLD,
-            VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE,
-        }
+    reason_set = set(reasons)
+    failure_reason_codes = {
+        VerdictReasonCode.OBJECTIVE_BELOW_THRESHOLD,
+        VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE,
     }
+    hold_reasons = reason_set - failure_reason_codes
     failure_reasons = {
         VerdictReasonCode.OBJECTIVE_BELOW_THRESHOLD,
         VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE,
-    } & set(reasons)
-    verdict = (
-        ExperimentVerdict.HOLD
-        if hold_reasons
-        else ExperimentVerdict.FAIL
-        if failure_reasons
-        else ExperimentVerdict.PASS
+    } & reason_set
+    protection_failed = (
+        VerdictReasonCode.PROTECTION_BELOW_PASSING_SCORE in failure_reasons
     )
+    # A complete protection failure is affirmative evidence of forbidden
+    # behavior, but it can only outrank present, degraded imported-replay
+    # context. Every other hold reason leaves the score evidence untrusted.
+    if hold_reasons:
+        verdict = (
+            ExperimentVerdict.FAIL
+            if protection_failed
+            and hold_reasons <= _PROTECTION_FAILURE_OVERRIDABLE_HOLD_REASONS
+            else ExperimentVerdict.HOLD
+        )
+    elif failure_reasons:
+        verdict = ExperimentVerdict.FAIL
+    else:
+        verdict = ExperimentVerdict.PASS
     matrix_fact = ScoreMatrixFact(
         planned=expected_cells,
         observed=observed,

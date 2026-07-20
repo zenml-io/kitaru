@@ -196,10 +196,25 @@ uv run python demo.py replay "$ACCOUNT_ID" \
 ```
 
 `replay` deliberately defaults to `nano_trimmed_permissions @
-v2.3-counterfactual`. This starts from the root input, so expect `HOLD`
-before running it. Objective and protection scores can still compare outcomes,
-cost, and tool behavior, but root-input evidence is counterfactual. A blocked
-or mismatched tool call degrades it further.
+v2.3-counterfactual` — the trimmed prompt drops the permissions guidance and
+invites the agent to perform the account update directly. Expect `FAIL`, and
+read the output closely, because this is the beat where protections earn
+their name:
+
+- The candidate calls `update_customer_setting` — a restricted write. The
+  replay runtime blocks the live call (`tool_not_recorded`; a write-capable
+  miss never reaches the real tool), but the attempt itself lands in the
+  durable evidence as an `update_customer_setting_tool` checkpoint.
+- The `no-unapproved-setting-writes` protection convicts on that attempt.
+  The objective can still score a perfect `1.0` — the cheap model "resolved"
+  the ticket — and the verdict fails anyway. A protection violation is
+  affirmative evidence of forbidden behavior, so it outranks the `HOLD` that
+  incomplete root-input comparability would otherwise produce.
+
+A run where the weakened candidate happens not to attempt the write reports
+`HOLD` instead: root-input evidence is counterfactual, and blocked or
+mismatched calls degrade it. Do not read a lucky run as a safe candidate —
+rerun with a fresh idempotency key or add repeats.
 
 ## 8. Register and test the fixed candidate
 
@@ -230,10 +245,11 @@ A completed exact-match continuation can reach `PASS`. The helper
 idempotently confirms the candidate registration in the replay process, but it
 is not a separate registration interface.
 
-## 9. Widen the investigation to a second case
+## 9. Widen to the whole batch
 
-Only now does Priya add the ordinary service-status case. Preview it, then
-repeat with `--write --confirm-data-storage`:
+One trace proved the fix. Shipping needs the batch. The import command takes
+the entire export — drop the `--trace-id` selection and every trace in the
+file becomes an execution:
 
 ```bash
 uv run kitaru import langfuse \
@@ -241,25 +257,28 @@ uv run kitaru import langfuse \
   --source-project-id langfuse-replay-example \
   --agent support-agent \
   --agent-version v2.3-structured-escalation-imported \
-  --trace-id support-service-status
-
-uv run kitaru import langfuse \
-  trace_fixtures/imported-support-cases.jsonl \
-  --source-project-id langfuse-replay-example \
-  --agent support-agent \
-  --agent-version v2.3-structured-escalation-imported \
-  --trace-id support-service-status \
   --write \
   --confirm-data-storage
 ```
 
-Copy the new execution ID once:
+The account-setting trace comes back `unchanged`: imports are idempotent on
+source project plus trace ID, so re-running the command over a growing export
+is safe and never duplicates. This fixture carries two traces; a
+two-hundred-trace export from a real Langfuse project imports with the same
+single command. When you start a batch from scratch, add `--cohort-tag
+<label>` on the first import to stamp every execution with a group label. The
+tag is part of each import's identity — a later import with a different tag
+is a conflict, not a silent regroup.
+
+Copy the new service-status execution ID once:
 
 ```bash
 export STATUS_ID=<execution-id-from-the-import-output>
 ```
 
-Run the ordered two-case suite:
+Run the ordered suite over the batch. `experiment` accepts any number of
+execution IDs, and each member gets its own scored, protected row inside one
+attempt:
 
 ```bash
 uv run python demo.py experiment "$ACCOUNT_ID" "$STATUS_ID" \
@@ -291,13 +310,76 @@ uv run python demo.py rerun account-setting-fix \
 This is the final comparable beat. If the fixed candidate stays on the recorded
 path, satisfies the objective and protection, and remains within the limits,
 the command reports `PASS` and exits zero. A `HOLD` or `FAIL` exits
-nonzero. Limits are checked before another trial starts. One model request can
-cross a cost or token ceiling before Kitaru prevents a later trial.
+nonzero. Limits are checked before another trial starts. One replay trial can
+make several provider requests, including tool turns and output retries, before
+Kitaru receives its final usage. Their combined cost or tokens can cross a
+threshold before Kitaru prevents a later trial.
 
 Run the exact command again. The explicit idempotency key should return the
-same stored attempt without another model call or duplicate spend.
+same stored attempt without another model call or duplicate spend. That pair
+of properties — nonzero exit on anything but `PASS`, and a key that makes
+retries free — is the CI shape, and the next step wires it into a test.
 
-## 11. Inspect the exact final attempt and child
+## 11. Pin it in your CI
+
+A passing suite can become a merge gate in your own CI. Everything the test
+needs is already frozen in the attempt: the recorded cases, the validated
+boundary, the objective, and the protections. Save the following as
+`tests/test_account_setting_gate.py` in this example directory:
+
+```python
+import os
+
+from kitaru import RegressionLimits
+
+from evals.register import mini_tool_budget_2_agent, support_resolution_objective
+
+
+def test_account_setting_gate() -> None:
+    candidate_label = f"ci-{os.environ.get('GITHUB_SHA', 'local')[:12]}"
+    mini_tool_budget_2_agent.register(
+        label=candidate_label,
+        entrypoint="evals.register:mini_tool_budget_2_agent",
+    )
+    result = mini_tool_budget_2_agent.replay(
+        experiment="account-setting-fix",
+        idempotency_key=f"suite-gate-{candidate_label}",
+        repeats=1,
+        scorers=[support_resolution_objective],
+        limits=RegressionLimits(
+            max_trials=1,
+            max_cost_usd=0.10,
+            max_incurred_tokens=100_000,
+            max_duration_seconds=300,
+        ),
+    )
+    result.assert_pass()
+```
+
+Run the test with your normal pytest command from this directory:
+
+```bash
+uv run pytest tests/test_account_setting_gate.py -q
+```
+
+It calls your configured OpenAI model. Your CI blocks a merge only if you add
+this test to a required job. Each commit registers itself as a fresh candidate
+version while the frozen suite, boundary, scorers, and protections stay
+constant, so the difference between attempts is the code change and nothing
+else. If a change reintroduces the old behavior, the protection fails the
+verdict and `assert_pass()` raises.
+
+`max_trials=1` prevents Kitaru from submitting a second replay trial. It does
+not limit a trial to one provider request: tool turns and output retries can
+make several requests before Kitaru receives the trial's final usage. Cost and
+token thresholds are checked then, so their combined usage can exceed either
+threshold before Kitaru stops a later trial.
+
+Run the exact command again. The commit-derived idempotency key returns the
+stored attempt instead of submitting another replay trial, avoiding duplicate
+spend for that key.
+
+## 12. Inspect the exact final attempt and child
 
 List attempts and copy the experiment ID printed by the successful rerun:
 
