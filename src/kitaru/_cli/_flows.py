@@ -57,11 +57,13 @@ from ._executions import (
     _parse_json_object,
 )
 from ._helpers import (
+    _ACTIVE_EXECUTION_DELETE_WARNING,
     DEFAULT_LIST_PAGE,
     DEFAULT_LIST_SIZE,
     OutputFormatOption,
     PaginationPageOption,
     PaginationSizeOption,
+    _confirm_delete,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
@@ -729,6 +731,45 @@ def show(
             ("Tags", ", ".join(sorted(item["tags"].keys())) or "none"),
         ],
     )
+
+
+@flow_app.command(name="delete")
+def delete_flow(
+    flow: Annotated[str, Parameter(help="Flow name, ID, or ID prefix.")],
+    *,
+    yes: Annotated[
+        bool,
+        Parameter(
+            alias=["-y"],
+            help="Skip confirmation prompt. Required with --output json.",
+        ),
+    ] = False,
+    output: OutputFormatOption = "text",
+) -> None:
+    """Delete a flow, including its saved deployment versions and executions."""
+    command = "flow.delete"
+    output_format = _resolve_output_format(output)
+    _confirm_delete(
+        command=command,
+        output=output_format,
+        yes=yes,
+        description=(f"flow `{flow}` and its saved deployment versions and executions"),
+        warning=_ACTIVE_EXECUTION_DELETE_WARNING,
+    )
+
+    run_with_cli_error_boundary(
+        lambda: cli_dependencies().kitaru_client().flows.delete(flow),
+        command=command,
+        output=output_format,
+        exit_with_error=_exit_with_error,
+    )
+    item = {"flow": flow, "deleted": True}
+
+    if output_format == CLIOutputFormat.JSON:
+        _emit_json_item(command, item, output=output_format)
+        return
+
+    _print_success(f"Deleted flow: {flow}")
 
 
 @flow_deployments_app.command

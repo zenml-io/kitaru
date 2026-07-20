@@ -440,7 +440,7 @@ runner already exited), call `resume(...)`:
 execution = client.executions.resume(exec_id)
 ```
 
-## Replay, retry, and cancel
+## Replay, retry, cancel, and delete
 
 Replay is the core of the improve loop: it re-executes a recorded run into a
 **new** execution from a checkpoint boundary, optionally with inputs changed.
@@ -478,6 +478,61 @@ cancelled = client.executions.cancel(exec_id)
 For the full replay/diff workflow, see the
 [ZenML Learn Agents guide](https://docs.zenml.io/user-guides/agents-guide).
 
+### Delete an execution
+
+Cancellation and deletion have different effects. `cancel(...)` asks a running
+execution to stop and keeps its record available for inspection. `delete(...)`
+removes the execution record.
+
+{% hint style="warning" %}
+Deleting an active execution removes its stored metadata without stopping the
+underlying workload. That workload can continue consuming compute and may later
+fail when it tries to update metadata that no longer exists. Cancel the execution
+and wait for it to terminate before deleting it.
+{% endhint %}
+
+Delete by execution ID through the client namespace:
+
+```python
+client.executions.delete(exec_id)
+```
+
+If you already fetched the execution, the model convenience method performs the
+same deletion:
+
+```python
+execution = client.executions.get(exec_id)
+execution.delete()
+```
+
+`Execution` is a frozen snapshot. Calling `execution.delete()` does not mutate
+that Python object, but refreshing it or fetching the same ID again will fail
+once the deletion has succeeded.
+
+The CLI prompts before deleting. Pass `--yes` (or `-y`) when a person has already
+approved the deletion and the command runs non-interactively:
+
+```bash
+kitaru executions delete kr-a8f3c2
+kitaru executions delete kr-a8f3c2 --yes
+```
+
+With `--output json`, `--yes` is required. This keeps stdout and stderr
+machine-readable by avoiding an interactive prompt in structured-output mode.
+
+MCP callers use the direct mutation tool and receive a minimal acknowledgement:
+
+```text
+kitaru_executions_delete(exec_id="kr-a8f3c2")
+```
+
+```json
+{"exec_id": "kr-a8f3c2", "deleted": true}
+```
+
+The MCP tool does not prompt or accept a confirmation argument. The MCP caller
+must obtain any required user approval before invoking it.
+
 ## Execution convenience methods
 
 `Execution` objects returned by `client.executions.get(...)` also expose
@@ -491,15 +546,18 @@ retried = execution.retry()          # retry a failed execution
 resumed = execution.resume()         # resume after wait input
 cancelled = execution.cancel()       # cancel a running execution
 replayed = execution.replay(at="write_draft", checkpoint_overrides={"research": {"output": "Edited notes"}})
+execution.delete()                    # permanently delete the execution record
 
 checkpoints = execution.list_checkpoints()
 artifacts = execution.list_artifacts()
 ```
 
-These are equivalent to calling `client.executions.retry(exec_id)` etc.
-`refresh`, `retry`, `resume`, and `cancel` return a new `Execution` snapshot
-rather than mutating the existing object; `replay` returns a `ReplaySubmission`
-describing the new replay execution(s).
+These are equivalent to calling the corresponding method on
+`client.executions`. `refresh`, `retry`, `resume`, and `cancel` return a new
+`Execution` snapshot rather than mutating the existing object; `replay` returns
+a `ReplaySubmission` describing the new replay execution(s). `delete` returns
+`None`, and the frozen snapshot remains unchanged after the stored execution is
+deleted.
 
 ## Inspect or abort waits programmatically
 
@@ -563,6 +621,7 @@ kitaru executions resume kr-a8f3c2
 kitaru executions replay kr-a8f3c2 --at write_draft --flow-overrides '{"topic":"New topic"}' --checkpoint-overrides '{"research":{"output":"Edited notes"}}'
 kitaru executions retry kr-a8f3c2
 kitaru executions cancel kr-a8f3c2
+kitaru executions delete kr-a8f3c2 --yes
 ```
 
 ## Query executions through MCP
@@ -582,6 +641,7 @@ Then use tool calls like:
 - `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
 - `kitaru_executions_abort_wait(exec_id=..., wait=...)`
 - `kitaru_executions_resume(exec_id=...)`
+- `kitaru_executions_delete(exec_id=...)`
 - `get_execution_logs(exec_id=...)`
 - `kitaru_artifacts_get(artifact_id=...)`
 - `kitaru_status()`

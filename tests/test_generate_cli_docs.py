@@ -150,6 +150,7 @@ class TestBuildCommandTree:
         assert [sub.name for sub in executions.subcommands] == [
             "cancel",
             "cohort",
+            "delete",
             "diff",
             "diff-matrix",
             "get",
@@ -161,6 +162,14 @@ class TestBuildCommandTree:
             "retry",
             "statistics",
         ]
+
+        execution_delete = _find_command(tree, "executions", "delete")
+        assert execution_delete.parameters[0].names == ["EXEC-ID"]
+        option_names = [
+            set(parameter.names) for parameter in execution_delete.parameters
+        ]
+        assert {"--yes", "-y"} in option_names
+        assert {"--output", "-o"} in option_names
 
     def test_auth_tree_includes_service_accounts_and_api_keys(self) -> None:
         from kitaru.cli import app
@@ -198,12 +207,20 @@ class TestBuildCommandTree:
         tree = build_command_tree(app)
         flow = _find_command(tree, "flow")
         assert [sub.name for sub in flow.subcommands] == [
+            "delete",
             "deployments",
             "list",
             "show",
             "tag",
             "untag",
         ]
+
+        flow_delete = _find_command(tree, "flow", "delete")
+        assert flow_delete.parameters[0].names == ["FLOW"]
+        option_names = [set(parameter.names) for parameter in flow_delete.parameters]
+        assert {"--yes", "-y"} in option_names
+        assert {"--output", "-o"} in option_names
+
         deployments = _find_command(tree, "flow", "deployments")
         assert [sub.name for sub in deployments.subcommands] == [
             "curl",
@@ -212,6 +229,29 @@ class TestBuildCommandTree:
             "logs",
             "show",
         ]
+
+    @pytest.mark.parametrize(
+        "command_path",
+        [
+            ("auth", "service-accounts", "delete"),
+            ("auth", "api-keys", "delete"),
+            ("flow", "delete"),
+            ("executions", "delete"),
+        ],
+    )
+    def test_delete_yes_help_states_json_requirement(
+        self,
+        command_path: tuple[str, ...],
+    ) -> None:
+        from kitaru.cli import app
+
+        command = _find_command(build_command_tree(app), *command_path)
+        yes_option = next(
+            parameter for parameter in command.parameters if "--yes" in parameter.names
+        )
+        assert yes_option.help == (
+            "Skip confirmation prompt. Required with --output json."
+        )
 
     def test_builds_canonical_docs_urls_for_nested_commands(self) -> None:
         from kitaru.cli import app
@@ -554,6 +594,7 @@ class TestWriteDocsTree:
         assert meta["pages"] == [
             "cancel",
             "cohort",
+            "delete",
             "diff",
             "diff-matrix",
             "get",

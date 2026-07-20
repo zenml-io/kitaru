@@ -668,6 +668,7 @@ def test_client_initializes_namespaces() -> None:
     ):
         client = KitaruClient()
 
+    assert hasattr(client, "flows")
     assert hasattr(client, "executions")
     assert hasattr(client, "artifacts")
     assert hasattr(client, "deployments")
@@ -749,6 +750,8 @@ def test_project_management_client_blocks_project_scoped_apis_without_project() 
     ):
         client = KitaruClient.for_project_management()
 
+    with pytest.raises(KitaruUsageError, match="flow"):
+        client.flows.delete("flow-a")
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
         client.executions.list()
     with pytest.raises(KitaruUsageError, match="KITARU_PROJECT"):
@@ -4514,6 +4517,123 @@ def test_statistics_backend_failure_raises_backend_error() -> None:
 
         with pytest.raises(KitaruBackendError, match="database offline"):
             client.executions.statistics()
+
+
+def test_flow_delete_calls_one_project_scoped_backend_mutation_and_tracks() -> None:
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+    ):
+        client_mock = client_cls.return_value
+        client = KitaruClient()
+
+        result = client.flows.delete("flow-name-or-prefix")
+
+    assert result is None
+    client_mock.delete_pipeline.assert_called_once_with(
+        name_id_or_prefix="flow-name-or-prefix",
+        project="project-a",
+    )
+    track_mock.assert_called_once_with(AnalyticsEvent.FLOW_DELETED, {})
+
+
+def test_execution_delete_calls_one_project_scoped_backend_mutation_and_tracks() -> (
+    None
+):
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+    ):
+        client_mock = client_cls.return_value
+        client = KitaruClient()
+
+        result = client.executions.delete("execution-name-or-id")
+
+    assert result is None
+    client_mock.delete_pipeline_run.assert_called_once_with(
+        name_id_or_prefix="execution-name-or-id",
+        project="project-a",
+    )
+    track_mock.assert_called_once_with(AnalyticsEvent.EXECUTION_DELETED, {})
+
+
+@pytest.mark.parametrize(
+    ("namespace_name", "backend_method", "identifier", "operation"),
+    [
+        ("flows", "delete_pipeline", "flow-a", "flow"),
+        ("executions", "delete_pipeline_run", "exec-a", "execution"),
+    ],
+)
+def test_deletion_translates_backend_exceptions_and_skips_analytics(
+    namespace_name: str,
+    backend_method: str,
+    identifier: str,
+    operation: str,
+) -> None:
+    backend_error = ValueError("backend unavailable")
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+        patch("kitaru.client.track") as track_mock,
+    ):
+        client_mock = client_cls.return_value
+        getattr(client_mock, backend_method).side_effect = backend_error
+        client = KitaruClient()
+
+        with pytest.raises(
+            KitaruBackendError,
+            match=rf"Failed to delete {operation}.*{identifier}.*backend unavailable",
+        ) as exc_info:
+            getattr(client, namespace_name).delete(identifier)
+
+    assert exc_info.value.__cause__ is backend_error
+    assert client_mock.method_calls == [
+        getattr(call, backend_method)(
+            name_id_or_prefix=identifier,
+            project="project-a",
+        )
+    ]
+    track_mock.assert_not_called()
+
+
+def test_execution_delete_delegates_through_originating_client_without_mutation() -> (
+    None
+):
+    run = _DummyRun(
+        status=ZenMLExecutionStatus.COMPLETED,
+        flow_name="flow_a",
+    )
+    with (
+        patch(
+            "kitaru.client.resolve_connection_config",
+            return_value=_resolved_connection("project-a"),
+        ),
+        patch("kitaru.client.Client") as client_cls,
+    ):
+        client_mock = client_cls.return_value
+        client_mock.get_pipeline_run.return_value = _as_pipeline_run(run)
+        client_mock.list_run_steps.return_value = SimpleNamespace(items=[])
+        client = KitaruClient()
+        execution = client.executions.get(str(run.id))
+        snapshot_fields = (execution.exec_id, execution.status)
+
+        with patch.object(client.executions, "delete") as delete_mock:
+            result = execution.delete()
+
+    assert result is None
+    delete_mock.assert_called_once_with(str(run.id))
+    assert (execution.exec_id, execution.status) == snapshot_fields
 
 
 def test_latest_raises_when_no_execution_matches() -> None:

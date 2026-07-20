@@ -1598,6 +1598,7 @@ run_test "kitaru build --help"            $UV_RUN kitaru build --help
 run_test "kitaru deploy --help"           $UV_RUN kitaru deploy --help
 run_test "kitaru invoke --help"           $UV_RUN kitaru invoke --help
 run_test "kitaru flow --help"             $UV_RUN kitaru flow --help
+run_test "kitaru flow delete --help"      $UV_RUN kitaru flow delete --help
 run_test "kitaru flow deployments --help" $UV_RUN kitaru flow deployments --help
 run_test "kitaru flow deployments curl --help" $UV_RUN kitaru flow deployments curl --help
 run_test "kitaru flow list"               $UV_RUN kitaru flow list
@@ -1943,6 +1944,7 @@ run_test "Wait/resume example import contract" \
     $UV_RUN python -c 'from importlib.util import module_from_spec, spec_from_file_location; from pathlib import Path; path = Path("examples/features/execution_management/wait_and_resume.py"); spec = spec_from_file_location("wait_and_resume_smoke", path); assert spec and spec.loader; module = module_from_spec(spec); spec.loader.exec_module(module); details = module.ReleaseDetails(notes="Bug fixes", major_version=2); assert details.major_version == 2; source = path.read_text(); assert "approve_release" in source and "release_details" in source and "timeout=3600" in source and "timeout=60" in source'
 run_test "Replay with overrides"   timed 120 $UV_RUN examples/features/replay/replay_with_overrides.py
 run_test "executions replay --help" $UV_RUN kitaru executions replay --help
+run_test "executions delete --help" $UV_RUN kitaru executions delete --help
 run_test "executions diff --help"   $UV_RUN kitaru executions diff --help
 run_test "executions diff-matrix --help" $UV_RUN kitaru executions diff-matrix --help
 run_test "executions cohort --help" $UV_RUN kitaru executions cohort --help

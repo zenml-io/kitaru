@@ -23,6 +23,7 @@ from ._helpers import (
     OutputFormatOption,
     PaginationPageOption,
     PaginationSizeOption,
+    _confirm_delete,
     _emit_json_item,
     _emit_json_items,
     _emit_pagination_note,
@@ -31,7 +32,6 @@ from ._helpers import (
     _exit_with_error,
     _format_table_timestamp,
     _format_timestamp,
-    _is_input_interactive,
     _print_success,
     _resolve_output_format,
     _validate_pagination,
@@ -199,30 +199,6 @@ def _api_key_table_rows(api_keys: list[AuthAPIKey]) -> list[list[str]]:
 def _auth_management_client() -> Any:
     """Return the public SDK client configured for server-level auth management."""
     return cli_dependencies().auth_management_client()
-
-
-def _confirm_delete(
-    *,
-    command: str,
-    output: CLIOutputFormat,
-    yes: bool,
-    description: str,
-) -> None:
-    """Require explicit confirmation before destructive auth deletes."""
-    if yes:
-        return
-    if not _is_input_interactive():
-        _exit_with_error(
-            command,
-            f"Non-interactive environment requires --yes to delete {description}.",
-            output=output,
-        )
-    try:
-        response = input(f"Delete {description}? [y/N] ")
-    except (EOFError, KeyboardInterrupt):
-        response = ""
-    if response.strip().lower() not in {"y", "yes"}:
-        _exit_with_error(command, "Deletion aborted.", output=output)
 
 
 # ---------------------------------------------------------------------------
@@ -473,7 +449,10 @@ def service_accounts_delete(
     *,
     yes: Annotated[
         bool,
-        Parameter(alias=["-y"], help="Skip confirmation prompt."),
+        Parameter(
+            alias=["-y"],
+            help="Skip confirmation prompt. Required with --output json.",
+        ),
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:
@@ -767,7 +746,10 @@ def api_keys_delete(
     *,
     yes: Annotated[
         bool,
-        Parameter(alias=["-y"], help="Skip confirmation prompt."),
+        Parameter(
+            alias=["-y"],
+            help="Skip confirmation prompt. Required with --output json.",
+        ),
     ] = False,
     output: OutputFormatOption = "text",
 ) -> None:

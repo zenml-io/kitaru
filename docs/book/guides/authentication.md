@@ -141,6 +141,9 @@ kitaru auth api-keys list ci-runner
 kitaru auth api-keys delete ci-runner old-key --yes
 ```
 
+Deletion prompts in text mode. With `--output json`, pass `--yes`; otherwise
+Kitaru refuses the deletion and writes one JSON error document to stderr.
+
 ## SDK usage
 
 The Python SDK exposes the same OSS-first auth-management surface:

@@ -48,6 +48,7 @@ class AnalyticsEvent(StrEnum):
     FLOW_FAILED = "Kitaru flow failed"
     FLOW_TERMINAL = "Kitaru flow terminal"
     FLOW_REPLAYED = "Kitaru flow replayed"
+    FLOW_DELETED = "Kitaru flow deleted"
     REPLAY_REQUESTED = "Kitaru flow replay requested"
     REPLAY_FAILED = "Kitaru flow replay failed"
     REPLAY_MANY_REQUESTED = "Kitaru flow replay many requested"
@@ -60,6 +61,7 @@ class AnalyticsEvent(StrEnum):
     EXECUTION_RETRIED = "Kitaru execution retried"
     EXECUTION_RESUMED = "Kitaru execution resumed"
     EXECUTION_CANCELLED = "Kitaru execution cancelled"
+    EXECUTION_DELETED = "Kitaru execution deleted"
     EXECUTION_STATISTICS_QUERIED = "Kitaru execution statistics queried"
 
     # Feature adoption

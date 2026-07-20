@@ -69,6 +69,11 @@ PaginationSizeOption = Annotated[
     Parameter(help="Number of items to return per page."),
 ]
 
+_ACTIVE_EXECUTION_DELETE_WARNING = (
+    "Deleting metadata for active executions does not stop their workloads. "
+    "Cancel active executions and wait for termination before deleting."
+)
+
 
 def _format_timestamp(value: datetime | None) -> str:
     """Format optional timestamps for CLI output."""
@@ -106,6 +111,41 @@ def _is_interactive(*, stderr: bool = False) -> bool:
 def _is_input_interactive() -> bool:
     """Check whether stdin is an interactive terminal for user prompts."""
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
+def _confirm_delete(
+    *,
+    command: str,
+    output: CLIOutputFormat,
+    yes: bool,
+    description: str,
+    warning: str | None = None,
+) -> None:
+    """Require explicit confirmation before a destructive delete."""
+    if yes:
+        return
+    if output == CLIOutputFormat.JSON:
+        _exit_with_error(
+            command,
+            f"JSON output requires --yes to delete {description}.",
+            output=output,
+        )
+    if not _is_input_interactive():
+        _exit_with_error(
+            command,
+            f"Non-interactive environment requires --yes to delete {description}.",
+            output=output,
+        )
+
+    if warning:
+        print(f"Warning: {warning}", file=sys.stderr)
+    print(f"Delete {description}? [y/N] ", end="", file=sys.stderr, flush=True)
+    try:
+        response = input()
+    except (EOFError, KeyboardInterrupt):
+        response = ""
+    if response.strip().lower() not in {"y", "yes"}:
+        _exit_with_error(command, "Deletion aborted.", output=output)
 
 
 def _value_style(value: str) -> str:

@@ -278,6 +278,46 @@ kitaru flow tag research_agent default --version 2 --exclusive
 kitaru flow deployments delete research_agent --version 1
 ```
 
+### Delete one version or the whole flow
+
+These operations have different scopes:
+
+- `kitaru flow deployments delete FLOW --version VERSION` deletes one saved
+  deployment version. An exclusive tag must be moved first, as shown above.
+- `kitaru flow delete FLOW` deletes the whole flow, including all of its saved
+  deployment versions and executions.
+
+Whole-flow deletion is destructive and prompts for confirmation:
+
+```bash
+kitaru flow delete research_agent
+kitaru flow delete research_agent --yes  # approved non-interactive use
+```
+
+With `--output json`, `--yes` is required. This keeps stdout and stderr
+machine-readable by avoiding an interactive prompt in structured-output mode.
+
+{% hint style="warning" %}
+Deleting a flow does not stop workloads for its active executions. It removes
+their stored metadata while those workloads can continue consuming compute and
+may later fail when they try to update metadata that no longer exists. Cancel all
+active executions and wait for them to terminate before deleting the flow.
+{% endhint %}
+
+The equivalent Python call is:
+
+```python
+from kitaru import KitaruClient
+
+KitaruClient().flows.delete("research_agent")
+```
+
+Deleting a whole flow removes its saved versions and executions, but it does not
+delete shared artifacts. Kitaru does not walk through those records or delete
+artifacts separately. The active runtime applies the flow's stored
+relationships, which avoids removing an artifact that another flow or execution
+still uses.
+
 ### Shared tags
 
 Non-exclusive tags can point to more than one version. A common mixed pattern

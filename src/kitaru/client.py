@@ -1164,6 +1164,24 @@ def _list_status_filter_value(public_status: ExecutionStatus) -> str:
     return status_value
 
 
+class _FlowsAPI:
+    """Namespace for flow lifecycle operations."""
+
+    def __init__(self, client: KitaruClient) -> None:
+        self._client_ref = client
+
+    def delete(self, name: str) -> None:
+        """Delete a flow and its backend-associated records."""
+        try:
+            self._client_ref._client().delete_pipeline(
+                name_id_or_prefix=name,
+                project=self._client_ref._project,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(f"Failed to delete flow {name!r}: {exc}") from exc
+        track(AnalyticsEvent.FLOW_DELETED, {})
+
+
 class _ExecutionsAPI:
     """Namespace for execution lifecycle and inspection operations."""
 
@@ -1912,6 +1930,19 @@ class _ExecutionsAPI:
         """Get and map one execution by ID."""
         run = self._client_ref._get_pipeline_run(exec_id, hydrate=True)
         return _map_execution(run=run, client=self._client_ref, include_details=True)
+
+    def delete(self, exec_id: str) -> None:
+        """Delete an execution."""
+        try:
+            self._client_ref._client().delete_pipeline_run(
+                name_id_or_prefix=exec_id,
+                project=self._client_ref._project,
+            )
+        except Exception as exc:
+            raise KitaruBackendError(
+                f"Failed to delete execution {exec_id!r}: {exc}"
+            ) from exc
+        track(AnalyticsEvent.EXECUTION_DELETED, {})
 
     def _list_replays_for_originals(
         self,
@@ -3140,7 +3171,7 @@ class _ProjectScopedAPIUnavailable:
     def __getattr__(self, name: str) -> NoReturn:
         raise KitaruUsageError(
             "This Kitaru client has no active project. Set KITARU_PROJECT "
-            "before using execution, artifact, or deployment APIs."
+            "before using flow, execution, artifact, or deployment APIs."
         )
 
 
@@ -3189,7 +3220,7 @@ class _ProjectsAPI:
 
 
 class KitaruClient:
-    """Client for Kitaru executions, artifacts, deployments, projects, and auth."""
+    """Client for Kitaru flows, executions, and related project-scoped APIs."""
 
     def __init__(
         self,
@@ -3237,10 +3268,12 @@ class KitaruClient:
         self.projects = _ProjectsAPI(self)
         if not _require_project and self._project is None:
             unavailable = _ProjectScopedAPIUnavailable()
+            self.flows = unavailable
             self.executions = unavailable
             self.artifacts = unavailable
             self.deployments = unavailable
         else:
+            self.flows = _FlowsAPI(self)
             self.executions = _ExecutionsAPI(self)
             self.artifacts = _ArtifactsAPI(self)
             self.deployments = _DeploymentsAPI(self)
