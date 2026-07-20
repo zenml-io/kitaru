@@ -2577,12 +2577,18 @@ def test_manage_stack_create_modal_rejects_aws_credentials_without_region() -> N
     mock_create_stack.assert_not_called()
 
 
-def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -> None:
-    """MCP Modal verify=False should not request a cloud connector by itself."""
-    with (
-        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
-        pytest.raises(ValueError, match="only applies when Kitaru is creating"),
-    ):
+def test_manage_stack_create_modal_accepts_no_verify_without_connector_input() -> None:
+    """MCP Modal verify=False should also cover reused service connectors."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=(),
+            resources={},
+        )
+
         manage_stack(
             "create",
             "prod-modal",
@@ -2592,7 +2598,10 @@ def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -
             verify=False,
         )
 
-    mock_create_stack.assert_not_called()
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.verify is False
+    assert modal_spec.credentials is None
 
 
 def test_manage_stack_create_modal_rejects_mismatched_connectorless_resources() -> None:

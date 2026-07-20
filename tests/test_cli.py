@@ -8649,11 +8649,13 @@ def test_stack_create_modal_rejects_aws_credentials_without_region(
     assert "--extra orchestrator.region" in stderr
 
 
-def test_stack_create_modal_rejects_no_verify_without_cloud_connector_input(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """--no-verify should not request a Modal cloud connector by itself."""
-    with pytest.raises(SystemExit) as exc_info:
+def test_stack_create_modal_accepts_no_verify_without_cloud_connector_input() -> None:
+    """--no-verify should also cover reused Modal service connectors."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub()
         app(
             [
                 "stack",
@@ -8669,11 +8671,10 @@ def test_stack_create_modal_rejects_no_verify_without_cloud_connector_input(
             ]
         )
 
-    assert exc_info.value.code == 1
-    stderr = capsys.readouterr().err
-    assert "--no-verify only applies when Kitaru is creating" in stderr
-    assert "--region" in stderr
-    assert "--credentials" in stderr
+    assert exc_info.value.code == 0
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert modal_spec.verify is False
+    assert modal_spec.credentials is None
 
 
 def test_stack_create_modal_rejects_mismatched_credentialed_registry(

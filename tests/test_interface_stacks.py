@@ -146,16 +146,17 @@ def test_local_cloud_uri_rejects_unsafe_values_without_echoing_them(
     )
 
 
-def test_local_connectorless_storage_rejects_no_verify() -> None:
-    """Verification only applies to newly created explicit connectors."""
-    with pytest.raises(
-        ValueError,
-        match="--no-verify only applies when --credentials",
-    ):
-        _build_request(
-            artifact_store="s3://bucket/path",
-            verify=False,
-        )
+def test_local_connectorless_storage_accepts_no_verify() -> None:
+    """--no-verify without credentials skips reused-connector verification."""
+    request = _build_request(
+        artifact_store="s3://bucket/path",
+        verify=False,
+    )
+
+    spec = request.local_cloud_artifact_store_spec
+    assert spec is not None
+    assert spec.verify is False
+    assert spec.credentials is None
 
 
 @pytest.mark.parametrize(

@@ -28,7 +28,7 @@ from zenml.container_registries.gcp_container_registry import (
     GCPContainerRegistryFlavor,
 )
 from zenml.enums import ContainerRegistryFlavor, StackComponentType
-from zenml.exceptions import EntityExistsError
+from zenml.exceptions import AuthorizationException, EntityExistsError
 from zenml.image_builders.local_image_builder import LocalImageBuilderFlavor
 from zenml.integrations.aws import (
     AWS_CONNECTOR_TYPE,
@@ -79,6 +79,7 @@ from zenml.models.v2.core.stack import StackRequest
 from zenml.models.v2.misc.info_models import ComponentInfo, ServiceConnectorInfo
 from zenml.orchestrators.local.local_orchestrator import LocalOrchestratorFlavor
 from zenml.stack.utils import validate_stack_component_config
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 from kitaru._config import _sandbox_stack_components as _sandbox_components
 from kitaru._modal_registry import (
@@ -285,6 +286,10 @@ class _ResolvedConnectorSpec:
 
     connector_info: ServiceConnectorInfo
     verify_resource_type: str
+    # Set when the credentials are a pointer into this machine's local state
+    # (e.g. an AWS profile name) that a remote ZenML server cannot resolve.
+    # Each resolver decides portability where it builds the configuration.
+    machine_local_credential: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1057,8 +1062,16 @@ def _connector_label(connector: Any) -> str:
 def _existing_connector_reference(
     connector: Any,
     resource_id: str,
+    *,
+    client: Client,
+    lookup: _ConnectorLookup,
+    verify: bool,
 ) -> _ExistingConnectorReference:
-    """Build a stack-request connector reference from a ZenML connector model."""
+    """Build a stack-request connector reference from a ZenML connector model.
+
+    Every reuse path must construct its reference through this function, so
+    verification cannot be silently skipped by a future discovery path.
+    """
     connector_id_raw = getattr(connector, "id", None)
     try:
         connector_id = UUID(str(connector_id_raw))
@@ -1067,10 +1080,44 @@ def _existing_connector_reference(
             "ZenML returned a matching service connector without a UUID id: "
             f"{_connector_label(connector)}"
         ) from exc
+    if verify:
+        _verify_existing_connector(
+            client,
+            connector_id=connector_id,
+            connector_label=_connector_label(connector),
+            lookup=lookup,
+        )
     return _ExistingConnectorReference(
         connector_id=connector_id,
         resource_id=resource_id,
     )
+
+
+def _verify_existing_connector(
+    client: Client,
+    *,
+    connector_id: UUID,
+    connector_label: str,
+    lookup: _ConnectorLookup,
+) -> None:
+    """Fail fast when a reused connector cannot authenticate to its resource."""
+    try:
+        client.verify_service_connector(
+            connector_id,
+            resource_type=lookup.resource_type,
+            resource_id=lookup.target_resource_id,
+            list_resources=False,
+        )
+    except AuthorizationException as exc:
+        raise KitaruUsageError(
+            f"Kitaru found existing service connector "
+            f"{connector_label} for the {lookup.component_label} "
+            f"({lookup.target_resource_id}), but it failed verification: {exc}. "
+            "Pass explicit cloud credentials so Kitaru creates a working "
+            "connector, fix or delete the broken connector on the ZenML server, "
+            "or skip verification (`--no-verify` on the CLI, `verify=False` in "
+            "the SDK/MCP) to link it anyway."
+        ) from exc
 
 
 def _collect_connector_candidates(
@@ -1250,10 +1297,16 @@ def _resolve_modal_existing_connectors(
         artifact_store=_existing_connector_reference(
             selected_matches[0][0],
             artifact_resource_id,
+            client=client,
+            lookup=lookups[0],
+            verify=spec.verify,
         ),
         container_registry=_existing_connector_reference(
             selected_matches[1][0],
             registry_resource_id,
+            client=client,
+            lookup=lookups[1],
+            verify=spec.verify,
         ),
     )
 
@@ -1263,7 +1316,7 @@ def _resolve_local_cloud_existing_connector(
     *,
     client: Client,
 ) -> _ExistingConnectorReference | None:
-    """Find one existing connector for a local stack's cloud storage."""
+    """Find one verified existing connector for a local stack's cloud storage."""
     if spec.credentials is not None:
         return None
 
@@ -1296,7 +1349,13 @@ def _resolve_local_cloud_existing_connector(
             "one matching resource or pass explicit cloud credentials so Kitaru "
             "creates a new connector."
         )
-    return _existing_connector_reference(matches[0], resource_id)
+    return _existing_connector_reference(
+        matches[0],
+        resource_id,
+        client=client,
+        lookup=lookup,
+        verify=spec.verify,
+    )
 
 
 def _modal_cloud_connector_inputs_requested(spec: ModalStackSpec) -> bool:
@@ -1327,13 +1386,6 @@ def _validate_modal_cloud_connector_inputs(
         )
 
     if not _modal_cloud_connector_inputs_requested(spec):
-        if not spec.verify:
-            raise KitaruUsageError(
-                "`verify=False` only applies when Kitaru is creating a cloud "
-                "connector for a Modal stack. Add the needed cloud connector "
-                "input, such as `region`, `subscription_id`, or `credentials`, "
-                "or remove `verify=False`."
-            )
         return
 
     if provider == CloudProvider.AWS:
@@ -1535,8 +1587,8 @@ def _resolve_aws_connector_spec(
             )
 
     resolved_region = region.strip() if region and region.strip() else None
+    profile_value = configuration.get("profile_name")
     if resolved_region is None:
-        profile_value = configuration.get("profile_name")
         resolved_region = _discover_aws_region(
             str(profile_value) if profile_value is not None else None
         )
@@ -1549,6 +1601,9 @@ def _resolve_aws_connector_spec(
             configuration=dict(configuration),
         ),
         verify_resource_type=AWS_RESOURCE_TYPE,
+        machine_local_credential=(
+            f"aws-profile:{profile_value}" if profile_value is not None else None
+        ),
     )
 
 
@@ -2474,6 +2529,45 @@ def _stack_type_display_name(stack_type: StackType) -> str:
     }.get(stack_type, str(stack_type))
 
 
+_LOCAL_SERVER_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _zen_store_is_remote(client: Client) -> bool:
+    """Return whether the client talks to a ZenML server on another machine."""
+    zen_store = client.zen_store
+    if not isinstance(zen_store, RestZenStore):
+        return False
+    hostname = urlparse(str(zen_store.url)).hostname
+    return hostname not in _LOCAL_SERVER_HOSTNAMES
+
+
+def _reject_machine_local_connector_credentials(
+    client: Client,
+    connector_spec: _ResolvedConnectorSpec,
+) -> None:
+    """Reject connector credentials a remote ZenML server cannot resolve.
+
+    An `aws-profile:` credential stores only the profile name on the connector.
+    The server resolves the connector at runtime and looks the profile up in its
+    own AWS config, where it does not exist, so stack creation would succeed and
+    every run would fail.
+    """
+    credential = connector_spec.machine_local_credential
+    if credential is None or not _zen_store_is_remote(client):
+        return
+    _, _, profile_name = credential.partition(":")
+    raise KitaruUsageError(
+        f"Cannot use `{credential}` credentials while connected "
+        "to a remote ZenML server. The AWS profile only exists in this "
+        "machine's `~/.aws/config`, but the remote server is what resolves the "
+        "connector's credentials at runtime, so every run would fail with a "
+        "missing-profile error. Pass portable credentials instead: "
+        "`aws-access-keys:KEY:SECRET` or `aws-session-token:KEY:SECRET:TOKEN` "
+        "(`aws configure export-credentials --profile "
+        f"{profile_name}` prints the current values)."
+    )
+
+
 def _create_one_shot_stack_operation(
     name: str,
     *,
@@ -2495,6 +2589,9 @@ def _create_one_shot_stack_operation(
     """Create a stack via ZenML's validated one-shot stack API."""
     selector = _normalize_stack_selector(name)
     client = client if client is not None else client_factory()
+
+    if connector_spec is not None:
+        _reject_machine_local_connector_credentials(client, connector_spec)
 
     if any(
         stack_model.name == selector for stack_model in _iter_available_stacks(client)
@@ -3442,12 +3539,6 @@ def _create_local_cloud_stack_operation(
 ) -> _StackCreateResult:
     """Create a local-runner stack backed by cloud artifact storage."""
     selector = _normalize_stack_selector(name)
-    if spec.credentials is None and not spec.verify:
-        raise KitaruUsageError(
-            "`verify=False` only applies when explicit credentials create a new "
-            "cloud connector."
-        )
-
     connector_spec = _resolve_local_cloud_connector_spec(spec)
     existing_connector: _ExistingConnectorReference | None = None
     operation_client: Any | None = None

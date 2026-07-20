@@ -488,8 +488,9 @@ def create(
         bool | None,
         Parameter(
             help=(
-                "Skip verification when explicit credentials create a new cloud "
-                "connector for a local or remote stack."
+                "Skip cloud connector verification during stack creation, both "
+                "for new connectors created from explicit credentials and for "
+                "existing server-side connectors Kitaru discovers and reuses."
             )
         ),
     ] = None,

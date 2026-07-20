@@ -397,7 +397,6 @@ def _validate_modal_cloud_connector_inputs(
     region: str | None,
     subscription_id: str | None,
     credentials: str | None,
-    verify: bool,
     labels: StackOptionLabels,
 ) -> None:
     """Reject impossible Modal cloud credential combinations early."""
@@ -415,16 +414,6 @@ def _validate_modal_cloud_connector_inputs(
         subscription_id=subscription_id,
         credentials=credentials,
     ):
-        if not verify:
-            raise ValueError(
-                f"{labels.field_labels['verify']} only applies when Kitaru is "
-                "creating a cloud connector for a Modal stack. Add the needed "
-                "cloud connector input, such as "
-                f"{labels.field_labels['region']}, "
-                f"{labels.field_labels['subscription_id']}, or "
-                f"{labels.field_labels['credentials']}, or remove "
-                f"{labels.field_labels['verify']}."
-            )
         return
 
     region_label = labels.field_labels["region"]
@@ -1005,13 +994,6 @@ def build_local_cloud_artifact_store_spec(
             f"{labels.field_labels['subscription_id']} only applies to Azure "
             "storage for local stacks."
         )
-    if not verify and normalized_credentials is None:
-        raise ValueError(
-            f"{labels.field_labels['verify']} only applies when "
-            f"{labels.field_labels['credentials']} asks Kitaru to create a new "
-            "cloud connector."
-        )
-
     return LocalCloudArtifactStoreSpec(
         artifact_store=normalized_artifact_store,
         region=normalized_region,
@@ -1177,7 +1159,6 @@ def build_remote_stack_spec(
             region=normalized_region,
             subscription_id=normalized_subscription_id,
             credentials=normalized_credentials,
-            verify=verify,
             labels=labels,
         )
         return ModalStackSpec(

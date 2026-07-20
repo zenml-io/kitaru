@@ -21,9 +21,10 @@ import pytest
 from zenml.config.docker_settings import DockerSettings
 from zenml.constants import ENV_ZENML_ACTIVE_PROJECT_ID, ENV_ZENML_ACTIVE_STACK_ID
 from zenml.enums import StackComponentType
-from zenml.exceptions import EntityExistsError
+from zenml.exceptions import AuthorizationException, EntityExistsError
 from zenml.models.v2.misc.info_models import ComponentInfo
 from zenml.utils import io_utils, yaml_utils
+from zenml.zen_stores.rest_zen_store import RestZenStore
 
 import kitaru.config as config_module
 from kitaru._config import _stacks as config_stacks_module
@@ -2283,8 +2284,99 @@ def test_create_local_cloud_stack_operation_reuses_scoped_or_unscoped_connector(
     storage = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert storage.service_connector_index == 0
     assert storage.service_connector_resource_id == "s3://bucket"
+    client_mock.verify_service_connector.assert_called_once_with(
+        UUID(connector_id),
+        resource_type="s3-bucket",
+        resource_id="s3://bucket",
+        list_resources=False,
+    )
     client_mock.get_stack.assert_called_once_with("stack-local-cloud-id", hydrate=True)
     assert result.service_connectors_created == ()
+
+
+def test_create_local_cloud_stack_operation_rejects_broken_reused_connector() -> None:
+    """A reused connector that fails verification should abort stack creation."""
+    connector = _service_connector_model(
+        connector_id="00000000-0000-0000-0000-000000000123",
+        name="existing-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_service_connectors.return_value = [connector]
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.verify_service_connector.side_effect = AuthorizationException(
+        "expired credentials"
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_local_cloud_stack_operation(
+            "dev",
+            spec=LocalCloudArtifactStoreSpec(
+                artifact_store="s3://bucket/path",
+            ),
+            activate=False,
+        )
+
+    message = str(exc_info.value)
+    assert "existing-s3" in message
+    assert "failed verification" in message
+    assert "expired credentials" in message
+    assert "credentials" in message
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_local_cloud_stack_operation_no_verify_skips_reused_check() -> None:
+    """verify=False should link a reused connector without a health check."""
+    connector_id = "00000000-0000-0000-0000-000000000123"
+    connector = _service_connector_model(
+        connector_id=connector_id,
+        name="existing-s3",
+        connector_type="aws",
+        resource_type="s3-bucket",
+        resource_id=None,
+    )
+    default = _stack_model(stack_id="stack-default-id", name="default")
+    created_stack = _local_cloud_stack_model(name="dev")
+    hydrated_stack = _local_cloud_stack_model(
+        name="dev",
+        connector_name="existing-s3",
+    )
+    client_mock = Mock()
+    client_mock.active_stack_model = default
+    client_mock.list_service_connectors.return_value = [connector]
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[default],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock()
+    client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_local_cloud_stack_operation(
+            "dev",
+            spec=LocalCloudArtifactStoreSpec(
+                artifact_store="s3://bucket/path",
+                verify=False,
+            ),
+            activate=False,
+        )
+
+    client_mock.verify_service_connector.assert_not_called()
+    stack_request = client_mock._validate_stack_configuration.call_args.args[0]
+    assert stack_request.service_connectors == [UUID(connector_id)]
 
 
 @pytest.mark.parametrize(
@@ -2481,6 +2573,79 @@ def test_create_local_cloud_aws_connector_discovers_profile_region(
         list_resources=False,
         register=False,
     )
+
+
+def _profile_credentials_client_mock(*, server_url: str) -> Mock:
+    """Return a client mock whose zen store looks like a REST server."""
+    client_mock = Mock()
+    client_mock.active_stack_model = _stack_model(
+        stack_id="stack-default-id",
+        name="default",
+    )
+    client_mock.list_stacks.return_value = _FakeStackPage(
+        items=[client_mock.active_stack_model],
+        total_pages=1,
+        max_size=50,
+    )
+    client_mock.zen_store = Mock(spec=RestZenStore)
+    client_mock.zen_store.url = server_url
+    client_mock.zen_store.create_stack.return_value = _local_cloud_stack_model(
+        name="dev",
+        connector_name="dev-aws",
+    )
+    return client_mock
+
+
+def test_create_local_cloud_rejects_profile_credentials_on_remote_server() -> None:
+    """aws-profile credentials cannot be resolved by a remote ZenML server."""
+    client_mock = _profile_credentials_client_mock(
+        server_url="https://zenml.example.com"
+    )
+
+    with (
+        patch("kitaru.config.Client", return_value=client_mock),
+        pytest.raises(KitaruUsageError) as exc_info,
+    ):
+        _create_local_cloud_stack_operation(
+            "dev",
+            spec=LocalCloudArtifactStoreSpec(
+                artifact_store="s3://bucket/path",
+                credentials="aws-profile:team",
+                region="eu-west-2",
+                verify=False,
+            ),
+            activate=False,
+        )
+
+    message = str(exc_info.value)
+    assert "aws-profile:team" in message
+    assert "remote ZenML server" in message
+    assert "aws-session-token" in message
+    client_mock.create_service_connector.assert_not_called()
+    client_mock.zen_store.create_stack.assert_not_called()
+
+
+def test_create_local_cloud_allows_profile_credentials_on_localhost_server() -> None:
+    """A localhost server shares this machine's AWS config, so profiles work."""
+    client_mock = _profile_credentials_client_mock(server_url="http://localhost:8237")
+
+    with patch("kitaru.config.Client", return_value=client_mock):
+        _create_local_cloud_stack_operation(
+            "dev",
+            spec=LocalCloudArtifactStoreSpec(
+                artifact_store="s3://bucket/path",
+                credentials="aws-profile:team",
+                region="eu-west-2",
+                verify=False,
+            ),
+            activate=False,
+        )
+
+    client_mock.create_service_connector.assert_called_once()
+    configuration = client_mock.create_service_connector.call_args.kwargs[
+        "configuration"
+    ]
+    assert configuration["profile_name"] == "team"
 
 
 @pytest.mark.parametrize(
@@ -3691,8 +3856,10 @@ def test_create_modal_stack_operation_creates_stack_without_connector(
     }
 
 
+@pytest.mark.parametrize("verify", [True, False])
 def test_create_modal_stack_operation_reuses_existing_aws_connectors(
     monkeypatch: pytest.MonkeyPatch,
+    verify: bool,
 ) -> None:
     """Modal create should reuse matching server-side S3 and ECR connectors."""
     _install_fake_modal_package(monkeypatch)
@@ -3701,6 +3868,7 @@ def test_create_modal_stack_operation_reuses_existing_aws_connectors(
         container_registry=(
             "339712793861.dkr.ecr.eu-central-1.amazonaws.com/zenml-k8s-3794f302c1ca"
         ),
+        verify=verify,
     )
     s3_connector_id = "f964c5e4-d060-442c-8f35-af977bb3c3f8"
     ecr_connector_id = "f058457a-1194-4c4a-bc1c-de5a345e783a"
@@ -3803,6 +3971,23 @@ def test_create_modal_stack_operation_reuses_existing_aws_connectors(
         "uri": "339712793861.dkr.ecr.eu-central-1.amazonaws.com",
         "default_repository": "zenml-k8s-3794f302c1ca",
     }
+    if verify:
+        assert client_mock.verify_service_connector.call_args_list == [
+            call(
+                UUID(s3_connector_id),
+                resource_type="s3-bucket",
+                resource_id="s3://zenml-k8s-339712793861-3794f302c1ca",
+                list_resources=False,
+            ),
+            call(
+                UUID(ecr_connector_id),
+                resource_type="docker-registry",
+                resource_id="339712793861.dkr.ecr.eu-central-1.amazonaws.com",
+                list_resources=False,
+            ),
+        ]
+    else:
+        client_mock.verify_service_connector.assert_not_called()
     assert result.service_connectors_created == ()
 
 
@@ -4473,27 +4658,6 @@ def test_create_modal_stack_operation_rejects_aws_credentials_without_region(
                 artifact_store="s3://bucket/path",
                 container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
                 credentials="aws-profile:ml-team",
-            ),
-            client_factory=client_factory,
-        )
-
-    client_factory.assert_not_called()
-
-
-def test_create_modal_stack_operation_rejects_no_verify_without_connector_input(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Modal verify=False should not create a cloud connector by itself."""
-    _install_fake_modal_package(monkeypatch)
-    client_factory = Mock(name="client_factory")
-
-    with pytest.raises(KitaruUsageError, match="only applies when Kitaru is creating"):
-        config_module._config_stacks._create_modal_stack_operation(
-            "modal-dev",
-            spec=ModalStackSpec(
-                artifact_store="s3://bucket/path",
-                container_registry="123456789012.dkr.ecr.eu-west-1.amazonaws.com/repo",
-                verify=False,
             ),
             client_factory=client_factory,
         )

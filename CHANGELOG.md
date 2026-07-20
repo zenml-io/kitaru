@@ -15,12 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
-<<<<<<< fix/llm-integration-canary
+- Stack creation now verifies discovered service connectors before reusing them for local cloud storage or Modal stacks, failing fast with an actionable error instead of letting runs fail later; `--no-verify` skips the check.
+- `--credentials aws-profile:NAME` is now rejected when connected to a remote ZenML server, because the server cannot resolve AWS profiles that only exist on the local machine; portable `aws-access-keys`/`aws-session-token` credentials remain supported.
 - Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.
 - Live LLM integration runs now retain tested SHA, workflow run ID, and run-attempt provenance for release evidence.
-=======
 - Detailed execution graphs now resolve downstream parent call IDs to the visible successful checkpoint after a retry, instead of retaining the hidden failed attempt ID. (#564)
->>>>>>> develop
 - Reporting now preserves physical retry identity, marks unavailable secret-list key metadata explicitly, accounts for unknown billing conservatively, and documents the distinct workload-token and incurred-cost diff bases. (#566)
 - Execution diffs now reject blank selectors and explicit comparisons without recorded direct replay lineage, while deduplicating repeated selectors and aliases in first-occurrence order. (#565)
 - `kitaru executions diff` now shows useful checkpoint comparison rows in its default text output, and diff serialization includes redacted evidence that replay output overrides were applied without exposing override values. (#563)
