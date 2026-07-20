@@ -373,14 +373,14 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
         config_module.SupportDecision.model_validate_json(final_text)
         assert json.loads(final_text) == row["output"]
         assert row["metadata"]["fixture_generation_id"] == (
-            "kitaru-replay-example-json-text-v1"
+            "kitaru-replay-example-20260720-regenerated"
         )
         assert row["metadata"]["fixture_contract_revision"] == (
-            "structured-escalation-derived-v1"
+            "pydantic-ai-final-generation-v1"
         )
 
     account_row = next(
-        row for row in rows if row["traceId"] == "support-account-setting"
+        row for row in rows if row["traceId"] == "390972667ef147cbbbd6db2b30e8ad1b"
     )
     escalation_call = next(
         tool_call["function"]
@@ -404,6 +404,36 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
     )
     assert escalation_result["blocked"] is False
     assert escalation_result["wrote_state"] is True
+
+
+def test_raw_source_fixture_preserves_regenerated_langfuse_observations() -> None:
+    fixture = DEMO_ROOT / "trace_fixtures" / "raw-imported-support-cases.jsonl"
+    rows = [
+        json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()
+    ]
+
+    account_trace_id = "390972667ef147cbbbd6db2b30e8ad1b"
+    status_trace_id = "00cbb102c7844e00aeb0149e8deea83b"
+    assert len(rows) == 14
+    assert {row["traceId"] for row in rows} == {account_trace_id, status_trace_id}
+    assert {row["type"] for row in rows if row["traceId"] == account_trace_id} == {
+        "AGENT",
+        "GENERATION",
+        "SPAN",
+        "TOOL",
+    }
+    assert [
+        row["name"]
+        for row in rows
+        if row["traceId"] == account_trace_id and row["type"] == "TOOL"
+    ] == ["lookup_customer", "search_kb", "escalate_to_human"]
+    roots = [row for row in rows if row["name"] == "support-agent"]
+    assert {row["metadata"]["fixture_generation_id"] for row in roots} == {
+        "kitaru-replay-example-20260720-regenerated"
+    }
+    assert all(
+        "public_key" not in json.dumps(row.get("metadata", {})).lower() for row in rows
+    )
 
 
 def test_experiment_replays_explicit_imported_set_with_objective(

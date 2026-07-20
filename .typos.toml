@@ -3,6 +3,7 @@ extend-exclude = [
     "*.json",
     "*.js",
     "*.ipynb",
+    "examples/end_to_end/replay_fork_demo/trace_fixtures/raw-imported-support-cases.jsonl",
     "examples/end_to_end/replay_fork_demo/trace_fixtures/support-traces.jsonl",
     "uv.lock",
     "docs/pnpm-lock.yaml",

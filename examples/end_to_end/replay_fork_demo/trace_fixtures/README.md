@@ -1,15 +1,14 @@
-# Trace fixture generation
+# Trace fixture maintenance
 
-This directory supports the one-time setup for the replay example. The public
-walkthrough imports the selected trace through `kitaru import langfuse` before
-using `demo.py` for candidate replay and inspection.
+The public walkthrough starts from `imported-support-cases.jsonl`. Generating
+agent traffic and exporting Langfuse observations are one-time fixture
+maintenance tasks, not part of the case-first journey.
 
 `generate.py` runs the frozen `baseline` PydanticAI support agent through the
-seeded scenarios and records the resulting production-shaped traces in
-Langfuse. That variant maps to the immutable
-`v2.3-structured-escalation-imported` source label; the command rejects other
-variants instead of stamping them with that label. It is useful when the example
-needs a fresh set of traces or a checked-in Langfuse export.
+seeded scenarios. It records production-shaped traces in Langfuse with source
+label `v2.3-structured-escalation-imported`. The account-setting scenario uses
+the example's SQLite customer database, local knowledge base, and escalation
+write. The status scenario calls the local HTTP service.
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -22,35 +21,38 @@ for scenario in account_setting_change_request service_status_question; do
   uv run --with langfuse python -m trace_fixtures.generate \
     --scenario "$scenario" \
     --variant baseline \
-    --generation-id kitaru-replay-example-structured-escalation-v1
+    --generation-id kitaru-replay-example-20260720-regenerated
 done
 ```
 
-Each command prints one `langfuse://trace/<id>` URI. Pass a URI directly to
-`kitaru import langfuse` for a read-only preview. To generate ordered JSONL from
-raw live observations, fetch each printed trace and select the `AGENT` observation
-named
-`support-agent` whose input contains `messages` and `tools`, and write the raw
-account-setting observation followed by the raw service-status observation.
-Keep the observation id, trace id, timestamps, input, output, source version,
-and metadata unchanged. JSONL imports also need the Langfuse project ID.
+Each command prints a `langfuse://trace/<id>` URI. Export the selected traces
+in walkthrough order:
 
-`imported-support-cases.jsonl` is the current small walkthrough fixture. Its
-source label, baseline variant, callable-tool schemas, and validated JSON-text
-output contract are frozen together. The checked-in rows carry the Langfuse
-generation identifier `kitaru-replay-example-json-text-v1` and
-`fixture_contract_revision=structured-escalation-derived-v1`. The revision
-marker identifies the structured escalation call and audit result as derived
-production-shaped fixture data, not raw live observations. Keep the marker on
-derived rows. To generate raw live observations, run the command above and
-export the two raw `support-agent` observations in the documented order.
+```bash
+uv run --with langfuse python -m trace_fixtures.export \
+  --trace-id 390972667ef147cbbbd6db2b30e8ad1b \
+  --trace-id 00cbb102c7844e00aeb0149e8deea83b
+```
 
-`support-traces.jsonl` is a separate larger exported corpus for generation
-`kitaru-replay-example-20260717-final`. It contains 46 observations across six
-traces, including the root span, PydanticAI agent span, model generations, and
-tool calls. It is not the source fixture registered by the current walkthrough.
-For an exported scenario corpus, export all observations for the generated
-trace IDs rather than only the root observations.
+The exporter writes two artifacts:
 
-These scenarios, local services, and generation commands are fixture
-provenance. Users investigating production behavior do not run them.
+- `raw-imported-support-cases.jsonl` contains all 14 observations returned by
+  Langfuse. It preserves the root spans, PydanticAI agent spans, model
+  generations, tool calls, timestamps, costs, and metadata. Public-key metadata
+  is removed.
+- `imported-support-cases.jsonl` contains one replay-ready row per trace. The
+  exporter selects the final model generation, converts PydanticAI message
+  parts to Kitaru's imported-message contract, and retains the live trace ID,
+  tool schemas, tool arguments, tool results, final output, and source stamps.
+
+The replay rows carry
+`fixture_generation_id=kitaru-replay-example-20260720-regenerated` and
+`fixture_contract_revision=pydantic-ai-final-generation-v1`. The revision marks
+the deterministic conversion from the raw export. Kitaru can import the raw
+observation stream, but the current importer reports ambiguous message order
+for replay. The derived fixture is the checked-in entry point while that SDK
+surface evolves.
+
+`support-traces.jsonl` is an older six-trace corpus for generation
+`kitaru-replay-example-20260717-final`. It remains as broader importer test data
+and is not used by the walkthrough.
