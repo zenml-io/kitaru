@@ -310,54 +310,74 @@ uv run python demo.py rerun account-setting-fix \
 This is the final comparable beat. If the fixed candidate stays on the recorded
 path, satisfies the objective and protection, and remains within the limits,
 the command reports `PASS` and exits zero. A `HOLD` or `FAIL` exits
-nonzero. Limits are checked before another trial starts. One model request can
-cross a cost or token ceiling before Kitaru prevents a later trial.
+nonzero. Limits are checked before another trial starts. One replay trial can
+make several provider requests, including tool turns and output retries, before
+Kitaru receives its final usage. Their combined cost or tokens can cross a
+threshold before Kitaru prevents a later trial.
 
 Run the exact command again. The explicit idempotency key should return the
 same stored attempt without another model call or duplicate spend. That pair
 of properties — nonzero exit on anything but `PASS`, and a key that makes
 retries free — is the CI shape, and the next step wires it into a test.
 
-## 11. Pin it in CI
+## 11. Pin it in your CI
 
-A passing suite does not retire — it becomes a merge gate. Everything a
-regression test needs is already frozen in the attempt: the recorded cases,
-the validated boundary, the objective, the protection, and a spend ceiling.
-[`evals/test_suite_gate.py`](evals/test_suite_gate.py) in this example is the
-whole test:
+A passing suite can become a merge gate in your own CI. Everything the test
+needs is already frozen in the attempt: the recorded cases, the validated
+boundary, the objective, and the protections. Save the following as
+`tests/test_account_setting_gate.py` in this example directory:
 
 ```python
-candidate_label = f"ci-{os.environ.get('GITHUB_SHA', 'local')[:12]}"
-mini_tool_budget_2_agent.register(
-    label=candidate_label,
-    entrypoint="evals.register:mini_tool_budget_2_agent",
-)
-result = mini_tool_budget_2_agent.replay(
-    experiment="account-setting-fix",
-    idempotency_key=f"suite-gate-{candidate_label}",
-    repeats=1,
-    scorers=[support_resolution_objective],
-    limits=RegressionLimits(max_trials=1, max_cost_usd=0.10),
-)
-result.assert_pass()
+import os
+
+from kitaru import RegressionLimits
+
+from evals.register import mini_tool_budget_2_agent, support_resolution_objective
+
+
+def test_account_setting_gate() -> None:
+    candidate_label = f"ci-{os.environ.get('GITHUB_SHA', 'local')[:12]}"
+    mini_tool_budget_2_agent.register(
+        label=candidate_label,
+        entrypoint="evals.register:mini_tool_budget_2_agent",
+    )
+    result = mini_tool_budget_2_agent.replay(
+        experiment="account-setting-fix",
+        idempotency_key=f"suite-gate-{candidate_label}",
+        repeats=1,
+        scorers=[support_resolution_objective],
+        limits=RegressionLimits(
+            max_trials=1,
+            max_cost_usd=0.10,
+            max_incurred_tokens=100_000,
+            max_duration_seconds=300,
+        ),
+    )
+    result.assert_pass()
 ```
 
-Run it here — it calls the configured OpenAI model, so it is gated behind an
-environment variable:
+Run the test with your normal pytest command from this directory:
 
 ```bash
-KITARU_SUITE_GATE=1 uv run pytest evals/test_suite_gate.py -q
+uv run pytest tests/test_account_setting_gate.py -q
 ```
 
-Each commit registers itself as a fresh candidate version while the frozen
-suite, boundary, scorers, and protections stay constant, so the difference
-between attempts is the code change and nothing else. If a change
-reintroduces the old behavior, the protection fails the verdict,
-`assert_pass()` raises, and the pull request is blocked — a regression test
-minted from a production trace, not written by hand. Two properties make this
-safe in a pipeline: the limits are a hard spend ceiling and every verdict
-prints its cost, and the commit-derived idempotency key means a re-triggered
-job returns the stored attempt instead of paying twice.
+It calls your configured OpenAI model. Your CI blocks a merge only if you add
+this test to a required job. Each commit registers itself as a fresh candidate
+version while the frozen suite, boundary, scorers, and protections stay
+constant, so the difference between attempts is the code change and nothing
+else. If a change reintroduces the old behavior, the protection fails the
+verdict and `assert_pass()` raises.
+
+`max_trials=1` prevents Kitaru from submitting a second replay trial. It does
+not limit a trial to one provider request: tool turns and output retries can
+make several requests before Kitaru receives the trial's final usage. Cost and
+token thresholds are checked then, so their combined usage can exceed either
+threshold before Kitaru stops a later trial.
+
+Run the exact command again. The commit-derived idempotency key returns the
+stored attempt instead of submitting another replay trial, avoiding duplicate
+spend for that key.
 
 ## 12. Inspect the exact final attempt and child
 
