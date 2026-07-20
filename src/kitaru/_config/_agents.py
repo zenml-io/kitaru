@@ -1289,10 +1289,18 @@ def _resolve_agent_project(client: Any, selector: str) -> Any:
         exact_project = _get_project_by_exact_selector(client, selector)
     except Exception:
         exact_project = None
-    if exact_project is not None and (
-        str(getattr(exact_project, "id", "")).strip() == selector
-    ):
-        return exact_project
+    if exact_project is not None:
+        exact_project_id = str(getattr(exact_project, "id", "")).strip()
+        if exact_project_id == selector:
+            return exact_project
+        exact_project_name = str(getattr(exact_project, "name", "")).strip()
+        if exact_project_name == selector:
+            envelope = _parse_agent_metadata(
+                exact_project_id,
+                _complete_project_metadata(exact_project),
+            )
+            if envelope is not None and envelope.agent.name == selector:
+                return exact_project
 
     matches: list[Any] = []
     first_page = client.list_projects(hydrate=True)

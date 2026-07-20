@@ -667,6 +667,22 @@ def test_get_agent_resolves_uuid_directly_without_scanning_projects() -> None:
     client.list_projects.assert_not_called()
 
 
+def test_get_agent_resolves_exact_named_project_without_scanning_projects() -> None:
+    initialized = _project_model(
+        project_name="customer-support-agent",
+        metadata=_stored_metadata(_envelope(agent_name="customer-support-agent")),
+    )
+    client = Mock()
+    client.active_project = SimpleNamespace(id="other-active-id")
+    client.get_project.return_value = initialized
+
+    agent = get_agent("customer-support-agent", client_factory=lambda: client)
+
+    assert agent.agent_id == "project-id"
+    assert agent.name == "customer-support-agent"
+    client.list_projects.assert_not_called()
+
+
 def test_get_agent_resolves_local_default_project_by_logical_name() -> None:
     initialized = _project_model(
         project_name="default",
