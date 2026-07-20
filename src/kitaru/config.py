@@ -121,6 +121,7 @@ VertexStackSpec = _config_stacks.VertexStackSpec
 SagemakerStackSpec = _config_stacks.SagemakerStackSpec
 AzureMLStackSpec = _config_stacks.AzureMLStackSpec
 ModalStackSpec = _config_stacks.ModalStackSpec
+LocalCloudArtifactStoreSpec = _config_stacks.LocalCloudArtifactStoreSpec
 RemoteStackSpec = _config_stacks.RemoteStackSpec
 StackComponentConfigOverrides = _config_stacks.StackComponentConfigOverrides
 _ResolvedConnectorSpec = _config_stacks._ResolvedConnectorSpec
@@ -607,6 +608,27 @@ def _show_stack_operation(name_or_id: str) -> StackDetails:
     )
 
 
+def _create_local_cloud_stack_operation(
+    name: str,
+    *,
+    spec: LocalCloudArtifactStoreSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str = "local",
+) -> _StackCreateResult:
+    """Create a local-runner stack with cloud artifact storage."""
+    return _config_stacks._create_local_cloud_stack_operation(
+        name,
+        spec=spec,
+        activate=activate,
+        labels=labels,
+        component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
+        client_factory=Client,
+    )
+
+
 def _create_kubernetes_stack_operation(
     name: str,
     *,
@@ -719,6 +741,7 @@ def _create_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
+    local_cloud_artifact_store_spec: LocalCloudArtifactStoreSpec | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
     sandbox_flavor: str | None = None,
 ) -> _StackCreateResult:
@@ -729,8 +752,10 @@ def _create_stack_operation(
         activate=activate,
         labels=labels,
         remote_spec=remote_spec,
+        local_cloud_artifact_store_spec=local_cloud_artifact_store_spec,
         component_overrides=component_overrides,
         sandbox_flavor=sandbox_flavor,
+        local_cloud_operation_override=_create_local_cloud_stack_operation,
         operation_overrides=cast(
             dict[StackType, Callable[..., _StackCreateResult]],
             {

@@ -803,10 +803,16 @@ def manage_stack(
     """Create or delete a local, Kubernetes, Vertex AI, SageMaker, AzureML,
     or Modal stack.
 
+    Local stacks default to a local runner, storage, and sandbox. Set
+    `artifact_store` to an s3://, gs://, az://, abfs://, or abfss:// URI to keep
+    the runner local while storing artifacts in the cloud. Without `credentials`,
+    Kitaru reuses a matching connector when available, then falls back to ambient
+    provider credentials on the machine running the flow.
+
     For remote stacks, `sandbox` attaches a sandbox only when provided. Use
     `sandbox="modal"` to attach a Modal sandbox component to a Modal stack.
-    Local stacks default to `local`. `async_mode` is the MCP equivalent of CLI
-    `--async`.
+    `async_mode` is the MCP equivalent of CLI `--async` and is not valid for
+    local stacks.
     """
 
     def _manage_stack() -> dict[str, Any]:

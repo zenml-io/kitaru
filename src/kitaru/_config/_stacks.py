@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import configparser
 import difflib
+import json
+import os
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, MutableMapping
 from contextlib import suppress
@@ -14,7 +17,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from zenml.artifact_stores.local_artifact_store import LocalArtifactStoreFlavor
 from zenml.client import Client
 from zenml.constants import DOCKER_REGISTRY_RESOURCE_TYPE
@@ -120,7 +123,7 @@ class StackType(StrEnum):
 
 
 class CloudProvider(StrEnum):
-    """Supported cloud providers for remote stacks."""
+    """Supported cloud providers for stack resources."""
 
     AWS = "aws"
     GCP = "gcp"
@@ -224,6 +227,31 @@ class ModalStackSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LocalCloudArtifactStoreSpec(BaseModel):
+    """Cloud storage configuration for a local-runner stack."""
+
+    artifact_store: str
+    region: str | None = None
+    subscription_id: str | None = None
+    credentials: str | None = None
+    verify: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("artifact_store")
+    @classmethod
+    def validate_artifact_store(cls, value: str) -> str:
+        """Validate and normalize the cloud artifact-store URI."""
+        normalized = value.strip()
+        _infer_cloud_provider_from_artifact_store(normalized)
+        return normalized
+
+    @property
+    def provider(self) -> CloudProvider:
+        """Return the cloud provider implied by the artifact-store URI."""
+        return _infer_cloud_provider_from_artifact_store(self.artifact_store)
+
+
 RemoteStackSpec = (
     KubernetesStackSpec
     | VertexStackSpec
@@ -235,15 +263,15 @@ RemoteStackSpec = (
 
 @dataclass(frozen=True)
 class _ResolvedConnectorSpec:
-    """Resolved ZenML connector information for remote stack creation."""
+    """Resolved ZenML connector information for stack creation."""
 
     connector_info: ServiceConnectorInfo
     verify_resource_type: str
 
 
 @dataclass(frozen=True)
-class _ModalConnectorReference:
-    """Existing service connector selected for one Modal component."""
+class _ExistingConnectorReference:
+    """Existing service connector selected for one stack component."""
 
     connector_id: UUID
     resource_id: str
@@ -253,13 +281,13 @@ class _ModalConnectorReference:
 class _ResolvedModalExistingConnectors:
     """Existing Modal storage and registry service connectors."""
 
-    artifact_store: _ModalConnectorReference
-    container_registry: _ModalConnectorReference
+    artifact_store: _ExistingConnectorReference
+    container_registry: _ExistingConnectorReference
 
 
 @dataclass(frozen=True)
-class _ModalConnectorLookup:
-    """Connector discovery inputs for one Modal component."""
+class _ConnectorLookup:
+    """Connector discovery inputs for one stack component."""
 
     component_label: str
     connector_type: str
@@ -269,10 +297,10 @@ class _ModalConnectorLookup:
 
 
 @dataclass(frozen=True)
-class _ModalConnectorDiscoveryResult:
-    """Connector discovery result for one Modal component."""
+class _ConnectorDiscoveryResult:
+    """Connector discovery result for one stack component."""
 
-    lookup: _ModalConnectorLookup
+    lookup: _ConnectorLookup
     scoped_matches: tuple[Any, ...]
     unscoped_matches: tuple[Any, ...]
 
@@ -841,7 +869,7 @@ def _container_registry_resource_id(
     return normalized_registry.rstrip("/")
 
 
-def _normalize_modal_connector_resource_id(resource_id: str | None) -> str | None:
+def _normalize_connector_resource_id(resource_id: str | None) -> str | None:
     """Normalize a service connector resource ID for tolerant comparisons."""
     if resource_id is None:
         return None
@@ -852,11 +880,11 @@ def _normalize_modal_connector_resource_id(resource_id: str | None) -> str | Non
     return normalized.rstrip("/")
 
 
-def _modal_artifact_store_resource_id_variants(
+def _artifact_store_connector_resource_id_variants(
     resource_id: str,
     provider: CloudProvider,
 ) -> frozenset[str]:
-    """Return acceptable connector resource IDs for a Modal artifact store."""
+    """Return acceptable connector resource IDs for an artifact store."""
     parsed = urlparse(resource_id)
     variants = {resource_id.rstrip("/")}
     if parsed.netloc:
@@ -864,7 +892,7 @@ def _modal_artifact_store_resource_id_variants(
     return frozenset(
         normalized
         for value in variants
-        if (normalized := _normalize_modal_connector_resource_id(value)) is not None
+        if (normalized := _normalize_connector_resource_id(value)) is not None
     )
 
 
@@ -883,11 +911,11 @@ def _modal_container_registry_resource_id_variants(
     return frozenset(
         normalized
         for value in variants
-        if (normalized := _normalize_modal_connector_resource_id(value)) is not None
+        if (normalized := _normalize_connector_resource_id(value)) is not None
     )
 
 
-def _modal_connector_type(provider: CloudProvider) -> str:
+def _connector_type(provider: CloudProvider) -> str:
     """Return the provider-specific service connector type."""
     return {
         CloudProvider.AWS: AWS_CONNECTOR_TYPE,
@@ -896,7 +924,7 @@ def _modal_connector_type(provider: CloudProvider) -> str:
     }[provider]
 
 
-def _modal_artifact_store_connector_resource_type(provider: CloudProvider) -> str:
+def _artifact_store_connector_resource_type(provider: CloudProvider) -> str:
     """Return the provider-specific artifact-store connector resource type."""
     return {
         CloudProvider.AWS: S3_RESOURCE_TYPE,
@@ -905,7 +933,7 @@ def _modal_artifact_store_connector_resource_type(provider: CloudProvider) -> st
     }[provider]
 
 
-def _modal_connector_type_matches(connector: Any, connector_type: str) -> bool:
+def _connector_type_matches(connector: Any, connector_type: str) -> bool:
     """Return whether a connector model reports the expected connector type."""
     raw_type = getattr(connector, "type", None)
     if raw_type is None:
@@ -917,7 +945,7 @@ def _modal_connector_type_matches(connector: Any, connector_type: str) -> bool:
     return str(raw_type) == connector_type
 
 
-def _modal_connector_resource_type_matches(connector: Any, resource_type: str) -> bool:
+def _connector_resource_type_matches(connector: Any, resource_type: str) -> bool:
     """Return whether a connector model supports the expected resource type."""
     raw_resource_types = getattr(connector, "resource_types", None)
     if raw_resource_types is None:
@@ -932,14 +960,12 @@ def _modal_connector_resource_type_matches(connector: Any, resource_type: str) -
     return resource_type in connector_resource_types
 
 
-def _modal_connector_resource_id(connector: Any) -> str | None:
+def _connector_resource_id(connector: Any) -> str | None:
     """Return a connector resource ID normalized for discovery matching."""
-    return _normalize_modal_connector_resource_id(
-        getattr(connector, "resource_id", None)
-    )
+    return _normalize_connector_resource_id(getattr(connector, "resource_id", None))
 
 
-def _modal_connector_label(connector: Any) -> str:
+def _connector_label(connector: Any) -> str:
     """Render a connector for user-facing discovery errors."""
     name = _normalize_stack_detail_value(getattr(connector, "name", None))
     connector_id = _normalize_stack_detail_value(getattr(connector, "id", None))
@@ -952,10 +978,10 @@ def _modal_connector_label(connector: Any) -> str:
     return label
 
 
-def _modal_existing_connector_reference(
+def _existing_connector_reference(
     connector: Any,
     resource_id: str,
-) -> _ModalConnectorReference:
+) -> _ExistingConnectorReference:
     """Build a stack-request connector reference from a ZenML connector model."""
     connector_id_raw = getattr(connector, "id", None)
     try:
@@ -963,19 +989,19 @@ def _modal_existing_connector_reference(
     except (TypeError, ValueError, AttributeError) as exc:
         raise KitaruBackendError(
             "ZenML returned a matching service connector without a UUID id: "
-            f"{_modal_connector_label(connector)}"
+            f"{_connector_label(connector)}"
         ) from exc
-    return _ModalConnectorReference(
+    return _ExistingConnectorReference(
         connector_id=connector_id,
         resource_id=resource_id,
     )
 
 
-def _collect_modal_connector_candidates(
+def _collect_connector_candidates(
     client: Client,
-    lookup: _ModalConnectorLookup,
-) -> _ModalConnectorDiscoveryResult:
-    """Collect scoped and unscoped Modal connector candidates."""
+    lookup: _ConnectorLookup,
+) -> _ConnectorDiscoveryResult:
+    """Collect scoped and unscoped connector candidates."""
     scoped_matches: list[Any] = []
     unscoped_matches: list[Any] = []
     page = 1
@@ -997,14 +1023,12 @@ def _collect_modal_connector_candidates(
                 "runtime."
             )
         for connector in connector_page:
-            if not _modal_connector_type_matches(connector, lookup.connector_type):
+            if not _connector_type_matches(connector, lookup.connector_type):
                 continue
-            if not _modal_connector_resource_type_matches(
-                connector, lookup.resource_type
-            ):
+            if not _connector_resource_type_matches(connector, lookup.resource_type):
                 continue
 
-            connector_resource_id = _modal_connector_resource_id(connector)
+            connector_resource_id = _connector_resource_id(connector)
             if connector_resource_id is None:
                 unscoped_matches.append(connector)
             elif connector_resource_id in lookup.acceptable_resource_ids:
@@ -1018,15 +1042,15 @@ def _collect_modal_connector_candidates(
         if page >= total_pages:
             break
         page += 1
-    return _ModalConnectorDiscoveryResult(
+    return _ConnectorDiscoveryResult(
         lookup=lookup,
         scoped_matches=tuple(scoped_matches),
         unscoped_matches=tuple(unscoped_matches),
     )
 
 
-def _selected_modal_connector_matches(
-    discovery: _ModalConnectorDiscoveryResult,
+def _selected_connector_matches(
+    discovery: _ConnectorDiscoveryResult,
 ) -> tuple[Any, ...]:
     """Return the connector candidates used after scoped/unscoped precedence."""
     if discovery.scoped_matches:
@@ -1034,7 +1058,7 @@ def _selected_modal_connector_matches(
     return discovery.unscoped_matches
 
 
-def _modal_connector_lookup_message(lookup: _ModalConnectorLookup) -> str:
+def _connector_lookup_message(lookup: _ConnectorLookup) -> str:
     """Render what Kitaru looked for during existing connector discovery."""
     return (
         f"{lookup.component_label} connector type '{lookup.connector_type}', "
@@ -1063,19 +1087,19 @@ def _resolve_modal_existing_connectors(
         spec.container_registry,
         provider,
     )
-    connector_type = _modal_connector_type(provider)
+    connector_type = _connector_type(provider)
     lookups = (
-        _ModalConnectorLookup(
+        _ConnectorLookup(
             component_label="artifact store",
             connector_type=connector_type,
-            resource_type=_modal_artifact_store_connector_resource_type(provider),
+            resource_type=_artifact_store_connector_resource_type(provider),
             target_resource_id=artifact_resource_id,
-            acceptable_resource_ids=_modal_artifact_store_resource_id_variants(
+            acceptable_resource_ids=_artifact_store_connector_resource_id_variants(
                 artifact_resource_id,
                 provider,
             ),
         ),
-        _ModalConnectorLookup(
+        _ConnectorLookup(
             component_label="container registry",
             connector_type=connector_type,
             resource_type=DOCKER_REGISTRY_RESOURCE_TYPE,
@@ -1087,10 +1111,10 @@ def _resolve_modal_existing_connectors(
         ),
     )
     discoveries = tuple(
-        _collect_modal_connector_candidates(client, lookup) for lookup in lookups
+        _collect_connector_candidates(client, lookup) for lookup in lookups
     )
     selected_matches = tuple(
-        _selected_modal_connector_matches(discovery) for discovery in discoveries
+        _selected_connector_matches(discovery) for discovery in discoveries
     )
     if all(not matches for matches in selected_matches):
         return None
@@ -1106,11 +1130,11 @@ def _resolve_modal_existing_connectors(
     ambiguous = [*scoped_ambiguous, *unscoped_ambiguous]
     if ambiguous:
         details = "; ".join(
-            f"{_modal_connector_lookup_message(discovery.lookup)} matched "
-            f"{len(_selected_modal_connector_matches(discovery))} connectors: "
+            f"{_connector_lookup_message(discovery.lookup)} matched "
+            f"{len(_selected_connector_matches(discovery))} connectors: "
             + ", ".join(
-                _modal_connector_label(match)
-                for match in _selected_modal_connector_matches(discovery)
+                _connector_label(match)
+                for match in _selected_connector_matches(discovery)
             )
             for discovery in ambiguous
         )
@@ -1132,12 +1156,11 @@ def _resolve_modal_existing_connectors(
             if len(matches) == 1
         ]
         found_text = "; ".join(
-            f"found {_modal_connector_label(match)} for "
-            f"{discovery.lookup.component_label}"
+            f"found {_connector_label(match)} for {discovery.lookup.component_label}"
             for discovery, match in found
         )
         missing_text = "; ".join(
-            _modal_connector_lookup_message(discovery.lookup) for discovery in missing
+            _connector_lookup_message(discovery.lookup) for discovery in missing
         )
         raise KitaruUsageError(
             "Kitaru found only part of the existing service connector pair needed "
@@ -1148,15 +1171,56 @@ def _resolve_modal_existing_connectors(
         )
 
     return _ResolvedModalExistingConnectors(
-        artifact_store=_modal_existing_connector_reference(
+        artifact_store=_existing_connector_reference(
             selected_matches[0][0],
             artifact_resource_id,
         ),
-        container_registry=_modal_existing_connector_reference(
+        container_registry=_existing_connector_reference(
             selected_matches[1][0],
             registry_resource_id,
         ),
     )
+
+
+def _resolve_local_cloud_existing_connector(
+    spec: LocalCloudArtifactStoreSpec,
+    *,
+    client: Client,
+) -> _ExistingConnectorReference | None:
+    """Find one existing connector for a local stack's cloud storage."""
+    if spec.credentials is not None:
+        return None
+
+    artifact_store_uri = (
+        _normalize_azure_artifact_store_uri(spec.artifact_store)
+        if spec.provider == CloudProvider.AZURE
+        else spec.artifact_store
+    )
+    resource_id = _artifact_store_resource_id(artifact_store_uri, spec.provider)
+    lookup = _ConnectorLookup(
+        component_label="artifact store",
+        connector_type=_connector_type(spec.provider),
+        resource_type=_artifact_store_connector_resource_type(spec.provider),
+        target_resource_id=resource_id,
+        acceptable_resource_ids=_artifact_store_connector_resource_id_variants(
+            resource_id,
+            spec.provider,
+        ),
+    )
+    discovery = _collect_connector_candidates(client, lookup)
+    matches = _selected_connector_matches(discovery)
+    if not matches:
+        return None
+    if len(matches) > 1:
+        candidates = ", ".join(_connector_label(match) for match in matches)
+        raise KitaruUsageError(
+            "Kitaru found ambiguous existing service connectors for this local "
+            f"stack. {_connector_lookup_message(lookup)} matched "
+            f"{len(matches)} connectors: {candidates}. Narrow the connectors to "
+            "one matching resource or pass explicit cloud credentials so Kitaru "
+            "creates a new connector."
+        )
+    return _existing_connector_reference(matches[0], resource_id)
 
 
 def _modal_cloud_connector_inputs_requested(spec: ModalStackSpec) -> bool:
@@ -1290,15 +1354,52 @@ def _merge_managed_labels(labels: dict[str, str] | None) -> dict[str, str]:
     return merged_labels
 
 
+def _discover_aws_region(profile_name: str | None) -> str:
+    """Resolve an AWS region from boto-compatible environment and config."""
+    environment_region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+    if environment_region and environment_region.strip():
+        return environment_region.strip()
+
+    selected_profile = (
+        profile_name
+        or os.getenv("AWS_PROFILE")
+        or os.getenv("AWS_DEFAULT_PROFILE")
+        or "default"
+    )
+    config_path = Path(
+        os.getenv("AWS_CONFIG_FILE", str(Path.home() / ".aws" / "config"))
+    ).expanduser()
+    parser = configparser.RawConfigParser()
+    try:
+        parser.read(config_path, encoding="utf-8")
+    except (OSError, configparser.Error) as exc:
+        raise KitaruUsageError(
+            f"Unable to read AWS boto config '{config_path}': {exc}"
+        ) from exc
+
+    section = (
+        "default" if selected_profile == "default" else f"profile {selected_profile}"
+    )
+    configured_region = parser.get(section, "region", fallback=None)
+    if configured_region and configured_region.strip():
+        return configured_region.strip()
+
+    raise KitaruUsageError(
+        "Cannot discover an AWS region for the new cloud connector. Pass "
+        "`--region`, set AWS_REGION or AWS_DEFAULT_REGION, or configure `region` "
+        f"for the '{selected_profile}' profile in '{config_path}'."
+    )
+
+
 def _resolve_aws_connector_spec(
     *,
-    region: str,
+    region: str | None,
     credentials: str | None,
 ) -> _ResolvedConnectorSpec:
     """Translate Kitaru AWS credentials into ZenML connector info."""
     normalized_credentials = credentials.strip() if credentials else None
     auth_method = "implicit"
-    configuration: dict[str, Any] = {"region": region}
+    configuration: dict[str, Any] = {}
 
     if normalized_credentials:
         method, separator, raw_value = normalized_credentials.partition(":")
@@ -1357,6 +1458,14 @@ def _resolve_aws_connector_spec(
                 "aws-profile, aws-access-keys, aws-session-token."
             )
 
+    resolved_region = region.strip() if region and region.strip() else None
+    if resolved_region is None:
+        profile_value = configuration.get("profile_name")
+        resolved_region = _discover_aws_region(
+            str(profile_value) if profile_value is not None else None
+        )
+    configuration["region"] = resolved_region
+
     return _ResolvedConnectorSpec(
         connector_info=ServiceConnectorInfo(
             type=AWS_CONNECTOR_TYPE,
@@ -1367,28 +1476,88 @@ def _resolve_aws_connector_spec(
     )
 
 
+def _discover_gcp_adc_project_id() -> str:
+    """Resolve the active GCP project from Application Default Credentials."""
+    try:
+        import google.auth
+    except ImportError as exc:
+        raise KitaruUsageError(
+            "GCP project discovery requires google-auth. Install the GCP "
+            "dependencies or use gcp-service-account:/path/to/key.json."
+        ) from exc
+
+    try:
+        _, project_id = google.auth.default()
+    except Exception as exc:
+        raise KitaruUsageError(
+            "Unable to load GCP Application Default Credentials while discovering "
+            f"the project ID: {exc}"
+        ) from exc
+    if project_id is None or not project_id.strip():
+        raise KitaruUsageError(
+            "Cannot discover a GCP project ID from Application Default "
+            "Credentials. Set GOOGLE_CLOUD_PROJECT, configure ADC with a quota "
+            "project, or use gcp-service-account:/path/to/key.json."
+        )
+    return project_id.strip()
+
+
+def _gcp_project_id_from_service_account_json(
+    service_account_json: str,
+    *,
+    credential_path: Path,
+) -> str:
+    """Read the project ID required by a GCP service connector."""
+    try:
+        payload = json.loads(service_account_json)
+    except json.JSONDecodeError as exc:
+        raise KitaruUsageError(
+            f"GCP service account file '{credential_path}' is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise KitaruUsageError(
+            f"GCP service account file '{credential_path}' must contain a JSON object."
+        )
+    project_id = payload.get("project_id")
+    if not isinstance(project_id, str) or not project_id.strip():
+        raise KitaruUsageError(
+            f"GCP service account file '{credential_path}' does not contain a "
+            "non-empty project_id."
+        )
+    return project_id.strip()
+
+
 def _resolve_gcp_connector_spec(
     *,
-    container_registry: str,
+    container_registry: str | None = None,
+    project_id: str | None = None,
     credentials: str | None,
 ) -> _ResolvedConnectorSpec:
     """Translate Kitaru GCP credentials into ZenML connector info."""
-    project_id = _infer_gcp_project_id_from_container_registry(container_registry)
+    resolved_project_id = project_id
+    if resolved_project_id is None and container_registry is not None:
+        resolved_project_id = _infer_gcp_project_id_from_container_registry(
+            container_registry
+        )
+
     normalized_credentials = credentials.strip() if credentials else None
     auth_method = "implicit"
-    configuration: dict[str, Any] = {"project_id": project_id}
+    configuration: dict[str, Any] = {}
+    service_account_json: str | None = None
+    credential_path: Path | None = None
 
-    if normalized_credentials:
+    if normalized_credentials and normalized_credentials.lower() != "implicit":
         method, separator, raw_value = normalized_credentials.partition(":")
         if not separator:
             raise KitaruUsageError(
-                "Invalid GCP credentials format. Use "
+                "Invalid GCP credentials format. Use implicit or "
                 "gcp-service-account:/path/to/key.json."
             )
         normalized_method = method.strip().lower()
         if normalized_method != "gcp-service-account":
             raise KitaruUsageError(
-                "Unsupported GCP credentials method. Use: gcp-service-account."
+                "Unsupported GCP credentials method. Use implicit or "
+                "gcp-service-account."
             )
 
         credential_path_raw = raw_value.strip()
@@ -1403,7 +1572,17 @@ def _resolve_gcp_connector_spec(
             ) from exc
 
         auth_method = "service-account"
-        configuration.update({"service_account_json": service_account_json})
+        configuration["service_account_json"] = service_account_json
+
+    if resolved_project_id is None:
+        if service_account_json is not None and credential_path is not None:
+            resolved_project_id = _gcp_project_id_from_service_account_json(
+                service_account_json,
+                credential_path=credential_path,
+            )
+        else:
+            resolved_project_id = _discover_gcp_adc_project_id()
+    configuration["project_id"] = resolved_project_id
 
     return _ResolvedConnectorSpec(
         connector_info=ServiceConnectorInfo(
@@ -1417,13 +1596,15 @@ def _resolve_gcp_connector_spec(
 
 def _resolve_azure_connector_spec(
     *,
-    subscription_id: str,
+    subscription_id: str | None,
     credentials: str | None,
 ) -> _ResolvedConnectorSpec:
     """Translate Kitaru Azure credentials into ZenML connector info."""
     normalized_credentials = credentials.strip() if credentials else None
     auth_method = "implicit"
-    configuration: dict[str, Any] = {"subscription_id": subscription_id}
+    configuration: dict[str, Any] = {}
+    if subscription_id is not None:
+        configuration["subscription_id"] = subscription_id
 
     if normalized_credentials:
         if normalized_credentials.lower() == "implicit":
@@ -1480,6 +1661,27 @@ def _resolve_azure_connector_spec(
         ),
         verify_resource_type=AZURE_RESOURCE_TYPE,
     )
+
+
+def _resolve_local_cloud_connector_spec(
+    spec: LocalCloudArtifactStoreSpec,
+) -> _ResolvedConnectorSpec | None:
+    """Build a new connector only when local cloud credentials are explicit."""
+    if spec.credentials is None:
+        return None
+    if spec.provider == CloudProvider.AWS:
+        return _resolve_aws_connector_spec(
+            region=spec.region,
+            credentials=spec.credentials,
+        )
+    if spec.provider == CloudProvider.GCP:
+        return _resolve_gcp_connector_spec(credentials=spec.credentials)
+    if spec.provider == CloudProvider.AZURE:
+        return _resolve_azure_connector_spec(
+            subscription_id=spec.subscription_id,
+            credentials=spec.credentials,
+        )
+    raise KitaruUsageError(f"Unsupported cloud provider: {spec.provider}")
 
 
 def _resolve_kubernetes_connector_spec(
@@ -1544,6 +1746,86 @@ def _add_remote_sandbox_component_info(
         sandbox_flavor=sandbox_flavor,
         configuration=configuration,
     )
+
+
+def _build_local_cloud_stack_request(
+    name: str,
+    *,
+    spec: LocalCloudArtifactStoreSpec,
+    connector_spec: _ResolvedConnectorSpec | None = None,
+    existing_connector: _ExistingConnectorReference | None = None,
+    labels: dict[str, str] | None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str = _sandbox_components.LOCAL_SANDBOX_FLAVOR,
+) -> StackRequest:
+    """Build a one-shot local-runner stack with cloud storage."""
+    if connector_spec is not None and existing_connector is not None:
+        raise KitaruUsageError(
+            "Local cloud stack creation cannot both create and reuse a connector."
+        )
+
+    merged_labels = _merge_managed_labels(labels)
+    if existing_connector is not None:
+        merged_labels[_STACK_REUSED_SERVICE_CONNECTORS_LABEL_KEY] = (
+            _STACK_REUSED_SERVICE_CONNECTORS_LABEL_VALUE
+        )
+    artifact_store_uri = (
+        _normalize_azure_artifact_store_uri(spec.artifact_store)
+        if spec.provider == CloudProvider.AZURE
+        else spec.artifact_store
+    )
+
+    connector_kwargs: dict[str, Any] = {}
+    service_connectors: list[UUID | ServiceConnectorInfo] = []
+    resource_id = _artifact_store_resource_id(artifact_store_uri, spec.provider)
+    if connector_spec is not None:
+        service_connectors = _build_connector_services_list(connector_spec)
+        connector_kwargs = {
+            "service_connector_index": 0,
+            "service_connector_resource_id": resource_id,
+        }
+    elif existing_connector is not None:
+        service_connectors = [existing_connector.connector_id]
+        connector_kwargs = {
+            "service_connector_index": 0,
+            "service_connector_resource_id": existing_connector.resource_id,
+        }
+
+    stack_request = StackRequest(
+        name=name,
+        labels=merged_labels,
+        components={
+            StackComponentType.ORCHESTRATOR: [
+                ComponentInfo(
+                    flavor=StackType.LOCAL.value,
+                    configuration=_build_component_configuration(
+                        {},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ORCHESTRATOR,
+                    ),
+                )
+            ],
+            StackComponentType.ARTIFACT_STORE: [
+                ComponentInfo(
+                    flavor=_artifact_store_flavor(spec.provider),
+                    **connector_kwargs,
+                    configuration=_build_component_configuration(
+                        {"path": artifact_store_uri},
+                        overrides=component_overrides,
+                        target=StackComponentTarget.ARTIFACT_STORE,
+                    ),
+                )
+            ],
+        },
+        service_connectors=service_connectors,
+    )
+    assert stack_request.components is not None
+    _add_remote_sandbox_component_info(
+        stack_request.components,
+        sandbox_flavor=sandbox_flavor,
+        component_overrides=component_overrides,
+    )
+    return stack_request
 
 
 def _build_kubernetes_stack_request(
@@ -2000,35 +2282,35 @@ def _get_required_stack_component(
     """Return the single component of a required stack type from a stack model."""
     raw_components = getattr(stack_model, "components", None)
     if not isinstance(raw_components, Mapping):
-        raise KitaruStateError(
-            "Unable to inspect components from the created remote stack."
-        )
+        raise KitaruStateError("Unable to inspect components from the created stack.")
 
     components = raw_components.get(component_type, [])
     if len(components) != 1:
         raise KitaruStateError(
-            "Created remote stack is missing the expected "
-            f"{component_type.value} component."
+            f"Created stack is missing the expected {component_type.value} component."
         )
     return components[0]
+
+
+_DEFAULT_ONE_SHOT_REQUIRED_COMPONENTS: tuple[
+    tuple[StackComponentType, _StackComponentKind], ...
+] = (
+    (StackComponentType.ORCHESTRATOR, "orchestrator"),
+    (StackComponentType.ARTIFACT_STORE, "artifact_store"),
+    (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
+)
 
 
 def _extract_remote_stack_components(
     stack_model: Any,
     *,
+    required_components: tuple[
+        tuple[StackComponentType, _StackComponentKind], ...
+    ] = _DEFAULT_ONE_SHOT_REQUIRED_COMPONENTS,
     require_connector_metadata: bool = True,
     connector_required_component_types: frozenset[StackComponentType] | None = None,
-    additional_required_components: tuple[
-        tuple[StackComponentType, _StackComponentKind], ...
-    ] = (),
 ) -> tuple[tuple[str, ...], tuple[str, ...], bool]:
-    """Extract created component and connector names from a hydrated stack."""
-    required_components = (
-        (StackComponentType.ORCHESTRATOR, "orchestrator"),
-        (StackComponentType.ARTIFACT_STORE, "artifact_store"),
-        (StackComponentType.CONTAINER_REGISTRY, "container_registry"),
-        *additional_required_components,
-    )
+    """Extract component and connector names from a hydrated one-shot stack."""
     if not require_connector_metadata:
         connector_required_component_types = frozenset()
     if connector_required_component_types is None:
@@ -2052,7 +2334,7 @@ def _extract_remote_stack_components(
         component_name = str(getattr(component, "name", "")).strip()
         if not component_name:
             raise KitaruStateError(
-                "Unable to inspect components from the created remote stack."
+                "Unable to inspect components from the created stack."
             )
         component_labels.append(_format_stack_component_label(component_name, kind))
 
@@ -2078,15 +2360,19 @@ def _extract_remote_stack_components(
             in connector_required_component_types,
         )
 
-    for sandbox_component in _stack_component_models_for_type(
-        stack_model,
-        StackComponentType.SANDBOX,
-    ):
-        _collect_component(
-            sandbox_component,
-            kind=_sandbox_components.SANDBOX_COMPONENT_KIND,
-            require_connector_metadata=False,
-        )
+    required_component_types = {
+        component_type for component_type, _ in required_components
+    }
+    if StackComponentType.SANDBOX not in required_component_types:
+        for sandbox_component in _stack_component_models_for_type(
+            stack_model,
+            StackComponentType.SANDBOX,
+        ):
+            _collect_component(
+                sandbox_component,
+                kind=_sandbox_components.SANDBOX_COMPONENT_KIND,
+                require_connector_metadata=False,
+            )
 
     return tuple(component_labels), tuple(connector_names), missing_connector_metadata
 
@@ -2103,24 +2389,27 @@ def _stack_type_display_name(stack_type: StackType) -> str:
     }.get(stack_type, str(stack_type))
 
 
-def _create_remote_stack_operation(
+def _create_one_shot_stack_operation(
     name: str,
     *,
     stack_type: StackType,
     connector_spec: _ResolvedConnectorSpec | None,
     stack_request: StackRequest,
     resource_summary: dict[str, str],
-    connector_required_component_types: frozenset[StackComponentType] | None = None,
-    additional_required_components: tuple[
+    required_components: tuple[
         tuple[StackComponentType, _StackComponentKind], ...
-    ] = (),
+    ] = _DEFAULT_ONE_SHOT_REQUIRED_COMPONENTS,
+    connector_required_component_types: frozenset[StackComponentType] | None = None,
+    dependency_error_predicate: Callable[[BaseException], bool] | None = None,
+    dependency_error_hint: str | None = None,
     activate: bool = True,
     verify: bool = True,
     client_factory: Callable[[], Any] = Client,
+    client: Any | None = None,
 ) -> _StackCreateResult:
-    """Create a remote stack via ZenML's one-shot stack API."""
+    """Create a stack via ZenML's validated one-shot stack API."""
     selector = _normalize_stack_selector(name)
-    client = client_factory()
+    client = client if client is not None else client_factory()
 
     if any(
         stack_model.name == selector for stack_model in _iter_available_stacks(client)
@@ -2130,14 +2419,18 @@ def _create_remote_stack_operation(
     previous_active_stack = str(client.active_stack_model.name) if activate else None
     stack_label = _stack_type_display_name(stack_type)
 
+    def _raise_dependency_error(exc: BaseException) -> None:
+        if (
+            dependency_error_predicate is not None
+            and dependency_error_hint is not None
+            and dependency_error_predicate(exc)
+        ):
+            raise KitaruUsageError(dependency_error_hint) from exc
+
     try:
         _prevalidate_stack_request_components(stack_request)
     except Exception as exc:
-        if (
-            stack_type == StackType.MODAL
-            and _exception_chain_has_missing_modal_dependency(exc)
-        ):
-            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        _raise_dependency_error(exc)
         raise
 
     if connector_spec is not None:
@@ -2160,22 +2453,14 @@ def _create_remote_stack_operation(
     try:
         client._validate_stack_configuration(stack_request)
     except (ValueError, ValidationError) as exc:
-        if (
-            stack_type == StackType.MODAL
-            and _exception_chain_has_missing_modal_dependency(exc)
-        ):
-            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        _raise_dependency_error(exc)
         raise KitaruUsageError(
             f"Invalid {stack_label} stack configuration for '{selector}'. "
             f"ZenML rejected the final stack request after Kitaru prevalidated "
             f"the component defaults: {exc}"
         ) from exc
     except Exception as exc:
-        if (
-            stack_type == StackType.MODAL
-            and _exception_chain_has_missing_modal_dependency(exc)
-        ):
-            raise KitaruUsageError(_MODAL_INSTALL_HINT) from exc
+        _raise_dependency_error(exc)
         raise KitaruBackendError(
             f"Failed to validate {stack_label} stack '{selector}': {exc}"
         ) from exc
@@ -2193,9 +2478,9 @@ def _create_remote_stack_operation(
     components_created, service_connectors_created, missing_connector_metadata = (
         _extract_remote_stack_components(
             created_stack,
+            required_components=required_components,
             require_connector_metadata=require_connector_metadata,
             connector_required_component_types=connector_required_component_types,
-            additional_required_components=additional_required_components,
         )
     )
     if missing_connector_metadata:
@@ -2207,9 +2492,9 @@ def _create_remote_stack_operation(
             components_created, service_connectors_created, _ = (
                 _extract_remote_stack_components(
                     refreshed_stack,
+                    required_components=required_components,
                     require_connector_metadata=require_connector_metadata,
                     connector_required_component_types=connector_required_component_types,
-                    additional_required_components=additional_required_components,
                 )
             )
 
@@ -3058,6 +3343,74 @@ def _show_stack_operation(
     )
 
 
+def _create_local_cloud_stack_operation(
+    name: str,
+    *,
+    spec: LocalCloudArtifactStoreSpec,
+    activate: bool = True,
+    labels: dict[str, str] | None = None,
+    component_overrides: StackComponentConfigOverrides | None = None,
+    sandbox_flavor: str = _sandbox_components.LOCAL_SANDBOX_FLAVOR,
+    client_factory: Callable[[], Any] = Client,
+) -> _StackCreateResult:
+    """Create a local-runner stack backed by cloud artifact storage."""
+    selector = _normalize_stack_selector(name)
+    if spec.credentials is None and not spec.verify:
+        raise KitaruUsageError(
+            "`verify=False` only applies when explicit credentials create a new "
+            "cloud connector."
+        )
+
+    connector_spec = _resolve_local_cloud_connector_spec(spec)
+    existing_connector: _ExistingConnectorReference | None = None
+    operation_client: Any | None = None
+    if connector_spec is None:
+        operation_client = client_factory()
+        existing_connector = _resolve_local_cloud_existing_connector(
+            spec,
+            client=operation_client,
+        )
+
+    stack_request = _build_local_cloud_stack_request(
+        selector,
+        spec=spec,
+        connector_spec=connector_spec,
+        existing_connector=existing_connector,
+        labels=labels,
+        component_overrides=component_overrides,
+        sandbox_flavor=sandbox_flavor,
+    )
+    resource_summary = {
+        "provider": spec.provider.value,
+        "artifact_store": spec.artifact_store,
+        "sandbox": sandbox_flavor,
+    }
+    if spec.region is not None:
+        resource_summary["region"] = spec.region
+    if spec.subscription_id is not None:
+        resource_summary["subscription_id"] = spec.subscription_id
+
+    return _create_one_shot_stack_operation(
+        selector,
+        stack_type=StackType.LOCAL,
+        connector_spec=connector_spec,
+        stack_request=stack_request,
+        resource_summary=resource_summary,
+        required_components=(
+            (StackComponentType.ORCHESTRATOR, "orchestrator"),
+            (StackComponentType.ARTIFACT_STORE, "artifact_store"),
+            (StackComponentType.SANDBOX, "sandbox"),
+        ),
+        connector_required_component_types=frozenset(
+            {StackComponentType.ARTIFACT_STORE}
+        ),
+        activate=activate,
+        verify=spec.verify,
+        client_factory=client_factory,
+        client=operation_client,
+    )
+
+
 def _create_kubernetes_stack_operation(
     name: str,
     *,
@@ -3079,7 +3432,7 @@ def _create_kubernetes_stack_operation(
         component_overrides=component_overrides,
         sandbox_flavor=sandbox_flavor,
     )
-    return _create_remote_stack_operation(
+    return _create_one_shot_stack_operation(
         selector,
         stack_type=StackType.KUBERNETES,
         connector_spec=connector_spec,
@@ -3123,7 +3476,7 @@ def _create_vertex_stack_operation(
         component_overrides=component_overrides,
         sandbox_flavor=sandbox_flavor,
     )
-    return _create_remote_stack_operation(
+    return _create_one_shot_stack_operation(
         selector,
         stack_type=StackType.VERTEX,
         connector_spec=connector_spec,
@@ -3165,7 +3518,7 @@ def _create_sagemaker_stack_operation(
         component_overrides=component_overrides,
         sandbox_flavor=sandbox_flavor,
     )
-    return _create_remote_stack_operation(
+    return _create_one_shot_stack_operation(
         selector,
         stack_type=StackType.SAGEMAKER,
         connector_spec=connector_spec,
@@ -3220,7 +3573,7 @@ def _create_azureml_stack_operation(
         resource_summary["region"] = spec.region
     if sandbox_flavor is not None:
         resource_summary["sandbox"] = sandbox_flavor
-    return _create_remote_stack_operation(
+    return _create_one_shot_stack_operation(
         selector,
         stack_type=StackType.AZUREML,
         connector_spec=connector_spec,
@@ -3248,19 +3601,14 @@ def _create_modal_stack_operation(
     provider = _infer_cloud_provider_from_artifact_store(spec.artifact_store)
     connector_spec = _resolve_modal_connector_spec(spec, provider=provider)
     existing_connectors: _ResolvedModalExistingConnectors | None = None
-    operation_client_factory: Callable[[], Any] = client_factory
+    operation_client: Any | None = None
     if connector_spec is None:
-        discovery_client = client_factory()
+        operation_client = client_factory()
         existing_connectors = _resolve_modal_existing_connectors(
             spec,
             provider=provider,
-            client=discovery_client,
+            client=operation_client,
         )
-
-        def _discovered_client_factory() -> Any:
-            return discovery_client
-
-        operation_client_factory = _discovered_client_factory
     stack_request = _build_modal_stack_request(
         selector,
         spec=spec,
@@ -3281,24 +3629,28 @@ def _create_modal_stack_operation(
         resource_summary["subscription_id"] = spec.subscription_id
     if sandbox_flavor is not None:
         resource_summary["sandbox"] = sandbox_flavor
-    return _create_remote_stack_operation(
+    return _create_one_shot_stack_operation(
         selector,
         stack_type=StackType.MODAL,
         connector_spec=connector_spec,
         stack_request=stack_request,
         resource_summary=resource_summary,
+        required_components=(
+            *_DEFAULT_ONE_SHOT_REQUIRED_COMPONENTS,
+            (StackComponentType.IMAGE_BUILDER, "image_builder"),
+        ),
         connector_required_component_types=frozenset(
             {
                 StackComponentType.ARTIFACT_STORE,
                 StackComponentType.CONTAINER_REGISTRY,
             }
         ),
-        additional_required_components=(
-            (StackComponentType.IMAGE_BUILDER, "image_builder"),
-        ),
+        dependency_error_predicate=_exception_chain_has_missing_modal_dependency,
+        dependency_error_hint=_MODAL_INSTALL_HINT,
         activate=activate,
         verify=spec.verify,
-        client_factory=operation_client_factory,
+        client_factory=client_factory,
+        client=operation_client,
     )
 
 
@@ -3309,10 +3661,12 @@ def _create_stack_operation(
     activate: bool = True,
     labels: dict[str, str] | None = None,
     remote_spec: RemoteStackSpec | None = None,
+    local_cloud_artifact_store_spec: LocalCloudArtifactStoreSpec | None = None,
     component_overrides: StackComponentConfigOverrides | None = None,
     sandbox_flavor: str | None = None,
     operation_overrides: dict[StackType, Callable[..., _StackCreateResult]]
     | None = None,
+    local_cloud_operation_override: Callable[..., _StackCreateResult] | None = None,
 ) -> _StackCreateResult:
     """Create a stack by dispatching to the requested stack type flow."""
     dispatch: dict[StackType, Callable[..., _StackCreateResult]] = {
@@ -3337,7 +3691,21 @@ def _create_stack_operation(
         }
         if component_overrides is not None:
             local_kwargs["component_overrides"] = component_overrides
+        if local_cloud_artifact_store_spec is not None:
+            local_cloud_operation = (
+                local_cloud_operation_override or _create_local_cloud_stack_operation
+            )
+            return local_cloud_operation(
+                name,
+                spec=local_cloud_artifact_store_spec,
+                **local_kwargs,
+            )
         return dispatch[StackType.LOCAL](name, **local_kwargs)
+
+    if local_cloud_artifact_store_spec is not None:
+        raise KitaruUsageError(
+            "Cloud artifact-store specs for local runners require --type local."
+        )
 
     operation = dispatch.get(stack_type)
     if operation is None:

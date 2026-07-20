@@ -380,8 +380,9 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Artifact store URI for remote stacks. Modal accepts s3://, gs://, "
-                "az://, abfs://, or abfss://; other stack types may require one "
+                "Artifact store URI. Local stacks accept s3://, gs://, az://, "
+                "abfs://, or abfss:// cloud storage and normally discover "
+                "authentication; remote stack types may require one "
                 "provider-specific URI scheme."
             )
         ),
@@ -413,10 +414,10 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Cloud provider region for Kubernetes, Vertex, SageMaker, "
-                "AzureML, or credentialed Modal stack components. Optional for "
-                "AzureML. For Modal, this is the cloud artifact/registry region "
-                "where applicable; Modal placement uses "
+                "Cloud provider region for remote stacks or credentialed S3 "
+                "storage on a local stack. Optional for AzureML and normally "
+                "discovered for local S3 storage. For Modal, this is the cloud "
+                "artifact/registry region where applicable; Modal placement uses "
                 "--extra orchestrator.region=... instead."
             )
         ),
@@ -426,7 +427,8 @@ def create(
         Parameter(
             help=(
                 "Azure subscription ID for AzureML stacks or credentialed "
-                "Azure-backed Modal stack components."
+                "Azure storage on local or Modal stacks. Local stacks normally "
+                "discover it from the configured credentials."
             )
         ),
     ] = None,
@@ -450,9 +452,10 @@ def create(
         str | None,
         Parameter(
             help=(
-                "Optional cloud credentials reference for Kubernetes, Vertex, "
-                "SageMaker, AzureML, or credentialed Modal stack components. "
-                "Modal API credentials are separate: use "
+                "Optional cloud credentials reference for remote stacks or cloud "
+                "storage on a local stack. Without it, local stacks reuse a "
+                "matching connector or use ambient provider credentials. Modal "
+                "API credentials are separate: use "
                 "--extra orchestrator.token_id=... and token_secret=... for "
                 "Modal tokens."
             )
@@ -485,14 +488,17 @@ def create(
         bool | None,
         Parameter(
             help=(
-                "Skip cloud connector verification for Kubernetes, Vertex, "
-                "SageMaker, AzureML, or credentialed Modal stack components."
+                "Skip verification when explicit credentials create a new cloud "
+                "connector for a local or remote stack."
             )
         ),
     ] = None,
     output: OutputFormatOption = "text",
 ) -> None:
-    """Create a local, Kubernetes, Vertex AI, SageMaker, AzureML, or Modal stack."""
+    """Create a local, Kubernetes, Vertex AI, SageMaker, AzureML, or Modal stack.
+
+    Local stacks can use S3, GCS, or Azure storage while keeping execution local.
+    """
     command = "stack.create"
     output_format = _resolve_output_format(output)
 

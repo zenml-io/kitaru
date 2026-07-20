@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, NoReturn, Protocol
+from urllib.parse import urlparse
 
 import yaml
 from zenml.utils import yaml_utils
@@ -17,6 +19,7 @@ from kitaru._config._stacks import (
     AzureMLStackSpec,
     CloudProvider,
     KubernetesStackSpec,
+    LocalCloudArtifactStoreSpec,
     ModalStackSpec,
     RemoteStackSpec,
     SagemakerStackSpec,
@@ -115,6 +118,22 @@ _PROVIDER_URI_DESCRIPTIONS: dict[StackType, tuple[str, str]] = {
     StackType.SAGEMAKER: ("SageMaker", "an s3://"),
     StackType.AZUREML: ("AzureML", "an az://, abfs://, or abfss://"),
 }
+_LOCAL_CLOUD_PROVIDER_BY_SCHEME = {
+    "s3": CloudProvider.AWS,
+    "gs": CloudProvider.GCP,
+    "az": CloudProvider.AZURE,
+    "abfs": CloudProvider.AZURE,
+    "abfss": CloudProvider.AZURE,
+}
+_LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN = re.compile(
+    r"[A-Za-z0-9$](?:[A-Za-z0-9._$-]*[A-Za-z0-9$])?"
+)
+_LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN = re.compile(
+    r"[A-Za-z0-9$](?:[A-Za-z0-9.$-]*[A-Za-z0-9$])?"
+    r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"\.dfs\.core\.windows\.net",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -189,6 +208,7 @@ class ManageStackCreateRequest:
     activate: bool
     stack_type: StackType
     remote_spec: RemoteStackSpec | None = None
+    local_cloud_artifact_store_spec: LocalCloudArtifactStoreSpec | None = None
     sandbox_flavor: str | None = None
     component_overrides: StackComponentConfigOverrides = field(
         default_factory=StackComponentConfigOverrides
@@ -240,6 +260,7 @@ class _CreateStackOperation(Protocol):
         stack_type: StackType,
         activate: bool,
         remote_spec: RemoteStackSpec | None,
+        local_cloud_artifact_store_spec: LocalCloudArtifactStoreSpec | None = None,
         component_overrides: StackComponentConfigOverrides | None = None,
         sandbox_flavor: str | None = None,
     ) -> stack_ops._StackCreateResult: ...
@@ -372,6 +393,45 @@ def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
         f"Cannot infer cloud provider from '{artifact_store_uri}'. "
         "Use an s3://, gs://, az://, abfs://, or abfss:// URI."
     )
+
+
+def _validate_local_cloud_artifact_store_uri(
+    artifact_store_uri: str,
+    *,
+    labels: StackOptionLabels,
+) -> CloudProvider:
+    """Validate a local stack's cloud URI without exposing rejected values."""
+
+    def _raise_invalid_uri() -> NoReturn:
+        raise ValueError(
+            f"{labels.field_labels['artifact_store']} must be an s3://, gs://, "
+            "az://, abfs://, or abfss:// URI with a bucket or container name "
+            "and without query parameters, fragments, embedded credentials, "
+            "or ports."
+        )
+
+    try:
+        parsed = urlparse(artifact_store_uri)
+    except ValueError:
+        _raise_invalid_uri()
+
+    provider = _LOCAL_CLOUD_PROVIDER_BY_SCHEME.get(parsed.scheme)
+    if (
+        provider is None
+        or not artifact_store_uri.startswith(f"{parsed.scheme}://")
+        or not parsed.netloc
+        or "?" in artifact_store_uri
+        or "#" in artifact_store_uri
+    ):
+        _raise_invalid_uri()
+
+    authority_pattern = _LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN
+    if parsed.scheme in {"abfs", "abfss"} and "@" in parsed.netloc:
+        authority_pattern = _LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN
+    if authority_pattern.fullmatch(parsed.netloc) is None:
+        _raise_invalid_uri()
+
+    return provider
 
 
 def _modal_cloud_connector_inputs_requested(
@@ -911,6 +971,113 @@ def validate_component_override_targets(
         )
 
 
+def build_local_cloud_artifact_store_spec(
+    *,
+    stack_type: StackType,
+    artifact_store: str | None,
+    container_registry: str | None,
+    cluster: str | None,
+    region: str | None,
+    subscription_id: str | None,
+    resource_group: str | None,
+    workspace: str | None,
+    execution_role: str | None,
+    namespace: str | None,
+    credentials: str | None,
+    sandbox: str | None,
+    verify: bool,
+    labels: StackOptionLabels,
+) -> LocalCloudArtifactStoreSpec | None:
+    """Build optional cloud-storage configuration for a local stack."""
+    if stack_type != StackType.LOCAL:
+        return None
+
+    normalized_artifact_store = normalize_optional_stack_string(artifact_store)
+    provided_fields = {
+        "artifact_store": artifact_store is not None,
+        "container_registry": container_registry is not None,
+        "cluster": cluster is not None,
+        "region": region is not None,
+        "subscription_id": subscription_id is not None,
+        "resource_group": resource_group is not None,
+        "workspace": workspace is not None,
+        "execution_role": execution_role is not None,
+        "namespace": namespace is not None,
+        "credentials": credentials is not None,
+        "sandbox": sandbox is not None,
+        "verify": not verify,
+    }
+    cloud_storage_fields = ("credentials", "region", "subscription_id", "verify")
+    if artifact_store is None:
+        fields_requiring_storage = [
+            field_name
+            for field_name in cloud_storage_fields
+            if provided_fields[field_name]
+        ]
+        if fields_requiring_storage:
+            raise ValueError(
+                _render_field_labels(fields_requiring_storage, labels=labels)
+                + f" require {labels.field_labels['artifact_store']} with an "
+                "s3://, gs://, az://, abfs://, or abfss:// URI for a local stack."
+            )
+        _validate_explicit_field_usage(
+            stack_type=stack_type,
+            provided_fields={**provided_fields, "artifact_store": False},
+            labels=labels,
+        )
+        return None
+
+    if normalized_artifact_store is None:
+        raise ValueError(f"{labels.field_labels['artifact_store']} cannot be empty.")
+
+    _validate_explicit_field_usage(
+        stack_type=stack_type,
+        provided_fields={
+            **provided_fields,
+            "artifact_store": False,
+            "region": False,
+            "subscription_id": False,
+            "credentials": False,
+            "verify": False,
+        },
+        labels=labels,
+    )
+    normalized_region = normalize_optional_stack_string(region)
+    normalized_subscription_id = normalize_optional_stack_string(subscription_id)
+    normalized_credentials = normalize_optional_stack_string(credentials)
+    if credentials is not None and normalized_credentials is None:
+        raise ValueError(f"{labels.field_labels['credentials']} cannot be empty.")
+
+    provider = _validate_local_cloud_artifact_store_uri(
+        normalized_artifact_store,
+        labels=labels,
+    )
+    if provider != CloudProvider.AWS and normalized_region is not None:
+        raise ValueError(
+            f"{labels.field_labels['region']} only applies to s3:// storage for "
+            "local stacks."
+        )
+    if provider != CloudProvider.AZURE and normalized_subscription_id is not None:
+        raise ValueError(
+            f"{labels.field_labels['subscription_id']} only applies to Azure "
+            "storage for local stacks."
+        )
+    if not verify and normalized_credentials is None:
+        raise ValueError(
+            f"{labels.field_labels['verify']} only applies when "
+            f"{labels.field_labels['credentials']} asks Kitaru to create a new "
+            "cloud connector."
+        )
+
+    return LocalCloudArtifactStoreSpec(
+        artifact_store=normalized_artifact_store,
+        region=normalized_region,
+        subscription_id=normalized_subscription_id,
+        credentials=normalized_credentials,
+        verify=verify,
+    )
+
+
 def build_remote_stack_spec(
     *,
     stack_type: StackType,
@@ -929,6 +1096,9 @@ def build_remote_stack_spec(
     labels: StackOptionLabels,
 ) -> RemoteStackSpec | None:
     """Validate interface inputs and build a remote stack spec when needed."""
+    if stack_type == StackType.LOCAL:
+        return None
+
     provided_fields = {
         "artifact_store": artifact_store is not None,
         "container_registry": container_registry is not None,
@@ -948,9 +1118,6 @@ def build_remote_stack_spec(
         provided_fields=provided_fields,
         labels=labels,
     )
-
-    if stack_type == StackType.LOCAL:
-        return None
 
     normalized_artifact_store = normalize_optional_stack_string(artifact_store)
     normalized_container_registry = normalize_optional_stack_string(container_registry)
@@ -1133,6 +1300,23 @@ def build_stack_create_request(
             "only apply when the created stack has a sandbox."
         )
 
+    local_cloud_artifact_store_spec = build_local_cloud_artifact_store_spec(
+        stack_type=normalized_stack_type,
+        artifact_store=artifact_store,
+        container_registry=container_registry,
+        cluster=cluster,
+        region=region,
+        subscription_id=subscription_id,
+        resource_group=resource_group,
+        workspace=workspace,
+        execution_role=execution_role,
+        namespace=namespace,
+        credentials=credentials,
+        sandbox=sandbox,
+        verify=verify,
+        labels=labels,
+    )
+
     return ManageStackCreateRequest(
         name=name,
         activate=activate,
@@ -1153,6 +1337,7 @@ def build_stack_create_request(
             verify=verify,
             labels=labels,
         ),
+        local_cloud_artifact_store_spec=local_cloud_artifact_store_spec,
         sandbox_flavor=normalized_sandbox,
         component_overrides=apply_async_override(
             component_overrides,
@@ -1315,6 +1500,10 @@ def execute_stack_create_request(
         "activate": request.activate,
         "remote_spec": request.remote_spec,
     }
+    if request.local_cloud_artifact_store_spec is not None:
+        create_kwargs["local_cloud_artifact_store_spec"] = (
+            request.local_cloud_artifact_store_spec
+        )
     if request.sandbox_flavor is not None:
         create_kwargs["sandbox_flavor"] = request.sandbox_flavor
     if not request.component_overrides.is_empty():

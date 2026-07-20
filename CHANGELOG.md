@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Local stacks can now use S3, GCS, or Azure Blob/ADLS artifact storage while keeping flow execution local, with existing-connector reuse and ambient provider credentials when explicit credentials are not supplied. (#593)
 - Flow and execution deletion is now available through the SDK, `kitaru flow delete` and `kitaru executions delete` CLI commands, and MCP tools.
 
 ### Changed
