@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -130,6 +130,24 @@ class CloudProvider(StrEnum):
     AZURE = "azure"
 
 
+_LOCAL_CLOUD_PROVIDER_BY_SCHEME = {
+    "s3": CloudProvider.AWS,
+    "gs": CloudProvider.GCP,
+    "az": CloudProvider.AZURE,
+    "abfs": CloudProvider.AZURE,
+    "abfss": CloudProvider.AZURE,
+}
+_LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN = re.compile(
+    r"[A-Za-z0-9$](?:[A-Za-z0-9._$-]*[A-Za-z0-9$])?"
+)
+_LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN = re.compile(
+    r"[A-Za-z0-9$](?:[A-Za-z0-9.$-]*[A-Za-z0-9$])?"
+    r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"\.dfs\.core\.windows\.net",
+    re.IGNORECASE,
+)
+
+
 class StackComponentTarget(StrEnum):
     """Logical stack component targets used for advanced config overrides."""
 
@@ -236,20 +254,20 @@ class LocalCloudArtifactStoreSpec(BaseModel):
     credentials: str | None = None
     verify: bool = True
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     @field_validator("artifact_store")
     @classmethod
     def validate_artifact_store(cls, value: str) -> str:
         """Validate and normalize the cloud artifact-store URI."""
         normalized = value.strip()
-        _infer_cloud_provider_from_artifact_store(normalized)
+        _validate_local_cloud_artifact_store_uri(normalized)
         return normalized
 
     @property
     def provider(self) -> CloudProvider:
         """Return the cloud provider implied by the artifact-store URI."""
-        return _infer_cloud_provider_from_artifact_store(self.artifact_store)
+        return _validate_local_cloud_artifact_store_uri(self.artifact_store)
 
 
 RemoteStackSpec = (
@@ -501,6 +519,26 @@ def _build_component_configuration(
     """Merge base component config with user-provided overrides."""
     return _merge_configuration_dicts(
         base, _component_override_values(overrides, target)
+    )
+
+
+def _build_local_cloud_artifact_store_configuration(
+    artifact_store_uri: str,
+    *,
+    overrides: StackComponentConfigOverrides | None,
+) -> dict[str, Any]:
+    """Merge artifact-store overrides without replacing the validated URI."""
+    artifact_store_overrides = _component_override_values(
+        overrides, StackComponentTarget.ARTIFACT_STORE
+    )
+    override_path = artifact_store_overrides.pop("path", artifact_store_uri)
+    if override_path != artifact_store_uri:
+        raise KitaruUsageError(
+            "`artifact_store.path` cannot override the validated cloud artifact-store "
+            "URI. Set the cloud location through `artifact_store` instead."
+        )
+    return _merge_configuration_dicts(
+        {"path": artifact_store_uri}, artifact_store_overrides
     )
 
 
@@ -816,6 +854,44 @@ def _normalize_azure_artifact_store_uri(artifact_store_uri: str) -> str:
     if artifact_store_uri.startswith("abfss://"):
         return "abfs://" + artifact_store_uri.removeprefix("abfss://")
     return artifact_store_uri
+
+
+def _validate_local_cloud_artifact_store_uri(
+    artifact_store_uri: str,
+    *,
+    field_label: str = "Artifact store",
+) -> CloudProvider:
+    """Validate a local stack's cloud URI without exposing rejected values."""
+
+    def _raise_invalid_uri() -> NoReturn:
+        raise KitaruUsageError(
+            f"{field_label} must be an s3://, gs://, az://, abfs://, or abfss:// "
+            "URI with a bucket or container name and without query parameters, "
+            "fragments, embedded credentials, or ports."
+        )
+
+    try:
+        parsed = urlparse(artifact_store_uri)
+    except ValueError:
+        _raise_invalid_uri()
+
+    provider = _LOCAL_CLOUD_PROVIDER_BY_SCHEME.get(parsed.scheme)
+    if (
+        provider is None
+        or not artifact_store_uri.startswith(f"{parsed.scheme}://")
+        or not parsed.netloc
+        or "?" in artifact_store_uri
+        or "#" in artifact_store_uri
+    ):
+        _raise_invalid_uri()
+
+    authority_pattern = _LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN
+    if parsed.scheme in {"abfs", "abfss"} and "@" in parsed.netloc:
+        authority_pattern = _LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN
+    if authority_pattern.fullmatch(parsed.netloc) is None:
+        _raise_invalid_uri()
+
+    return provider
 
 
 def _infer_cloud_provider_from_artifact_store(
@@ -1668,6 +1744,16 @@ def _resolve_local_cloud_connector_spec(
 ) -> _ResolvedConnectorSpec | None:
     """Build a new connector only when local cloud credentials are explicit."""
     if spec.credentials is None:
+        metadata_fields = []
+        if spec.region is not None:
+            metadata_fields.append("region")
+        if spec.subscription_id is not None:
+            metadata_fields.append("subscription_id")
+        if metadata_fields:
+            raise KitaruUsageError(
+                f"{_format_option_list(metadata_fields)} require `credentials` "
+                "because they configure a new cloud connector."
+            )
         return None
     if spec.provider == CloudProvider.AWS:
         return _resolve_aws_connector_spec(
@@ -1809,10 +1895,9 @@ def _build_local_cloud_stack_request(
                 ComponentInfo(
                     flavor=_artifact_store_flavor(spec.provider),
                     **connector_kwargs,
-                    configuration=_build_component_configuration(
-                        {"path": artifact_store_uri},
+                    configuration=_build_local_cloud_artifact_store_configuration(
+                        artifact_store_uri,
                         overrides=component_overrides,
-                        target=StackComponentTarget.ARTIFACT_STORE,
                     ),
                 )
             ],
@@ -2517,7 +2602,9 @@ def _create_one_shot_stack_operation(
         previous_active_stack=previous_active_stack,
         components_created=components_created,
         stack_type=stack_type.value,
-        service_connectors_created=service_connectors_created,
+        service_connectors_created=(
+            service_connectors_created if connector_spec is not None else ()
+        ),
         resources=resource_summary,
     )
 

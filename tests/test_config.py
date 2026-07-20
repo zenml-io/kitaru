@@ -2113,6 +2113,28 @@ def test_create_stack_dispatcher_routes_local_cloud_requests() -> None:
 
 
 @pytest.mark.parametrize(
+    "artifact_store",
+    [
+        "s3://access-key:secret@bucket/path",
+        "s3://bucket/path?X-Amz-Signature=secret",
+        "s3://bucket:443/path",
+    ],
+)
+def test_local_cloud_spec_rejects_unsafe_uri_without_echoing_it(
+    artifact_store: str,
+) -> None:
+    """Direct spec construction should enforce the non-leaking URI boundary."""
+    with pytest.raises(ValueError) as exc_info:
+        LocalCloudArtifactStoreSpec(artifact_store=artifact_store)
+
+    message = str(exc_info.value)
+    assert artifact_store not in message
+    assert "without query parameters, fragments, embedded credentials, or ports" in (
+        message
+    )
+
+
+@pytest.mark.parametrize(
     ("artifact_store", "provider", "flavor", "normalized_path", "resource_type"),
     [
         ("s3://bucket/path", CloudProvider.AWS, "s3", "s3://bucket/path", "s3-bucket"),
@@ -2226,7 +2248,8 @@ def test_create_local_cloud_stack_operation_reuses_scoped_or_unscoped_connector(
         resource_id=connector_resource_id,
     )
     default = _stack_model(stack_id="stack-default-id", name="default")
-    created_stack = _local_cloud_stack_model(
+    created_stack = _local_cloud_stack_model(name="dev")
+    hydrated_stack = _local_cloud_stack_model(
         name="dev",
         connector_name="existing-s3",
     )
@@ -2240,6 +2263,7 @@ def test_create_local_cloud_stack_operation_reuses_scoped_or_unscoped_connector(
     )
     client_mock.zen_store = Mock()
     client_mock.zen_store.create_stack.return_value = created_stack
+    client_mock.get_stack.return_value = hydrated_stack
 
     with patch("kitaru.config.Client", return_value=client_mock):
         result = _create_local_cloud_stack_operation(
@@ -2259,7 +2283,8 @@ def test_create_local_cloud_stack_operation_reuses_scoped_or_unscoped_connector(
     storage = stack_request.components[StackComponentType.ARTIFACT_STORE][0]
     assert storage.service_connector_index == 0
     assert storage.service_connector_resource_id == "s3://bucket"
-    assert result.service_connectors_created == ("existing-s3",)
+    client_mock.get_stack.assert_called_once_with("stack-local-cloud-id", hydrate=True)
+    assert result.service_connectors_created == ()
 
 
 @pytest.mark.parametrize(
@@ -2456,6 +2481,31 @@ def test_create_local_cloud_aws_connector_discovers_profile_region(
         list_resources=False,
         register=False,
     )
+
+
+@pytest.mark.parametrize(
+    ("artifact_store", "metadata_field", "metadata_value"),
+    [
+        ("s3://bucket/path", "region", "eu-west-1"),
+        ("az://container/path", "subscription_id", "subscription-123"),
+    ],
+)
+def test_local_cloud_connector_metadata_requires_credentials(
+    artifact_store: str,
+    metadata_field: str,
+    metadata_value: str,
+) -> None:
+    """Connector metadata must not be ignored on connectorless requests."""
+    spec = LocalCloudArtifactStoreSpec(
+        artifact_store=artifact_store,
+        **{metadata_field: metadata_value},
+    )
+
+    with pytest.raises(
+        KitaruUsageError,
+        match=rf"`{metadata_field}` require `credentials`",
+    ):
+        config_stacks_module._resolve_local_cloud_connector_spec(spec)
 
 
 def test_local_cloud_aws_connector_reports_missing_region(
@@ -2676,6 +2726,29 @@ def test_build_local_cloud_stack_request_merges_component_overrides() -> None:
         "client_kwargs": {"endpoint_url": "http://minio:9000"},
     }
     assert sandbox.configuration == {"timeout": 900}
+
+
+def test_build_local_cloud_stack_request_rejects_path_override() -> None:
+    """Component overrides cannot bypass the validated artifact-store URI."""
+    rejected_path = "s3://access-key:secret@other-bucket/path"
+
+    with pytest.raises(KitaruUsageError) as exc_info:
+        config_stacks_module._build_local_cloud_stack_request(
+            "dev",
+            spec=LocalCloudArtifactStoreSpec(
+                artifact_store="s3://bucket/path",
+            ),
+            labels=None,
+            component_overrides=StackComponentConfigOverrides(
+                artifact_store={
+                    "path": rejected_path,
+                    "client_kwargs": {"endpoint_url": "http://minio:9000"},
+                },
+            ),
+        )
+
+    assert rejected_path not in str(exc_info.value)
+    assert "artifact_store.path" in str(exc_info.value)
 
 
 def test_create_local_cloud_stack_operation_reports_activation_failure() -> None:
@@ -3730,10 +3803,7 @@ def test_create_modal_stack_operation_reuses_existing_aws_connectors(
         "uri": "339712793861.dkr.ecr.eu-central-1.amazonaws.com",
         "default_repository": "zenml-k8s-3794f302c1ca",
     }
-    assert result.service_connectors_created == (
-        "aws-k8s-stack-s3",
-        "aws-k8s-stack-ecr",
-    )
+    assert result.service_connectors_created == ()
 
 
 def test_create_modal_stack_operation_prefers_specific_over_unscoped_connectors(
@@ -3905,7 +3975,7 @@ def test_create_modal_stack_operation_reuses_shared_unscoped_connector_once(
         registry.service_connector_resource_id
         == "123456789012.dkr.ecr.eu-central-1.amazonaws.com"
     )
-    assert result.service_connectors_created == ("aws_connector",)
+    assert result.service_connectors_created == ()
 
 
 def test_create_modal_stack_operation_rejects_multiple_unscoped_connectors(

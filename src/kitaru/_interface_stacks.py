@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, NoReturn, Protocol
-from urllib.parse import urlparse
+from typing import Any, Literal, Protocol
 
 import yaml
 from zenml.utils import yaml_utils
@@ -118,22 +116,6 @@ _PROVIDER_URI_DESCRIPTIONS: dict[StackType, tuple[str, str]] = {
     StackType.SAGEMAKER: ("SageMaker", "an s3://"),
     StackType.AZUREML: ("AzureML", "an az://, abfs://, or abfss://"),
 }
-_LOCAL_CLOUD_PROVIDER_BY_SCHEME = {
-    "s3": CloudProvider.AWS,
-    "gs": CloudProvider.GCP,
-    "az": CloudProvider.AZURE,
-    "abfs": CloudProvider.AZURE,
-    "abfss": CloudProvider.AZURE,
-}
-_LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN = re.compile(
-    r"[A-Za-z0-9$](?:[A-Za-z0-9._$-]*[A-Za-z0-9$])?"
-)
-_LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN = re.compile(
-    r"[A-Za-z0-9$](?:[A-Za-z0-9.$-]*[A-Za-z0-9$])?"
-    r"@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-    r"\.dfs\.core\.windows\.net",
-    re.IGNORECASE,
-)
 
 
 @dataclass(frozen=True)
@@ -393,45 +375,6 @@ def infer_cloud_provider(artifact_store_uri: str) -> CloudProvider:
         f"Cannot infer cloud provider from '{artifact_store_uri}'. "
         "Use an s3://, gs://, az://, abfs://, or abfss:// URI."
     )
-
-
-def _validate_local_cloud_artifact_store_uri(
-    artifact_store_uri: str,
-    *,
-    labels: StackOptionLabels,
-) -> CloudProvider:
-    """Validate a local stack's cloud URI without exposing rejected values."""
-
-    def _raise_invalid_uri() -> NoReturn:
-        raise ValueError(
-            f"{labels.field_labels['artifact_store']} must be an s3://, gs://, "
-            "az://, abfs://, or abfss:// URI with a bucket or container name "
-            "and without query parameters, fragments, embedded credentials, "
-            "or ports."
-        )
-
-    try:
-        parsed = urlparse(artifact_store_uri)
-    except ValueError:
-        _raise_invalid_uri()
-
-    provider = _LOCAL_CLOUD_PROVIDER_BY_SCHEME.get(parsed.scheme)
-    if (
-        provider is None
-        or not artifact_store_uri.startswith(f"{parsed.scheme}://")
-        or not parsed.netloc
-        or "?" in artifact_store_uri
-        or "#" in artifact_store_uri
-    ):
-        _raise_invalid_uri()
-
-    authority_pattern = _LOCAL_CLOUD_SIMPLE_AUTHORITY_PATTERN
-    if parsed.scheme in {"abfs", "abfss"} and "@" in parsed.netloc:
-        authority_pattern = _LOCAL_CLOUD_ABFS_AUTHORITY_PATTERN
-    if authority_pattern.fullmatch(parsed.netloc) is None:
-        _raise_invalid_uri()
-
-    return provider
 
 
 def _modal_cloud_connector_inputs_requested(
@@ -1048,9 +991,9 @@ def build_local_cloud_artifact_store_spec(
     if credentials is not None and normalized_credentials is None:
         raise ValueError(f"{labels.field_labels['credentials']} cannot be empty.")
 
-    provider = _validate_local_cloud_artifact_store_uri(
+    provider = stack_ops._validate_local_cloud_artifact_store_uri(
         normalized_artifact_store,
-        labels=labels,
+        field_label=labels.field_labels["artifact_store"],
     )
     if provider != CloudProvider.AWS and normalized_region is not None:
         raise ValueError(
