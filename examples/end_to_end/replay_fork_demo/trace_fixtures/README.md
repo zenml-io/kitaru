@@ -6,7 +6,7 @@ maintenance tasks, not part of the case-first journey.
 
 `generate.py` runs the frozen `baseline` PydanticAI support agent through the
 seeded scenarios. It records production-shaped traces in Langfuse with source
-label `v2.3-structured-escalation-imported`. The account-setting scenario uses
+label `investigation-v1`. The account-setting scenario uses
 the example's SQLite customer database, local knowledge base, and escalation
 write. The status scenario calls the local HTTP service.
 
@@ -26,7 +26,7 @@ for scenario in \
   uv run --with langfuse python -m trace_fixtures.generate \
     --scenario "$scenario" \
     --variant baseline \
-    --generation-id kitaru-replay-example-20260720-regenerated
+    --generation-id kitaru-replay-example-20260720-multistep
 done
 ```
 
@@ -35,16 +35,16 @@ in walkthrough order:
 
 ```bash
 uv run --with langfuse python -m trace_fixtures.export \
-  --trace-id 390972667ef147cbbbd6db2b30e8ad1b \
-  --trace-id 00cbb102c7844e00aeb0149e8deea83b \
-  --trace-id 40860e9cee9d4d71b6a6f82208af1a75 \
-  --trace-id 50b5ad259d5c4c61bdfe2f593c8f8495 \
-  --trace-id 88b77b16089946ee966d2ae55e0921d7
+  --trace-id e6d5d34d529a453ab06734544d4a1650 \
+  --trace-id 3dddfacc626546298ca0b9b1c767c552 \
+  --trace-id b4dfba42318241c09ffd3ac2798306d7 \
+  --trace-id 19b293a67a6a45fc924cc1e0b54ce3f1 \
+  --trace-id a3ace29ebcd340d3ae48526c97d062bd
 ```
 
 The exporter writes two artifacts:
 
-- `raw-imported-support-cases.jsonl` contains all 35 observations returned by
+- `raw-imported-support-cases.jsonl` contains all 59 observations returned by
   Langfuse. It preserves the root spans, PydanticAI agent spans, model
   generations, tool calls, timestamps, costs, and metadata. Public-key metadata
   is removed.
@@ -54,7 +54,7 @@ The exporter writes two artifacts:
   tool schemas, tool arguments, tool results, final output, and source stamps.
 
 The replay rows carry
-`fixture_generation_id=kitaru-replay-example-20260720-regenerated` and
+`fixture_generation_id=kitaru-replay-example-20260720-multistep` and
 `fixture_contract_revision=pydantic-ai-final-generation-v1`. The revision marks
 the deterministic conversion from the raw export. Kitaru can import the raw
 observation stream, but the current importer reports ambiguous message order

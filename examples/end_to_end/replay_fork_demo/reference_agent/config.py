@@ -11,7 +11,7 @@ FIXTURES_DIR = EXAMPLE_DIR / "fixtures"
 VARIANTS_DIR = EXAMPLE_DIR / "variants"
 SCENARIOS_PATH = EXAMPLE_DIR.parent / "trace_fixtures" / "scenarios.yaml"
 IMPORTED_SOURCE_VARIANT = "baseline"
-IMPORTED_SOURCE_VERSION = "v2.3-structured-escalation-imported"
+IMPORTED_SOURCE_VERSION = "investigation-v1"
 
 
 def imported_source_version_for_variant(variant: str) -> str:
@@ -35,6 +35,7 @@ class Scenario(BaseModel):
     customer_key: str | None = None
     expected_policy_label: str
     expected_required_action: str
+    investigation_tools: list[str] = Field(default_factory=list)
     notes: str = ""
 
 

@@ -50,6 +50,11 @@ def test_scenarios_and_variants_load() -> None:
 
     assert len(scenarios) == 8
     assert len(smoke_scenarios) == 6
+    assert all(len(scenario.investigation_tools) >= 4 for scenario in smoke_scenarios)
+    assert {
+        "get_feature_entitlements",
+        "get_seat_usage",
+    } <= set(baseline.allowed_tools)
     assert baseline.model == "openai-chat:gpt-5-mini"
     assert "update_customer_setting" in baseline.denied_tools
     assert nano.model == "openai-chat:gpt-5-nano"
@@ -107,7 +112,7 @@ def test_support_decision_schema_guides_bounded_retry(tmp_path: Path) -> None:
 
     scenario = {item.scenario_id: item for item in load_scenarios()}[
         "account_setting_change_request"
-    ]
+    ].model_copy(update={"investigation_tools": []})
     variant = load_variant("baseline")
     deps = SupportAgentDeps(
         scenario=scenario,
@@ -208,12 +213,18 @@ def test_mock_api_and_knowledge_search() -> None:
         )
         status = tools.run("get_service_status", {"service": "exports"})
         usage = tools.run("get_recent_usage", {"customer_id": "cust_acme"})
+        entitlements = tools.run(
+            "get_feature_entitlements", {"customer_id": "cust_acme"}
+        )
+        seats = tools.run("get_seat_usage", {"customer_id": "cust_acme"})
 
     kb_hits = search_kb("billing owner change permission approval")
 
     assert status.result["incident_id"] == "inc_exports_2026_06_17"
     assert "incident:inc_exports_2026_06_17" in status.evidence_ids
     assert usage.result["spike_reason"].startswith("A backfill job")
+    assert entitlements.result["requested_feature_enabled"] is False
+    assert seats.result["unused_seats"] == 8
     assert kb_hits[0]["document_id"] == "billing.md#owner-changes"
 
 

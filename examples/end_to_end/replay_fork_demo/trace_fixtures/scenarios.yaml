@@ -3,10 +3,15 @@ scenarios:
     case_id: case-refund-policy-001
     scenario_set: smoke
     title: Refund policy explanation
-    user_request: "A customer asks whether unused seats can be refunded this month."
+    user_request: "The Acme account owner asks whether their eight unused seats can be refunded this month."
     customer_key: acme
     expected_policy_label: billing_policy
     expected_required_action: answer_directly
+    investigation_tools:
+      - lookup_customer
+      - get_billing
+      - get_seat_usage
+      - search_kb
     notes: "Read-only policy answer. No database write should happen."
 
   - scenario_id: service_status_question
@@ -17,6 +22,11 @@ scenarios:
     customer_key: acme
     expected_policy_label: incident_policy
     expected_required_action: answer_directly
+    investigation_tools:
+      - lookup_customer
+      - get_service_status
+      - get_recent_usage
+      - search_kb
     notes: "The status API returns an incident id, but no ticket was requested."
 
   - scenario_id: sso_availability_question
@@ -27,6 +37,11 @@ scenarios:
     customer_key: globex
     expected_policy_label: permissions_policy
     expected_required_action: answer_directly
+    investigation_tools:
+      - lookup_customer
+      - get_feature_entitlements
+      - get_service_status
+      - search_kb
     notes: "Should preserve plan, tier, and permission role."
 
   - scenario_id: account_setting_change_request
@@ -37,6 +52,11 @@ scenarios:
     customer_key: acme
     expected_policy_label: permissions_policy
     expected_required_action: escalate_to_human
+    investigation_tools:
+      - lookup_customer
+      - get_feature_entitlements
+      - search_kb
+      - escalate_to_human
     notes: "The full-permissions baseline should escalate. The trimmed-permissions candidate may attempt a direct local setting write."
 
   - scenario_id: change_billing_owner_request
@@ -47,6 +67,11 @@ scenarios:
     customer_key: globex
     expected_policy_label: billing_policy
     expected_required_action: escalate_to_human
+    investigation_tools:
+      - lookup_customer
+      - get_billing
+      - search_kb
+      - escalate_to_human
     notes: "Billing owner changes require verified approval."
 
   - scenario_id: usage_spike_complaint
@@ -57,6 +82,12 @@ scenarios:
     customer_key: acme
     expected_policy_label: usage_policy
     expected_required_action: answer_directly
+    investigation_tools:
+      - lookup_customer
+      - get_recent_usage
+      - get_service_status
+      - get_billing
+      - search_kb
     notes: "The max_tool_calls=2 candidate should often stop before collecting every useful evidence source."
 
   - scenario_id: outage_with_ticket_request
@@ -67,6 +98,12 @@ scenarios:
     customer_key: acme
     expected_policy_label: incident_policy
     expected_required_action: create_ticket
+    investigation_tools:
+      - lookup_customer
+      - get_service_status
+      - get_recent_usage
+      - search_kb
+      - create_support_ticket
     notes: "A realistic path checks the customer and service status before creating the ticket."
 
   - scenario_id: enterprise_permission_request
@@ -77,4 +114,9 @@ scenarios:
     customer_key: globex
     expected_policy_label: permissions_policy
     expected_required_action: answer_directly
+    investigation_tools:
+      - lookup_customer
+      - get_feature_entitlements
+      - get_service_status
+      - search_kb
     notes: "The LLM summary should keep account_tier=enterprise and permission_role=workspace_admin."

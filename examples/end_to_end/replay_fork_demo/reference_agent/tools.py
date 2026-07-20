@@ -1,4 +1,4 @@
-"""Local tools used by the reference-agent LangGraph graph."""
+"""Local tools used by the PydanticAI reference agent."""
 
 from pathlib import Path
 from typing import Any
@@ -93,6 +93,32 @@ class SupportTools:
                 args=args,
                 result=result,
                 evidence_ids=[f"api:billing:{args['customer_id']}"],
+            )
+        if name == "get_feature_entitlements":
+            result = fetch_json(
+                self.api_base_url,
+                "/entitlements",
+                {"customer_id": str(args["customer_id"])},
+            )
+            return ToolExecution(
+                name=name,
+                kind="http_read",
+                args=args,
+                result=result,
+                evidence_ids=[f"api:entitlements:{args['customer_id']}"],
+            )
+        if name == "get_seat_usage":
+            result = fetch_json(
+                self.api_base_url,
+                "/seats",
+                {"customer_id": str(args["customer_id"])},
+            )
+            return ToolExecution(
+                name=name,
+                kind="http_read",
+                args=args,
+                result=result,
+                evidence_ids=[f"api:seats:{args['customer_id']}"],
             )
         if name == "search_kb":
             hits = search_kb(str(args["query"]), self.kb_dir)

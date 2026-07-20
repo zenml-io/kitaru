@@ -25,7 +25,7 @@ from tests.replay_fork_support import (
     bootstrap_account_setting_comparable_suite,
 )
 
-STATUS_TRACE_ID = "00cbb102c7844e00aeb0149e8deea83b"
+STATUS_TRACE_ID = "3dddfacc626546298ca0b9b1c767c552"
 BASELINE_REPRODUCTION_VERSION = "recorded-path-reproduction-v1"
 FIXED_CANDIDATE_VERSION = "permissions-fix-v1"
 
@@ -177,7 +177,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     assert resumed_member.boundary == boundary
     resumed_child = KitaruClient().executions.get(resumed_member.child_execution_id)
     assert resumed_child.status == "completed", resumed_child.failure
-    assert resumed_member.recorded_response_hits == 1, (
+    assert resumed_member.recorded_response_hits == 2, (
         resumed_member.model_dump_json(indent=2),
         resumed_child.failure,
     )
@@ -196,7 +196,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     mismatched = demo._resume_case(
         account_execution_id,
         boundary_kind="tool-result",
-        boundary_index=1,
+        boundary_index=2,
         name="account-setting-structured-mismatch",
         idempotency_key="account-setting-structured-mismatch-v1",
         candidate_variant="baseline",
@@ -303,7 +303,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     ]
     assert suite.record.counts.verified == 2
     assert suite.record.imported_replay_evidence is not None
-    assert suite.record.imported_replay_evidence.recorded_response_hits == 4
+    assert suite.record.imported_replay_evidence.recorded_response_hits == 8
     assert suite.record.imported_replay_evidence.recorded_response_misses == 0
     assert suite.record.imported_replay_evidence.blocked_calls == 0
     assert suite.verdict is not None
@@ -404,7 +404,7 @@ def test_imported_replay_journey_persists_contract_faithful_evidence(
     )
     counterfactual_member = counterfactual.record.imported_replay_members[0]
     assert counterfactual_member.recorded_response_hits == 0
-    assert counterfactual_member.recorded_response_misses == 3
+    assert counterfactual_member.recorded_response_misses == 4
     assert counterfactual_member.blocked_calls == 1
     assert counterfactual_member.path_diverged is True
     assert counterfactual_member.comparability is ImportedReplayComparability.DEGRADED

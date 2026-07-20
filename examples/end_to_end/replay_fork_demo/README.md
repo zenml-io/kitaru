@@ -10,7 +10,7 @@ shape is:
 
 ```text
 customer-support-agent
-└── v2.3-structured-escalation-imported
+└── investigation-v1
     ├── 5 imported source executions
     ├── experiment attempt 1: 5 child executions
     ├── experiment attempt 2: 5 child executions
@@ -22,7 +22,7 @@ experiment creates new experiment records and executions under the existing
 AgentVersion. It does not create another flow.
 
 The checked-in `trace_fixtures/imported-support-cases.jsonl` file is a portable,
-replay-ready projection of the Langfuse evidence. The complete 35-observation
+replay-ready projection of the Langfuse evidence. The complete 59-observation
 export is stored beside it as
 `trace_fixtures/raw-imported-support-cases.jsonl`. Trace generation and export
 instructions live in `trace_fixtures/README.md`; they are maintenance steps,
@@ -38,16 +38,20 @@ nondeterminism can still produce a different tool path.
 
 The fixture contains these source traces in order:
 
-| Case | Langfuse trace ID | Expected action |
-| --- | --- | --- |
-| Account setting change | `390972667ef147cbbbd6db2b30e8ad1b` | Escalate to a human |
-| Service status | `00cbb102c7844e00aeb0149e8deea83b` | Answer directly |
-| Refund policy | `40860e9cee9d4d71b6a6f82208af1a75` | Answer directly |
-| Usage spike | `50b5ad259d5c4c61bdfe2f593c8f8495` | Answer directly |
-| Outage ticket | `88b77b16089946ee966d2ae55e0921d7` | Create a ticket when warranted |
+| Case | Langfuse trace ID | Tool calls | Expected action |
+| --- | --- | ---: | --- |
+| Account setting change | `e6d5d34d529a453ab06734544d4a1650` | 4 | Escalate to a human |
+| Service status | `3dddfacc626546298ca0b9b1c767c552` | 4 | Answer directly |
+| Refund policy | `b4dfba42318241c09ffd3ac2798306d7` | 4 | Answer directly |
+| Usage spike | `19b293a67a6a45fc924cc1e0b54ce3f1` | 5 | Answer directly |
+| Outage ticket | `a3ace29ebcd340d3ae48526c97d062bd` | 5 | Create a ticket when warranted |
+
+The paths combine customer lookup with account, operational, billing, and
+policy evidence. The account-setting and outage cases end with recorded write
+tools for escalation and ticket creation.
 
 All five traces declare source label
-`v2.3-structured-escalation-imported` and were produced by the baseline
+`investigation-v1` and were produced by the baseline
 PydanticAI implementation.
 
 ## 2. Prepare the example
@@ -105,7 +109,7 @@ uv run kitaru agents show customer-support-agent
 ```
 
 The output should report one AgentVersion with alias
-`v2.3-structured-escalation-imported`.
+`investigation-v1`.
 
 ## 4. Preview and import all five traces
 
@@ -116,7 +120,7 @@ uv run kitaru import langfuse \
   trace_fixtures/imported-support-cases.jsonl \
   --source-project-id cmqnzjkwa01m7ad0cjmj6fhpq \
   --agent customer-support-agent \
-  --agent-version v2.3-structured-escalation-imported
+  --agent-version investigation-v1
 ```
 
 Check that the preview selects five complete traces, verifies their source
@@ -127,7 +131,7 @@ uv run kitaru import langfuse \
   trace_fixtures/imported-support-cases.jsonl \
   --source-project-id cmqnzjkwa01m7ad0cjmj6fhpq \
   --agent customer-support-agent \
-  --agent-version v2.3-structured-escalation-imported \
+  --agent-version investigation-v1 \
   --write \
   --confirm-data-storage
 ```
@@ -168,7 +172,7 @@ for attempt in 1 2 3; do
     --name customer-support-baseline-regression \
     --idempotency-key "customer-support-baseline-regression-attempt-$attempt" \
     --candidate-variant baseline \
-    --candidate-version v2.3-structured-escalation-imported
+    --candidate-version investigation-v1
 done
 ```
 

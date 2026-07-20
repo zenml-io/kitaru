@@ -13,7 +13,7 @@ from .db import load_seed
 
 
 class MockApiServer:
-    """Small localhost API server for status, usage, and billing reads."""
+    """Small localhost API server for support evidence reads."""
 
     def __init__(self, seed_path: Path = FIXTURES_DIR / "seed_data.json") -> None:
         self.seed_path = seed_path
@@ -81,6 +81,10 @@ def _build_handler(seed: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 body = _lookup_response(seed["usage"], params.get("customer_id"))
             elif parsed.path == "/billing":
                 body = _lookup_response(seed["billing"], params.get("customer_id"))
+            elif parsed.path == "/entitlements":
+                body = _lookup_response(seed["entitlements"], params.get("customer_id"))
+            elif parsed.path == "/seats":
+                body = _lookup_response(seed["seat_usage"], params.get("customer_id"))
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -100,7 +104,21 @@ def _build_handler(seed: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
 def _status_response(seed: dict[str, Any], params: dict[str, str]) -> dict[str, Any]:
     service = params.get("service", "")
-    return dict(seed["service_status"].get(service, {"service": service, "ok": True}))
+    normalized = service.strip().lower()
+    aliases = {
+        "export api": "exports",
+        "export-service": "exports",
+        "export_api": "exports",
+        "exporter": "exports",
+        "exports api": "exports",
+        "sso": "sso",
+    }
+    lookup_key = aliases.get(normalized, normalized)
+    if lookup_key.startswith("export"):
+        lookup_key = "exports"
+    return dict(
+        seed["service_status"].get(lookup_key, {"service": service, "ok": True})
+    )
 
 
 def _lookup_response(records: dict[str, Any], key: str | None) -> dict[str, Any]:

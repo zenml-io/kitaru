@@ -389,14 +389,14 @@ def test_source_fixture_matches_json_text_agent_contract() -> None:
         config_module.SupportDecision.model_validate_json(final_text)
         assert json.loads(final_text) == row["output"]
         assert row["metadata"]["fixture_generation_id"] == (
-            "kitaru-replay-example-20260720-regenerated"
+            "kitaru-replay-example-20260720-multistep"
         )
         assert row["metadata"]["fixture_contract_revision"] == (
             "pydantic-ai-final-generation-v1"
         )
 
     account_row = next(
-        row for row in rows if row["traceId"] == "390972667ef147cbbbd6db2b30e8ad1b"
+        row for row in rows if row["traceId"] == "e6d5d34d529a453ab06734544d4a1650"
     )
     escalation_call = next(
         tool_call["function"]
@@ -428,15 +428,15 @@ def test_raw_source_fixture_preserves_regenerated_langfuse_observations() -> Non
         json.loads(line) for line in fixture.read_text(encoding="utf-8").splitlines()
     ]
 
-    account_trace_id = "390972667ef147cbbbd6db2b30e8ad1b"
+    account_trace_id = "e6d5d34d529a453ab06734544d4a1650"
     trace_ids = {
         account_trace_id,
-        "00cbb102c7844e00aeb0149e8deea83b",
-        "40860e9cee9d4d71b6a6f82208af1a75",
-        "50b5ad259d5c4c61bdfe2f593c8f8495",
-        "88b77b16089946ee966d2ae55e0921d7",
+        "3dddfacc626546298ca0b9b1c767c552",
+        "b4dfba42318241c09ffd3ac2798306d7",
+        "19b293a67a6a45fc924cc1e0b54ce3f1",
+        "a3ace29ebcd340d3ae48526c97d062bd",
     }
-    assert len(rows) == 35
+    assert len(rows) == 59
     assert {row["traceId"] for row in rows} == trace_ids
     assert {row["type"] for row in rows if row["traceId"] == account_trace_id} == {
         "AGENT",
@@ -448,11 +448,16 @@ def test_raw_source_fixture_preserves_regenerated_langfuse_observations() -> Non
         row["name"]
         for row in rows
         if row["traceId"] == account_trace_id and row["type"] == "TOOL"
-    ] == ["lookup_customer", "search_kb", "escalate_to_human"]
+    ] == [
+        "lookup_customer",
+        "get_feature_entitlements",
+        "search_kb",
+        "escalate_to_human",
+    ]
     roots = [row for row in rows if row["name"] == "support-agent"]
     assert len(roots) == 5
     assert {row["metadata"]["fixture_generation_id"] for row in roots} == {
-        "kitaru-replay-example-20260720-regenerated"
+        "kitaru-replay-example-20260720-multistep"
     }
     assert all(
         "public_key" not in json.dumps(row.get("metadata", {})).lower() for row in rows

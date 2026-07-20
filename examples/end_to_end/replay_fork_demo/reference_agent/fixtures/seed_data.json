@@ -15,6 +15,33 @@
       "next_invoice_amount_usd": 4200
     }
   },
+  "entitlements": {
+    "cust_acme": {
+      "approval_required_for_account_wide_changes": true,
+      "customer_id": "cust_acme",
+      "enabled_features": [
+        "scheduled_exports",
+        "audit_logs"
+      ],
+      "found": true,
+      "plan": "Business",
+      "requested_feature": "beta_exports_fast_path",
+      "requested_feature_enabled": false
+    },
+    "cust_globex": {
+      "approval_required_for_account_wide_changes": true,
+      "customer_id": "cust_globex",
+      "enabled_features": [
+        "scheduled_exports",
+        "audit_logs",
+        "sso"
+      ],
+      "found": true,
+      "plan": "Enterprise",
+      "requested_feature": "sso",
+      "requested_feature_enabled": true
+    }
+  },
   "customer_settings": {
     "cust_acme": {
       "api_key_rotated": "false",
@@ -58,6 +85,24 @@
       "ok": true,
       "service": "sso",
       "severity": "none"
+    }
+  },
+  "seat_usage": {
+    "cust_acme": {
+      "active_seats": 42,
+      "customer_id": "cust_acme",
+      "found": true,
+      "purchased_seats": 50,
+      "unused_seats": 8,
+      "unused_since_days": 18
+    },
+    "cust_globex": {
+      "active_seats": 196,
+      "customer_id": "cust_globex",
+      "found": true,
+      "purchased_seats": 200,
+      "unused_seats": 4,
+      "unused_since_days": 5
     }
   },
   "usage": {

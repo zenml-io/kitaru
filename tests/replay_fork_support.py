@@ -22,7 +22,7 @@ from kitaru import KitaruClient
 from tests.test_replay_fork_demo import DEMO_ROOT, _load_demo_module
 
 FIXTURE = DEMO_ROOT / "trace_fixtures" / "imported-support-cases.jsonl"
-ACCOUNT_TRACE_ID = "390972667ef147cbbbd6db2b30e8ad1b"
+ACCOUNT_TRACE_ID = "e6d5d34d529a453ab06734544d4a1650"
 FIXED_CANDIDATE_VERSION = "permissions-fix-v1"
 
 
@@ -246,6 +246,16 @@ def recorded_path_model() -> FunctionModel:
                         )
                     ]
                 )
+            if "get_feature_entitlements" not in returned_names:
+                return pydantic_messages.ModelResponse(
+                    parts=[
+                        pydantic_messages.ToolCallPart(
+                            tool_name="get_feature_entitlements",
+                            args={"customer_id": "cust_acme"},
+                            tool_call_id="candidate-entitlements",
+                        )
+                    ]
+                )
             if "search_kb" not in returned_names:
                 return pydantic_messages.ModelResponse(
                     parts=[
@@ -253,9 +263,9 @@ def recorded_path_model() -> FunctionModel:
                             tool_name="search_kb",
                             args={
                                 "query": (
-                                    "enable beta feature account setting "
-                                    "beta_exports_fast_path who can enable beta "
-                                    "features account-wide policy"
+                                    "beta_exports_fast_path account-wide enable "
+                                    "approval required policy beta feature "
+                                    "enablement steps"
                                 )
                             },
                             tool_call_id="candidate-kb",
@@ -287,13 +297,49 @@ def recorded_path_model() -> FunctionModel:
             )
 
         if "currently timing out" in prompt:
+            if "lookup_customer" not in returned_names:
+                return pydantic_messages.ModelResponse(
+                    parts=[
+                        pydantic_messages.ToolCallPart(
+                            tool_name="lookup_customer",
+                            args={"email_or_id": "Acme"},
+                            tool_call_id="candidate-status-customer",
+                        )
+                    ]
+                )
             if "get_service_status" not in returned_names:
                 return pydantic_messages.ModelResponse(
                     parts=[
                         pydantic_messages.ToolCallPart(
                             tool_name="get_service_status",
-                            args={"service": "Export API"},
+                            args={"service": "export_api"},
                             tool_call_id="candidate-status",
+                        )
+                    ]
+                )
+            if "get_recent_usage" not in returned_names:
+                return pydantic_messages.ModelResponse(
+                    parts=[
+                        pydantic_messages.ToolCallPart(
+                            tool_name="get_recent_usage",
+                            args={"customer_id": "cust_acme"},
+                            tool_call_id="candidate-status-usage",
+                        )
+                    ]
+                )
+            if "search_kb" not in returned_names:
+                return pydantic_messages.ModelResponse(
+                    parts=[
+                        pydantic_messages.ToolCallPart(
+                            tool_name="search_kb",
+                            args={
+                                "query": (
+                                    "export API timeout incident 30 seconds status "
+                                    "incident inc_exports_2026_06_17 guidance for "
+                                    "customers"
+                                )
+                            },
+                            tool_call_id="candidate-status-kb",
                         )
                     ]
                 )
@@ -305,8 +351,19 @@ def recorded_path_model() -> FunctionModel:
                     "summary": (
                         "The recorded status and incident evidence were reproduced."
                     ),
-                    "evidence_ids": ["api:status:Export API"],
-                    "tool_names": ["get_service_status"],
+                    "evidence_ids": [
+                        "db:customers:cust_acme",
+                        "api:status:exports",
+                        "incident:inc_exports_2026_06_17",
+                        "api:usage:cust_acme",
+                        "incidents.md#export-api-incident",
+                    ],
+                    "tool_names": [
+                        "lookup_customer",
+                        "get_service_status",
+                        "get_recent_usage",
+                        "search_kb",
+                    ],
                 }
             )
 

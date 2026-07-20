@@ -14,6 +14,7 @@ from typing import Any, cast
 from pydantic import ValidationError
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.capabilities import Instrumentation
+from pydantic_ai.messages import ModelResponse, ToolCallPart
 
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
@@ -108,8 +109,25 @@ def build_support_agent(
     )
 
     @agent.output_validator
-    def validate_support_decision(output: str) -> str:
-        """Require the persisted text result to satisfy the decision schema."""
+    def validate_support_decision(
+        ctx: RunContext[SupportAgentDeps], output: str
+    ) -> str:
+        """Require the case evidence and decision schema before completion."""
+        completed = {
+            part.tool_name
+            for message in ctx.messages
+            if isinstance(message, ModelResponse)
+            for part in message.parts
+            if isinstance(part, ToolCallPart)
+        }
+        missing = [
+            name for name in _investigation_tools(ctx) if name not in completed
+        ]
+        if missing:
+            raise ModelRetry(
+                "Complete the investigation playbook before answering. Missing "
+                f"tools: {', '.join(missing)}."
+            )
         try:
             SupportDecision.model_validate_json(output)
         except ValidationError as exc:
@@ -118,6 +136,22 @@ def build_support_agent(
                 f"Pydantic validation details:\n{exc}"
             ) from exc
         return output
+
+    @agent.instructions
+    def investigation_playbook(ctx: RunContext[SupportAgentDeps]) -> str:
+        """Require the evidence sources selected for this support case."""
+        required = ", ".join(_investigation_tools(ctx))
+        if not required:
+            return (
+                "Follow the recorded investigation path and use tools to verify "
+                "each fact before returning a final decision."
+            )
+        return (
+            "Follow this case's investigation playbook before returning a final "
+            f"decision. Call each of these tools once, in order: {required}. "
+            "Use identifiers returned by earlier tools as inputs to later tools. "
+            "Do not skip a read because you think you already know the answer."
+        )
 
     @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def lookup_customer(
@@ -146,6 +180,22 @@ def build_support_agent(
     ) -> ToolExecution:
         """Fetch billing details for one customer."""
         return ctx.deps.execute("get_billing", {"customer_id": customer_id})
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def get_feature_entitlements(
+        ctx: RunContext[SupportAgentDeps], customer_id: str
+    ) -> ToolExecution:
+        """Fetch enabled features and approval requirements for one account."""
+        return ctx.deps.execute(
+            "get_feature_entitlements", {"customer_id": customer_id}
+        )
+
+    @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
+    def get_seat_usage(
+        ctx: RunContext[SupportAgentDeps], customer_id: str
+    ) -> ToolExecution:
+        """Fetch purchased, active, and unused seat counts for one account."""
+        return ctx.deps.execute("get_seat_usage", {"customer_id": customer_id})
 
     @agent.tool(metadata={"kitaru_replay": {"effect": "read_only"}})
     def search_kb(ctx: RunContext[SupportAgentDeps], query: str) -> ToolExecution:
@@ -195,6 +245,13 @@ def build_support_agent(
         )
 
     return KitaruAgent(agent, name=name, checkpoint_strategy="calls")
+
+
+def _investigation_tools(ctx: RunContext[SupportAgentDeps]) -> tuple[str, ...]:
+    """Return source-generation playbook tools when full dependencies exist."""
+    if not isinstance(ctx.deps, SupportAgentDeps):
+        return ()
+    return tuple(ctx.deps.scenario.investigation_tools)
 
 
 def _shared_instructions() -> str:

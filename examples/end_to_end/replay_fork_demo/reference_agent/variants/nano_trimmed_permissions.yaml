@@ -8,6 +8,8 @@ allowed_tools:
   - get_service_status
   - get_recent_usage
   - get_billing
+  - get_feature_entitlements
+  - get_seat_usage
   - search_kb
   - create_support_ticket
   - escalate_to_human
