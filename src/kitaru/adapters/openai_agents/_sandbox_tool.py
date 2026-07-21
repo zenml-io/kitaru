@@ -191,7 +191,7 @@ def _normalize_cleanup(cleanup: str) -> SandboxToolCleanupPolicy:
         raise KitaruUsageError(
             f"sandbox_command_tool cleanup must be either {expected}."
         )
-    return cast(SandboxToolCleanupPolicy, cleanup)
+    return cleanup
 
 
 def _parse_tool_input(input_json: str) -> dict[str, Any]:

@@ -480,7 +480,7 @@ def normalize_timeout_seconds(
 def _normalize_cleanup(cleanup: str) -> SandboxCleanupPolicy:
     if cleanup not in {CLEANUP_DESTROY, CLEANUP_CLOSE}:
         raise KitaruUsageError("Sandbox cleanup must be either 'destroy' or 'close'.")
-    return cast(SandboxCleanupPolicy, cleanup)
+    return cleanup
 
 
 def _resolve_active_stack(
