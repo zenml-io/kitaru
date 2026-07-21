@@ -33,11 +33,3 @@ CVE-2026-48817  # starlette -> 1.1.0 (above fastapi's <0.50.0 ceiling)
 CVE-2026-48818  # starlette -> 1.1.0 (above fastapi's <0.50.0 ceiling)
 CVE-2026-54282  # starlette -> 1.3.0 (above fastapi's <0.50.0 ceiling)
 CVE-2026-54283  # starlette -> 1.3.1 (above fastapi's <0.50.0 ceiling)
-
-# --- Reachable today; suppressed only until the starlette bump lands. ------
-# Unlike the five above, these two are fixed *below* fastapi's <0.50.0 ceiling,
-# so nothing upstream is blocking them: our lock is just stale at starlette
-# 0.45.3. `uv lock --upgrade-package starlette` resolves to 0.49.3 and clears
-# both. Delete these two entries as part of that bump.
-CVE-2025-54121  # starlette 0.45 -> 0.47.2 (reachable; pending lock refresh)
-CVE-2025-62727  # starlette 0.45 -> 0.49.1 (reachable; pending lock refresh)
