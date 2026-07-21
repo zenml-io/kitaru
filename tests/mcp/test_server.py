@@ -22,6 +22,7 @@ from kitaru.config import (
     CloudProvider,
     ImageSettings,
     KubernetesStackSpec,
+    LocalCloudArtifactStoreSpec,
     ModalStackSpec,
     ProjectInfo,
     SagemakerStackSpec,
@@ -158,6 +159,16 @@ def test_delete_tool_descriptions_warn_about_active_workloads() -> None:
         assert "does not stop" in description
         assert "continue consuming compute" in description
         assert "wait for termination" in description
+
+
+def test_manage_stack_description_documents_local_cloud_storage() -> None:
+    """The MCP tool description should explain the local cloud-storage contract."""
+    tools = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    description = tools["manage_stack"].description or ""
+
+    assert "runner local while storing artifacts in the cloud" in description
+    assert "ambient" in description
+    assert "provider credentials on the machine running the flow" in description
 
 
 def test_fastmcp_registers_public_tools_with_expected_input_schemas() -> None:
@@ -2566,12 +2577,18 @@ def test_manage_stack_create_modal_rejects_aws_credentials_without_region() -> N
     mock_create_stack.assert_not_called()
 
 
-def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -> None:
-    """MCP Modal verify=False should not request a cloud connector by itself."""
-    with (
-        patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
-        pytest.raises(ValueError, match="only applies when Kitaru is creating"),
-    ):
+def test_manage_stack_create_modal_accepts_no_verify_without_connector_input() -> None:
+    """MCP Modal verify=False should also cover reused service connectors."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-modal-id", name="prod-modal", is_active=False),
+            previous_active_stack=None,
+            components_created=(),
+            stack_type="modal",
+            service_connectors_created=(),
+            resources={},
+        )
+
         manage_stack(
             "create",
             "prod-modal",
@@ -2581,7 +2598,10 @@ def test_manage_stack_create_modal_rejects_no_verify_without_connector_input() -
             verify=False,
         )
 
-    mock_create_stack.assert_not_called()
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert isinstance(modal_spec, ModalStackSpec)
+    assert modal_spec.verify is False
+    assert modal_spec.credentials is None
 
 
 def test_manage_stack_create_modal_rejects_mismatched_connectorless_resources() -> None:
@@ -2761,48 +2781,94 @@ def test_manage_stack_create_kubernetes_requires_required_fields(
     mock_create_stack.assert_not_called()
 
 
-_REMOTE_STACK_TYPE_ERROR = (
-    'Remote stack options require `stack_type="kubernetes"`, '
-    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
-    '`stack_type="azureml"`, or `stack_type="modal"`'
+@pytest.mark.parametrize(
+    ("artifact_store", "provider"),
+    [
+        ("s3://my-bucket/kitaru", CloudProvider.AWS),
+        ("gs://my-bucket/kitaru", CloudProvider.GCP),
+        ("az://container/kitaru", CloudProvider.AZURE),
+        ("abfs://container/kitaru", CloudProvider.AZURE),
+        ("abfss://container/kitaru", CloudProvider.AZURE),
+    ],
 )
-_CLOUD_CONNECTOR_STACK_TYPE_ERROR = (
-    'Remote stack options require `stack_type="kubernetes"`, '
-    '`stack_type="vertex"`, `stack_type="sagemaker"`, '
-    '`stack_type="azureml"`, or `stack_type="modal"`'
-)
+def test_manage_stack_create_local_accepts_cloud_artifact_store(
+    artifact_store: str,
+    provider: CloudProvider,
+) -> None:
+    """MCP should produce the shared local-cloud request for every provider."""
+    with patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack:
+        mock_create_stack.return_value = SimpleNamespace(
+            stack=StackInfo(id="stack-dev-id", name="dev", is_active=False),
+            previous_active_stack=None,
+            components_created=(
+                "dev (orchestrator)",
+                "dev (artifact_store)",
+                "dev (sandbox)",
+            ),
+            stack_type="local",
+            service_connectors_created=(),
+            resources={
+                "provider": provider.value,
+                "artifact_store": artifact_store,
+                "connector_mode": "ambient",
+            },
+        )
+
+        payload = manage_stack(
+            "create",
+            "dev",
+            activate=False,
+            artifact_store=artifact_store,
+        )
+
+    assert mock_create_stack.call_args.kwargs["remote_spec"] is None
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    spec = mock_create_stack.call_args.kwargs["local_cloud_artifact_store_spec"]
+    assert isinstance(spec, LocalCloudArtifactStoreSpec)
+    assert spec.artifact_store == artifact_store
+    assert spec.provider == provider
+    assert spec.credentials is None
+    assert payload["resources"]["artifact_store"] == artifact_store
 
 
 @pytest.mark.parametrize(
     ("extra_kwargs", "expected_message"),
     [
-        ({"artifact_store": "s3://my-bucket/kitaru"}, _REMOTE_STACK_TYPE_ERROR),
         (
             {
                 "container_registry": (
                     "123456789012.dkr.ecr.eu-west-1.amazonaws.com/kitaru"
                 )
             },
-            _REMOTE_STACK_TYPE_ERROR,
+            'Remote stack options require `stack_type="kubernetes"`',
         ),
         (
             {"cluster": "cluster-1"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `cluster`',
         ),
-        ({"region": "eu-west-1"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
         (
             {"namespace": "ml-team"},
             'Kubernetes-only options require `stack_type="kubernetes"`: `namespace`',
         ),
-        ({"credentials": "implicit"}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
-        ({"verify": False}, _CLOUD_CONNECTOR_STACK_TYPE_ERROR),
+        (
+            {"region": "eu-west-1"},
+            r"`region` require `artifact_store` with an s3://",
+        ),
+        (
+            {"credentials": "implicit"},
+            r"`credentials` require `artifact_store` with an s3://",
+        ),
+        (
+            {"verify": False},
+            r"`verify` require `artifact_store` with an s3://",
+        ),
     ],
 )
-def test_manage_stack_create_local_rejects_kubernetes_only_options(
+def test_manage_stack_create_local_rejects_incompatible_options(
     extra_kwargs: dict[str, Any],
     expected_message: str,
 ) -> None:
-    """Local MCP create should reject remote-stack inputs."""
+    """Local MCP create should reject fields without their required local storage."""
     with (
         patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
         pytest.raises(ValueError, match=expected_message),
@@ -3324,10 +3390,7 @@ def test_manage_stack_create_local_rejects_azureml_only_options() -> None:
         patch("kitaru._config._stacks._create_stack_operation") as mock_create_stack,
         pytest.raises(
             ValueError,
-            match=(
-                'Stack-specific options require `stack_type="azureml"` or '
-                '`stack_type="modal"`: `subscription_id`'
-            ),
+            match=(r"`subscription_id` require `artifact_store` with an s3://"),
         ),
     ):
         manage_stack(

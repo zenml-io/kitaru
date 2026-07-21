@@ -102,6 +102,50 @@ If you want to create the stack without switching to it yet:
 kitaru stack create dev --no-activate
 ```
 
+## Use cloud storage with a local runner
+
+You can keep flow execution on your machine while storing checkpoints in cloud
+storage:
+
+```bash
+kitaru stack create local-cloud \
+  --type local \
+  --artifact-store s3://my-bucket/kitaru
+```
+
+Local stacks accept these storage URI forms:
+
+- Amazon S3: `s3://bucket/path`
+- Google Cloud Storage: `gs://bucket/path`
+- Azure Blob Storage: `az://container/path`
+- Azure Data Lake Storage: `abfs://container/path` or
+  `abfss://container/path`
+
+You do not normally need another authentication flag. Kitaru uses credentials in
+this order:
+
+1. If you pass `--credentials`, Kitaru creates a connector for those
+   credentials.
+2. Otherwise, Kitaru reuses one matching connector from the configured Kitaru
+   server when available. Kitaru verifies that the connector can still
+   authenticate before linking it, so a stale connector fails at stack creation
+   with a clear message instead of at run time. Pass `--no-verify` to link the
+   connector without this check.
+3. If no connector matches, the runner uses the cloud provider credentials
+   available on the machine where the flow runs, such as an AWS profile, Google
+   Application Default Credentials, or Azure environment and CLI credentials.
+
+When you are connected to a remote Kitaru server, `--credentials
+aws-profile:NAME` is rejected: the server resolves connector credentials at run
+time and has no access to the AWS profiles on your machine. Use portable
+credentials instead, such as `aws-access-keys:KEY:SECRET` or
+`aws-session-token:KEY:SECRET:TOKEN` (`aws configure export-credentials
+--profile NAME` prints the current values for a profile).
+
+The bucket or container must already exist. Deleting the stack removes Kitaru's
+stack records and created components, but never deletes the bucket, container, or
+stored objects.
+
 ## Create a remote stack
 
 Today, the CLI and MCP server can provision six shipped stack types:

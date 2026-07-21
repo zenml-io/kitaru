@@ -415,6 +415,7 @@ CURRENT_SECTION="Preflight"
 RESULT_RECORDS_FILE=$(mktemp "${TMPDIR:-/tmp}/kitaru-smoke-results.XXXXXX")
 RECORDING_FAILED=false
 GEMINI_SANDBOX_FUNCTION_SMOKE_STACK=""
+SMOKE_LOCAL_CLOUD_STACK=""
 GOOGLE_ADK_SMOKE_ENV=""
 PRO_PROJECT_SMOKE_CREATED_PROJECT=""
 PRO_PROJECT_SMOKE_LOGGED_IN=false
@@ -1312,6 +1313,10 @@ cleanup() {
         timed 60 $UV_RUN kitaru stack delete \
             "$GEMINI_SANDBOX_FUNCTION_SMOKE_STACK" --recursive &>/dev/null || true
     fi
+    if [[ -n "${SMOKE_LOCAL_CLOUD_STACK:-}" ]]; then
+        timed 60 $UV_RUN kitaru stack delete \
+            "$SMOKE_LOCAL_CLOUD_STACK" --recursive &>/dev/null || true
+    fi
     if [[ -n "${GOOGLE_ADK_SMOKE_ENV:-}" ]]; then
         rm -rf "$GOOGLE_ADK_SMOKE_ENV"
     fi
@@ -1586,6 +1591,20 @@ run_test "kitaru stack list"             $UV_RUN kitaru stack list
 run_test "kitaru stack current"          $UV_RUN kitaru stack current
 run_test "kitaru stack create help mentions modal" \
     bash -c "$UV_RUN kitaru stack create --help | grep -q modal"
+run_test "kitaru stack create help mentions local cloud storage" \
+    bash -c "$UV_RUN kitaru stack create --help | grep -q 'Local stacks can use S3, GCS, or Azure storage'"
+SMOKE_LOCAL_CLOUD_STACK="kitaru-smoke-local-cloud-$$"
+run_test "create connectorless local S3 stack" \
+    $UV_RUN kitaru stack create "$SMOKE_LOCAL_CLOUD_STACK" \
+        --type local \
+        --artifact-store s3://kitaru-smoke-placeholder/artifacts \
+        --no-activate
+run_test "inspect connectorless local S3 stack" \
+    bash -c "$UV_RUN kitaru stack show \"$SMOKE_LOCAL_CLOUD_STACK\" --output json | $UV_RUN python -c 'import json,sys; item=json.load(sys.stdin)[\"item\"]; components=item[\"components\"]; assert any(c[\"role\"] == \"runner\" and c[\"backend\"] == \"local\" for c in components); assert any(c[\"role\"] == \"storage\" and c[\"backend\"] == \"s3\" for c in components)'"
+if run_test "delete connectorless local S3 stack" \
+    $UV_RUN kitaru stack delete "$SMOKE_LOCAL_CLOUD_STACK" --recursive; then
+    SMOKE_LOCAL_CLOUD_STACK=""
+fi
 run_test "kitaru model list"             $UV_RUN kitaru model list
 run_test "kitaru analytics status"       $UV_RUN kitaru analytics status
 run_test "kitaru analytics opt-in --help"  $UV_RUN kitaru analytics opt-in --help

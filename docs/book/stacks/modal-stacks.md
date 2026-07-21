@@ -117,11 +117,11 @@ The cloud credential fields are optional. Use them when you want Kitaru to creat
 | `--region` | Cloud provider region when the provider needs one. For AWS-backed Modal stacks, this is the S3/ECR connector region and must match the ECR registry host. For GCP-backed Modal stacks, Kitaru can check it against GAR/GCR when the registry host includes a location. |
 | `--subscription-id` | Azure subscription ID for Azure Blob/ADLS + ACR Modal stacks |
 | `--credentials` | Cloud credential reference, such as `aws-profile:ml-team`, `gcp-service-account:/path/to/key.json`, or `azure-access-token:...` |
-| `--no-verify` | Skip cloud connector verification when Kitaru is creating a connector. It does not affect existing-connector discovery and does not request a connector by itself; pair it with the needed cloud input, such as `--region`, `--subscription-id`, or `--credentials`. |
+| `--no-verify` | Skip cloud connector verification during stack creation. This covers both a new connector Kitaru creates from explicit credentials and existing server-side connectors Kitaru discovers and reuses. |
 
 Top-level `--region` is **not** Modal placement. If you want to steer where Modal places work, set it through `--extra orchestrator.region=...` / `--extra orchestrator.cloud=...` instead.
 
-`aws-profile:PROFILE` is only safe when the ZenML connector runtime can see that AWS profile. On a remote ZenML server, your laptop's SSO profile is usually invisible to the server. Prefer reusing an existing server-side connector for remote Modal stacks, or pass credentials that the server can use directly.
+`aws-profile:PROFILE` is only safe when the ZenML connector runtime can see that AWS profile, so Kitaru rejects it when you are connected to a remote ZenML server — the server cannot see your laptop's AWS profiles. Prefer reusing an existing server-side connector for remote Modal stacks, or pass portable credentials such as `aws-access-keys:KEY:SECRET` or `aws-session-token:KEY:SECRET:TOKEN`.
 
 ## Set advanced Modal defaults
 

@@ -55,9 +55,11 @@ from kitaru.config import (
     KITARU_MODEL_REGISTRY_ENV,
     ActiveEnvironmentVariable,
     AzureMLStackSpec,
+    CloudProvider,
     ImageSettings,
     KitaruConfig,
     KubernetesStackSpec,
+    LocalCloudArtifactStoreSpec,
     ModalStackSpec,
     ModelAliasConfig,
     ModelRegistryConfig,
@@ -7653,34 +7655,137 @@ def test_stack_create_json_output(capsys: pytest.CaptureFixture[str]) -> None:
     }
 
 
-def test_stack_create_rejects_kubernetes_flags_for_local_stack(
+@pytest.mark.parametrize(
+    ("artifact_store", "provider"),
+    [
+        ("s3://bucket/kitaru", CloudProvider.AWS),
+        ("gs://bucket/kitaru", CloudProvider.GCP),
+        ("az://container/kitaru", CloudProvider.AZURE),
+        ("abfs://container/kitaru", CloudProvider.AZURE),
+        ("abfss://container/kitaru", CloudProvider.AZURE),
+    ],
+)
+def test_stack_create_local_accepts_cloud_artifact_store(
+    artifact_store: str,
+    provider: CloudProvider,
+) -> None:
+    """Bare cloud URIs should use the shared local-cloud request path."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub()
+        app(["stack", "create", "dev", "--artifact-store", artifact_store])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["remote_spec"] is None
+    spec = mock_create_stack.call_args.kwargs["local_cloud_artifact_store_spec"]
+    assert isinstance(spec, LocalCloudArtifactStoreSpec)
+    assert spec.artifact_store == artifact_store
+    assert spec.provider == provider
+    assert spec.credentials is None
+    assert mock_create_stack.call_args.kwargs["sandbox_flavor"] == "local"
+
+
+def test_stack_create_local_cloud_no_activate() -> None:
+    """Local cloud-storage creation should preserve --no-activate."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            is_active=False,
+            previous_active_stack=None,
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "dev",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--no-activate",
+            ]
+        )
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+
+
+def test_stack_create_local_cloud_json_serializes_resources(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Local stack creation should reject remote-stack flags."""
-    with pytest.raises(SystemExit) as exc_info:
-        app(["stack", "create", "dev", "--artifact-store", "s3://bucket/kitaru"])
+    """Local cloud-storage JSON should include the backend resource summary."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            resources={
+                "provider": "aws",
+                "artifact_store": "s3://bucket/kitaru",
+                "connector_mode": "ambient",
+            }
+        )
+        app(
+            [
+                "stack",
+                "create",
+                "dev",
+                "--artifact-store",
+                "s3://bucket/kitaru",
+                "--output",
+                "json",
+            ]
+        )
 
-    assert exc_info.value.code == 1
-    assert (
-        "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
-        in capsys.readouterr().err
-    )
+    assert exc_info.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["item"]["stack_type"] == "local"
+    assert payload["item"]["resources"] == {
+        "provider": "aws",
+        "artifact_store": "s3://bucket/kitaru",
+        "connector_mode": "ambient",
+    }
 
 
-def test_stack_create_rejects_blank_kubernetes_flags_for_local_stack(
+def test_stack_create_rejects_blank_local_artifact_store(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Blank remote-stack flag values still count as explicit local-stack inputs."""
+    """An explicitly blank local artifact-store URI should fail validation."""
     with pytest.raises(SystemExit) as exc_info:
         app(["stack", "create", "dev", "--artifact-store", "   "])
 
     assert exc_info.value.code == 1
+    assert "--artifact-store cannot be empty." in capsys.readouterr().err
+
+
+def test_stack_create_local_cloud_fields_require_artifact_store(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Connector fields should require cloud storage on local stacks."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "dev", "--credentials", "aws-profile:demo"])
+
+    assert exc_info.value.code == 1
     assert (
-        "Remote stack options require --type kubernetes, --type vertex, "
-        "--type sagemaker, --type azureml, or --type modal: --artifact-store"
-        in capsys.readouterr().err
+        "--credentials require --artifact-store with an s3://, gs://, az://, "
+        "abfs://, or abfss:// URI for a local stack." in capsys.readouterr().err
     )
+
+
+def test_stack_create_help_documents_local_cloud_storage(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stack-create help should advertise cloud storage for local runners."""
+    with pytest.raises(SystemExit) as exc_info:
+        app(["stack", "create", "--help"])
+
+    assert exc_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Local stacks can use S3, GCS, or Azure storage" in output
+    assert "Artifact store URI. Local stacks accept s3://" in output
+    assert "abfss:// cloud storage" in output
 
 
 def test_stack_create_kubernetes_requires_all_mandatory_flags(
@@ -7854,8 +7959,8 @@ def test_stack_create_local_rejects_azureml_only_flags(
 
     assert exc_info.value.code == 1
     assert (
-        "Stack-specific options require --type azureml or --type modal: "
-        "--subscription-id" in capsys.readouterr().err
+        "--subscription-id require --artifact-store with an s3://, gs://, az://, "
+        "abfs://, or abfss:// URI for a local stack." in capsys.readouterr().err
     )
 
 
@@ -8544,11 +8649,13 @@ def test_stack_create_modal_rejects_aws_credentials_without_region(
     assert "--extra orchestrator.region" in stderr
 
 
-def test_stack_create_modal_rejects_no_verify_without_cloud_connector_input(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """--no-verify should not request a Modal cloud connector by itself."""
-    with pytest.raises(SystemExit) as exc_info:
+def test_stack_create_modal_accepts_no_verify_without_cloud_connector_input() -> None:
+    """--no-verify should also cover reused Modal service connectors."""
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub()
         app(
             [
                 "stack",
@@ -8564,11 +8671,10 @@ def test_stack_create_modal_rejects_no_verify_without_cloud_connector_input(
             ]
         )
 
-    assert exc_info.value.code == 1
-    stderr = capsys.readouterr().err
-    assert "--no-verify only applies when Kitaru is creating" in stderr
-    assert "--region" in stderr
-    assert "--credentials" in stderr
+    assert exc_info.value.code == 0
+    modal_spec = mock_create_stack.call_args.kwargs["remote_spec"]
+    assert modal_spec.verify is False
+    assert modal_spec.credentials is None
 
 
 def test_stack_create_modal_rejects_mismatched_credentialed_registry(
@@ -9595,6 +9701,43 @@ activate: true
         remote_spec=None,
         sandbox_flavor="local",
     )
+
+
+def test_stack_create_from_file_builds_local_cloud_stack(tmp_path: Path) -> None:
+    """YAML local cloud storage should build the same request as CLI flags."""
+    stack_file = _write_stack_create_file(
+        tmp_path,
+        """
+name: yaml-local-cloud
+type: local
+artifact_store: gs://bucket/kitaru
+activate: false
+""".strip(),
+    )
+
+    with (
+        patch("kitaru.cli._create_stack_operation") as mock_create_stack,
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        mock_create_stack.return_value = _stack_create_result_stub(
+            name="yaml-local-cloud",
+            is_active=False,
+            previous_active_stack=None,
+        )
+        app(["stack", "create", "--file", str(stack_file)])
+
+    assert exc_info.value.code == 0
+    assert mock_create_stack.call_args.kwargs["activate"] is False
+    spec = mock_create_stack.call_args.kwargs["local_cloud_artifact_store_spec"]
+    assert isinstance(spec, LocalCloudArtifactStoreSpec)
+    assert spec.model_dump(mode="json") == {
+        "artifact_store": "gs://bucket/kitaru",
+        "region": None,
+        "subscription_id": None,
+        "credentials": None,
+        "verify": True,
+    }
+    assert spec.provider == CloudProvider.GCP
 
 
 def test_stack_create_from_file_builds_kubernetes_stack(tmp_path: Path) -> None:
