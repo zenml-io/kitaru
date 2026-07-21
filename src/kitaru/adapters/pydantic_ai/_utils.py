@@ -227,7 +227,7 @@ def checkpoint_cache_key(payload: Any) -> str:
 def validate_checkpoint_strategy(value: str) -> CheckpointStrategy:
     """Return a supported PydanticAI checkpoint strategy."""
     if value in _ALLOWED_CHECKPOINT_STRATEGIES:
-        return cast(CheckpointStrategy, value)
+        return value
     accepted = ", ".join(repr(strategy) for strategy in _ALLOWED_CHECKPOINT_STRATEGIES)
     raise KitaruUsageError(
         f"Unsupported PydanticAI checkpoint_strategy {value!r}. "

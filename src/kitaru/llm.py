@@ -239,7 +239,7 @@ def _parse_provider_target(resolved_model: str) -> _ProviderTarget:
         )
 
     return _ProviderTarget(
-        provider=provider,  # ty: ignore[invalid-argument-type]
+        provider=provider,
         provider_model=model_name,
         resolved_model=resolved_model,
     )

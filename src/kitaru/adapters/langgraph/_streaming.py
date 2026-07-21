@@ -198,7 +198,7 @@ class LangGraphStreamPublisher(BaseStreamPublisher):
                     namespace=_namespace(part),
                 ),
             )
-        stream_mode = cast(LangGraphStreamMode, mode)
+        stream_mode = mode
         payload = self._normalize_known_mode(stream_mode, part)
         return _MODE_EVENT_KINDS[stream_mode], payload
 
