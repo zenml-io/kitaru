@@ -755,8 +755,7 @@ resolution-markers = [
 dependencies = [
     { name = "annotated-doc" },
     { name = "pydantic" },
-    { name = "starlette", version = "0.45.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
-    { name = "starlette", version = "0.49.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
+    { name = "starlette", version = "0.49.3", source = { registry = "https://pypi.org/simple" } },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3f/3a/0bf90d5189d7f62dc2bd0523899629ca59b58ff4290d631cd3bb5c8889d4/fastapi-0.120.4.tar.gz", hash = "sha256:2d856bc847893ca4d77896d4504ffdec0fb04312b705065fca9104428eca3868", size = 339716, upload-time = "2025-10-31T18:37:28.81Z" }
@@ -1963,8 +1962,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pywin32", marker = "sys_platform == 'win32' or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
     { name = "sse-starlette" },
-    { name = "starlette", version = "0.45.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
-    { name = "starlette", version = "0.49.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
+    { name = "starlette", version = "0.49.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-kitaru-local' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-google-adk'" },
     { name = "starlette", version = "1.3.1", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-kitaru-google-adk'" },
     { name = "typing-extensions" },
     { name = "typing-inspection" },
@@ -3553,28 +3551,15 @@ wheels = [
 
 [[package]]
 name = "starlette"
-version = "0.45.3"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.14'",
-]
-dependencies = [
-    { name = "anyio", marker = "(python_full_version < '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ff/fb/2984a686808b89a6781526129a4b51266f678b2d2b97ab2d325e56116df8/starlette-0.45.3.tar.gz", hash = "sha256:2cbcba2a75806f8a41c722141486f37c28e30a0921c5f6fe4346cb0dcee1302f", size = 2574076, upload-time = "2025-01-24T11:17:36.535Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/61/f2b52e107b1fc8944b33ef56bf6ac4ebbe16d91b94d2b87ce013bf63fb84/starlette-0.45.3-py3-none-any.whl", hash = "sha256:dfb6d332576f136ec740296c7e8bb8c8a7125044e7c6da30744718880cdd059d", size = 71507, upload-time = "2025-01-24T11:17:34.182Z" },
-]
-
-[[package]]
-name = "starlette"
 version = "0.49.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14'",
+    "python_full_version < '3.14'",
 ]
 dependencies = [
-    { name = "anyio", marker = "(python_full_version >= '3.14' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
+    { name = "anyio", marker = "extra == 'extra-6-kitaru-local' or extra == 'group-6-kitaru-dev' or extra != 'extra-6-kitaru-google-adk'" },
+    { name = "typing-extensions", marker = "(python_full_version < '3.13' and extra != 'extra-6-kitaru-google-adk') or (extra == 'extra-6-kitaru-google-adk' and extra == 'extra-6-kitaru-local') or (extra == 'extra-6-kitaru-google-adk' and extra == 'group-6-kitaru-dev')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/de/1a/608df0b10b53b0beb96a37854ee05864d182ddd4b1156a22f1ad3860425a/starlette-0.49.3.tar.gz", hash = "sha256:1c14546f299b5901a1ea0e34410575bc33bbd741377a10484a54445588d00284", size = 2655031, upload-time = "2025-11-01T15:12:26.13Z" }
 wheels = [
