@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 ImportedEligibilityState = Literal[
     "eligible",
@@ -370,7 +370,7 @@ def recorded_call_from_mapping(raw: Mapping[str, Any]) -> RecordedCall:
     if kind not in {"llm", "tool", "retrieval", "evaluator", "other"}:
         kind = "other"
     return RecordedCall(
-        kind=cast(RecordedCallKind, kind),
+        kind=kind,
         name=str(raw.get("name") or raw.get("tool_name") or "unknown"),
         input_payload=raw.get("input", raw.get("input_payload")),
         output_payload=raw.get("output", raw.get("output_payload")),
