@@ -115,6 +115,28 @@ def _event_kinds(event_map: Mapping[str, list[dict[str, Any]]]) -> set[str]:
     return {str(event.get("kind")) for event in _events(event_map)}
 
 
+def _langgraph_events(
+    event_map: Mapping[str, Any], *, exec_id: str
+) -> list[dict[str, Any]]:
+    """Collect LangGraph events from full or lightweight run metadata.
+
+    When the tracker flushes inside a checkpoint it records only a lightweight
+    pointer (`artifact_name`, `event_count`, ...) and persists the full event
+    list as an artifact, so follow the pointer in that case.
+    """
+    client = KitaruClient()
+    events: list[dict[str, Any]] = []
+    for payload in event_map.values():
+        if isinstance(payload, list):
+            events.extend(cast(list[dict[str, Any]], payload))
+            continue
+        artifact_name = cast(str, payload["artifact_name"])
+        refs = client.artifacts.list(exec_id, name=artifact_name, limit=1)
+        assert refs, f"No artifact named {artifact_name!r} on execution {exec_id}."
+        events.extend(cast(list[dict[str, Any]], refs[0].load()))
+    return events
+
+
 def _openai_tool_runner(tool_calls: list[str]) -> KitaruRunner:
     @agents.function_tool
     def lookup_live_marker(marker: str) -> str:
@@ -139,7 +161,7 @@ def _openai_tool_runner(tool_calls: list[str]) -> KitaruRunner:
     )
 
 
-def test_openai_agents_live_tool_call_records_result_evidence() -> None:
+def test_openai_agents_live_tool_call_records_result_evidence(primed_zenml) -> None:
     """The OpenAI Agents adapter can run and record a real local tool call."""
     tool_calls: list[str] = []
     runner = _openai_tool_runner(tool_calls)
@@ -159,7 +181,9 @@ def test_openai_agents_live_tool_call_records_result_evidence() -> None:
     assert result.output_artifact_name is not None
 
 
-def test_openai_agents_live_streaming_records_lifecycle_evidence() -> None:
+def test_openai_agents_live_streaming_records_lifecycle_evidence(
+    primed_zenml,
+) -> None:
     """The OpenAI Agents streaming adapter exposes durable run evidence."""
     agent = agents.Agent(
         name=f"kitaru-live-openai-stream-{uuid4().hex[:8]}",
@@ -219,7 +243,7 @@ def pydantic_ai_live_behavior_flow(nonce: str) -> dict[str, Any]:
     return {"answer": result.output.model_dump(), "tool_calls": tool_calls}
 
 
-def test_pydantic_ai_live_tool_and_structured_output_metadata() -> None:
+def test_pydantic_ai_live_tool_and_structured_output_metadata(primed_zenml) -> None:
     """PydanticAI records real model/tool events and structured output."""
     handle = pydantic_ai_live_behavior_flow.run(uuid4().hex)
     hydrated = _wait_for_hydrated_run(handle.exec_id)
@@ -313,7 +337,9 @@ def langgraph_live_calls_flow(nonce: str) -> dict[str, Any]:
     return persist_langgraph_live_summary(summary)
 
 
-def test_langgraph_live_calls_mode_records_model_and_tool_evidence() -> None:
+def test_langgraph_live_calls_mode_records_model_and_tool_evidence(
+    primed_zenml,
+) -> None:
     """LangGraph calls mode records real model/tool behavior through Kitaru."""
     nonce = uuid4().hex
     handle = langgraph_live_calls_flow.run(nonce)
@@ -339,15 +365,13 @@ def test_langgraph_live_calls_mode_records_model_and_tool_evidence() -> None:
     assert any(name.startswith("tool_call__add_one_live_") for name in checkpoint_names)
 
     hydrated = _wait_for_hydrated_run(handle.exec_id)
-    event_map = cast(
-        dict[str, list[dict[str, Any]]],
-        _metadata_dict_from_steps(hydrated, LANGGRAPH_EVENTS_METADATA_KEY),
-    )
+    event_map = _metadata_dict_from_steps(hydrated, LANGGRAPH_EVENTS_METADATA_KEY)
     summary_map = cast(
         dict[str, dict[str, Any]],
         _metadata_dict_from_steps(hydrated, LANGGRAPH_RUN_SUMMARIES_METADATA_KEY),
     )
-    event_kinds = _event_kinds(event_map)
+    events = _langgraph_events(event_map, exec_id=handle.exec_id)
+    event_kinds = {str(event.get("kind")) for event in events}
     run_summary = next(iter(summary_map.values()))
 
     assert {"model_call", "tool_call"} <= event_kinds
