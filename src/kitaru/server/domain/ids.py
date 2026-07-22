@@ -11,4 +11,17 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru."""
+"""Time-ordered id generation."""
+
+import uuid
+
+import uuid_utils
+
+
+def uuid7() -> uuid.UUID:
+    """Generate a UUIDv7.
+
+    Returns:
+        Time-ordered UUID.
+    """
+    return uuid.UUID(bytes=uuid_utils.uuid7().bytes)

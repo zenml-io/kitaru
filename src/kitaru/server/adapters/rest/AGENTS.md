@@ -1,0 +1,20 @@
+# REST adapter rules
+
+- One router module per resource under `routers/`, registered in
+  `server/api/app.py` with a `/v1/<resource>` prefix and matching tag.
+- Status codes: 201 for create, 200 for read and update, 204 for delete.
+- Updates are partial and use `PATCH /{id}`, never `PUT`. The update body
+  carries only the mutable fields.
+- Domain errors map to responses in the app-level exception handlers (404 for
+  `NotFoundError`, 409 for `ConflictError`, 422 for `ValidationError`).
+  Routers never catch domain errors and never raise `HTTPException` for them.
+- One mapping module per resource under `mapping/`. Response functions
+  construct DTOs explicitly field by field and assert timestamps are not
+  `None`. Never use `model_validate(obj, from_attributes=True)`.
+- Routers parse query parameters into the application filter model and build
+  the `Page` envelope from the service result.
+- Service dependencies live in `dependencies.py` as
+  `get_<resource>_service(session)` returning the service bound to the SQL
+  repository.
+- Route docstrings state the status codes clients observe, including error
+  cases.

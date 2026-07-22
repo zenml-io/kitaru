@@ -11,4 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru."""
+"""Shared server model primitives."""
+
+from pydantic import BaseModel, ConfigDict
+
+
+class FrozenModel(BaseModel):
+    """Base type for immutable value objects."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
