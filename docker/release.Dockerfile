@@ -4,6 +4,7 @@ ARG PYTHON_VERSION=3.13
 ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG KITARU_VERSION=""
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS base
 
@@ -29,17 +30,15 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
   UV_PYTHON_DOWNLOADS=never \
+  VIRTUAL_ENV=/app/.venv \
   PATH="/home/$USERNAME/.local/bin:$PATH"
 
 FROM base AS builder
 
-ARG USERNAME
-ARG USER_GID
+ARG KITARU_VERSION
 
-COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock README.md LICENSE ./
-COPY --chown=$USERNAME:$USER_GID src ./src
-
-RUN uv sync --locked --no-dev --extra server --no-editable
+RUN uv venv /app/.venv && \
+  uv pip install "kitaru[server]${KITARU_VERSION:+==$KITARU_VERSION}"
 
 FROM base AS runtime
 

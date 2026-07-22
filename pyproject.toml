@@ -1,7 +1,7 @@
 [project]
 name = "kitaru"
 version = "0.21.0"
-description = "Record, replay, and improve AI agents in production, built on ZenML"
+description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -40,68 +40,22 @@ keywords = [
     "observability",
 ]
 dependencies = [
-    "cyclopts>=3.0",
-    "genai-prices>=0.0.71,<0.1",
-    "pydantic>=2.0",
-    "rich>=12.0.0",
-    "zenml[local]>=0.96.1",
+    "pydantic>=2",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
-openai = [
-    "openai>=1.0.0,<3",
+server = [
+    "fastapi>=0.139",
+    "sqlmodel>=0.0.39",
+    "sqlalchemy[asyncio]>=2.0.51",
+    "alembic>=1.18",
+    "uvicorn>=0.51",
+    "pydantic-settings>=2.14",
+    "asyncpg>=0.31",
+    "pyjwt>=2.13",
+    "uuid-utils>=0.10",
 ]
-anthropic = [
-    "anthropic>=0.40.0,<1",
-]
-llm = [
-    "kitaru[openai]",
-    "kitaru[anthropic]",
-]
-local = [
-    "zenml[server]>=0.96.1",
-]
-pydantic-ai = [
-    "pydantic-ai-slim>=1.102.0,<1.104.0",
-    "typing_extensions>=4.12",
-]
-openai-agents = [
-    "openai-agents>=0.15.0,<0.18.0",
-]
-langgraph = [
-    "langchain>=1.0,<2",
-    "langgraph>=1.1,<2",
-]
-langgraph-openai = [
-    "kitaru[langgraph]",
-    "langchain-openai>=1.0,<2",
-]
-langgraph-anthropic = [
-    "kitaru[langgraph]",
-    "langchain-anthropic>=1.0,<2",
-]
-claude-agent-sdk = [
-    "claude-agent-sdk>=0.1.58,<0.2",
-]
-gemini = [
-    "google-genai>=2.8.0,<3",
-]
-google-adk = [
-    "google-adk>=2.3.0,<3",
-]
-modal = [
-    "modal>=1.4,<2",
-]
-mcp = [
-    "mcp>=1.23.0,<2",
-]
-
-[project.scripts]
-kitaru = "kitaru.cli:cli"
-kitaru-mcp = "kitaru.mcp:main"
-
-[project.entry-points."zenml.init_hooks"]
-kitaru = "kitaru_init_hook:init"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -112,73 +66,30 @@ Repository = "https://github.com/zenml-io/kitaru"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-
-[tool.hatch.build]
-artifacts = [
-    "src/kitaru/_ui/dist/**",
-    "src/kitaru/_ui/bundle_manifest.json",
-]
-
 [tool.hatch.build.targets.wheel]
-packages = ["src/kitaru", "src/kitaru_init_hook"]
+packages = ["src/kitaru"]
 
 [tool.uv]
 exclude-newer = "3 days"
-exclude-newer-package = { zenml = false, aiohttp = false, langsmith = false, pydantic-settings = false }
-# google-adk 2.3.x currently resolves FastAPI 0.138 / Starlette 1.3.
-# A direct no-project resolver probe with google-adk>=2.3,<3 plus
-# zenml[server]>=0.96.1 succeeded on 2026-07-02, including a
-# zenml.zen_server.zen_server_api import. Keep ADK out of the normal dev/local
-# project environment until the full Kitaru local-server path is certified with
-# that newer FastAPI/Starlette stack.
-# Verified isolated contract command (2026-07-02):
-# UV_PROJECT_ENVIRONMENT=<tmp-env> KITARU_REQUIRE_GOOGLE_ADK_CONTRACT=1 \
-#   uv run --python 3.12 --no-dev --extra google-adk --with pytest \
-#   pytest -o addopts='-vv' tests/test_google_adk_installed_contract.py tests/test_google_adk_example.py
-conflicts = [
-    [
-        { extra = "google-adk" },
-        { extra = "local" },
-    ],
-    [
-        { extra = "google-adk" },
-        { group = "dev" },
-    ],
-]
 
 [dependency-groups]
 dev = [
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
-    "zenml[server]>=0.96.1",
     "pytest>=8.0",
-    "pytest-randomly",
-    "pytest-clarity",
-    "pytest-xdist[psutil]",
-    "griffe>=1.13.0,<2.0.0",
-    "griffe-typingdoc>=0.2.8,<1.0.0",
-    "pydantic-ai-slim>=1.102.0,<1.104.0",
-    "openai-agents>=0.15.0,<0.18.0",
-    "langchain>=1.0,<2",
-    "langchain-openai>=1.0,<2",
-    "langgraph>=1.1,<2",
-    "openai>=1.0.0,<3",
-    "anthropic>=0.40.0,<1",
-    "claude-agent-sdk>=0.1.58,<0.2",
-    "google-genai>=2.8.0,<3",
-    "pip-audit>=2.9.0",
-    "python-dotenv>=1.0,<2",
+    "import-linter>=2.0",
+    "pytest-asyncio>=1.4.0",
 ]
 
 [tool.ruff]
 target-version = "py311"
 src = ["src", "scripts", "tests"]
 line-length = 88
-exclude= [
+exclude = [
     ".git",
     ".ruff_cache",
-    ".venv"
+    ".venv",
 ]
 
 [tool.ruff.lint]
@@ -192,17 +103,8 @@ select = [
     "RUF",  # ruff-specific rules
 ]
 
-[tool.ruff.lint.per-file-ignores]
-# Vendored from upstream `pydantic_ai.durable_exec.kitaru`; upstream owns the style.
-# UP006/UP007/UP035/UP045: upstream uses `Dict`/`Optional`/`typing.List` aliases.
-# UP008: upstream uses explicit `super(Cls, self)` in WrapperAgent subclass.
-"src/kitaru/adapters/pydantic_ai/**" = ["E501", "I001", "UP006", "UP007", "UP008", "UP035", "UP045", "SIM105"]
-# Demo HTML/CSS report builders: long inline style and markup string literals
-# that read more clearly unwrapped than broken across lines.
-"examples/end_to_end/*/reporting/*_html.py" = ["E501"]
-
-[tool.ruff.format]
-exclude = ["src/kitaru/adapters/pydantic_ai/**"]
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends"]
 
 [tool.ruff.lint.pydocstyle]
 # Use Google-style docstrings.
@@ -211,80 +113,31 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = ["kitaru"]
 
-[tool.ty.src]
-exclude = ["examples/**"]
-
 [tool.ty.environment]
 python-version = "3.11"
-root = ["src", "scripts", "."]
-
-[[tool.ty.overrides]]
-include = ["scripts/generate_sdk_docs.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
-include = ["src/kitaru/adapters/pydantic_ai/_otel.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
-# `langfuse` is an optional, lazily-imported dependency: only the live
-# Langfuse trace-fetch path needs it; the demo runs on local obs.jsonl files
-# without it, so it is intentionally not a declared dependency.
-include = ["src/kitaru/adapters/langgraph/replay/_facade.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
-# LangGraph's StateGraph/add_node/invoke generics are stricter than the toy
-# graphs these compiler tests build (lambda nodes, TypedDict state). The graphs
-# compile and run correctly; the mismatch is type-stub friction, not a bug.
-include = [
-    "tests/adapters/langgraph/replay/test_compiler.py",
-    "tests/adapters/langgraph/replay/test_langgraph_node_metadata_probe.py",
-]
-
-[tool.ty.overrides.rules]
-invalid-argument-type = "ignore"
-
-[[tool.ty.overrides]]
-# Smoke-test imports `agent_factory` / `mocks` from the example tree at runtime
-# via the `_example_on_syspath` autouse fixture (in the test file); static
-# analysis can't see those packages because `examples/**` is excluded from
-# ty's first-party search root.
-include = ["tests/test_agent_factory_example.py"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-
-[[tool.ty.overrides]]
-# The wrapper entrypoints still rely on a few pyright-specific patterns upstream.
-include = [
-    "src/kitaru/adapters/pydantic_ai/_agent.py",
-    "src/kitaru/adapters/pydantic_ai/_model.py",
-    "src/kitaru/adapters/pydantic_ai/_toolset.py",
-    "src/kitaru/adapters/pydantic_ai/_run_context.py",
-]
-
-[tool.ty.overrides.rules]
-invalid-method-override = "ignore"
-invalid-assignment = "ignore"
-invalid-return-type = "ignore"
-invalid-argument-type = "ignore"
-no-matching-overload = "ignore"
+root = ["src", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-vv -n auto -m 'not live_llm and not live_openai and not live_anthropic and not live_gemini'"
-pythonpath = ["scripts"]
-markers = [
-    "live_llm: paid or external LLM/provider test; excluded from default pytest runs",
-    "live_openai: live OpenAI provider test; requires OPENAI_API_KEY",
-    "live_anthropic: live Anthropic/Claude provider test; requires ANTHROPIC_API_KEY",
-    "live_gemini: live Gemini/Google provider test; requires GEMINI_API_KEY/GOOGLE_API_KEY or local/manual Vertex ADC env shape",
-    "provider_extended: slower or higher-cost provider test outside the provider-core suite",
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.importlinter]
+root_packages = ["kitaru"]
+
+[[tool.importlinter.contracts]]
+name = "client and server are independent, both sit on api_models"
+type = "layers"
+layers = [
+    "kitaru.client | kitaru.server",
+    "kitaru.api_models",
+]
+
+[[tool.importlinter.contracts]]
+name = "server layering"
+type = "layers"
+layers = [
+    "kitaru.server.adapters",
+    "kitaru.server.application",
+    "kitaru.server.domain",
 ]

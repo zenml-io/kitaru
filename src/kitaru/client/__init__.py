@@ -11,4 +11,30 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru."""
+"""Public SDK surface."""
+
+from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.client import KitaruClient
+from kitaru.client.exceptions import (
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+    KitaruClientError,
+    NotFoundError,
+    ServerError,
+    ValidationError,
+)
+from kitaru.client.sync_client import KitaruSyncClient
+
+__all__ = [
+    "APIError",
+    "AuthenticationError",
+    "AuthorizationError",
+    "KitaruAPIClient",
+    "KitaruClient",
+    "KitaruClientError",
+    "KitaruSyncClient",
+    "NotFoundError",
+    "ServerError",
+    "ValidationError",
+]
