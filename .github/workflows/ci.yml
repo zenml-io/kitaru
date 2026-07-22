@@ -31,11 +31,24 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra server
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run lint-imports
+      - run: uv run bash scripts/check_openapi.sh
       - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
           -print0 | xargs -0 uv run yamlfix --check
+  client-import:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+      - run: uv venv .venv-clean
+      - run: uv pip install --python .venv-clean/bin/python .
+      - run: .venv-clean/bin/python -c "import kitaru.client"
   typos:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

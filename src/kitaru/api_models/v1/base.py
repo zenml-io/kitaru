@@ -11,4 +11,36 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru."""
+"""Shared DTO bases, pagination envelope, and error body."""
+
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel, ConfigDict
+
+
+class RequestModel(BaseModel):
+    """Request model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ResponseModel(BaseModel):
+    """Response model."""
+
+
+ItemT = TypeVar("ItemT", bound=ResponseModel)
+
+
+class Page(ResponseModel, Generic[ItemT]):
+    """Pagination envelope."""
+
+    items: list[ItemT]
+    total: int
+    page: int
+    page_size: int
+
+
+class ErrorBody(ResponseModel):
+    """Error body."""
+
+    detail: str

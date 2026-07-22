@@ -284,3 +284,6 @@ docs/reviews/
 plans/
 replay-verify-reports-live/
 replay-verify-reports/
+
+# OpenAPI baseline build output
+openapi/.build/
