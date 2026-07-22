@@ -76,7 +76,9 @@ def claude_live_capture_flow(nonce: str, cwd: str) -> dict[str, Any]:
     return result.model_dump(mode="json")
 
 
-def test_claude_agent_sdk_live_streaming_records_event_artifacts(tmp_path) -> None:
+def test_claude_agent_sdk_live_streaming_records_event_artifacts(
+    primed_zenml, tmp_path
+) -> None:
     """The streaming path completes and records persisted lifecycle evidence."""
     handle = claude_live_stream_flow.run(uuid4().hex, str(tmp_path))
     result = cast(dict[str, Any], handle.wait())
@@ -88,7 +90,9 @@ def test_claude_agent_sdk_live_streaming_records_event_artifacts(tmp_path) -> No
     assert result["run_summary_artifact_name"] is not None
 
 
-def test_claude_agent_sdk_live_capture_records_result_artifacts(tmp_path) -> None:
+def test_claude_agent_sdk_live_capture_records_result_artifacts(
+    primed_zenml, tmp_path
+) -> None:
     """The non-streaming path records useful result metadata/artifact names."""
     handle = claude_live_capture_flow.run(uuid4().hex, str(tmp_path))
     result = cast(dict[str, Any], handle.wait())

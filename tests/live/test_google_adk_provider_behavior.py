@@ -157,7 +157,9 @@ async def _run_tool_turn() -> Any:
     return result
 
 
-def test_google_adk_runner_call_with_gemini_captures_function_call() -> None:
+def test_google_adk_runner_call_with_gemini_captures_function_call(
+    primed_zenml,
+) -> None:
     """The Google ADK adapter captures a real Gemini function/tool turn."""
     prepare_live_google_credentials()
 

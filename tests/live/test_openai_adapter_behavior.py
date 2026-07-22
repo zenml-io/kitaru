@@ -161,7 +161,7 @@ def _openai_tool_runner(tool_calls: list[str]) -> KitaruRunner:
     )
 
 
-def test_openai_agents_live_tool_call_records_result_evidence() -> None:
+def test_openai_agents_live_tool_call_records_result_evidence(primed_zenml) -> None:
     """The OpenAI Agents adapter can run and record a real local tool call."""
     tool_calls: list[str] = []
     runner = _openai_tool_runner(tool_calls)
@@ -181,7 +181,9 @@ def test_openai_agents_live_tool_call_records_result_evidence() -> None:
     assert result.output_artifact_name is not None
 
 
-def test_openai_agents_live_streaming_records_lifecycle_evidence() -> None:
+def test_openai_agents_live_streaming_records_lifecycle_evidence(
+    primed_zenml,
+) -> None:
     """The OpenAI Agents streaming adapter exposes durable run evidence."""
     agent = agents.Agent(
         name=f"kitaru-live-openai-stream-{uuid4().hex[:8]}",
@@ -241,7 +243,7 @@ def pydantic_ai_live_behavior_flow(nonce: str) -> dict[str, Any]:
     return {"answer": result.output.model_dump(), "tool_calls": tool_calls}
 
 
-def test_pydantic_ai_live_tool_and_structured_output_metadata() -> None:
+def test_pydantic_ai_live_tool_and_structured_output_metadata(primed_zenml) -> None:
     """PydanticAI records real model/tool events and structured output."""
     handle = pydantic_ai_live_behavior_flow.run(uuid4().hex)
     hydrated = _wait_for_hydrated_run(handle.exec_id)
@@ -335,7 +337,9 @@ def langgraph_live_calls_flow(nonce: str) -> dict[str, Any]:
     return persist_langgraph_live_summary(summary)
 
 
-def test_langgraph_live_calls_mode_records_model_and_tool_evidence() -> None:
+def test_langgraph_live_calls_mode_records_model_and_tool_evidence(
+    primed_zenml,
+) -> None:
     """LangGraph calls mode records real model/tool behavior through Kitaru."""
     nonce = uuid4().hex
     handle = langgraph_live_calls_flow.run(nonce)
