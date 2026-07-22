@@ -115,6 +115,28 @@ def _event_kinds(event_map: Mapping[str, list[dict[str, Any]]]) -> set[str]:
     return {str(event.get("kind")) for event in _events(event_map)}
 
 
+def _langgraph_events(
+    event_map: Mapping[str, Any], *, exec_id: str
+) -> list[dict[str, Any]]:
+    """Collect LangGraph events from full or lightweight run metadata.
+
+    When the tracker flushes inside a checkpoint it records only a lightweight
+    pointer (`artifact_name`, `event_count`, ...) and persists the full event
+    list as an artifact, so follow the pointer in that case.
+    """
+    client = KitaruClient()
+    events: list[dict[str, Any]] = []
+    for payload in event_map.values():
+        if isinstance(payload, list):
+            events.extend(cast(list[dict[str, Any]], payload))
+            continue
+        artifact_name = cast(str, payload["artifact_name"])
+        refs = client.artifacts.list(exec_id, name=artifact_name, limit=1)
+        assert refs, f"No artifact named {artifact_name!r} on execution {exec_id}."
+        events.extend(cast(list[dict[str, Any]], refs[0].load()))
+    return events
+
+
 def _openai_tool_runner(tool_calls: list[str]) -> KitaruRunner:
     @agents.function_tool
     def lookup_live_marker(marker: str) -> str:
@@ -339,15 +361,13 @@ def test_langgraph_live_calls_mode_records_model_and_tool_evidence() -> None:
     assert any(name.startswith("tool_call__add_one_live_") for name in checkpoint_names)
 
     hydrated = _wait_for_hydrated_run(handle.exec_id)
-    event_map = cast(
-        dict[str, list[dict[str, Any]]],
-        _metadata_dict_from_steps(hydrated, LANGGRAPH_EVENTS_METADATA_KEY),
-    )
+    event_map = _metadata_dict_from_steps(hydrated, LANGGRAPH_EVENTS_METADATA_KEY)
     summary_map = cast(
         dict[str, dict[str, Any]],
         _metadata_dict_from_steps(hydrated, LANGGRAPH_RUN_SUMMARIES_METADATA_KEY),
     )
-    event_kinds = _event_kinds(event_map)
+    events = _langgraph_events(event_map, exec_id=handle.exec_id)
+    event_kinds = {str(event.get("kind")) for event in events}
     run_summary = next(iter(summary_map.values()))
 
     assert {"model_call", "tool_call"} <= event_kinds
