@@ -271,8 +271,8 @@ async def test_update(setup: Setup) -> None:
         secret_ids=[smtp.id],
         timeout_seconds=900,
     )
-    created.update_run_spec(run_spec)
-    created.update_capabilities(CAPABILITIES)
+    created.update_run_spec(run_spec, frozen=False)
+    created.update_capabilities(CAPABILITIES, frozen=False)
     updated = await repository.update(created)
     assert updated.description == "Tuned prompt"
     assert updated.run_spec == run_spec

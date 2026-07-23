@@ -33,19 +33,48 @@ from sqlalchemy.ext.asyncio import (
 from sqlmodel import SQLModel
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_agent_service,
+    get_agent_version_service,
+    get_cohort_service,
+    get_experiment_run_service,
+    get_experiment_service,
+    get_replay_service,
+    get_session_service,
+    get_tag_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.application.models.agent_versions import AgentVersionFilter
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohorts import (
     CohortFilter,
     CohortSessionsFilter,
 )
+from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
+from kitaru.server.application.models.experiments import ExperimentFilter
+from kitaru.server.application.models.replays import ReplayFilter
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
+from kitaru.server.application.services.agent_service import AgentService
+from kitaru.server.application.services.agent_version_service import (
+    AgentVersionService,
+)
+from kitaru.server.application.services.cohort_service import CohortService
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
+from kitaru.server.application.services.experiment_service import (
+    ExperimentService,
+)
+from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.session_service import SessionService
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,
@@ -60,6 +89,7 @@ from kitaru.server.domain.agent import (
 )
 from kitaru.server.domain.agent_version import (
     AgentVersion,
+    AgentVersionInUse,
     AgentVersionNotFound,
     DuplicateAgentVersion,
 )
@@ -73,8 +103,29 @@ from kitaru.server.domain.api_key import (
 )
 from kitaru.server.domain.cohort import (
     Cohort,
+    CohortInUse,
     CohortNotFound,
     DuplicateCohortName,
+)
+from kitaru.server.domain.experiment import (
+    DuplicateExperimentName,
+    Experiment,
+    ExperimentInUse,
+    ExperimentNotFound,
+)
+from kitaru.server.domain.experiment_run import (
+    ExperimentRun,
+    ExperimentRunNotFound,
+)
+from kitaru.server.domain.replay import (
+    DuplicateReplaySession,
+    Replay,
+    ReplayNotFound,
+    ReplayStatus,
+)
+from kitaru.server.domain.replay_config import (
+    ReplayConfig,
+    ReplayConfigNotFound,
 )
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
@@ -985,6 +1036,9 @@ class FakeAgentVersionRepository:
         """
         self._versions: dict[uuid.UUID, AgentVersion] = {}
         self._agent_repository = agent_repository
+        self.session_repository: FakeSessionRepository | None = None
+        self.run_repository: FakeExperimentRunRepository | None = None
+        self.replay_repository: FakeReplayRepository | None = None
         agent_repository.version_repository = self
         if secret_repository is not None:
             secret_repository.version_repository = self
@@ -1084,6 +1138,24 @@ class FakeAgentVersionRepository:
         page = versions[start : start + version_filter.page_size]
         return [version.model_copy() for version in page], total
 
+    async def get_latest_runnable(self, agent_id: uuid.UUID) -> AgentVersion | None:
+        """Load the most recently created runnable version of an agent.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            Latest version with a run spec, ``None`` when none exists.
+        """
+        runnable = [
+            version
+            for version in self._versions.values()
+            if version.agent_id == agent_id and version.run_spec is not None
+        ]
+        if not runnable:
+            return None
+        return max(runnable, key=lambda version: version.id.int).model_copy()
+
     async def update(self, version: AgentVersion) -> AgentVersion:
         """Persist changes to an existing agent version.
 
@@ -1115,9 +1187,25 @@ class FakeAgentVersionRepository:
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by a session, an
+                experiment run, or a replay.
         """
         if version_id not in self._versions:
             raise AgentVersionNotFound(version_id)
+        if (
+            self.session_repository is not None
+            and self.session_repository.references_version(version_id)
+        ):
+            raise AgentVersionInUse(version_id, "sessions")
+        if self.run_repository is not None and self.run_repository.references_version(
+            version_id
+        ):
+            raise AgentVersionInUse(version_id, "experiment runs")
+        if (
+            self.replay_repository is not None
+            and await self.replay_repository.references_agent_version(version_id)
+        ):
+            raise AgentVersionInUse(version_id, "replays")
         del self._versions[version_id]
 
 
@@ -1145,6 +1233,23 @@ class FakeSessionRepository:
         self._tag_repository = tag_repository
         self.node_repository: FakeSessionNodeRepository | None = None
         self.cohort_repository: FakeCohortRepository | None = None
+        self.replay_repository: FakeReplayRepository | None = None
+        if agent_version_repository is not None:
+            agent_version_repository.session_repository = self
+
+    def references_version(self, version_id: uuid.UUID) -> bool:
+        """Report whether a stored session references an agent version.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Returns:
+            ``True`` when a stored session references the version.
+        """
+        return any(
+            session.agent_version_id == version_id
+            for session in self._sessions.values()
+        )
 
     def _check_duplicate_external_id(self, session: Session) -> None:
         if session.provider is None or session.external_id is None:
@@ -1341,7 +1446,8 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session is a member of a cohort.
+            SessionInUse: The session is a member of a cohort or referenced
+                by a replay.
         """
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
@@ -1349,7 +1455,12 @@ class FakeSessionRepository:
             self.cohort_repository is not None
             and self.cohort_repository.references_session(session_id)
         ):
-            raise SessionInUse(session_id)
+            raise SessionInUse(session_id, "cohorts")
+        if (
+            self.replay_repository is not None
+            and self.replay_repository.references_session(session_id)
+        ):
+            raise SessionInUse(session_id, "replays")
         del self._sessions[session_id]
         if self.node_repository is not None:
             self.node_repository.remove_for_session(session_id)
@@ -1491,6 +1602,7 @@ class FakeCohortRepository:
         self._session_repository = session_repository
         self._agent_repository = agent_repository
         self._tag_repository = tag_repository
+        self.experiment_repository: FakeExperimentRepository | None = None
         session_repository.cohort_repository = self
 
     def references_session(self, session_id: uuid.UUID) -> bool:
@@ -1630,12 +1742,689 @@ class FakeCohortRepository:
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: The cohort is referenced by an experiment.
         """
         if cohort_id not in self._cohorts:
             raise CohortNotFound(cohort_id)
+        if (
+            self.experiment_repository is not None
+            and self.experiment_repository.references_cohort(cohort_id)
+        ):
+            raise CohortInUse(cohort_id)
         del self._cohorts[cohort_id]
         del self._members[cohort_id]
         if self._tag_repository is not None:
             self._tag_repository.remove_links_for_resource(
                 TagResourceType.COHORT, cohort_id
             )
+
+
+class FakeReplayConfigRepository:
+    """In-memory replay config repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._configs: dict[uuid.UUID, ReplayConfig] = {}
+        self.experiment_repository: FakeExperimentRepository | None = None
+        self.replay_repository: FakeReplayRepository | None = None
+
+    async def create(self, config: ReplayConfig) -> ReplayConfig:
+        """Persist a new replay config.
+
+        Args:
+            config: Replay config to store.
+
+        Returns:
+            Stored replay config with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = config.model_copy(update={"created": now, "updated": now})
+        self._configs[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, config_id: uuid.UUID) -> ReplayConfig:
+        """Load a replay config by id.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Raises:
+            ReplayConfigNotFound: No replay config has this id.
+
+        Returns:
+            Stored replay config.
+        """
+        config = self._configs.get(config_id)
+        if config is None:
+            raise ReplayConfigNotFound(config_id)
+        return config.model_copy()
+
+    async def get_many(
+        self, config_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, ReplayConfig]:
+        """Load replay configs by id.
+
+        Args:
+            config_ids: Ids of the replay configs.
+
+        Returns:
+            Stored replay configs keyed by id, missing ids omitted.
+        """
+        return {
+            config_id: self._configs[config_id].model_copy()
+            for config_id in config_ids
+            if config_id in self._configs
+        }
+
+    async def delete_if_unreferenced(self, config_id: uuid.UUID) -> bool:
+        """Delete a replay config unless something still references it.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Returns:
+            ``True`` when the config was deleted.
+        """
+        if config_id not in self._configs:
+            return False
+        if (
+            self.experiment_repository is not None
+            and self.experiment_repository.references_config(config_id)
+        ):
+            return False
+        if (
+            self.replay_repository is not None
+            and self.replay_repository.references_config(config_id)
+        ):
+            return False
+        del self._configs[config_id]
+        return True
+
+
+class FakeExperimentRepository:
+    """In-memory experiment repository."""
+
+    def __init__(
+        self,
+        cohort_repository: FakeCohortRepository,
+        replay_config_repository: FakeReplayConfigRepository,
+        tag_repository: FakeTagRepository | None = None,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            cohort_repository: Fake cohort repository backing the cohort
+                ids.
+            replay_config_repository: Fake replay config repository backing
+                the config ids.
+            tag_repository: Fake tag repository backing the tag filter and
+                link cleanup.
+        """
+        self._experiments: dict[uuid.UUID, Experiment] = {}
+        self._cohort_repository = cohort_repository
+        self._replay_config_repository = replay_config_repository
+        self._tag_repository = tag_repository
+        self.run_repository: FakeExperimentRunRepository | None = None
+        cohort_repository.experiment_repository = self
+        replay_config_repository.experiment_repository = self
+
+    def references_cohort(self, cohort_id: uuid.UUID) -> bool:
+        """Report whether a stored experiment references a cohort.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Returns:
+            ``True`` when a stored experiment references the cohort.
+        """
+        return any(
+            experiment.cohort_id == cohort_id
+            for experiment in self._experiments.values()
+        )
+
+    def references_config(self, config_id: uuid.UUID) -> bool:
+        """Report whether a stored experiment references a replay config.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Returns:
+            ``True`` when a stored experiment references the config.
+        """
+        return any(
+            experiment.replay_config_id == config_id
+            for experiment in self._experiments.values()
+        )
+
+    def _check_duplicate_name(self, experiment: Experiment) -> None:
+        for other in self._experiments.values():
+            if other.id != experiment.id and other.name == experiment.name:
+                raise DuplicateExperimentName(experiment.name)
+
+    async def create(self, experiment: Experiment) -> Experiment:
+        """Persist a new experiment.
+
+        Args:
+            experiment: Experiment to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already
+                registered.
+            CohortNotFound: No cohort has the experiment's cohort id.
+            ReplayConfigNotFound: No replay config has the experiment's
+                replay config id.
+
+        Returns:
+            Stored experiment with timestamps set.
+        """
+        await self._cohort_repository.get(experiment.cohort_id)
+        await self._replay_config_repository.get(experiment.replay_config_id)
+        self._check_duplicate_name(experiment)
+        now = datetime.now(UTC)
+        stored = experiment.model_copy(update={"created": now, "updated": now})
+        self._experiments[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, experiment_id: uuid.UUID) -> Experiment:
+        """Load an experiment by id.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+
+        Returns:
+            Stored experiment.
+        """
+        experiment = self._experiments.get(experiment_id)
+        if experiment is None:
+            raise ExperimentNotFound(experiment_id)
+        return experiment.model_copy()
+
+    async def query(
+        self, experiment_filter: ExperimentFilter
+    ) -> tuple[list[Experiment], int]:
+        """Query experiments matching a filter.
+
+        Args:
+            experiment_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching experiments and the total match count.
+        """
+        experiments = sorted(
+            self._experiments.values(), key=lambda experiment: experiment.id.int
+        )
+        if experiment_filter.name is not None:
+            experiments = [
+                experiment
+                for experiment in experiments
+                if experiment.name == experiment_filter.name
+            ]
+        if experiment_filter.tag is not None:
+            tagged_ids: set[uuid.UUID] = set()
+            if self._tag_repository is not None:
+                tagged_ids = self._tag_repository.linked_resource_ids(
+                    experiment_filter.tag, TagResourceType.EXPERIMENT
+                )
+            experiments = [
+                experiment for experiment in experiments if experiment.id in tagged_ids
+            ]
+        total = len(experiments)
+        start = (experiment_filter.page - 1) * experiment_filter.page_size
+        page = experiments[start : start + experiment_filter.page_size]
+        return [experiment.model_copy() for experiment in page], total
+
+    async def update(self, experiment: Experiment) -> Experiment:
+        """Persist changes to an existing experiment.
+
+        Args:
+            experiment: Experiment with modified fields.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+            DuplicateExperimentName: The experiment name is already
+                registered.
+            CohortNotFound: No cohort has the experiment's cohort id.
+            ReplayConfigNotFound: No replay config has the experiment's
+                replay config id.
+
+        Returns:
+            Stored experiment with the updated timestamp renewed.
+        """
+        stored = self._experiments.get(experiment.id)
+        if stored is None:
+            raise ExperimentNotFound(experiment.id)
+        await self._cohort_repository.get(experiment.cohort_id)
+        await self._replay_config_repository.get(experiment.replay_config_id)
+        self._check_duplicate_name(experiment)
+        now = _renewed_timestamp(stored.updated)
+        updated = experiment.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._experiments[experiment.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, experiment_id: uuid.UUID) -> None:
+        """Delete an experiment by id, including its tag links.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+            ExperimentInUse: The experiment has runs.
+        """
+        if experiment_id not in self._experiments:
+            raise ExperimentNotFound(experiment_id)
+        if self.run_repository is not None and await self.run_repository.has_runs(
+            experiment_id
+        ):
+            raise ExperimentInUse(experiment_id)
+        del self._experiments[experiment_id]
+        if self._tag_repository is not None:
+            self._tag_repository.remove_links_for_resource(
+                TagResourceType.EXPERIMENT, experiment_id
+            )
+
+
+class FakeReplayRepository:
+    """In-memory replay repository."""
+
+    def __init__(
+        self,
+        session_repository: FakeSessionRepository,
+        agent_version_repository: FakeAgentVersionRepository,
+        replay_config_repository: FakeReplayConfigRepository,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            session_repository: Fake session repository backing the session
+                ids.
+            agent_version_repository: Fake agent version repository backing
+                the agent version ids.
+            replay_config_repository: Fake replay config repository backing
+                the config ids.
+        """
+        self._replays: dict[uuid.UUID, Replay] = {}
+        self._session_repository = session_repository
+        self.agent_version_repository = agent_version_repository
+        self._replay_config_repository = replay_config_repository
+        self.run_repository: FakeExperimentRunRepository | None = None
+        session_repository.replay_repository = self
+        agent_version_repository.replay_repository = self
+        replay_config_repository.replay_repository = self
+
+    def references_session(self, session_id: uuid.UUID) -> bool:
+        """Report whether a stored replay references a session.
+
+        Args:
+            session_id: Id of the session.
+
+        Returns:
+            ``True`` when a stored replay references the session.
+        """
+        return any(
+            replay.original_session_id == session_id
+            or replay.result_session_id == session_id
+            for replay in self._replays.values()
+        )
+
+    def references_config(self, config_id: uuid.UUID) -> bool:
+        """Report whether a stored replay references a replay config.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Returns:
+            ``True`` when a stored replay references the config.
+        """
+        return any(
+            replay.replay_config_id == config_id for replay in self._replays.values()
+        )
+
+    def _check_duplicate_session(self, replay: Replay) -> None:
+        if replay.experiment_run_id is None:
+            return
+        for other in self._replays.values():
+            if (
+                other.id != replay.id
+                and other.experiment_run_id == replay.experiment_run_id
+                and other.original_session_id == replay.original_session_id
+            ):
+                raise DuplicateReplaySession(
+                    replay.experiment_run_id, replay.original_session_id
+                )
+
+    async def create(self, replay: Replay) -> Replay:
+        """Persist a new replay.
+
+        Args:
+            replay: Replay to store.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has the replay's
+                experiment run id.
+            ReplayConfigNotFound: No replay config has the replay's replay
+                config id.
+            AgentVersionNotFound: No agent version has the replay's agent
+                version id.
+            SessionNotFound: No session has the replay's original session
+                id.
+            DuplicateReplaySession: The run already replays the original
+                session.
+
+        Returns:
+            Stored replay with timestamps set.
+        """
+        if replay.experiment_run_id is not None and self.run_repository is not None:
+            await self.run_repository.get(replay.experiment_run_id)
+        await self._replay_config_repository.get(replay.replay_config_id)
+        await self.agent_version_repository.get(replay.agent_version_id)
+        await self._session_repository.get(replay.original_session_id)
+        self._check_duplicate_session(replay)
+        now = datetime.now(UTC)
+        stored = replay.model_copy(update={"created": now, "updated": now})
+        self._replays[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, replay_id: uuid.UUID) -> Replay:
+        """Load a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+
+        Returns:
+            Stored replay.
+        """
+        replay = self._replays.get(replay_id)
+        if replay is None:
+            raise ReplayNotFound(replay_id)
+        return replay.model_copy()
+
+    async def query(self, replay_filter: ReplayFilter) -> tuple[list[Replay], int]:
+        """Query replays matching a filter.
+
+        Args:
+            replay_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching replays and the total match count.
+        """
+        replays = sorted(self._replays.values(), key=lambda replay: replay.id.int)
+        if replay_filter.experiment_run_id is not None:
+            replays = [
+                replay
+                for replay in replays
+                if replay.experiment_run_id == replay_filter.experiment_run_id
+            ]
+        if replay_filter.original_session_id is not None:
+            replays = [
+                replay
+                for replay in replays
+                if replay.original_session_id == replay_filter.original_session_id
+            ]
+        if replay_filter.status is not None:
+            replays = [
+                replay for replay in replays if replay.status == replay_filter.status
+            ]
+        if replay_filter.standalone is not None:
+            replays = [
+                replay
+                for replay in replays
+                if (replay.experiment_run_id is None) == replay_filter.standalone
+            ]
+        total = len(replays)
+        start = (replay_filter.page - 1) * replay_filter.page_size
+        page = replays[start : start + replay_filter.page_size]
+        return [replay.model_copy() for replay in page], total
+
+    async def count_by_status(
+        self, run_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[ReplayStatus, int]]:
+        """Count replays by status for a set of experiment runs.
+
+        Args:
+            run_ids: Ids of the experiment runs.
+
+        Returns:
+            Replay counts by status, keyed by experiment run id.
+        """
+        counts: dict[uuid.UUID, dict[ReplayStatus, int]] = {}
+        for replay in self._replays.values():
+            if replay.experiment_run_id not in run_ids:
+                continue
+            run_counts = counts.setdefault(replay.experiment_run_id, {})
+            run_counts[replay.status] = run_counts.get(replay.status, 0) + 1
+        return counts
+
+    async def references_agent_version(self, version_id: uuid.UUID) -> bool:
+        """Report whether a stored replay references an agent version.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Returns:
+            ``True`` when a stored replay references the version.
+        """
+        return any(
+            replay.agent_version_id == version_id for replay in self._replays.values()
+        )
+
+
+class FakeExperimentRunRepository:
+    """In-memory experiment run repository."""
+
+    def __init__(
+        self,
+        experiment_repository: FakeExperimentRepository,
+        replay_repository: FakeReplayRepository,
+        tag_repository: FakeTagRepository | None = None,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            experiment_repository: Fake experiment repository backing the
+                experiment ids.
+            replay_repository: Fake replay repository storing the run's
+                replays.
+            tag_repository: Fake tag repository backing the tag filter.
+        """
+        self._runs: dict[uuid.UUID, ExperimentRun] = {}
+        self._experiment_repository = experiment_repository
+        self._replay_repository = replay_repository
+        self._tag_repository = tag_repository
+        experiment_repository.run_repository = self
+        replay_repository.run_repository = self
+        replay_repository.agent_version_repository.run_repository = self
+
+    def references_version(self, version_id: uuid.UUID) -> bool:
+        """Report whether a stored run references an agent version.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Returns:
+            ``True`` when a stored run references the version.
+        """
+        return any(run.agent_version_id == version_id for run in self._runs.values())
+
+    async def create(self, run: ExperimentRun, replays: list[Replay]) -> ExperimentRun:
+        """Persist a new experiment run with its replays as one batch.
+
+        Args:
+            run: Experiment run to store.
+            replays: Replays to store with the run.
+
+        Raises:
+            ExperimentNotFound: No experiment has the run's experiment id.
+
+        Returns:
+            Stored experiment run with the number and timestamps set.
+        """
+        await self._experiment_repository.get(run.experiment_id)
+        number = (
+            max(
+                (
+                    other.number
+                    for other in self._runs.values()
+                    if other.experiment_id == run.experiment_id
+                ),
+                default=0,
+            )
+            + 1
+        )
+        now = datetime.now(UTC)
+        stored = run.model_copy(
+            update={"number": number, "created": now, "updated": now}
+        )
+        self._runs[stored.id] = stored
+        for replay in replays:
+            await self._replay_repository.create(replay)
+        return stored.model_copy()
+
+    async def get(self, run_id: uuid.UUID) -> ExperimentRun:
+        """Load an experiment run by id.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+
+        Returns:
+            Stored experiment run.
+        """
+        run = self._runs.get(run_id)
+        if run is None:
+            raise ExperimentRunNotFound(run_id)
+        return run.model_copy()
+
+    async def query(
+        self, run_filter: ExperimentRunFilter
+    ) -> tuple[list[ExperimentRun], int]:
+        """Query experiment runs matching a filter.
+
+        Args:
+            run_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching experiment runs and the total match count.
+        """
+        runs = sorted(self._runs.values(), key=lambda run: run.id.int)
+        if run_filter.experiment_id is not None:
+            runs = [
+                run for run in runs if run.experiment_id == run_filter.experiment_id
+            ]
+        if run_filter.tag is not None:
+            tagged_ids: set[uuid.UUID] = set()
+            if self._tag_repository is not None:
+                tagged_ids = self._tag_repository.linked_resource_ids(
+                    run_filter.tag, TagResourceType.EXPERIMENT_RUN
+                )
+            runs = [run for run in runs if run.id in tagged_ids]
+        total = len(runs)
+        start = (run_filter.page - 1) * run_filter.page_size
+        page = runs[start : start + run_filter.page_size]
+        return [run.model_copy() for run in page], total
+
+    async def has_runs(self, experiment_id: uuid.UUID) -> bool:
+        """Report whether an experiment has stored runs.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            ``True`` when a stored run belongs to the experiment.
+        """
+        return any(run.experiment_id == experiment_id for run in self._runs.values())
+
+
+EXPERIMENT_APP_ACCOUNT_ID = uuid.uuid4()
+
+
+def experiment_app() -> FastAPI:
+    """Build the app with every service bound to one set of shared fakes.
+
+    Returns:
+        Application for experiment, run, and replay tests.
+    """
+    app = create_app(
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+    )
+    agent_repository = FakeAgentRepository()
+    secret_repository = FakeSecretRepository()
+    tag_repository = FakeTagRepository()
+    version_repository = FakeAgentVersionRepository(agent_repository, secret_repository)
+    session_repository = FakeSessionRepository(
+        agent_repository, version_repository, tag_repository
+    )
+    node_repository = FakeSessionNodeRepository(session_repository)
+    cohort_repository = FakeCohortRepository(
+        session_repository, agent_repository, tag_repository
+    )
+    config_repository = FakeReplayConfigRepository()
+    experiment_repository = FakeExperimentRepository(
+        cohort_repository, config_repository, tag_repository
+    )
+    replay_repository = FakeReplayRepository(
+        session_repository, version_repository, config_repository
+    )
+    run_repository = FakeExperimentRunRepository(
+        experiment_repository, replay_repository, tag_repository
+    )
+    agent_service = AgentService(repository=agent_repository)
+    version_service = AgentVersionService(
+        repository=version_repository,
+        agent_repository=agent_repository,
+        secret_repository=secret_repository,
+        replay_repository=replay_repository,
+    )
+    session_service = SessionService(
+        repository=session_repository,
+        agent_repository=agent_repository,
+        agent_version_repository=version_repository,
+        node_repository=node_repository,
+    )
+    cohort_service = CohortService(
+        repository=cohort_repository,
+        session_repository=session_repository,
+        agent_repository=agent_repository,
+    )
+    experiment_service = ExperimentService(
+        repository=experiment_repository,
+        run_repository=run_repository,
+        cohort_repository=cohort_repository,
+        agent_version_repository=version_repository,
+        replay_config_repository=config_repository,
+    )
+    run_service = ExperimentRunService(
+        repository=run_repository,
+        replay_repository=replay_repository,
+        replay_config_repository=config_repository,
+        experiment_repository=experiment_repository,
+    )
+    replay_service = ReplayService(
+        repository=replay_repository,
+        replay_config_repository=config_repository,
+        session_repository=session_repository,
+        agent_version_repository=version_repository,
+    )
+    tag_service = TagService(repository=tag_repository)
+    app.dependency_overrides[get_agent_service] = lambda: agent_service
+    app.dependency_overrides[get_agent_version_service] = lambda: version_service
+    app.dependency_overrides[get_session_service] = lambda: session_service
+    app.dependency_overrides[get_cohort_service] = lambda: cohort_service
+    app.dependency_overrides[get_experiment_service] = lambda: experiment_service
+    app.dependency_overrides[get_experiment_run_service] = lambda: run_service
+    app.dependency_overrides[get_replay_service] = lambda: replay_service
+    app.dependency_overrides[get_tag_service] = lambda: tag_service
+    app.dependency_overrides[authorize] = lambda: AuthContext(
+        account=Account(id=EXPERIMENT_APP_ACCOUNT_ID, name="ann")
+    )
+    return app

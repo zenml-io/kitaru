@@ -24,6 +24,10 @@ from kitaru.server.adapters.db.schemas.cohort import (
     CohortSchema,
     CohortSessionSchema,
 )
+from kitaru.server.adapters.db.schemas.experiment import ExperimentSchema
+from kitaru.server.adapters.db.schemas.experiment_run import ExperimentRunSchema
+from kitaru.server.adapters.db.schemas.replay import ReplaySchema
+from kitaru.server.adapters.db.schemas.replay_config import ReplayConfigSchema
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.session import SessionSchema
 from kitaru.server.adapters.db.schemas.session_node import SessionNodeSchema
@@ -37,6 +41,10 @@ __all__ = [
     "ApiKeySchema",
     "CohortSchema",
     "CohortSessionSchema",
+    "ExperimentRunSchema",
+    "ExperimentSchema",
+    "ReplayConfigSchema",
+    "ReplaySchema",
     "SecretSchema",
     "SessionNodeSchema",
     "SessionSchema",

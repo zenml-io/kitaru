@@ -21,7 +21,10 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSecretRepository,
+    FakeSessionRepository,
     asgi_api_client,
     create_secret,
 )
@@ -67,11 +70,17 @@ async def api_client(
     )
     agent_repository = FakeAgentRepository()
     version_repository = FakeAgentVersionRepository(agent_repository, secret_repository)
+    replay_repository = FakeReplayRepository(
+        FakeSessionRepository(agent_repository, version_repository),
+        version_repository,
+        FakeReplayConfigRepository(),
+    )
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
         repository=version_repository,
         agent_repository=agent_repository,
         secret_repository=secret_repository,
+        replay_repository=replay_repository,
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service

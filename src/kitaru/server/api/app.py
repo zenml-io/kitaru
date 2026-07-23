@@ -31,6 +31,9 @@ from kitaru.server.adapters.rest.routers import (
     api_keys,
     auth,
     cohorts,
+    experiment_runs,
+    experiments,
+    replays,
     secrets,
     sessions,
     tags,
@@ -125,6 +128,15 @@ def create_app(settings: APISettings) -> FastAPI:
     )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
+    app.include_router(
+        experiment_runs.router,
+        prefix="/v1/experiment-runs",
+        tags=["experiment-runs"],
+    )
+    app.include_router(
+        experiments.router, prefix="/v1/experiments", tags=["experiments"]
+    )
+    app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
     app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
     app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])

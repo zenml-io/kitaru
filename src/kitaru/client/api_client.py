@@ -25,6 +25,9 @@ from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.cohorts import CohortsResource
+from kitaru.client.resources.experiment_runs import ExperimentRunsResource
+from kitaru.client.resources.experiments import ExperimentsResource
+from kitaru.client.resources.replays import ReplaysResource
 from kitaru.client.resources.secrets import SecretsResource
 from kitaru.client.resources.session_nodes import SessionNodesResource
 from kitaru.client.resources.sessions import SessionsResource
@@ -64,6 +67,9 @@ class KitaruAPIClient:
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.cohorts = CohortsResource(self)
+        self.experiment_runs = ExperimentRunsResource(self)
+        self.experiments = ExperimentsResource(self)
+        self.replays = ReplaysResource(self)
         self.secrets = SecretsResource(self)
         self.session_nodes = SessionNodesResource(self)
         self.sessions = SessionsResource(self)

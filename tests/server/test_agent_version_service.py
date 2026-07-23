@@ -20,7 +20,10 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSecretRepository,
+    FakeSessionRepository,
     create_secret,
 )
 from kitaru.server.application.models.agent_versions import AgentVersionFilter
@@ -32,11 +35,23 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
+    AgentVersionFrozen,
+    AgentVersionInUse,
     AgentVersionNotFound,
     DuplicateAgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.replay_config import (
+    HistoryPolicy,
+    ReplayConfig,
+    ScorerConfig,
+    ScoringPolicy,
+    SourceRef,
+    ToolPolicyConfig,
+)
 from kitaru.server.domain.secret import SecretNotFound
+from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -67,16 +82,43 @@ def repository(
 
 
 @pytest.fixture
+def session_repository(
+    agent_repository: FakeAgentRepository,
+    repository: FakeAgentVersionRepository,
+) -> FakeSessionRepository:
+    """Provide a fake session repository."""
+    return FakeSessionRepository(agent_repository, repository)
+
+
+@pytest.fixture
+def config_repository() -> FakeReplayConfigRepository:
+    """Provide a fake replay config repository."""
+    return FakeReplayConfigRepository()
+
+
+@pytest.fixture
+def replay_repository(
+    session_repository: FakeSessionRepository,
+    repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+) -> FakeReplayRepository:
+    """Provide a fake replay repository."""
+    return FakeReplayRepository(session_repository, repository, config_repository)
+
+
+@pytest.fixture
 def service(
     repository: FakeAgentVersionRepository,
     agent_repository: FakeAgentRepository,
     secret_repository: FakeSecretRepository,
+    replay_repository: FakeReplayRepository,
 ) -> AgentVersionService:
     """Provide an agent version service backed by the fake repositories."""
     return AgentVersionService(
         repository=repository,
         agent_repository=agent_repository,
         secret_repository=secret_repository,
+        replay_repository=replay_repository,
     )
 
 
@@ -416,3 +458,122 @@ async def test_delete_version_not_found(service: AgentVersionService) -> None:
     """Raise for an unknown agent version id."""
     with pytest.raises(AgentVersionNotFound):
         await service.delete_version(uuid.uuid4(), actor=ACTOR)
+
+
+async def freeze_version(
+    service: AgentVersionService,
+    session_repository: FakeSessionRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    agent: Agent,
+) -> uuid.UUID:
+    """Store a runnable version referenced by a replay.
+
+    Args:
+        service: Agent version service.
+        session_repository: Fake session repository.
+        replay_repository: Fake replay repository.
+        config_repository: Fake replay config repository.
+        agent: Stored agent.
+
+    Returns:
+        Id of the frozen version.
+    """
+    version = await service.create_version(
+        agent.id,
+        version="v1",
+        description=None,
+        run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        capabilities=None,
+        actor=ACTOR,
+    )
+    session = await session_repository.create(
+        Session(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    config = await config_repository.create(
+        ReplayConfig(
+            owner_id=ACTOR.account.id,
+            tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
+            scoring_policy=ScoringPolicy(
+                scorers=[
+                    ScorerConfig(
+                        name="conciseness",
+                        source=SourceRef(
+                            module="my_pkg.scorers", attribute="conciseness"
+                        ),
+                    )
+                ],
+                pass_threshold=0.5,
+            ),
+        )
+    )
+    await replay_repository.create(
+        Replay(
+            replay_config_id=config.id,
+            agent_version_id=version.id,
+            original_session_id=session.id,
+        )
+    )
+    return version.id
+
+
+async def test_update_version_frozen_by_replay(
+    service: AgentVersionService,
+    session_repository: FakeSessionRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    agent: Agent,
+) -> None:
+    """Reject run spec and capability changes on a replayed version."""
+    version_id = await freeze_version(
+        service, session_repository, replay_repository, config_repository, agent
+    )
+    frozen_message = f"Agent version {version_id} is frozen by existing replays"
+    with pytest.raises(AgentVersionFrozen, match=frozen_message):
+        await service.update_version(
+            version_id,
+            description=None,
+            run_spec=RunSpec(command="python agent2.py", timeout_seconds=60),
+            capabilities=None,
+            actor=ACTOR,
+        )
+    with pytest.raises(AgentVersionFrozen, match=frozen_message):
+        await service.update_version(
+            version_id,
+            description=None,
+            run_spec=None,
+            capabilities=CAPABILITIES,
+            actor=ACTOR,
+        )
+    # The description stays mutable.
+    updated = await service.update_version(
+        version_id,
+        description="Still editable",
+        run_spec=None,
+        capabilities=None,
+        actor=ACTOR,
+    )
+    assert updated.description == "Still editable"
+
+
+async def test_delete_version_referenced_by_replay(
+    service: AgentVersionService,
+    session_repository: FakeSessionRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    agent: Agent,
+) -> None:
+    """Reject deleting a version that a replay references."""
+    version_id = await freeze_version(
+        service, session_repository, replay_repository, config_repository, agent
+    )
+    with pytest.raises(
+        AgentVersionInUse,
+        match=f"Agent version {version_id} is referenced by replays",
+    ):
+        await service.delete_version(version_id, actor=ACTOR)

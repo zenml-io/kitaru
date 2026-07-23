@@ -108,5 +108,6 @@ class CohortRepository(Protocol):
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: The cohort is referenced by an experiment.
         """
         ...

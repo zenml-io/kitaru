@@ -66,6 +66,17 @@ class AgentVersionRepository(Protocol):
         """
         ...
 
+    async def get_latest_runnable(self, agent_id: uuid.UUID) -> AgentVersion | None:
+        """Load the most recently created runnable version of an agent.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            Latest version with a run spec, ``None`` when none exists.
+        """
+        ...
+
     async def update(self, version: AgentVersion) -> AgentVersion:
         """Persist changes to an existing agent version.
 
@@ -90,5 +101,7 @@ class AgentVersionRepository(Protocol):
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by a session, an
+                experiment run, or a replay.
         """
         ...

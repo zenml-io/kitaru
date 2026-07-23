@@ -90,6 +90,7 @@ class SessionRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session is a member of a cohort.
+            SessionInUse: The session is a member of a cohort or referenced
+                by a replay.
         """
         ...

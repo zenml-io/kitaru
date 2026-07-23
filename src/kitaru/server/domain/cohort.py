@@ -54,6 +54,18 @@ class DuplicateCohortName(ConflictError):
         super().__init__(f"Cohort name '{name}' is already registered")
 
 
+class CohortInUse(ConflictError):
+    """Raised when a cohort deletion is blocked by existing references."""
+
+    def __init__(self, cohort_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            cohort_id: Id of the referenced cohort.
+        """
+        super().__init__(f"Cohort {cohort_id} is referenced by experiments")
+
+
 class InvalidCohort(ValidationError):
     """Raised when a cohort violates its shape rules."""
 

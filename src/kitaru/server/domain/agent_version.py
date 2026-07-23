@@ -54,6 +54,55 @@ class DuplicateAgentVersion(ConflictError):
         super().__init__(f"Agent version '{version}' is already registered")
 
 
+class AgentVersionInUse(ConflictError):
+    """Raised when an agent version deletion is blocked by existing references."""
+
+    def __init__(self, version_id: uuid.UUID, referrer: str) -> None:
+        """Initialize the error.
+
+        Args:
+            version_id: Id of the referenced agent version.
+            referrer: Kind of resource referencing the agent version.
+        """
+        super().__init__(f"Agent version {version_id} is referenced by {referrer}")
+
+
+class AgentVersionFrozen(ConflictError):
+    """Raised when a run spec or capability change hits a replayed version."""
+
+    def __init__(self, version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            version_id: Id of the frozen agent version.
+        """
+        super().__init__(f"Agent version {version_id} is frozen by existing replays")
+
+
+class AgentVersionNotRunnable(ConflictError):
+    """Raised when an operation requires a runnable agent version."""
+
+    def __init__(self, version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            version_id: Id of the agent version.
+        """
+        super().__init__(f"Agent version {version_id} has no run spec")
+
+
+class NoRunnableAgentVersion(ConflictError):
+    """Raised when an agent has no runnable version to resolve."""
+
+    def __init__(self, agent_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            agent_id: Id of the agent.
+        """
+        super().__init__(f"Agent {agent_id} has no runnable version")
+
+
 class InvalidRunSpec(ValidationError):
     """Raised when a run spec violates its shape rules."""
 
@@ -117,18 +166,32 @@ class AgentVersion(DomainModel):
         """
         self.description = description
 
-    def update_run_spec(self, run_spec: RunSpec) -> None:
+    def update_run_spec(self, run_spec: RunSpec, frozen: bool) -> None:
         """Set a new run specification.
 
         Args:
             run_spec: New run specification.
+            frozen: Whether a replay references the version.
+
+        Raises:
+            AgentVersionFrozen: A replay references the version.
         """
+        if frozen:
+            raise AgentVersionFrozen(self.id)
         self.run_spec = run_spec
 
-    def update_capabilities(self, capabilities: AgentCapabilities) -> None:
+    def update_capabilities(
+        self, capabilities: AgentCapabilities, frozen: bool
+    ) -> None:
         """Set new agent capabilities.
 
         Args:
             capabilities: New capabilities.
+            frozen: Whether a replay references the version.
+
+        Raises:
+            AgentVersionFrozen: A replay references the version.
         """
+        if frozen:
+            raise AgentVersionFrozen(self.id)
         self.capabilities = capabilities

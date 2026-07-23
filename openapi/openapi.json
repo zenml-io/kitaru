@@ -1041,6 +1041,454 @@
         "title": "CohortUpdateRequest",
         "type": "object"
       },
+      "ExperimentCreateRequest": {
+        "additionalProperties": false,
+        "description": "Experiment create request.",
+        "properties": {
+          "cohort_id": {
+            "description": "Id of the cohort.",
+            "format": "uuid",
+            "title": "Cohort Id",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Experiment description.",
+            "title": "Description"
+          },
+          "name": {
+            "description": "Experiment name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "tool_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool policy, a passthrough policy when omitted."
+          }
+        },
+        "required": [
+          "name",
+          "cohort_id",
+          "scoring_policy"
+        ],
+        "title": "ExperimentCreateRequest",
+        "type": "object"
+      },
+      "ExperimentResponse": {
+        "description": "Experiment response.",
+        "properties": {
+          "cohort_id": {
+            "description": "Id of the cohort.",
+            "format": "uuid",
+            "title": "Cohort Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Experiment description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Experiment id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Experiment name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "tool_policy": {
+            "$ref": "#/components/schemas/ToolPolicyConfig",
+            "description": "Tool policy."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "description",
+          "cohort_id",
+          "override",
+          "tool_policy",
+          "scoring_policy",
+          "created",
+          "updated"
+        ],
+        "title": "ExperimentResponse",
+        "type": "object"
+      },
+      "ExperimentRunCreateRequest": {
+        "additionalProperties": false,
+        "description": "Experiment run create request.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version to execute, the latest runnable version when omitted.",
+            "title": "Agent Version Id"
+          },
+          "score_baselines": {
+            "default": false,
+            "description": "Whether the runner also scores originals missing scores.",
+            "title": "Score Baselines",
+            "type": "boolean"
+          }
+        },
+        "title": "ExperimentRunCreateRequest",
+        "type": "object"
+      },
+      "ExperimentRunProgress": {
+        "description": "Experiment run progress.",
+        "properties": {
+          "canceled": {
+            "description": "Canceled replay count.",
+            "title": "Canceled",
+            "type": "integer"
+          },
+          "claimed": {
+            "description": "Claimed replay count.",
+            "title": "Claimed",
+            "type": "integer"
+          },
+          "completed": {
+            "description": "Completed replay count.",
+            "title": "Completed",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Failed replay count.",
+            "title": "Failed",
+            "type": "integer"
+          },
+          "pending": {
+            "description": "Pending replay count.",
+            "title": "Pending",
+            "type": "integer"
+          },
+          "running": {
+            "description": "Running replay count.",
+            "title": "Running",
+            "type": "integer"
+          },
+          "timed_out": {
+            "description": "Timed out replay count.",
+            "title": "Timed Out",
+            "type": "integer"
+          },
+          "total": {
+            "description": "Total replay count.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "claimed",
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "canceled",
+          "total"
+        ],
+        "title": "ExperimentRunProgress",
+        "type": "object"
+      },
+      "ExperimentRunResponse": {
+        "description": "Experiment run response.",
+        "properties": {
+          "agent_version_id": {
+            "description": "Id of the agent version.",
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "experiment_id": {
+            "description": "Id of the experiment.",
+            "format": "uuid",
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "id": {
+            "description": "Experiment run id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "number": {
+            "description": "Per-experiment run number.",
+            "title": "Number",
+            "type": "integer"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ExperimentRunProgress",
+            "description": "Replay counts by status."
+          },
+          "score_baselines": {
+            "description": "Whether the runner also scores originals missing scores.",
+            "title": "Score Baselines",
+            "type": "boolean"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExperimentRunStatus",
+            "description": "Run status."
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Aggregate diff, written at completion.",
+            "title": "Summary"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "experiment_id",
+          "number",
+          "status",
+          "agent_version_id",
+          "score_baselines",
+          "started_at",
+          "ended_at",
+          "summary",
+          "error",
+          "progress",
+          "created",
+          "updated"
+        ],
+        "title": "ExperimentRunResponse",
+        "type": "object"
+      },
+      "ExperimentRunStatus": {
+        "description": "Experiment run status.",
+        "enum": [
+          "pending",
+          "running",
+          "canceling",
+          "completed",
+          "failed",
+          "canceled"
+        ],
+        "title": "ExperimentRunStatus",
+        "type": "string"
+      },
+      "ExperimentUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Experiment update request.",
+        "properties": {
+          "cohort_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the new cohort.",
+            "title": "Cohort Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New experiment description.",
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New experiment name.",
+            "title": "Name"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New execution override."
+          },
+          "scoring_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoringPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New scoring policy."
+          },
+          "tool_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New tool policy."
+          }
+        },
+        "title": "ExperimentUpdateRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1052,6 +1500,74 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HistoryPolicy": {
+        "additionalProperties": false,
+        "description": "History tool policy.",
+        "properties": {
+          "on_miss": {
+            "$ref": "#/components/schemas/ToolPolicyOnMiss",
+            "default": "fail",
+            "description": "Miss behavior."
+          },
+          "scope": {
+            "$ref": "#/components/schemas/HistoryScope",
+            "default": "original_session",
+            "description": "Lookup scope."
+          },
+          "type": {
+            "const": "history",
+            "default": "history",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "HistoryPolicy",
+        "type": "object"
+      },
+      "HistoryScope": {
+        "description": "History policy lookup scope.",
+        "enum": [
+          "original_session",
+          "cohort",
+          "agent"
+        ],
+        "title": "HistoryScope",
+        "type": "string"
+      },
+      "LLMPolicy": {
+        "additionalProperties": false,
+        "description": "LLM tool policy.",
+        "properties": {
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Generation instructions.",
+            "title": "Instructions"
+          },
+          "model": {
+            "description": "Model generating the tool results.",
+            "title": "Model",
+            "type": "string"
+          },
+          "type": {
+            "const": "llm",
+            "default": "llm",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "LLMPolicy",
         "type": "object"
       },
       "NodeStatus": {
@@ -1230,6 +1746,99 @@
         "title": "Page[CohortResponse]",
         "type": "object"
       },
+      "Page_ExperimentResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ExperimentResponse]",
+        "type": "object"
+      },
+      "Page_ExperimentRunResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ExperimentRunResponse]",
+        "type": "object"
+      },
+      "Page_ReplayResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ReplayResponse]",
+        "type": "object"
+      },
       "Page_SecretResponse_": {
         "properties": {
           "items": {
@@ -1323,6 +1932,394 @@
         "title": "Page[TagResponse]",
         "type": "object"
       },
+      "PassthroughPolicy": {
+        "additionalProperties": false,
+        "description": "Passthrough tool policy.",
+        "properties": {
+          "type": {
+            "const": "passthrough",
+            "default": "passthrough",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "PassthroughPolicy",
+        "type": "object"
+      },
+      "ReplayCreateRequest": {
+        "additionalProperties": false,
+        "description": "Replay create request.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version to execute, the latest runnable version when omitted.",
+            "title": "Agent Version Id"
+          },
+          "original_session_id": {
+            "description": "Id of the session to replay.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "tool_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool policy, a history policy scoped to the original session when omitted."
+          }
+        },
+        "required": [
+          "original_session_id",
+          "scoring_policy"
+        ],
+        "title": "ReplayCreateRequest",
+        "type": "object"
+      },
+      "ReplayOverride": {
+        "additionalProperties": false,
+        "description": "Execution override.",
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement model, or an old to new model map.",
+            "title": "Model"
+          },
+          "model_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement model parameters.",
+            "title": "Model Params"
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement session inputs.",
+            "title": "Prompt"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replacement system prompt.",
+            "title": "System Prompt"
+          }
+        },
+        "title": "ReplayOverride",
+        "type": "object"
+      },
+      "ReplayResponse": {
+        "description": "Replay response.",
+        "properties": {
+          "agent_version_id": {
+            "description": "Id of the agent version.",
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
+          "attempt": {
+            "description": "Attempt counter.",
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claim time.",
+            "title": "Claimed At"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Diff summary, written at completion.",
+            "title": "Diff"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "experiment_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the experiment run, null for standalone replays.",
+            "title": "Experiment Run Id"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last heartbeat time.",
+            "title": "Heartbeat At"
+          },
+          "id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "original_session_id": {
+            "description": "Id of the replayed session.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring outcome, null until scored.",
+            "title": "Passed"
+          },
+          "result_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the result session.",
+            "title": "Result Session Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Weighted average, null until scored.",
+            "title": "Score"
+          },
+          "scores": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scores by scorer name, null until scored.",
+            "title": "Scores"
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReplayStatus"
+          },
+          "tool_policy": {
+            "$ref": "#/components/schemas/ToolPolicyConfig",
+            "description": "Tool policy."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the claiming worker.",
+            "title": "Worker Id"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_run_id",
+          "agent_version_id",
+          "original_session_id",
+          "result_session_id",
+          "status",
+          "attempt",
+          "worker_id",
+          "claimed_at",
+          "heartbeat_at",
+          "started_at",
+          "ended_at",
+          "error",
+          "passed",
+          "score",
+          "scores",
+          "diff",
+          "override",
+          "tool_policy",
+          "scoring_policy",
+          "created",
+          "updated"
+        ],
+        "title": "ReplayResponse",
+        "type": "object"
+      },
+      "ReplayStatus": {
+        "description": "Replay status.",
+        "enum": [
+          "pending",
+          "claimed",
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "canceled"
+        ],
+        "title": "ReplayStatus",
+        "type": "string"
+      },
       "RunSpec": {
         "additionalProperties": false,
         "description": "Agent run specification.",
@@ -1373,6 +2370,82 @@
           "timeout_seconds"
         ],
         "title": "RunSpec",
+        "type": "object"
+      },
+      "ScorerConfig": {
+        "additionalProperties": false,
+        "description": "Scorer configuration.",
+        "properties": {
+          "fail_below": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score at or below which the replay fails outright.",
+            "title": "Fail Below"
+          },
+          "name": {
+            "description": "Scorer name, unique within the policy.",
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Keyword arguments for the function.",
+            "title": "Params",
+            "type": "object"
+          },
+          "source": {
+            "description": "Scoring function reference as 'module:attribute'.",
+            "pattern": "^[^:\\s]+:[^:\\s]+$",
+            "title": "Source",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1.0,
+            "description": "Weight in the average.",
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "source"
+        ],
+        "title": "ScorerConfig",
+        "type": "object"
+      },
+      "ScoringPolicy": {
+        "additionalProperties": false,
+        "description": "Scoring policy.",
+        "properties": {
+          "pass_threshold": {
+            "description": "Weighted average required to pass.",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pass Threshold",
+            "type": "number"
+          },
+          "scorers": {
+            "description": "Scorers to run.",
+            "items": {
+              "$ref": "#/components/schemas/ScorerConfig"
+            },
+            "minItems": 1,
+            "title": "Scorers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scorers",
+          "pass_threshold"
+        ],
+        "title": "ScoringPolicy",
         "type": "object"
       },
       "SecretCreateRequest": {
@@ -2715,6 +3788,75 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
+      "StaticCase": {
+        "additionalProperties": false,
+        "description": "Static tool result case.",
+        "properties": {
+          "match": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inputs to match, any inputs when omitted.",
+            "title": "Match"
+          },
+          "match_mode": {
+            "$ref": "#/components/schemas/StaticMatchMode",
+            "default": "exact",
+            "description": "Match mode."
+          },
+          "result": {
+            "description": "Tool result to return.",
+            "title": "Result"
+          }
+        },
+        "title": "StaticCase",
+        "type": "object"
+      },
+      "StaticMatchMode": {
+        "description": "Static case match mode.",
+        "enum": [
+          "exact",
+          "subset"
+        ],
+        "title": "StaticMatchMode",
+        "type": "string"
+      },
+      "StaticPolicy": {
+        "additionalProperties": false,
+        "description": "Static tool policy.",
+        "properties": {
+          "cases": {
+            "description": "Cases evaluated in order, first match wins.",
+            "items": {
+              "$ref": "#/components/schemas/StaticCase"
+            },
+            "title": "Cases",
+            "type": "array"
+          },
+          "on_miss": {
+            "$ref": "#/components/schemas/ToolPolicyOnMiss",
+            "default": "fail",
+            "description": "Miss behavior."
+          },
+          "type": {
+            "const": "static",
+            "default": "static",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cases"
+        ],
+        "title": "StaticPolicy",
+        "type": "object"
+      },
       "TagCreateRequest": {
         "additionalProperties": false,
         "description": "Tag create request.",
@@ -2950,6 +4092,84 @@
         },
         "title": "TokenUsage",
         "type": "object"
+      },
+      "ToolPolicyConfig": {
+        "additionalProperties": false,
+        "description": "Tool policy configuration.",
+        "properties": {
+          "default": {
+            "description": "Policy for tools without an override.",
+            "discriminator": {
+              "mapping": {
+                "history": "#/components/schemas/HistoryPolicy",
+                "llm": "#/components/schemas/LLMPolicy",
+                "passthrough": "#/components/schemas/PassthroughPolicy",
+                "static": "#/components/schemas/StaticPolicy"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PassthroughPolicy"
+              },
+              {
+                "$ref": "#/components/schemas/HistoryPolicy"
+              },
+              {
+                "$ref": "#/components/schemas/StaticPolicy"
+              },
+              {
+                "$ref": "#/components/schemas/LLMPolicy"
+              }
+            ],
+            "title": "Default"
+          },
+          "tools": {
+            "additionalProperties": {
+              "discriminator": {
+                "mapping": {
+                  "history": "#/components/schemas/HistoryPolicy",
+                  "llm": "#/components/schemas/LLMPolicy",
+                  "passthrough": "#/components/schemas/PassthroughPolicy",
+                  "static": "#/components/schemas/StaticPolicy"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/PassthroughPolicy"
+                },
+                {
+                  "$ref": "#/components/schemas/HistoryPolicy"
+                },
+                {
+                  "$ref": "#/components/schemas/StaticPolicy"
+                },
+                {
+                  "$ref": "#/components/schemas/LLMPolicy"
+                }
+              ]
+            },
+            "description": "Per-tool override by tool name.",
+            "title": "Tools",
+            "type": "object"
+          }
+        },
+        "required": [
+          "default"
+        ],
+        "title": "ToolPolicyConfig",
+        "type": "object"
+      },
+      "ToolPolicyOnMiss": {
+        "description": "Tool policy miss behavior.",
+        "enum": [
+          "fail",
+          "passthrough",
+          "error_result"
+        ],
+        "title": "ToolPolicyOnMiss",
+        "type": "string"
       },
       "ValidationError": {
         "properties": {
@@ -3278,7 +4498,7 @@
     },
     "/v1/agent-versions/{version_id}": {
       "delete": {
-        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 while the version is referenced by a session, an\nexperiment run, or a replay.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
         "operationId": "delete_agent_version_v1_agent_versions__version_id__delete",
         "parameters": [
           {
@@ -3355,7 +4575,7 @@
         ]
       },
       "patch": {
-        "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has\nthis id or a referenced secret does not exist, and 422 on invalid\ninput.\n\nArgs:\n    version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
+        "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has\nthis id or a referenced secret does not exist, 409 when a run spec or\ncapability change hits a version referenced by a replay, and 422 on\ninvalid input.\n\nArgs:\n    version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
         "operationId": "update_agent_version_v1_agent_versions__version_id__patch",
         "parameters": [
           {
@@ -4145,7 +5365,7 @@
     },
     "/v1/cohorts/{cohort_id}": {
       "delete": {
-        "description": "Delete a cohort, including its membership and tag links.\n\nClients observe HTTP 204 on success and 404 when no cohort has this\nid.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
+        "description": "Delete a cohort, including its membership and tag links.\n\nClients observe HTTP 204 on success, 404 when no cohort has this id,\nand 409 while the cohort is referenced by an experiment.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
         "operationId": "delete_cohort_v1_cohorts__cohort_id__delete",
         "parameters": [
           {
@@ -4341,6 +5561,569 @@
         ]
       }
     },
+    "/v1/experiment-runs": {
+      "get": {
+        "description": "List experiment runs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Experiment run service.\n    actor: Caller context.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of experiment runs.",
+        "operationId": "list_experiment_runs_v1_experiment_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ExperimentRunResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Runs",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/experiment-runs/{run_id}": {
+      "get": {
+        "description": "Get an experiment run by id.\n\nClients observe HTTP 200 on success and 404 when no experiment run\nhas this id.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Stored experiment run.",
+        "operationId": "get_experiment_run_v1_experiment_runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment Run",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/experiment-runs/{run_id}/replays": {
+      "get": {
+        "description": "List the replays of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
+        "operationId": "list_experiment_run_replays_v1_experiment_runs__run_id__replays_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ReplayResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Run Replays",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/experiments": {
+      "get": {
+        "description": "List experiments.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Experiment service.\n    actor: Caller context.\n    name: Filter on experiment name.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of experiments.",
+        "operationId": "list_experiments_v1_experiments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ExperimentResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiments",
+        "tags": [
+          "experiments"
+        ]
+      },
+      "post": {
+        "description": "Create an experiment over a cohort with an inline replay config.\n\nThe tool policy defaults to passthrough when omitted.\n\nClients observe HTTP 201 on success, 404 when no cohort has the\nreferenced id, 409 when the name is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Experiment create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment.",
+        "operationId": "create_experiment_v1_experiments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Experiment",
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/v1/experiments/{experiment_id}": {
+      "delete": {
+        "description": "Delete an experiment, including its tag links.\n\nClients observe HTTP 204 on success, 404 when no experiment has this\nid, and 409 while the experiment has runs.\n\nArgs:\n    experiment_id: Id of the experiment.\n    service: Experiment service.\n    actor: Caller context.",
+        "operationId": "delete_experiment_v1_experiments__experiment_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Experiment",
+        "tags": [
+          "experiments"
+        ]
+      },
+      "get": {
+        "description": "Get an experiment by id.\n\nClients observe HTTP 200 on success and 404 when no experiment has\nthis id.\n\nArgs:\n    experiment_id: Id of the experiment.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Stored experiment.",
+        "operationId": "get_experiment_v1_experiments__experiment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Experiment",
+        "tags": [
+          "experiments"
+        ]
+      },
+      "patch": {
+        "description": "Update an experiment.\n\nName and description update on any experiment. Cohort and config\nchanges are rejected once a run exists.\n\nClients observe HTTP 200 on success, 404 when no experiment or\nreferenced cohort has this id, 409 when the new name is already\nregistered or a cohort or config change hits an experiment with runs,\nand 422 on invalid input.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment update request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Updated experiment.",
+        "operationId": "update_experiment_v1_experiments__experiment_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Experiment",
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
+    "/v1/experiments/{experiment_id}/runs": {
+      "get": {
+        "description": "List the runs of an experiment.\n\nClients observe HTTP 200 on success, 404 when no experiment has this\nid, and 422 on invalid pagination parameters.\n\nArgs:\n    experiment_id: Id of the experiment.\n    service: Experiment run service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of experiment runs.",
+        "operationId": "list_experiment_runs_v1_experiments__experiment_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ExperimentRunResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Runs",
+        "tags": [
+          "experiments"
+        ]
+      },
+      "post": {
+        "description": "Start an experiment run.\n\nCreates the run plus one pending replay per cohort session.\n\nClients observe HTTP 201 on success, 404 when no experiment or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves, and 422 when the version belongs to another agent.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment run.",
+        "operationId": "create_experiment_run_v1_experiments__experiment_id__runs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentRunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Experiment Run",
+        "tags": [
+          "experiments"
+        ]
+      }
+    },
     "/v1/login": {
       "post": {
         "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
@@ -4395,6 +6178,196 @@
         "summary": "Logout",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/replays": {
+      "get": {
+        "description": "List replays.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Replay service.\n    actor: Caller context.\n    original_session_id: Filter on the replayed session id.\n    replay_status: Filter on replay status.\n    standalone: Filter on standalone replays.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
+        "operationId": "list_replays_v1_replays_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "original_session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Original Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReplayStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "standalone",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Standalone"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ReplayResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Replays",
+        "tags": [
+          "replays"
+        ]
+      },
+      "post": {
+        "description": "Create a standalone replay of one session with an inline config.\n\nThe tool policy defaults to a history policy scoped to the original\nsession.\n\nClients observe HTTP 201 on success, 404 when no session or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves, and 422 when the original session is in progress, the\nversion belongs to another agent, a history policy scopes to a\ncohort, or the input is invalid.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
+        "operationId": "create_replay_v1_replays_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}": {
+      "get": {
+        "description": "Get a replay by id.\n\nClients observe HTTP 200 on success and 404 when no replay has this\nid.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
+        "operationId": "get_replay_v1_replays__replay_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Replay",
+        "tags": [
+          "replays"
         ]
       }
     },
@@ -5045,7 +7018,7 @@
     },
     "/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success, 404 when no session has this id,\nand 409 while the session is a member of a cohort.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success, 404 when no session has this id,\nand 409 while the session is a member of a cohort or referenced by a\nreplay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_v1_sessions__session_id__delete",
         "parameters": [
           {

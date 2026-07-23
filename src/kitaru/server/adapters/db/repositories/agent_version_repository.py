@@ -28,10 +28,20 @@ from kitaru.server.adapters.db.schemas.agent_version import (
     AgentVersionSchema,
     AgentVersionSecretSchema,
 )
+from kitaru.server.adapters.db.schemas.experiment_run import (
+    EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
+)
+from kitaru.server.adapters.db.schemas.replay import (
+    REPLAY_AGENT_VERSION_ID_FOREIGN_KEY,
+)
+from kitaru.server.adapters.db.schemas.session import (
+    SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.application.models.agent_versions import AgentVersionFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentVersion,
+    AgentVersionInUse,
     AgentVersionNotFound,
     DuplicateAgentVersion,
 )
@@ -164,6 +174,30 @@ class SQLAgentVersionRepository:
         secret_ids = await self._load_secret_ids([row.id for row in rows])
         return [row.to_domain(secret_ids.get(row.id, [])) for row in rows], total
 
+    async def get_latest_runnable(self, agent_id: uuid.UUID) -> AgentVersion | None:
+        """Load the most recently created runnable version of an agent.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            Latest version with a run spec, ``None`` when none exists.
+        """
+        statement = (
+            select(AgentVersionSchema)
+            .where(
+                col(AgentVersionSchema.agent_id) == agent_id,
+                col(AgentVersionSchema.run_command).is_not(None),
+            )
+            .order_by(col(AgentVersionSchema.id).desc())
+            .limit(1)
+        )
+        row = (await self._session.scalars(statement)).first()
+        if row is None:
+            return None
+        secret_ids = await self._load_secret_ids([row.id])
+        return row.to_domain(secret_ids.get(row.id, []))
+
     async def update(self, version: AgentVersion) -> AgentVersion:
         """Persist changes to an existing agent version.
 
@@ -220,9 +254,22 @@ class SQLAgentVersionRepository:
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by a session, an
+                experiment run, or a replay.
         """
         row = await self._session.get(AgentVersionSchema, version_id)
         if row is None:
             raise AgentVersionNotFound(version_id)
-        await self._session.delete(row)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                await self._session.delete(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            constraint = violated_constraint(exc)
+            if constraint == SESSION_AGENT_VERSION_ID_FOREIGN_KEY:
+                raise AgentVersionInUse(version_id, "sessions") from exc
+            if constraint == EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY:
+                raise AgentVersionInUse(version_id, "experiment runs") from exc
+            if constraint == REPLAY_AGENT_VERSION_ID_FOREIGN_KEY:
+                raise AgentVersionInUse(version_id, "replays") from exc
+            raise

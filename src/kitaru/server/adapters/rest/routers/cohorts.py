@@ -202,8 +202,8 @@ async def delete_cohort(
 ) -> None:
     """Delete a cohort, including its membership and tag links.
 
-    Clients observe HTTP 204 on success and 404 when no cohort has this
-    id.
+    Clients observe HTTP 204 on success, 404 when no cohort has this id,
+    and 409 while the cohort is referenced by an experiment.
 
     Args:
         cohort_id: Id of the cohort.

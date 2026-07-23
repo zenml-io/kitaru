@@ -234,7 +234,8 @@ async def delete_session(
     """Delete a session, including its nodes and tag links.
 
     Clients observe HTTP 204 on success, 404 when no session has this id,
-    and 409 while the session is a member of a cohort.
+    and 409 while the session is a member of a cohort or referenced by a
+    replay.
 
     Args:
         session_id: Id of the session.

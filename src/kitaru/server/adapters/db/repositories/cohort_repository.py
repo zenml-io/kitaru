@@ -28,6 +28,9 @@ from kitaru.server.adapters.db.schemas.cohort import (
     CohortSchema,
     CohortSessionSchema,
 )
+from kitaru.server.adapters.db.schemas.experiment import (
+    EXPERIMENT_COHORT_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.schemas.session import SessionSchema
 from kitaru.server.adapters.db.schemas.tag import TagLinkSchema
 from kitaru.server.adapters.db.tag_filtering import tagged_resource_ids
@@ -38,6 +41,7 @@ from kitaru.server.application.models.cohorts import (
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.cohort import (
     Cohort,
+    CohortInUse,
     CohortNotFound,
     DuplicateCohortName,
 )
@@ -212,15 +216,23 @@ class SQLCohortRepository:
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: The cohort is referenced by an experiment.
         """
         row = await self._session.get(CohortSchema, cohort_id)
         if row is None:
             raise CohortNotFound(cohort_id)
-        await self._session.execute(
-            delete(TagLinkSchema).where(
-                col(TagLinkSchema.resource_type) == TagResourceType.COHORT.value,
-                col(TagLinkSchema.resource_id) == cohort_id,
-            )
-        )
-        await self._session.delete(row)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                await self._session.execute(
+                    delete(TagLinkSchema).where(
+                        col(TagLinkSchema.resource_type)
+                        == TagResourceType.COHORT.value,
+                        col(TagLinkSchema.resource_id) == cohort_id,
+                    )
+                )
+                await self._session.delete(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if violated_constraint(exc) == EXPERIMENT_COHORT_ID_FOREIGN_KEY:
+                raise CohortInUse(cohort_id) from exc
+            raise

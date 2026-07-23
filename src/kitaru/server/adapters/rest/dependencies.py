@@ -40,6 +40,18 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
 from kitaru.server.adapters.db.repositories.cohort_repository import (
     SQLCohortRepository,
 )
+from kitaru.server.adapters.db.repositories.experiment_repository import (
+    SQLExperimentRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
+from kitaru.server.adapters.db.repositories.replay_config_repository import (
+    SQLReplayConfigRepository,
+)
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
@@ -61,6 +73,13 @@ from kitaru.server.application.services.agent_version_service import (
 )
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.cohort_service import CohortService
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
+from kitaru.server.application.services.experiment_service import (
+    ExperimentService,
+)
+from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -169,6 +188,7 @@ def get_agent_version_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+        replay_repository=SQLReplayRepository(session),
     )
 
 
@@ -187,6 +207,64 @@ def get_cohort_service(
         repository=SQLCohortRepository(session),
         session_repository=SQLSessionRepository(session),
         agent_repository=SQLAgentRepository(session),
+    )
+
+
+def get_experiment_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentService:
+    """Return an experiment service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment service bound to the SQL repositories.
+    """
+    return ExperimentService(
+        repository=SQLExperimentRepository(session),
+        run_repository=SQLExperimentRunRepository(session),
+        cohort_repository=SQLCohortRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        replay_config_repository=SQLReplayConfigRepository(session),
+    )
+
+
+def get_experiment_run_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentRunService:
+    """Return an experiment run service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment run service bound to the SQL repositories.
+    """
+    return ExperimentRunService(
+        repository=SQLExperimentRunRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        replay_config_repository=SQLReplayConfigRepository(session),
+        experiment_repository=SQLExperimentRepository(session),
+    )
+
+
+def get_replay_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ReplayService:
+    """Return a replay service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Replay service bound to the SQL repositories.
+    """
+    return ReplayService(
+        repository=SQLReplayRepository(session),
+        replay_config_repository=SQLReplayConfigRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
     )
 
 
