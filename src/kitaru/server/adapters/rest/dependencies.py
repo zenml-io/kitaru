@@ -22,11 +22,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
-    ScopeError,
+)
+from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.repositories.account_repository import (
+    SQLAccountRepository,
+)
+from kitaru.server.adapters.db.repositories.api_key_repository import (
+    SQLApiKeyRepository,
 )
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.account import AccountNotFound
 
 CSRF_HEADER = "X-CSRF-Token"
 BearerCredential = tuple[str, str | None]
@@ -63,22 +72,56 @@ def get_app_settings(request: Request) -> APISettings:
     return settings
 
 
-def get_auth_service(request: Request) -> AuthService:
+def get_account_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AccountService:
+    """Return an account service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Account service bound to the SQL repository.
+    """
+    return AccountService(
+        repository=SQLAccountRepository(session),
+        password_hasher=BcryptPasswordHasher(),
+    )
+
+
+def get_api_key_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ApiKeyService:
+    """Return an API key service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        API key service bound to the SQL repository.
+    """
+    return ApiKeyService(repository=SQLApiKeyRepository(session))
+
+
+def get_auth_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AuthService:
     """Return an authentication service for the current request.
 
     Args:
         request: Incoming request.
-
-    Raises:
-        RuntimeError: The control plane client is not configured.
+        session: Request-scoped database session.
 
     Returns:
-        Authentication service bound to shared application state.
+        Authentication service bound to the SQL repositories.
     """
-    control_plane = request.app.state.control_plane
-    if control_plane is None:
-        raise RuntimeError("Control plane client is not configured.")
-    return AuthService(get_app_settings(request), control_plane)
+    return AuthService(
+        settings=get_app_settings(request),
+        account_repository=SQLAccountRepository(session),
+        api_key_repository=SQLApiKeyRepository(session),
+        password_hasher=BcryptPasswordHasher(),
+    )
 
 
 def get_optional_bearer_credential(
@@ -109,30 +152,34 @@ def get_optional_bearer_credential(
 
 
 async def authorize(
-    request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         BearerCredential | None, Depends(get_optional_bearer_credential)
     ],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AuthContext:
     """Authorize a request and return its auth context.
 
-    With the ``none`` auth scheme every request is accepted and receives an
-    anonymous context. Other schemes require a bearer credential.
+    With the ``none`` auth scheme every request is accepted and runs as the
+    default account. Other schemes require a bearer credential.
 
     Args:
-        request: Incoming request.
         settings: Service settings governing auth behavior.
         credential: Bearer token plus optional CSRF token.
+        auth_service: Authentication service for the current request.
 
     Raises:
-        HTTPException: The credential is missing, invalid, or out of scope.
+        HTTPException: The credential is missing or invalid.
+        RuntimeError: The default account was not initialized at startup.
 
     Returns:
         Resolved scope and principal for use-case calls.
     """
     if settings.AUTH_SCHEME is AuthScheme.NONE:
-        return AuthContext()
+        try:
+            return await auth_service.resolve_default_account()
+        except AccountNotFound as exc:
+            raise RuntimeError("Default account is not initialized.") from exc
 
     if credential is None:
         raise HTTPException(
@@ -141,17 +188,12 @@ async def authorize(
         )
 
     try:
-        return await get_auth_service(request).resolve(
+        return await auth_service.resolve(
             credential=credential[0],
             csrf_token=credential[1],
         )
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(exc),
-        ) from exc
-    except ScopeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         ) from exc

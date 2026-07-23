@@ -19,6 +19,9 @@ from typing import Any
 import httpx
 
 from kitaru.client.exceptions import raise_for_response
+from kitaru.client.resources.accounts import AccountsResource
+from kitaru.client.resources.api_keys import ApiKeysResource
+from kitaru.client.resources.auth import AuthResource
 
 
 class KitaruAPIClient:
@@ -48,6 +51,9 @@ class KitaruAPIClient:
             timeout=timeout,
             transport=httpx.AsyncHTTPTransport(retries=retries),
         )
+        self.accounts = AccountsResource(self)
+        self.api_keys = ApiKeysResource(self)
+        self.auth = AuthResource(self)
 
     async def request(
         self,
@@ -55,6 +61,7 @@ class KitaruAPIClient:
         path: str,
         params: dict[str, Any] | None = None,
         json: Any = None,
+        data: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
@@ -63,6 +70,7 @@ class KitaruAPIClient:
             path: Request path relative to the base URL.
             params: Query parameters.
             json: JSON request body.
+            data: Form request body.
 
         Raises:
             APIError: The response has an error status code.
@@ -70,7 +78,9 @@ class KitaruAPIClient:
         Returns:
             HTTP response.
         """
-        response = await self._http.request(method, path, params=params, json=json)
+        response = await self._http.request(
+            method, path, params=params, json=json, data=data
+        )
         raise_for_response(response)
         return response
 

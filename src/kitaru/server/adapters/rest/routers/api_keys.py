@@ -1,0 +1,164 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""API key routes."""
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, status
+
+from kitaru.api_models.v1.api_keys import (
+    ApiKeyCreateRequest,
+    ApiKeyIssuedResponse,
+    ApiKeyResponse,
+    ApiKeyUpdateRequest,
+)
+from kitaru.api_models.v1.base import Page
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_api_key_service,
+)
+from kitaru.server.adapters.rest.mapping.api_keys import (
+    api_key_to_issued_response,
+    api_key_to_response,
+)
+from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.api_key_service import ApiKeyService
+
+router = APIRouter()
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_api_key(
+    body: ApiKeyCreateRequest,
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ApiKeyIssuedResponse:
+    """Create an API key.
+
+    Clients observe HTTP 201 on success, 409 when the name is already
+    registered, and 422 on invalid input. The response carries the plaintext
+    key exactly once.
+
+    Args:
+        body: API key create request.
+        service: API key service.
+        actor: Caller context.
+
+    Returns:
+        Created API key including the plaintext key.
+    """
+    api_key, key = await service.create_api_key(name=body.name, actor=actor)
+    return api_key_to_issued_response(api_key, key)
+
+
+@router.get("")
+async def list_api_keys(
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+    name: str | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
+) -> Page[ApiKeyResponse]:
+    """List API keys of the caller.
+
+    Clients observe HTTP 200 on success and 422 on invalid pagination
+    parameters.
+
+    Args:
+        service: API key service.
+        actor: Caller context.
+        name: Filter on API key name.
+        page: Page number.
+        page_size: Page size.
+
+    Returns:
+        Page of API keys.
+    """
+    api_key_filter = ApiKeyFilter(name=name, page=page, page_size=page_size)
+    api_keys, total = await service.list_api_keys(api_key_filter, actor=actor)
+    return Page[ApiKeyResponse](
+        items=[api_key_to_response(api_key) for api_key in api_keys],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/{api_key_id}")
+async def get_api_key(
+    api_key_id: uuid.UUID,
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ApiKeyResponse:
+    """Get an API key by id.
+
+    Clients observe HTTP 200 on success and 404 when the caller owns no api
+    key with this id.
+
+    Args:
+        api_key_id: Id of the API key.
+        service: API key service.
+        actor: Caller context.
+
+    Returns:
+        Stored API key.
+    """
+    api_key = await service.get_api_key(api_key_id, actor=actor)
+    return api_key_to_response(api_key)
+
+
+@router.patch("/{api_key_id}")
+async def update_api_key(
+    api_key_id: uuid.UUID,
+    body: ApiKeyUpdateRequest,
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ApiKeyResponse:
+    """Update an API key.
+
+    Clients observe HTTP 200 on success, 404 when the caller owns no API key
+    with this id, and 422 on invalid input.
+
+    Args:
+        api_key_id: Id of the API key.
+        body: API key update request.
+        service: API key service.
+        actor: Caller context.
+
+    Returns:
+        Updated API key.
+    """
+    api_key = await service.update_api_key(api_key_id, active=body.active, actor=actor)
+    return api_key_to_response(api_key)
+
+
+@router.delete("/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_api_key(
+    api_key_id: uuid.UUID,
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> None:
+    """Delete an API key.
+
+    Clients observe HTTP 204 on success and 404 when the caller owns no api
+    key with this id.
+
+    Args:
+        api_key_id: Id of the API key.
+        service: API key service.
+        actor: Caller context.
+    """
+    await service.delete_api_key(api_key_id, actor=actor)

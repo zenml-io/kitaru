@@ -18,8 +18,8 @@ repository and schema mechanics.
   explicit `max_length`.
 - `from_domain` passes the id and never timestamps. `to_domain` passes both
   timestamps. Nothing outside a repository touches ORM models.
-- Repositories implement the application-layer Protocol and take the session
-  in the constructor.
+- Repositories live one module per resource under `repositories/`, implement
+  the application-layer Protocol, and take the session in the constructor.
 - Translate `IntegrityError` by constraint name via
   `errors.violated_constraint`, comparing against a module-level constant.
   Never assume which constraint fired. Re-raise when the name does not match a

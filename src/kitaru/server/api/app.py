@@ -20,9 +20,14 @@ from importlib.metadata import version
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
+from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.repositories.account_repository import (
+    SQLAccountRepository,
+)
+from kitaru.server.adapters.rest.routers import accounts, api_keys, auth
 from kitaru.server.api import health
-from kitaru.server.api.config import APISettings, AuthScheme
+from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -80,15 +85,18 @@ def create_app(settings: APISettings) -> FastAPI:
         if not settings.SKIP_DB_MIGRATION:
             await database.create_db_and_tables()
         app.state.database = database
-        control_plane = None
-        if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
-            control_plane = ControlPlaneClient(settings)
-        app.state.control_plane = control_plane
+        async for session in database.get_async_session():
+            account_service = AccountService(
+                repository=SQLAccountRepository(session),
+                password_hasher=BcryptPasswordHasher(),
+            )
+            await account_service.ensure_account(
+                settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
+            )
+            await session.commit()
         try:
             yield
         finally:
-            if control_plane is not None:
-                await control_plane.close()
             await database.cleanup()
 
     app = FastAPI(
@@ -99,4 +107,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.settings = settings
     _register_domain_exception_handlers(app)
     app.include_router(health.router, prefix="/health", tags=["health"])
+    app.include_router(auth.router, prefix="/v1", tags=["auth"])
+    app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
+    app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     return app
