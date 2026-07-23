@@ -57,6 +57,7 @@ server = [
     "pyjwt>=2.13",
     "python-multipart>=0.0.9",
     "uuid-utils>=0.10",
+    "cryptography>=49.0.0",
 ]
 
 [project.urls]

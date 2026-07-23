@@ -20,7 +20,7 @@ import secrets
 import uuid
 from datetime import datetime
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from kitaru.server.domain.base import (
     ConflictError,
@@ -29,7 +29,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import validate_name
+from kitaru.server.domain.names import Name
 
 API_KEY_PREFIX = "KITKEY_"
 
@@ -67,17 +67,12 @@ class ApiKey(DomainModel):
 
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
-    name: str
+    name: Name
     key_hash: str
     active: bool = True
     last_used: datetime | None = None
     created: datetime | None = None
     updated: datetime | None = None
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        return validate_name(value)
 
     def update_active(self, active: bool) -> None:
         """Set whether the key may authenticate.

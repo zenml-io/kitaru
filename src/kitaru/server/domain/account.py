@@ -16,11 +16,11 @@
 import uuid
 from datetime import datetime
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import validate_name
+from kitaru.server.domain.names import Name
 
 
 class AccountNotFound(NotFoundError):
@@ -52,17 +52,12 @@ class Account(DomainModel):
 
     id: uuid.UUID = Field(default_factory=uuid7)
     is_service_account: bool = False
-    name: str
+    name: Name
     email: str | None = None
     password_hash: str | None = None
     active: bool = True
     created: datetime | None = None
     updated: datetime | None = None
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        return validate_name(value)
 
     def update_active(self, active: bool) -> None:
         """Set whether the account may authenticate.

@@ -39,7 +39,9 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
 @pytest.fixture
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed service."""
-    app = create_app(APISettings(DB_HOST="localhost"))
+    app = create_app(
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+    )
     service = AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),

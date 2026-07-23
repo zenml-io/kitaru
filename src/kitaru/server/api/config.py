@@ -60,17 +60,20 @@ class APISettings(Settings):
     DEFAULT_ACCOUNT_NAME: str = "default"
     DEFAULT_ACCOUNT_PASSWORD: str | None = None
 
+    SECRET_ENCRYPTION_KEY: str = ""
+
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:
         """Validate authentication settings.
 
         Raises:
-            ValueError: Local authentication is enabled without its required
-                settings.
+            ValueError: A required setting is not set.
 
         Returns:
             The validated settings object.
         """
         if self.AUTH_SCHEME is AuthScheme.LOCAL and not self.JWT_SIGNING_KEY:
             raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
+        if not self.SECRET_ENCRYPTION_KEY:
+            raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")
         return self

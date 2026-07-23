@@ -24,16 +24,21 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthService,
 )
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.secret_repository import (
+    SQLSecretRepository,
+)
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
 
@@ -101,6 +106,26 @@ def get_api_key_service(
         API key service bound to the SQL repository.
     """
     return ApiKeyService(repository=SQLApiKeyRepository(session))
+
+
+def get_secret_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> SecretService:
+    """Return a secret service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Secret service bound to the SQL repository.
+    """
+    return SecretService(
+        repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        )
+    )
 
 
 def get_auth_service(

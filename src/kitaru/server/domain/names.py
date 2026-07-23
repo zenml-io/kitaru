@@ -14,6 +14,9 @@
 """Restricted entity name validation."""
 
 import re
+from typing import Annotated
+
+from pydantic import AfterValidator
 
 from kitaru.server.domain.base import ValidationError
 
@@ -67,3 +70,6 @@ def validate_name(
             f"{allowed}, and must start and end with a letter or digit"
         )
     return value
+
+
+Name = Annotated[str, AfterValidator(validate_name)]

@@ -41,7 +41,9 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 @pytest.fixture
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed service."""
-    app = create_app(APISettings(DB_HOST="localhost"))
+    app = create_app(
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+    )
     service = ApiKeyService(repository=FakeApiKeyRepository())
     app.dependency_overrides[get_api_key_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
