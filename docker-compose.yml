@@ -18,6 +18,7 @@ services:
       KITARU_SERVER_LOG_LEVEL: DEBUG
       KITARU_SERVER_AUTH_SCHEME: local
       KITARU_SERVER_JWT_SIGNING_KEY: dev
+      KITARU_SERVER_SECRET_ENCRYPTION_KEY: dev
       KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD: password
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]

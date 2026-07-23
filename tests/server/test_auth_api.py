@@ -171,7 +171,9 @@ async def test_login_unavailable_under_none_scheme(
     """Observe HTTP 401 for password login under the none auth scheme."""
     _ = account
     app = build_app(
-        APISettings(DB_HOST="localhost"), account_repository, api_key_repository
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        account_repository,
+        api_key_repository,
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -188,7 +190,9 @@ async def test_none_scheme_requires_bootstrap(
 ) -> None:
     """Fail under none scheme when the default account was not initialized."""
     app = build_app(
-        APISettings(DB_HOST="localhost"), account_repository, api_key_repository
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        account_repository,
+        api_key_repository,
     )
     account_service = AccountService(
         repository=account_repository, password_hasher=FakePasswordHasher()
@@ -208,7 +212,9 @@ async def test_none_scheme_resolves_default_account(
     account = await account_repository.create(Account(name="default"))
     await create_api_key(api_key_repository, account.id)
     app = build_app(
-        APISettings(DB_HOST="localhost"), account_repository, api_key_repository
+        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        account_repository,
+        api_key_repository,
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
