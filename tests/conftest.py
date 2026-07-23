@@ -38,6 +38,7 @@ from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
 from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.tags import TagFilter
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,
@@ -56,6 +57,15 @@ from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
     SecretNotFound,
+)
+from kitaru.server.domain.tag import (
+    DuplicateTagLink,
+    DuplicateTagName,
+    Tag,
+    TagLink,
+    TagLinkNotFound,
+    TagNotFound,
+    TagResourceType,
 )
 
 
@@ -604,6 +614,145 @@ class FakeSecretRepository:
         if secret_id not in self._secrets:
             raise SecretNotFound(secret_id)
         del self._secrets[secret_id]
+
+
+class FakeTagRepository:
+    """In-memory tag repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._tags: dict[uuid.UUID, Tag] = {}
+        self._links: dict[uuid.UUID, TagLink] = {}
+
+    def _check_duplicate_name(self, tag: Tag) -> None:
+        for other in self._tags.values():
+            if other.id != tag.id and other.name == tag.name:
+                raise DuplicateTagName(tag.name)
+
+    async def create(self, tag: Tag) -> Tag:
+        """Persist a new tag.
+
+        Args:
+            tag: Tag to store.
+
+        Raises:
+            DuplicateTagName: The tag name is already registered.
+
+        Returns:
+            Stored tag with timestamps set.
+        """
+        self._check_duplicate_name(tag)
+        now = datetime.now(UTC)
+        stored = tag.model_copy(update={"created": now, "updated": now})
+        self._tags[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, tag_id: uuid.UUID) -> Tag:
+        """Load a tag by id.
+
+        Args:
+            tag_id: Id of the tag.
+
+        Raises:
+            TagNotFound: No tag has this id.
+
+        Returns:
+            Stored tag.
+        """
+        tag = self._tags.get(tag_id)
+        if tag is None:
+            raise TagNotFound(tag_id)
+        return tag.model_copy()
+
+    async def query(self, tag_filter: TagFilter) -> tuple[list[Tag], int]:
+        """Query tags matching a filter.
+
+        Args:
+            tag_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching tags and the total match count.
+        """
+        tags = sorted(self._tags.values(), key=lambda tag: tag.id.int)
+        if tag_filter.name is not None:
+            tags = [tag for tag in tags if tag.name == tag_filter.name]
+        if tag_filter.owner_id is not None:
+            tags = [tag for tag in tags if tag.owner_id == tag_filter.owner_id]
+        total = len(tags)
+        start = (tag_filter.page - 1) * tag_filter.page_size
+        page = tags[start : start + tag_filter.page_size]
+        return [tag.model_copy() for tag in page], total
+
+    async def delete(self, tag_id: uuid.UUID) -> None:
+        """Delete a tag by id, including its links.
+
+        Args:
+            tag_id: Id of the tag.
+
+        Raises:
+            TagNotFound: No tag has this id.
+        """
+        if tag_id not in self._tags:
+            raise TagNotFound(tag_id)
+        del self._tags[tag_id]
+        self._links = {
+            link_id: link
+            for link_id, link in self._links.items()
+            if link.tag_id != tag_id
+        }
+
+    async def create_link(self, link: TagLink) -> TagLink:
+        """Persist a new tag link.
+
+        Args:
+            link: Tag link to store.
+
+        Raises:
+            DuplicateTagLink: The tag link is already registered.
+
+        Returns:
+            Stored tag link with timestamps set.
+        """
+        for other in self._links.values():
+            if (
+                other.id != link.id
+                and other.tag_id == link.tag_id
+                and other.resource_type == link.resource_type
+                and other.resource_id == link.resource_id
+            ):
+                raise DuplicateTagLink(
+                    link.tag_id, link.resource_type, link.resource_id
+                )
+        now = datetime.now(UTC)
+        stored = link.model_copy(update={"created": now, "updated": now})
+        self._links[stored.id] = stored
+        return stored.model_copy()
+
+    async def delete_link(
+        self,
+        tag_id: uuid.UUID,
+        resource_type: TagResourceType,
+        resource_id: uuid.UUID,
+    ) -> None:
+        """Delete a tag link.
+
+        Args:
+            tag_id: Id of the tag.
+            resource_type: Type of the linked resource.
+            resource_id: Id of the linked resource.
+
+        Raises:
+            TagLinkNotFound: No tag link matches.
+        """
+        for link_id, link in self._links.items():
+            if (
+                link.tag_id == tag_id
+                and link.resource_type == resource_type
+                and link.resource_id == resource_id
+            ):
+                del self._links[link_id]
+                return
+        raise TagLinkNotFound(tag_id, resource_type, resource_id)
 
 
 async def create_secret(
