@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SKIP_DB_MIGRATION: bool = False
 
+    REPLAY_HEARTBEAT_TIMEOUT_SECONDS: int = 60
+    REPLAY_MAX_ATTEMPTS: int = 3
+
     DB_HOST: str | None = None
     DB_PORT: int = 5432
     DB_USER: str = "postgres"

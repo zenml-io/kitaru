@@ -27,6 +27,7 @@ from test_experiments_api import (
 )
 
 from conftest import experiment_app
+from kitaru.hashing import tool_call_cache_key
 
 
 @pytest.fixture
@@ -280,3 +281,333 @@ async def test_delete_session_referenced_by_replay(client: httpx.AsyncClient) ->
     assert response.json() == {
         "detail": f"Session {session_id} is referenced by replays"
     }
+
+
+async def start_replay(client: httpx.AsyncClient, replay_id: str) -> None:
+    """Move a replay to running through the API.
+
+    Args:
+        client: HTTP client for the app.
+        replay_id: Id of the replay.
+    """
+    response = await client.patch(
+        f"/v1/replays/{replay_id}", json={"status": "running"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+
+
+async def link_result_session(client: httpx.AsyncClient, replay_id: str) -> str:
+    """Open the replay's result session through the API.
+
+    Args:
+        client: HTTP client for the app.
+        replay_id: Id of the replay.
+
+    Returns:
+        Id of the result session.
+    """
+    response = await client.get(f"/v1/replays/{replay_id}")
+    assert response.status_code == 200
+    replay = response.json()
+    original = await client.get(f"/v1/sessions/{replay['original_session_id']}")
+    assert original.status_code == 200
+    response = await client.post(
+        "/v1/sessions",
+        json={
+            "agent_id": original.json()["agent_id"],
+            "origin": "recorded",
+            "replay_id": replay_id,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
+async def test_get_spec(client: httpx.AsyncClient) -> None:
+    """Resolve a replay spec with the run command and inputs."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    response = await client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "origin": "recorded", "inputs": {"prompt": "hi"}},
+    )
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+    response = await client.patch(
+        f"/v1/sessions/{session_id}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
+    created = await create_replay(client, session_id)
+
+    response = await client.get(f"/v1/replays/{created['id']}/spec")
+    assert response.status_code == 200
+    spec = response.json()
+    assert spec == {
+        "replay_id": created["id"],
+        "inputs": {"prompt": "hi"},
+        "override": None,
+        "tool_policy": created["tool_policy"],
+        "scoring_policy": SCORING_POLICY_RESPONSE,
+        "score_baselines": True,
+        "run": {
+            "command": "python agent.py",
+            "working_dir": None,
+            "env": {},
+            "timeout_seconds": 600,
+        },
+        "secret_env": {},
+        "original_session_id": session_id,
+    }
+
+
+async def test_get_spec_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    response = await client.get(f"/v1/replays/{missing_id}/spec")
+    assert response.status_code == 404
+
+
+async def test_runner_flow_completes_replay(client: httpx.AsyncClient) -> None:
+    """Walk a standalone replay through the runner endpoints."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    replay_id = created["id"]
+
+    await start_replay(client, replay_id)
+    result_session_id = await link_result_session(client, replay_id)
+
+    response = await client.get(f"/v1/replays/{replay_id}")
+    assert response.json()["result_session_id"] == result_session_id
+
+    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    assert response.status_code == 200
+    assert response.json() == {"canceled": False}
+
+    response = await client.patch(
+        f"/v1/sessions/{result_session_id}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/replays/{replay_id}",
+        json={
+            "status": "completed",
+            "passed": True,
+            "score": 0.8,
+            "scores": {"conciseness": 0.8},
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["passed"] is True
+    assert body["score"] == 0.8
+    assert body["scores"] == {"conciseness": 0.8}
+    assert body["ended_at"] is not None
+    assert body["diff"]["status_changed"] is False
+    assert body["diff"]["tool_calls"] == {
+        "matched": 0,
+        "mocked": 0,
+        "added": 0,
+        "removed": 0,
+    }
+
+    response = await client.get(f"/v1/replays/{replay_id}/diff")
+    assert response.status_code == 200
+    diff = response.json()
+    assert diff["replay_id"] == replay_id
+    assert diff["original_session_id"] == session_id
+    assert diff["result_session_id"] == result_session_id
+    assert diff["node_pairs"] == []
+    assert diff["added_nodes"] == []
+    assert diff["removed_nodes"] == []
+
+
+async def test_patch_replay_illegal_transition(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 for an illegal runner transition."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    response = await client.patch(
+        f"/v1/replays/{created['id']}",
+        json={"status": "completed", "passed": True, "score": 1.0, "scores": {}},
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} cannot transition from 'pending' "
+        f"to 'completed'"
+    }
+
+
+async def test_patch_replay_completed_without_result_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 409 when completing an unlinked replay."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    await start_replay(client, created["id"])
+    response = await client.patch(
+        f"/v1/replays/{created['id']}",
+        json={"status": "completed", "passed": True, "score": 1.0, "scores": {}},
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} has no result session"
+    }
+
+
+async def test_patch_replay_failed_requires_error(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 when failing without an error."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    await start_replay(client, created["id"])
+    response = await client.patch(
+        f"/v1/replays/{created['id']}", json={"status": "failed"}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Failing a replay requires an error"}
+
+    response = await client.patch(
+        f"/v1/replays/{created['id']}",
+        json={"status": "failed", "error": "agent exited with code 1"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["error"] == "agent exited with code 1"
+
+
+async def test_heartbeat_canceled_replay(client: httpx.AsyncClient) -> None:
+    """Report cancellation through the heartbeat."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+
+    response = await client.post(f"/v1/replays/{created['id']}/heartbeat")
+    assert response.status_code == 409
+
+    await start_replay(client, created["id"])
+    response = await client.patch(
+        f"/v1/replays/{created['id']}", json={"status": "canceled"}
+    )
+    assert response.status_code == 200
+    response = await client.post(f"/v1/replays/{created['id']}/heartbeat")
+    assert response.status_code == 200
+    assert response.json() == {"canceled": True}
+
+
+async def test_tool_lookup(client: httpx.AsyncClient) -> None:
+    """Resolve a history lookup against the original session's nodes."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    response = await client.post(
+        "/v1/sessions", json={"agent_id": agent_id, "origin": "recorded"}
+    )
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+    inputs = {"city": "Berlin"}
+    response = await client.post(
+        f"/v1/sessions/{session_id}/nodes",
+        json={
+            "nodes": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "sequence": 0,
+                    "node_type": "tool_call",
+                    "name": "get_weather",
+                    "status": "completed",
+                    "tool_name": "get_weather",
+                    "inputs": inputs,
+                    "outputs": {"temp": 21},
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/sessions/{session_id}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
+    created = await create_replay(client, session_id)
+
+    cache_key = tool_call_cache_key("get_weather", inputs)
+    response = await client.post(
+        f"/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "get_weather", "inputs": inputs, "cache_key": cache_key},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"found": True, "result": {"temp": 21}}
+
+    paris = {"city": "Paris"}
+    response = await client.post(
+        f"/v1/replays/{created['id']}/tool-lookup",
+        json={
+            "tool_name": "get_weather",
+            "inputs": paris,
+            "cache_key": tool_call_cache_key("get_weather", paris),
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"found": False, "result": None}
+
+    response = await client.post(
+        f"/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "get_weather", "inputs": paris, "cache_key": "a" * 64},
+    )
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Cache key does not match the tool name and inputs"
+    }
+
+
+async def test_diff_requires_result_session(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 for a diff without a result session."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    response = await client.get(f"/v1/replays/{created['id']}/diff")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} has no result session"
+    }
+
+
+async def test_session_link_conflicts(client: httpx.AsyncClient) -> None:
+    """Observe link errors for inactive, linked, and unknown replays."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+
+    body = {"agent_id": agent_id, "origin": "recorded", "replay_id": created["id"]}
+    response = await client.post("/v1/sessions", json=body)
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} is not claimed or running"
+    }
+
+    await start_replay(client, created["id"])
+    response = await client.post("/v1/sessions", json=body)
+    assert response.status_code == 201
+    response = await client.post("/v1/sessions", json=body)
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} already has a result session"
+    }
+
+    missing_id = uuid.uuid4()
+    response = await client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "origin": "recorded", "replay_id": str(missing_id)},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Replay {missing_id} was not found"}

@@ -22,6 +22,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -38,10 +40,27 @@ from kitaru.server.domain.agent import Agent, AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionNotFound,
+    RunSpec,
+)
+from kitaru.server.domain.replay import (
+    Replay,
+    ReplayAlreadyLinked,
+    ReplayNotActive,
+    ReplayNotFound,
+    ReplayStatus,
+)
+from kitaru.server.domain.replay_config import (
+    HistoryPolicy,
+    ReplayConfig,
+    ScorerConfig,
+    ScoringPolicy,
+    SourceRef,
+    ToolPolicyConfig,
 )
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     InvalidSession,
+    Session,
     SessionNotFound,
     SessionNotInProgress,
     SessionOrigin,
@@ -101,11 +120,28 @@ def node_repository(
 
 
 @pytest.fixture
+def config_repository() -> FakeReplayConfigRepository:
+    """Provide a fake replay config repository."""
+    return FakeReplayConfigRepository()
+
+
+@pytest.fixture
+def replay_repository(
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+) -> FakeReplayRepository:
+    """Provide a fake replay repository."""
+    return FakeReplayRepository(repository, version_repository, config_repository)
+
+
+@pytest.fixture
 def service(
     repository: FakeSessionRepository,
     agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
+    replay_repository: FakeReplayRepository,
 ) -> SessionService:
     """Provide a session service backed by the fake repositories."""
     return SessionService(
@@ -113,6 +149,7 @@ def service(
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
+        replay_repository=replay_repository,
     )
 
 
@@ -198,10 +235,12 @@ async def test_create_recorded_session_terminal_status(
         )
 
 
-async def test_create_replay_session(service: SessionService, agent: Agent) -> None:
-    """Reject a replay session."""
+async def test_create_replay_session_without_replay_id(
+    service: SessionService, agent: Agent
+) -> None:
+    """Reject the replay origin without a replay id."""
     with pytest.raises(
-        InvalidSession, match="Session origin 'replay' is not supported"
+        InvalidSession, match="Session origin 'replay' requires a replay id"
     ):
         await service.create_session(
             recorded_command(agent, origin=SessionOrigin.REPLAY), actor=ACTOR
@@ -598,3 +637,195 @@ async def test_delete_session_not_found(service: SessionService) -> None:
     """Raise for an unknown session id."""
     with pytest.raises(SessionNotFound):
         await service.delete_session(uuid.uuid4(), actor=ACTOR)
+
+
+async def create_running_replay(
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+    status: ReplayStatus = ReplayStatus.RUNNING,
+) -> Replay:
+    """Store a replay of a completed session in a given status.
+
+    Args:
+        repository: Fake session repository.
+        version_repository: Fake agent version repository.
+        config_repository: Fake replay config repository.
+        replay_repository: Fake replay repository.
+        agent: Agent of the session.
+        status: Replay status.
+
+    Returns:
+        Stored replay.
+    """
+    version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version=f"v-{uuid.uuid4().hex[:8]}",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    original = await repository.create(
+        Session(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    config = await config_repository.create(
+        ReplayConfig(
+            owner_id=ACTOR.account.id,
+            tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
+            scoring_policy=ScoringPolicy(
+                scorers=[
+                    ScorerConfig(
+                        name="conciseness",
+                        source=SourceRef(
+                            module="my_pkg.scorers", attribute="conciseness"
+                        ),
+                    )
+                ],
+                pass_threshold=0.5,
+            ),
+        )
+    )
+    return await replay_repository.create(
+        Replay(
+            replay_config_id=config.id,
+            agent_version_id=version.id,
+            original_session_id=original.id,
+            status=status,
+        )
+    )
+
+
+async def test_create_session_links_replay(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+) -> None:
+    """Link a created session to its replay and rewrite the origin."""
+    replay = await create_running_replay(
+        repository, version_repository, config_repository, replay_repository, agent
+    )
+    session = await service.create_session(
+        recorded_command(agent, replay_id=replay.id), actor=ACTOR
+    )
+    assert session.origin is SessionOrigin.REPLAY
+    assert session.status is SessionStatus.IN_PROGRESS
+    linked = await replay_repository.get(replay.id)
+    assert linked.result_session_id == session.id
+
+
+async def test_create_session_links_claimed_replay(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+) -> None:
+    """Accept the link while the replay is still claimed."""
+    replay = await create_running_replay(
+        repository,
+        version_repository,
+        config_repository,
+        replay_repository,
+        agent,
+        status=ReplayStatus.CLAIMED,
+    )
+    session = await service.create_session(
+        recorded_command(agent, replay_id=replay.id), actor=ACTOR
+    )
+    linked = await replay_repository.get(replay.id)
+    assert linked.result_session_id == session.id
+
+
+async def test_create_session_link_requires_active_replay(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+) -> None:
+    """Reject linking a replay that is not claimed or running."""
+    replay = await create_running_replay(
+        repository,
+        version_repository,
+        config_repository,
+        replay_repository,
+        agent,
+        status=ReplayStatus.PENDING,
+    )
+    with pytest.raises(
+        ReplayNotActive, match=f"Replay {replay.id} is not claimed or running"
+    ):
+        await service.create_session(
+            recorded_command(agent, replay_id=replay.id), actor=ACTOR
+        )
+    # The failed link stores no session.
+    _, total = await service.list_sessions(SessionFilter(), actor=ACTOR)
+    assert total == 1
+
+
+async def test_create_session_link_rejects_linked_replay(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+) -> None:
+    """Reject linking a replay that already has a result session."""
+    replay = await create_running_replay(
+        repository, version_repository, config_repository, replay_repository, agent
+    )
+    await service.create_session(
+        recorded_command(agent, replay_id=replay.id), actor=ACTOR
+    )
+    with pytest.raises(
+        ReplayAlreadyLinked,
+        match=f"Replay {replay.id} already has a result session",
+    ):
+        await service.create_session(
+            recorded_command(agent, replay_id=replay.id), actor=ACTOR
+        )
+
+
+async def test_create_session_link_unknown_replay(
+    service: SessionService, agent: Agent
+) -> None:
+    """Raise for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
+        await service.create_session(
+            recorded_command(agent, replay_id=missing_id), actor=ACTOR
+        )
+
+
+async def test_create_session_link_requires_recorded_origin(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    config_repository: FakeReplayConfigRepository,
+    replay_repository: FakeReplayRepository,
+    agent: Agent,
+) -> None:
+    """Reject a replay link on a non-recorded origin."""
+    replay = await create_running_replay(
+        repository, version_repository, config_repository, replay_repository, agent
+    )
+    with pytest.raises(
+        InvalidSession, match="Sessions linked to a replay require origin 'recorded'"
+    ):
+        await service.create_session(
+            imported_command(agent, replay_id=replay.id), actor=ACTOR
+        )

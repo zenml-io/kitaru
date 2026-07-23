@@ -173,3 +173,176 @@ async def test_list_experiment_run_replays_not_found(
     response = await client.get(f"/v1/experiment-runs/{missing_id}/replays")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Experiment run {missing_id} was not found"}
+
+
+async def test_claim_replays(client: httpx.AsyncClient) -> None:
+    """Claim pending replays and move the run to running."""
+    created = await seed_run(client)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["replays"]) == 1
+    claimed = body["replays"][0]
+    assert claimed["status"] == "claimed"
+    assert claimed["worker_id"] == "worker-1"
+    assert claimed["claimed_at"] is not None
+    assert claimed["heartbeat_at"] is not None
+    assert claimed["scoring_policy"] == SCORING_POLICY_RESPONSE
+
+    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    body = response.json()
+    assert body["status"] == "running"
+    assert body["started_at"] is not None
+    assert body["progress"]["pending"] == 1
+    assert body["progress"]["claimed"] == 1
+
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-2", "max_replays": 5},
+    )
+    assert response.status_code == 200
+    assert len(response.json()["replays"]) == 1
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-2", "max_replays": 5},
+    )
+    assert response.status_code == 200
+    assert response.json()["replays"] == []
+
+
+async def test_claim_unknown_run(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    response = await client.post(
+        f"/v1/experiment-runs/{missing_id}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 404
+
+
+async def test_claim_invalid_body(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an invalid claim request."""
+    created = await seed_run(client)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 0},
+    )
+    assert response.status_code == 422
+
+
+async def test_cancel_run(client: httpx.AsyncClient) -> None:
+    """Cancel a run and observe the immediate canceled state."""
+    created = await seed_run(client)
+    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "canceled"
+    assert body["ended_at"] is not None
+    assert body["summary"]["replay_counts_by_status"] == {"canceled": 2}
+    assert body["progress"]["canceled"] == 2
+
+    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Experiment run {created['id']} cannot transition from "
+        f"'canceled' to 'canceling'"
+    }
+
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 200
+    assert response.json()["replays"] == []
+
+
+async def test_cancel_run_drains_through_replay_patch(
+    client: httpx.AsyncClient,
+) -> None:
+    """Leave running replays to the heartbeat path and drain on patch."""
+    created = await seed_run(client, session_count=1)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    replay_id = response.json()["replays"][0]["id"]
+    response = await client.patch(
+        f"/v1/replays/{replay_id}", json={"status": "running"}
+    )
+    assert response.status_code == 200
+
+    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "canceling"
+
+    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    assert response.status_code == 200
+    assert response.json() == {"canceled": True}
+
+    response = await client.patch(
+        f"/v1/replays/{replay_id}", json={"status": "canceled"}
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "canceled"
+
+    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    body = response.json()
+    assert body["status"] == "canceled"
+    assert body["ended_at"] is not None
+    assert body["summary"]["replay_counts_by_status"] == {"canceled": 1}
+
+
+async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
+    """Complete every replay of a run and observe the stored summary."""
+    created = await seed_run(client, session_count=2)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 5},
+    )
+    replays = response.json()["replays"]
+    assert len(replays) == 2
+    for index, replay in enumerate(replays):
+        replay_id = replay["id"]
+        response = await client.patch(
+            f"/v1/replays/{replay_id}", json={"status": "running"}
+        )
+        assert response.status_code == 200
+        original = await client.get(f"/v1/sessions/{replay['original_session_id']}")
+        response = await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": original.json()["agent_id"],
+                "origin": "recorded",
+                "replay_id": replay_id,
+            },
+        )
+        assert response.status_code == 201
+        result_session_id = response.json()["id"]
+        assert response.json()["origin"] == "replay"
+        response = await client.patch(
+            f"/v1/sessions/{result_session_id}", json={"status": "completed"}
+        )
+        assert response.status_code == 200
+        response = await client.patch(
+            f"/v1/replays/{replay_id}",
+            json={
+                "status": "completed",
+                "passed": index == 0,
+                "score": 0.8 - index * 0.6,
+                "scores": {"conciseness": 0.8 - index * 0.6},
+            },
+        )
+        assert response.status_code == 200
+
+    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["ended_at"] is not None
+    summary = body["summary"]
+    assert summary["replay_counts_by_status"] == {"completed": 2}
+    assert summary["pass_rate"] == 0.5
+    assert summary["scores"]["conciseness"]["replay"]["mean"] == pytest.approx(0.5)
+    assert body["progress"]["completed"] == 2

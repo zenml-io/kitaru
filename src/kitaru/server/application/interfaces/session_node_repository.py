@@ -61,3 +61,24 @@ class SessionNodeRepository(Protocol):
             Nodes ordered by sequence.
         """
         ...
+
+    async def find_tool_result(
+        self,
+        cache_key: str,
+        session_ids: list[uuid.UUID] | None,
+        agent_id: uuid.UUID | None,
+    ) -> SessionNode | None:
+        """Find the most recent completed tool call with a cache key.
+
+        Nodes whose attributes mark them mocked are excluded. Exactly one
+        of the scope arguments is set.
+
+        Args:
+            cache_key: Cache key to match.
+            session_ids: Sessions to search within.
+            agent_id: Agent whose sessions to search within.
+
+        Returns:
+            Most recent matching node with payloads, ``None`` on a miss.
+        """
+        ...

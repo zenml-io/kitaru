@@ -22,6 +22,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -61,12 +63,17 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         agent_repository, version_repository, tag_repository
     )
     node_repository = FakeSessionNodeRepository(session_repository)
+    config_repository = FakeReplayConfigRepository()
+    replay_repository = FakeReplayRepository(
+        session_repository, version_repository, config_repository
+    )
     agent_service = AgentService(repository=agent_repository)
     session_service = SessionService(
         repository=session_repository,
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
+        replay_repository=replay_repository,
     )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository
@@ -172,14 +179,16 @@ async def test_create_imported_session_duplicate(client: httpx.AsyncClient) -> N
     }
 
 
-async def test_create_replay_session(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 for the replay origin."""
+async def test_create_replay_session_without_replay_id(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for the replay origin without a replay id."""
     agent_id = await create_agent(client)
     response = await client.post(
         "/v1/sessions", json={"agent_id": agent_id, "origin": "replay"}
     )
     assert response.status_code == 422
-    assert response.json() == {"detail": "Session origin 'replay' is not supported"}
+    assert response.json() == {"detail": "Session origin 'replay' requires a replay id"}
 
 
 async def test_create_imported_session_without_provider(

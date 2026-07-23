@@ -145,6 +145,34 @@ class SQLExperimentRunRepository:
         )
         return [row.to_domain() for row in rows], total
 
+    async def update(self, run: ExperimentRun) -> ExperimentRun:
+        """Persist changes to an existing experiment run.
+
+        Args:
+            run: Experiment run with modified fields.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+
+        Returns:
+            Stored experiment run with the updated timestamp renewed.
+        """
+        row = await self._session.get(ExperimentRunSchema, run.id)
+        if row is None:
+            raise ExperimentRunNotFound(run.id)
+        row.owner_id = run.owner_id
+        row.experiment_id = run.experiment_id
+        row.number = run.number
+        row.status = run.status.value
+        row.agent_version_id = run.agent_version_id
+        row.score_baselines = run.score_baselines
+        row.started_at = run.started_at
+        row.ended_at = run.ended_at
+        row.summary = run.summary
+        row.error = run.error
+        await self._session.flush()
+        return row.to_domain()
+
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.
 

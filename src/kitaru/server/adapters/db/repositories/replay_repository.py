@@ -14,8 +14,9 @@
 """SQL replay repository."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import ColumnElement, and_, case, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -27,6 +28,7 @@ from kitaru.server.adapters.db.schemas.replay import (
     REPLAY_EXPERIMENT_RUN_ID_FOREIGN_KEY,
     REPLAY_ORIGINAL_SESSION_ID_FOREIGN_KEY,
     REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY,
+    REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
     REPLAY_SESSION_UNIQUE_CONSTRAINT,
     ReplaySchema,
 )
@@ -178,27 +180,171 @@ class SQLReplayRepository:
         )
         return [row.to_domain() for row in rows], total
 
+    def _apply(self, row: ReplaySchema, replay: Replay) -> None:
+        """Copy domain replay fields onto an existing row.
+
+        Args:
+            row: Row to update.
+            replay: Replay with modified fields.
+        """
+        row.experiment_run_id = replay.experiment_run_id
+        row.replay_config_id = replay.replay_config_id
+        row.agent_version_id = replay.agent_version_id
+        row.original_session_id = replay.original_session_id
+        row.result_session_id = replay.result_session_id
+        row.status = replay.status.value
+        row.attempt = replay.attempt
+        row.worker_id = replay.worker_id
+        row.claimed_at = replay.claimed_at
+        row.heartbeat_at = replay.heartbeat_at
+        row.started_at = replay.started_at
+        row.ended_at = replay.ended_at
+        row.error = replay.error
+        row.passed = replay.passed
+        row.score = replay.score
+        row.scores = replay.scores
+        row.diff = replay.diff
+
+    async def update(self, replay: Replay) -> Replay:
+        """Persist changes to an existing replay.
+
+        Args:
+            replay: Replay with modified fields.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            SessionNotFound: No session has the replay's result session id.
+
+        Returns:
+            Stored replay with the updated timestamp renewed.
+        """
+        row = await self._session.get(ReplaySchema, replay.id)
+        if row is None:
+            raise ReplayNotFound(replay.id)
+        try:
+            async with self._session.begin_nested():
+                self._apply(row, replay)
+                await self._session.flush()
+        except IntegrityError as exc:
+            constraint = violated_constraint(exc)
+            if constraint == REPLAY_RESULT_SESSION_ID_FOREIGN_KEY:
+                assert replay.result_session_id is not None
+                raise SessionNotFound(replay.result_session_id) from exc
+            translate_replay_integrity_error(exc, replay)
+            raise
+        return row.to_domain()
+
+    def _stale_condition(self, stale_before: datetime) -> ColumnElement[bool]:
+        """Build the lost-heartbeat condition on claimed or running rows.
+
+        Args:
+            stale_before: Heartbeats older than this time count as lost.
+
+        Returns:
+            SQL condition.
+        """
+        return and_(
+            col(ReplaySchema.status).in_(
+                [ReplayStatus.CLAIMED.value, ReplayStatus.RUNNING.value]
+            ),
+            func.coalesce(col(ReplaySchema.heartbeat_at), col(ReplaySchema.claimed_at))
+            < stale_before,
+        )
+
+    async def requeue_stale(
+        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
+    ) -> None:
+        """Requeue or time out a run's replays with lost heartbeats.
+
+        Args:
+            run_id: Id of the experiment run.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
+        """
+        statement = (
+            select(ReplaySchema)
+            .where(
+                col(ReplaySchema.experiment_run_id) == run_id,
+                self._stale_condition(stale_before),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        for row in rows:
+            replay = row.to_domain()
+            self._apply(row, replay.with_staleness(stale_before, max_attempts))
+        await self._session.flush()
+
+    async def claim_pending(
+        self, run_id: uuid.UUID, worker_id: str, limit: int
+    ) -> list[Replay]:
+        """Atomically claim pending replays of a run for a worker.
+
+        Rows locked by a concurrent claim are skipped via
+        ``FOR UPDATE SKIP LOCKED``, so parallel workers never double-claim.
+
+        Args:
+            run_id: Id of the experiment run.
+            worker_id: Id of the claiming worker.
+            limit: Maximum number of replays to claim.
+
+        Returns:
+            Claimed replays.
+        """
+        statement = (
+            select(ReplaySchema)
+            .where(
+                col(ReplaySchema.experiment_run_id) == run_id,
+                col(ReplaySchema.status) == ReplayStatus.PENDING.value,
+            )
+            .order_by(col(ReplaySchema.id))
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        for row in rows:
+            replay = row.to_domain()
+            replay.claim(worker_id)
+            self._apply(row, replay)
+        await self._session.flush()
+        return [row.to_domain() for row in rows]
+
     async def count_by_status(
-        self, run_ids: list[uuid.UUID]
+        self, run_ids: list[uuid.UUID], stale_before: datetime, max_attempts: int
     ) -> dict[uuid.UUID, dict[ReplayStatus, int]]:
         """Count replays by status for a set of experiment runs.
 
+        Claimed or running replays with lost heartbeats count as pending,
+        or as timed out once the attempt count reached the maximum, without
+        writing.
+
         Args:
             run_ids: Ids of the experiment runs.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
 
         Returns:
             Replay counts by status, keyed by experiment run id.
         """
         if not run_ids:
             return {}
+        stale = self._stale_condition(stale_before)
+        effective_status = case(
+            (
+                and_(stale, col(ReplaySchema.attempt) >= max_attempts),
+                ReplayStatus.TIMED_OUT.value,
+            ),
+            (stale, ReplayStatus.PENDING.value),
+            else_=col(ReplaySchema.status),
+        )
         statement = (
             select(
                 col(ReplaySchema.experiment_run_id),
-                col(ReplaySchema.status),
+                effective_status,
                 func.count(),
             )
             .where(col(ReplaySchema.experiment_run_id).in_(run_ids))
-            .group_by(col(ReplaySchema.experiment_run_id), col(ReplaySchema.status))
+            .group_by(col(ReplaySchema.experiment_run_id), effective_status)
         )
         counts: dict[uuid.UUID, dict[ReplayStatus, int]] = {}
         for run_id, status, count in (await self._session.execute(statement)).all():

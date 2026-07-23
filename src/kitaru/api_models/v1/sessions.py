@@ -101,6 +101,10 @@ class SessionCreateRequest(RequestModel):
         default=None, max_length=64, description="Adapter version."
     )
     log_uri: str | None = Field(default=None, description="Log location.")
+    replay_id: uuid.UUID | None = Field(
+        default=None,
+        description="Id of the replay this session is the result of.",
+    )
 
 
 class SessionUpdateRequest(RequestModel):

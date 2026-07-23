@@ -34,6 +34,7 @@ from kitaru.server.application.models.experiment_runs import (
     ExperimentRunReplaysFilter,
 )
 from kitaru.server.application.models.experiments import ExperimentCreate
+from kitaru.server.application.models.replays import ReplayFilter
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
@@ -45,8 +46,12 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.experiment import Experiment, ExperimentNotFound
-from kitaru.server.domain.experiment_run import ExperimentRunNotFound
-from kitaru.server.domain.replay import ReplayStatus
+from kitaru.server.domain.experiment_run import (
+    ExperimentRunNotFound,
+    ExperimentRunStatus,
+    InvalidExperimentRunTransition,
+)
+from kitaru.server.domain.replay import HEARTBEAT_TIMEOUT_ERROR, ReplayStatus
 from kitaru.server.domain.replay_config import (
     ScorerConfig,
     ScoringPolicy,
@@ -156,6 +161,7 @@ def service(
     replay_repository: FakeReplayRepository,
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
+    session_repository: FakeSessionRepository,
 ) -> ExperimentRunService:
     """Provide an experiment run service backed by the fake repositories."""
     return ExperimentRunService(
@@ -163,6 +169,9 @@ def service(
         replay_repository=replay_repository,
         replay_config_repository=config_repository,
         experiment_repository=experiment_repository,
+        session_repository=session_repository,
+        heartbeat_timeout_seconds=60,
+        max_attempts=3,
     )
 
 
@@ -362,3 +371,255 @@ async def test_list_run_replays_not_found(service: ExperimentRunService) -> None
         await service.list_run_replays(
             missing_id, ExperimentRunReplaysFilter(), actor=ACTOR
         )
+
+
+def build_service(
+    repository: FakeExperimentRunRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    session_repository: FakeSessionRepository,
+    heartbeat_timeout_seconds: int = 60,
+    max_attempts: int = 3,
+) -> ExperimentRunService:
+    """Build an experiment run service with explicit staleness settings.
+
+    Args:
+        repository: Fake experiment run repository.
+        replay_repository: Fake replay repository.
+        config_repository: Fake replay config repository.
+        experiment_repository: Fake experiment repository.
+        session_repository: Fake session repository.
+        heartbeat_timeout_seconds: Heartbeat timeout, negative values mark
+            every claim stale immediately.
+        max_attempts: Attempt count at which a stale replay times out.
+
+    Returns:
+        Experiment run service.
+    """
+    return ExperimentRunService(
+        repository=repository,
+        replay_repository=replay_repository,
+        replay_config_repository=config_repository,
+        experiment_repository=experiment_repository,
+        session_repository=session_repository,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+        max_attempts=max_attempts,
+    )
+
+
+async def test_claim_replays(
+    service: ExperimentRunService,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Claim pending replays and move the run to running."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    claimed = await service.claim_replays(
+        run.id, worker_id="worker-1", max_replays=1, actor=ACTOR
+    )
+    assert len(claimed) == 1
+    replay, config = claimed[0]
+    assert replay.status is ReplayStatus.CLAIMED
+    assert replay.worker_id == "worker-1"
+    assert replay.claimed_at is not None
+    assert config.scoring_policy == SCORING_POLICY
+    started, _ = await service.get_run(run.id, actor=ACTOR)
+    assert started.status is ExperimentRunStatus.RUNNING
+    assert started.started_at is not None
+
+    remaining = await service.claim_replays(
+        run.id, worker_id="worker-2", max_replays=5, actor=ACTOR
+    )
+    assert len(remaining) == 1
+    assert remaining[0][0].worker_id == "worker-2"
+
+    assert (
+        await service.claim_replays(
+            run.id, worker_id="worker-2", max_replays=5, actor=ACTOR
+        )
+        == []
+    )
+
+
+async def test_claim_unknown_run(service: ExperimentRunService) -> None:
+    """Raise for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
+    ):
+        await service.claim_replays(
+            missing_id, worker_id="worker-1", max_replays=1, actor=ACTOR
+        )
+
+
+async def test_claim_canceling_run_returns_empty(
+    service: ExperimentRunService,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Yield no replays from a canceling or terminal run."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    canceled, _ = await service.cancel_run(run.id, actor=ACTOR)
+    assert canceled.status is ExperimentRunStatus.CANCELED
+    assert (
+        await service.claim_replays(
+            run.id, worker_id="worker-1", max_replays=5, actor=ACTOR
+        )
+        == []
+    )
+
+
+async def test_claim_requeues_stale_replays(
+    repository: FakeExperimentRunRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    session_repository: FakeSessionRepository,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Requeue stale claims for another worker and increment the attempt."""
+    stale_service = build_service(
+        repository,
+        replay_repository,
+        config_repository,
+        experiment_repository,
+        session_repository,
+        heartbeat_timeout_seconds=-60,
+    )
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    first = await stale_service.claim_replays(
+        run.id, worker_id="worker-1", max_replays=5, actor=ACTOR
+    )
+    assert len(first) == 2
+    second = await stale_service.claim_replays(
+        run.id, worker_id="worker-2", max_replays=5, actor=ACTOR
+    )
+    assert len(second) == 2
+    for replay, _ in second:
+        assert replay.worker_id == "worker-2"
+        assert replay.attempt == 2
+
+
+async def test_claim_times_out_stale_replays_at_max_attempts(
+    repository: FakeExperimentRunRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    session_repository: FakeSessionRepository,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Time out stale claims at the attempt limit and finalize the run."""
+    stale_service = build_service(
+        repository,
+        replay_repository,
+        config_repository,
+        experiment_repository,
+        session_repository,
+        heartbeat_timeout_seconds=-60,
+        max_attempts=1,
+    )
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    claimed = await stale_service.claim_replays(
+        run.id, worker_id="worker-1", max_replays=5, actor=ACTOR
+    )
+    assert len(claimed) == 2
+    assert (
+        await stale_service.claim_replays(
+            run.id, worker_id="worker-2", max_replays=5, actor=ACTOR
+        )
+        == []
+    )
+    replays, _ = await replay_repository.query(ReplayFilter(experiment_run_id=run.id))
+    assert all(replay.status is ReplayStatus.TIMED_OUT for replay in replays)
+    assert all(replay.error == HEARTBEAT_TIMEOUT_ERROR for replay in replays)
+    finalized = await repository.get(run.id)
+    assert finalized.status is ExperimentRunStatus.COMPLETED
+    assert finalized.summary is not None
+    assert finalized.summary["replay_counts_by_status"] == {"timed_out": 2}
+
+
+async def test_cancel_run_cancels_pending_and_claimed(
+    service: ExperimentRunService,
+    replay_repository: FakeReplayRepository,
+    repository: FakeExperimentRunRepository,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Cancel pending and claimed replays and land on canceled directly."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    await service.claim_replays(
+        run.id, worker_id="worker-1", max_replays=1, actor=ACTOR
+    )
+    canceled, progress = await service.cancel_run(run.id, actor=ACTOR)
+    assert canceled.status is ExperimentRunStatus.CANCELED
+    assert canceled.ended_at is not None
+    assert canceled.summary is not None
+    assert canceled.summary["replay_counts_by_status"] == {"canceled": 2}
+    assert progress.canceled == 2
+    replays, _ = await replay_repository.query(ReplayFilter(experiment_run_id=run.id))
+    assert all(replay.status is ReplayStatus.CANCELED for replay in replays)
+
+
+async def test_cancel_run_keeps_running_replays(
+    service: ExperimentRunService,
+    replay_repository: FakeReplayRepository,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Leave running replays to the heartbeat path and stay canceling."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    claimed = await service.claim_replays(
+        run.id, worker_id="worker-1", max_replays=1, actor=ACTOR
+    )
+    running = claimed[0][0]
+    running.start()
+    await replay_repository.update(running)
+
+    canceling, progress = await service.cancel_run(run.id, actor=ACTOR)
+    assert canceling.status is ExperimentRunStatus.CANCELING
+    assert canceling.summary is None
+    assert progress.running == 1
+    assert progress.canceled == 1
+    loaded = await replay_repository.get(running.id)
+    assert loaded.status is ReplayStatus.RUNNING
+
+    # The run lands on canceled once the running replay drains.
+    loaded.cancel()
+    await replay_repository.update(loaded)
+    drained, _ = await service.cancel_run(run.id, actor=ACTOR)
+    assert drained.status is ExperimentRunStatus.CANCELED
+    assert drained.summary is not None
+
+
+async def test_cancel_terminal_run(
+    service: ExperimentRunService,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Reject canceling a terminal run."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    canceled, _ = await service.cancel_run(run.id, actor=ACTOR)
+    assert canceled.status is ExperimentRunStatus.CANCELED
+    with pytest.raises(
+        InvalidExperimentRunTransition,
+        match=f"Experiment run {run.id} cannot transition from 'canceled' "
+        f"to 'canceling'",
+    ):
+        await service.cancel_run(run.id, actor=ACTOR)

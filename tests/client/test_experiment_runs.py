@@ -20,10 +20,13 @@ import pytest
 from test_experiments import SCORING_POLICY, create_cohort, create_experiment
 
 from conftest import asgi_api_client, experiment_app
-from kitaru.api_models.v1.experiment_runs import ExperimentRunCreateRequest
-from kitaru.api_models.v1.replays import ReplayStatus
+from kitaru.api_models.v1.experiment_runs import (
+    ExperimentRunCreateRequest,
+    ExperimentRunStatus,
+)
+from kitaru.api_models.v1.replays import ReplayClaimRequest, ReplayStatus
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import NotFoundError
+from kitaru.client.exceptions import APIError, NotFoundError
 
 
 @pytest.fixture
@@ -70,3 +73,31 @@ async def test_list_replays(api_client: KitaruAPIClient) -> None:
     assert replay.agent_version_id == version_id
     assert replay.status is ReplayStatus.PENDING
     assert replay.scoring_policy == SCORING_POLICY
+
+
+async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a run through claim and cancel."""
+    cohort_id, _ = await create_cohort(api_client)
+    experiment = await create_experiment(api_client, cohort_id)
+    created = await api_client.experiments.create_run(
+        experiment.id, ExperimentRunCreateRequest()
+    )
+    claimed = await api_client.experiment_runs.claim(
+        created.id, ReplayClaimRequest(worker_id="worker-1", max_replays=5)
+    )
+    assert len(claimed.replays) == 1
+    assert claimed.replays[0].status is ReplayStatus.CLAIMED
+    assert claimed.replays[0].worker_id == "worker-1"
+
+    canceled = await api_client.experiment_runs.cancel(created.id)
+    assert canceled.status is ExperimentRunStatus.CANCELED
+    assert canceled.summary is not None
+
+    empty = await api_client.experiment_runs.claim(
+        created.id, ReplayClaimRequest(worker_id="worker-1", max_replays=5)
+    )
+    assert empty.replays == []
+
+    with pytest.raises(APIError) as exc_info:
+        await api_client.experiment_runs.cancel(created.id)
+    assert exc_info.value.status_code == 409

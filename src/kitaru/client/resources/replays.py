@@ -19,8 +19,14 @@ from typing import TYPE_CHECKING, Any
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.replays import (
     ReplayCreateRequest,
+    ReplayDiffResponse,
+    ReplayHeartbeatResponse,
     ReplayResponse,
+    ReplaySpecResponse,
     ReplayStatus,
+    ReplayUpdateRequest,
+    ToolLookupRequest,
+    ToolLookupResponse,
 )
 
 if TYPE_CHECKING:
@@ -108,3 +114,103 @@ class ReplaysResource:
         """
         response = await self._client.request("GET", f"/v1/replays/{replay_id}")
         return ReplayResponse.model_validate(response.json())
+
+    async def get_spec(self, replay_id: uuid.UUID) -> ReplaySpecResponse:
+        """Resolve the spec a runner executes a replay with.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay or a deleted run spec secret and 409 when the
+                stamped agent version has no run spec.
+
+        Returns:
+            Resolved replay spec.
+        """
+        response = await self._client.request("GET", f"/v1/replays/{replay_id}/spec")
+        return ReplaySpecResponse.model_validate(response.json())
+
+    async def update(
+        self, replay_id: uuid.UUID, request: ReplayUpdateRequest
+    ) -> ReplayResponse:
+        """Transition a replay through the runner status updates.
+
+        Args:
+            replay_id: Id of the replay.
+            request: Replay update request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 for an illegal transition or completing
+                without a linked result session.
+
+        Returns:
+            Updated replay.
+        """
+        response = await self._client.request(
+            "PATCH",
+            f"/v1/replays/{replay_id}",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ReplayResponse.model_validate(response.json())
+
+    async def heartbeat(self, replay_id: uuid.UUID) -> ReplayHeartbeatResponse:
+        """Record a worker heartbeat on a replay.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay is neither claimed,
+                running, nor canceled.
+
+        Returns:
+            Heartbeat response with the cancellation flag.
+        """
+        response = await self._client.request(
+            "POST", f"/v1/replays/{replay_id}/heartbeat"
+        )
+        return ReplayHeartbeatResponse.model_validate(response.json())
+
+    async def tool_lookup(
+        self, replay_id: uuid.UUID, request: ToolLookupRequest
+    ) -> ToolLookupResponse:
+        """Resolve a history tool policy lookup within its scope.
+
+        Args:
+            replay_id: Id of the replay.
+            request: Tool lookup request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 422 for a cache key mismatch or a tool without
+                a history policy.
+
+        Returns:
+            Tool lookup response.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/replays/{replay_id}/tool-lookup",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ToolLookupResponse.model_validate(response.json())
+
+    async def get_diff(self, replay_id: uuid.UUID) -> ReplayDiffResponse:
+        """Compute the full diff between a replay's sessions.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay has no result session yet.
+
+        Returns:
+            Computed replay diff.
+        """
+        response = await self._client.request("GET", f"/v1/replays/{replay_id}/diff")
+        return ReplayDiffResponse.model_validate(response.json())

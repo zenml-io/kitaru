@@ -360,3 +360,134 @@ async def test_session_delete_cascades_nodes(setup: Setup) -> None:
     await repository.upsert([parent, child])
     await sessions.delete(session.id)
     assert await repository.list_for_session(session.id, include_payloads=True) == []
+
+
+def tool_node(
+    session_id: uuid.UUID,
+    cache_key: str,
+    sequence: int = 0,
+    **overrides: object,
+) -> SessionNode:
+    """Build a completed tool call node entity.
+
+    Args:
+        session_id: Id of the session.
+        cache_key: Cache key of the tool call.
+        sequence: Node sequence.
+        **overrides: Field overrides.
+
+    Returns:
+        Session node entity.
+    """
+    return node(
+        session_id,
+        key=f"tool_call:get_weather#{sequence + 1}",
+        sequence=sequence,
+        node_type=NodeType.TOOL_CALL,
+        name="get_weather",
+        tool_name="get_weather",
+        cache_key=cache_key,
+        **overrides,
+    )
+
+
+CACHE_KEY = "a" * 64
+
+
+async def test_find_tool_result_scopes(setup: Setup) -> None:
+    """Find tool results within a session scope and an agent scope."""
+    repository, sessions, agents, owner_id = setup
+    session = await create_session(sessions, agents, owner_id)
+    sibling = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=session.agent_id,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    await repository.upsert([tool_node(session.id, CACHE_KEY, outputs={"temp": 21})])
+    await repository.upsert([tool_node(sibling.id, CACHE_KEY, outputs={"temp": 22})])
+
+    found = await repository.find_tool_result(
+        CACHE_KEY, session_ids=[session.id], agent_id=None
+    )
+    assert found is not None
+    assert found.session_id == session.id
+    assert found.outputs == {"temp": 21}
+
+    found = await repository.find_tool_result(
+        CACHE_KEY, session_ids=None, agent_id=session.agent_id
+    )
+    assert found is not None
+
+    other = await create_session(sessions, agents, owner_id)
+    assert (
+        await repository.find_tool_result(
+            CACHE_KEY, session_ids=[other.id], agent_id=None
+        )
+        is None
+    )
+    assert (
+        await repository.find_tool_result(
+            CACHE_KEY, session_ids=None, agent_id=other.agent_id
+        )
+        is None
+    )
+
+
+async def test_find_tool_result_prefers_most_recent(setup: Setup) -> None:
+    """Return the most recently started matching node."""
+    repository, sessions, agents, owner_id = setup
+    session = await create_session(sessions, agents, owner_id)
+    early = tool_node(
+        session.id,
+        CACHE_KEY,
+        sequence=0,
+        started_at=datetime(2026, 7, 1, 12, 0, tzinfo=UTC),
+        outputs={"temp": 20},
+    )
+    late = tool_node(
+        session.id,
+        CACHE_KEY,
+        sequence=1,
+        started_at=datetime(2026, 7, 1, 13, 0, tzinfo=UTC),
+        outputs={"temp": 25},
+    )
+    await repository.upsert([late, early])
+    found = await repository.find_tool_result(
+        CACHE_KEY, session_ids=[session.id], agent_id=None
+    )
+    assert found is not None
+    assert found.outputs == {"temp": 25}
+
+
+async def test_find_tool_result_excludes_mocked_and_incomplete(setup: Setup) -> None:
+    """Skip mocked, failed, and differently keyed tool calls."""
+    repository, sessions, agents, owner_id = setup
+    session = await create_session(sessions, agents, owner_id)
+    await repository.upsert(
+        [
+            tool_node(
+                session.id,
+                CACHE_KEY,
+                sequence=0,
+                attributes={"mocked": True, "policy": "history"},
+            ),
+            tool_node(session.id, CACHE_KEY, sequence=1, status=NodeStatus.FAILED),
+            tool_node(session.id, "b" * 64, sequence=2),
+        ]
+    )
+    assert (
+        await repository.find_tool_result(
+            CACHE_KEY, session_ids=[session.id], agent_id=None
+        )
+        is None
+    )
+    real = tool_node(session.id, CACHE_KEY, sequence=3, outputs={"temp": 21})
+    await repository.upsert([real])
+    found = await repository.find_tool_result(
+        CACHE_KEY, session_ids=[session.id], agent_id=None
+    )
+    assert found is not None
+    assert found.id == real.id
+    assert found.attributes == {}

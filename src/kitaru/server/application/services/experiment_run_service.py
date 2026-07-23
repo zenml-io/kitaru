@@ -14,6 +14,7 @@
 """Experiment run use cases."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
@@ -27,17 +28,26 @@ from kitaru.server.application.interfaces.replay_config_repository import (
 from kitaru.server.application.interfaces.replay_repository import (
     ReplayRepository,
 )
+from kitaru.server.application.interfaces.session_repository import (
+    SessionRepository,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment_runs import (
     ExperimentRunFilter,
     ExperimentRunReplaysFilter,
 )
 from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.application.services.run_finalization import (
+    finalize_run_if_drained,
+    load_run_replays,
+)
 from kitaru.server.domain.experiment_run import (
+    TERMINAL_RUN_STATUSES,
     ExperimentRun,
     ExperimentRunProgress,
+    ExperimentRunStatus,
 )
-from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.replay import Replay, ReplayStatus
 from kitaru.server.domain.replay_config import ReplayConfig
 
 
@@ -50,6 +60,9 @@ class ExperimentRunService:
         replay_repository: ReplayRepository,
         replay_config_repository: ReplayConfigRepository,
         experiment_repository: ExperimentRepository,
+        session_repository: SessionRepository,
+        heartbeat_timeout_seconds: int,
+        max_attempts: int,
     ) -> None:
         """Initialize the service.
 
@@ -58,11 +71,26 @@ class ExperimentRunService:
             replay_repository: Replay repository.
             replay_config_repository: Replay config repository.
             experiment_repository: Experiment repository.
+            session_repository: Session repository.
+            heartbeat_timeout_seconds: Seconds after which a heartbeat
+                counts as lost.
+            max_attempts: Attempt count at which a stale replay times out.
         """
         self._repository = repository
         self._replay_repository = replay_repository
         self._replay_config_repository = replay_config_repository
         self._experiment_repository = experiment_repository
+        self._session_repository = session_repository
+        self._heartbeat_timeout_seconds = heartbeat_timeout_seconds
+        self._max_attempts = max_attempts
+
+    def _stale_before(self) -> datetime:
+        """Compute the heartbeat staleness threshold.
+
+        Returns:
+            Time before which a heartbeat counts as lost.
+        """
+        return datetime.now(UTC) - timedelta(seconds=self._heartbeat_timeout_seconds)
 
     async def get_run(
         self, run_id: uuid.UUID, actor: AuthContext
@@ -81,7 +109,9 @@ class ExperimentRunService:
         """
         _ = actor
         run = await self._repository.get(run_id)
-        counts = await self._replay_repository.count_by_status([run_id])
+        counts = await self._replay_repository.count_by_status(
+            [run_id], self._stale_before(), self._max_attempts
+        )
         return run, ExperimentRunProgress.from_counts(counts.get(run_id, {}))
 
     async def list_runs(
@@ -105,7 +135,9 @@ class ExperimentRunService:
         if run_filter.experiment_id is not None:
             await self._experiment_repository.get(run_filter.experiment_id)
         runs, total = await self._repository.query(run_filter)
-        counts = await self._replay_repository.count_by_status([run.id for run in runs])
+        counts = await self._replay_repository.count_by_status(
+            [run.id for run in runs], self._stale_before(), self._max_attempts
+        )
         return [
             (run, ExperimentRunProgress.from_counts(counts.get(run.id, {})))
             for run in runs
@@ -140,7 +172,105 @@ class ExperimentRunService:
                 page_size=replays_filter.page_size,
             )
         )
+        stale_before = self._stale_before()
+        replays = [
+            replay.with_staleness(stale_before, self._max_attempts)
+            for replay in replays
+        ]
         configs = await self._replay_config_repository.get_many(
             [replay.replay_config_id for replay in replays]
         )
         return [(replay, configs[replay.replay_config_id]) for replay in replays], total
+
+    async def claim_replays(
+        self,
+        run_id: uuid.UUID,
+        worker_id: str,
+        max_replays: int,
+        actor: AuthContext,
+    ) -> list[tuple[Replay, ReplayConfig]]:
+        """Atomically claim pending replays of a run for a worker.
+
+        Stale claimed or running replays are requeued or timed out first.
+        The first claim moves a pending run to running. Canceling and
+        terminal runs yield no replays. An empty claim finalizes the run
+        when every replay is already terminal.
+
+        Args:
+            run_id: Id of the experiment run.
+            worker_id: Id of the claiming worker.
+            max_replays: Maximum number of replays to claim.
+            actor: Caller context.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+
+        Returns:
+            Claimed replays with their replay configs.
+        """
+        _ = actor
+        run = await self._repository.get(run_id)
+        if (
+            run.status is ExperimentRunStatus.CANCELING
+            or run.status in TERMINAL_RUN_STATUSES
+        ):
+            return []
+        await self._replay_repository.requeue_stale(
+            run_id, self._stale_before(), self._max_attempts
+        )
+        replays = await self._replay_repository.claim_pending(
+            run_id, worker_id, max_replays
+        )
+        if replays and run.status is ExperimentRunStatus.PENDING:
+            run.start()
+            await self._repository.update(run)
+        if not replays:
+            # The requeue may have timed out the run's last replay, which
+            # leaves no transition that would finalize the run.
+            await finalize_run_if_drained(
+                self._repository,
+                self._replay_repository,
+                self._session_repository,
+                run_id,
+            )
+        configs = await self._replay_config_repository.get_many(
+            [replay.replay_config_id for replay in replays]
+        )
+        return [(replay, configs[replay.replay_config_id]) for replay in replays]
+
+    async def cancel_run(
+        self, run_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[ExperimentRun, ExperimentRunProgress]:
+        """Cancel an experiment run.
+
+        Pending and claimed replays are canceled immediately, running ones
+        drain through the heartbeat path. The run lands on canceled right
+        away when no running replay remains.
+
+        Args:
+            run_id: Id of the experiment run.
+            actor: Caller context.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+            InvalidExperimentRunTransition: The run is already terminal.
+
+        Returns:
+            Updated experiment run and its progress.
+        """
+        _ = actor
+        run = await self._repository.get(run_id)
+        run.cancel()
+        run = await self._repository.update(run)
+        replays = await load_run_replays(self._replay_repository, run_id)
+        for replay in replays:
+            if replay.status in (ReplayStatus.PENDING, ReplayStatus.CLAIMED):
+                replay.cancel()
+                await self._replay_repository.update(replay)
+        await finalize_run_if_drained(
+            self._repository,
+            self._replay_repository,
+            self._session_repository,
+            run_id,
+        )
+        return await self.get_run(run_id, actor)

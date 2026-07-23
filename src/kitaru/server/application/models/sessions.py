@@ -71,6 +71,7 @@ class SessionCreate(FrozenModel):
     framework: str | None = None
     adapter_version: str | None = None
     log_uri: str | None = None
+    replay_id: uuid.UUID | None = None
 
 
 class SessionUpdate(FrozenModel):

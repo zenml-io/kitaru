@@ -14,6 +14,7 @@
 """Replay repository interface."""
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.replays import ReplayFilter
@@ -71,13 +72,69 @@ class ReplayRepository(Protocol):
         """
         ...
 
+    async def update(self, replay: Replay) -> Replay:
+        """Persist changes to an existing replay.
+
+        Args:
+            replay: Replay with modified fields.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            SessionNotFound: No session has the replay's result session id.
+
+        Returns:
+            Stored replay with the updated timestamp renewed.
+        """
+        ...
+
+    async def requeue_stale(
+        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
+    ) -> None:
+        """Requeue or time out a run's replays with lost heartbeats.
+
+        A claimed or running replay whose last heartbeat, or claim when no
+        heartbeat arrived yet, is older than the threshold goes back to
+        pending with the attempt incremented, or to timed out once the
+        attempt count reached the maximum.
+
+        Args:
+            run_id: Id of the experiment run.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
+        """
+        ...
+
+    async def claim_pending(
+        self, run_id: uuid.UUID, worker_id: str, limit: int
+    ) -> list[Replay]:
+        """Atomically claim pending replays of a run for a worker.
+
+        Rows locked by a concurrent claim are skipped, so parallel workers
+        never double-claim.
+
+        Args:
+            run_id: Id of the experiment run.
+            worker_id: Id of the claiming worker.
+            limit: Maximum number of replays to claim.
+
+        Returns:
+            Claimed replays.
+        """
+        ...
+
     async def count_by_status(
-        self, run_ids: list[uuid.UUID]
+        self, run_ids: list[uuid.UUID], stale_before: datetime, max_attempts: int
     ) -> dict[uuid.UUID, dict[ReplayStatus, int]]:
         """Count replays by status for a set of experiment runs.
 
+        Claimed or running replays with lost heartbeats count as pending,
+        or as timed out once the attempt count reached the maximum, without
+        writing.
+
         Args:
             run_ids: Ids of the experiment runs.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
 
         Returns:
             Replay counts by status, keyed by experiment run id.

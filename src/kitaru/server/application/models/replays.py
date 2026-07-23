@@ -45,3 +45,13 @@ class ReplayCreate(FrozenModel):
     override: ReplayOverride | None = None
     tool_policy: ToolPolicyConfig | None = None
     scoring_policy: ScoringPolicy
+
+
+class ReplayUpdate(FrozenModel):
+    """Replay update command."""
+
+    status: ReplayStatus
+    error: str | None = None
+    passed: bool | None = None
+    score: float | None = None
+    scores: dict[str, float] | None = None

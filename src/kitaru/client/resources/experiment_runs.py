@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Any
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment_runs import ExperimentRunResponse
-from kitaru.api_models.v1.replays import ReplayResponse
+from kitaru.api_models.v1.replays import (
+    ReplayClaimRequest,
+    ReplayClaimResponse,
+    ReplayResponse,
+)
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -104,3 +108,44 @@ class ExperimentRunsResource:
             params={"page": page, "page_size": page_size},
         )
         return Page[ReplayResponse].model_validate(response.json())
+
+    async def claim(
+        self, run_id: uuid.UUID, request: ReplayClaimRequest
+    ) -> ReplayClaimResponse:
+        """Atomically claim pending replays of an experiment run.
+
+        Args:
+            run_id: Id of the experiment run.
+            request: Replay claim request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                experiment run.
+
+        Returns:
+            Claimed replays.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/experiment-runs/{run_id}/claim",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ReplayClaimResponse.model_validate(response.json())
+
+    async def cancel(self, run_id: uuid.UUID) -> ExperimentRunResponse:
+        """Cancel an experiment run.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                experiment run and 409 when the run is already terminal.
+
+        Returns:
+            Updated experiment run.
+        """
+        response = await self._client.request(
+            "POST", f"/v1/experiment-runs/{run_id}/cancel"
+        )
+        return ExperimentRunResponse.model_validate(response.json())

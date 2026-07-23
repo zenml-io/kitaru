@@ -41,6 +41,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_experiment_run_service,
     get_experiment_service,
     get_replay_service,
+    get_session_node_service,
     get_session_service,
     get_tag_service,
 )
@@ -73,6 +74,9 @@ from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
 from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.session_node_service import (
+    SessionNodeService,
+)
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.database.service import DatabaseService
@@ -144,6 +148,8 @@ from kitaru.server.domain.session_node import (
     DuplicateNodeKey,
     DuplicateNodeSequence,
     DuplicateSessionNodeId,
+    NodeStatus,
+    NodeType,
     SessionNode,
 )
 from kitaru.server.domain.tag import (
@@ -1251,6 +1257,21 @@ class FakeSessionRepository:
             for session in self._sessions.values()
         )
 
+    def session_ids_for_agent(self, agent_id: uuid.UUID) -> list[uuid.UUID]:
+        """Collect the ids of an agent's stored sessions.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            Ids of the agent's sessions.
+        """
+        return [
+            session.id
+            for session in self._sessions.values()
+            if session.agent_id == agent_id
+        ]
+
     def _check_duplicate_external_id(self, session: Session) -> None:
         if session.provider is None or session.external_id is None:
             return
@@ -1577,6 +1598,53 @@ class FakeSessionNodeRepository:
             node.model_copy(update={"inputs": None, "outputs": None, "attributes": {}})
             for node in nodes
         ]
+
+    async def find_tool_result(
+        self,
+        cache_key: str,
+        session_ids: list[uuid.UUID] | None,
+        agent_id: uuid.UUID | None,
+    ) -> SessionNode | None:
+        """Find the most recent completed tool call with a cache key.
+
+        Nodes whose attributes mark them mocked are excluded. Exactly one
+        of the scope arguments is set.
+
+        Args:
+            cache_key: Cache key to match.
+            session_ids: Sessions to search within.
+            agent_id: Agent whose sessions to search within.
+
+        Returns:
+            Most recent matching node with payloads, ``None`` on a miss.
+        """
+        if agent_id is not None:
+            session_ids = self._session_repository.session_ids_for_agent(agent_id)
+        assert session_ids is not None
+        scope = set(session_ids)
+        candidates = [
+            node
+            for node in self._nodes.values()
+            if node.cache_key == cache_key
+            and node.node_type is NodeType.TOOL_CALL
+            and node.status is NodeStatus.COMPLETED
+            and node.attributes.get("mocked") not in (True, "true")
+            and node.session_id in scope
+        ]
+        with_time = sorted(
+            (node for node in candidates if node.started_at is not None),
+            key=lambda node: (node.started_at, node.id.int),
+            reverse=True,
+        )
+        without_time = sorted(
+            (node for node in candidates if node.started_at is None),
+            key=lambda node: node.id.int,
+            reverse=True,
+        )
+        ordered = with_time + without_time
+        if not ordered:
+            return None
+        return ordered[0].model_copy()
 
 
 class FakeCohortRepository:
@@ -2184,13 +2252,96 @@ class FakeReplayRepository:
         page = replays[start : start + replay_filter.page_size]
         return [replay.model_copy() for replay in page], total
 
+    async def update(self, replay: Replay) -> Replay:
+        """Persist changes to an existing replay.
+
+        Args:
+            replay: Replay with modified fields.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            SessionNotFound: No session has the replay's result session id.
+
+        Returns:
+            Stored replay with the updated timestamp renewed.
+        """
+        stored = self._replays.get(replay.id)
+        if stored is None:
+            raise ReplayNotFound(replay.id)
+        if replay.result_session_id is not None:
+            await self._session_repository.get(replay.result_session_id)
+        self._check_duplicate_session(replay)
+        now = _renewed_timestamp(stored.updated)
+        updated = replay.model_copy(update={"created": stored.created, "updated": now})
+        self._replays[replay.id] = updated
+        return updated.model_copy()
+
+    async def requeue_stale(
+        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
+    ) -> None:
+        """Requeue or time out a run's replays with lost heartbeats.
+
+        Args:
+            run_id: Id of the experiment run.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
+        """
+        for replay_id, replay in list(self._replays.items()):
+            if replay.experiment_run_id != run_id:
+                continue
+            changed = replay.with_staleness(stale_before, max_attempts)
+            if changed is replay:
+                continue
+            self._replays[replay_id] = changed.model_copy(
+                update={"updated": _renewed_timestamp(replay.updated)}
+            )
+
+    async def claim_pending(
+        self, run_id: uuid.UUID, worker_id: str, limit: int
+    ) -> list[Replay]:
+        """Atomically claim pending replays of a run for a worker.
+
+        Args:
+            run_id: Id of the experiment run.
+            worker_id: Id of the claiming worker.
+            limit: Maximum number of replays to claim.
+
+        Returns:
+            Claimed replays.
+        """
+        pending = sorted(
+            (
+                replay
+                for replay in self._replays.values()
+                if replay.experiment_run_id == run_id
+                and replay.status is ReplayStatus.PENDING
+            ),
+            key=lambda replay: replay.id.int,
+        )
+        claimed: list[Replay] = []
+        for replay in pending[:limit]:
+            changed = replay.model_copy()
+            changed.claim(worker_id)
+            stored = changed.model_copy(
+                update={"updated": _renewed_timestamp(replay.updated)}
+            )
+            self._replays[replay.id] = stored
+            claimed.append(stored.model_copy())
+        return claimed
+
     async def count_by_status(
-        self, run_ids: list[uuid.UUID]
+        self, run_ids: list[uuid.UUID], stale_before: datetime, max_attempts: int
     ) -> dict[uuid.UUID, dict[ReplayStatus, int]]:
         """Count replays by status for a set of experiment runs.
 
+        Claimed or running replays with lost heartbeats count as pending,
+        or as timed out once the attempt count reached the maximum, without
+        writing.
+
         Args:
             run_ids: Ids of the experiment runs.
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
 
         Returns:
             Replay counts by status, keyed by experiment run id.
@@ -2199,8 +2350,9 @@ class FakeReplayRepository:
         for replay in self._replays.values():
             if replay.experiment_run_id not in run_ids:
                 continue
+            status = replay.with_staleness(stale_before, max_attempts).status
             run_counts = counts.setdefault(replay.experiment_run_id, {})
-            run_counts[replay.status] = run_counts.get(replay.status, 0) + 1
+            run_counts[status] = run_counts.get(status, 0) + 1
         return counts
 
     async def references_agent_version(self, version_id: uuid.UUID) -> bool:
@@ -2333,6 +2485,26 @@ class FakeExperimentRunRepository:
         page = runs[start : start + run_filter.page_size]
         return [run.model_copy() for run in page], total
 
+    async def update(self, run: ExperimentRun) -> ExperimentRun:
+        """Persist changes to an existing experiment run.
+
+        Args:
+            run: Experiment run with modified fields.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+
+        Returns:
+            Stored experiment run with the updated timestamp renewed.
+        """
+        stored = self._runs.get(run.id)
+        if stored is None:
+            raise ExperimentRunNotFound(run.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = run.model_copy(update={"created": stored.created, "updated": now})
+        self._runs[run.id] = updated
+        return updated.model_copy()
+
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.
 
@@ -2390,6 +2562,7 @@ def experiment_app() -> FastAPI:
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
+        replay_repository=replay_repository,
     )
     cohort_service = CohortService(
         repository=cohort_repository,
@@ -2408,17 +2581,32 @@ def experiment_app() -> FastAPI:
         replay_repository=replay_repository,
         replay_config_repository=config_repository,
         experiment_repository=experiment_repository,
+        session_repository=session_repository,
+        heartbeat_timeout_seconds=60,
+        max_attempts=3,
     )
     replay_service = ReplayService(
         repository=replay_repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
         agent_version_repository=version_repository,
+        session_node_repository=node_repository,
+        experiment_run_repository=run_repository,
+        experiment_repository=experiment_repository,
+        cohort_repository=cohort_repository,
+        secret_repository=secret_repository,
+        heartbeat_timeout_seconds=60,
+        max_attempts=3,
+    )
+    node_service = SessionNodeService(
+        repository=node_repository,
+        session_repository=session_repository,
     )
     tag_service = TagService(repository=tag_repository)
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[get_session_service] = lambda: session_service
+    app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[get_cohort_service] = lambda: cohort_service
     app.dependency_overrides[get_experiment_service] = lambda: experiment_service
     app.dependency_overrides[get_experiment_run_service] = lambda: run_service

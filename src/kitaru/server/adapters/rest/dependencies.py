@@ -232,11 +232,13 @@ def get_experiment_service(
 
 def get_experiment_run_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> ExperimentRunService:
     """Return an experiment run service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Experiment run service bound to the SQL repositories.
@@ -246,16 +248,21 @@ def get_experiment_run_service(
         replay_repository=SQLReplayRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
         experiment_repository=SQLExperimentRepository(session),
+        session_repository=SQLSessionRepository(session),
+        heartbeat_timeout_seconds=settings.REPLAY_HEARTBEAT_TIMEOUT_SECONDS,
+        max_attempts=settings.REPLAY_MAX_ATTEMPTS,
     )
 
 
 def get_replay_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> ReplayService:
     """Return a replay service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Replay service bound to the SQL repositories.
@@ -265,6 +272,15 @@ def get_replay_service(
         replay_config_repository=SQLReplayConfigRepository(session),
         session_repository=SQLSessionRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
+        session_node_repository=SQLSessionNodeRepository(session),
+        experiment_run_repository=SQLExperimentRunRepository(session),
+        experiment_repository=SQLExperimentRepository(session),
+        cohort_repository=SQLCohortRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+        heartbeat_timeout_seconds=settings.REPLAY_HEARTBEAT_TIMEOUT_SECONDS,
+        max_attempts=settings.REPLAY_MAX_ATTEMPTS,
     )
 
 
@@ -304,6 +320,7 @@ def get_session_service(
         agent_repository=SQLAgentRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         node_repository=SQLSessionNodeRepository(session),
+        replay_repository=SQLReplayRepository(session),
     )
 
 

@@ -15,13 +15,14 @@
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
+from kitaru.server.adapters.db.schemas.session import SessionSchema
 from kitaru.server.adapters.db.schemas.session_node import (
     SESSION_NODE_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SESSION_NODE_KEY_UNIQUE_CONSTRAINT,
@@ -35,6 +36,8 @@ from kitaru.server.domain.session_node import (
     DuplicateNodeKey,
     DuplicateNodeSequence,
     DuplicateSessionNodeId,
+    NodeStatus,
+    NodeType,
     SessionNode,
 )
 
@@ -170,3 +173,55 @@ class SQLSessionNodeRepository:
             )
         rows = (await self._session.scalars(statement)).all()
         return [row.to_domain(include_payloads=include_payloads) for row in rows]
+
+    async def find_tool_result(
+        self,
+        cache_key: str,
+        session_ids: list[uuid.UUID] | None,
+        agent_id: uuid.UUID | None,
+    ) -> SessionNode | None:
+        """Find the most recent completed tool call with a cache key.
+
+        Nodes whose attributes mark them mocked are excluded. Exactly one
+        of the scope arguments is set.
+
+        Args:
+            cache_key: Cache key to match.
+            session_ids: Sessions to search within.
+            agent_id: Agent whose sessions to search within.
+
+        Returns:
+            Most recent matching node with payloads, ``None`` on a miss.
+        """
+        statement = (
+            select(SessionNodeSchema)
+            .where(
+                col(SessionNodeSchema.cache_key) == cache_key,
+                col(SessionNodeSchema.node_type) == NodeType.TOOL_CALL.value,
+                col(SessionNodeSchema.status) == NodeStatus.COMPLETED.value,
+                func.jsonb_extract_path_text(
+                    col(SessionNodeSchema.attributes), "mocked"
+                ).is_distinct_from("true"),
+            )
+            .order_by(
+                col(SessionNodeSchema.started_at).desc().nulls_last(),
+                col(SessionNodeSchema.id).desc(),
+            )
+            .limit(1)
+        )
+        if session_ids is not None:
+            statement = statement.where(
+                col(SessionNodeSchema.session_id).in_(session_ids)
+            )
+        if agent_id is not None:
+            statement = statement.where(
+                col(SessionNodeSchema.session_id).in_(
+                    select(col(SessionSchema.id)).where(
+                        col(SessionSchema.agent_id) == agent_id
+                    )
+                )
+            )
+        row = (await self._session.scalars(statement)).first()
+        if row is None:
+            return None
+        return row.to_domain(include_payloads=True)

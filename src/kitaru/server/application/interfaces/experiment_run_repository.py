@@ -68,6 +68,20 @@ class ExperimentRunRepository(Protocol):
         """
         ...
 
+    async def update(self, run: ExperimentRun) -> ExperimentRun:
+        """Persist changes to an existing experiment run.
+
+        Args:
+            run: Experiment run with modified fields.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+
+        Returns:
+            Stored experiment run with the updated timestamp renewed.
+        """
+        ...
+
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.
 

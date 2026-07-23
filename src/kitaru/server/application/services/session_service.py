@@ -21,6 +21,9 @@ from kitaru.server.application.interfaces.agent_repository import (
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.replay_repository import (
+    ReplayRepository,
+)
 from kitaru.server.application.interfaces.session_node_repository import (
     SessionNodeRepository,
 )
@@ -51,6 +54,7 @@ class SessionService:
         agent_repository: AgentRepository,
         agent_version_repository: AgentVersionRepository,
         node_repository: SessionNodeRepository,
+        replay_repository: ReplayRepository,
     ) -> None:
         """Initialize the service.
 
@@ -59,16 +63,22 @@ class SessionService:
             agent_repository: Agent repository.
             agent_version_repository: Agent version repository.
             node_repository: Session node repository.
+            replay_repository: Replay repository.
         """
         self._repository = repository
         self._agent_repository = agent_repository
         self._agent_version_repository = agent_version_repository
         self._node_repository = node_repository
+        self._replay_repository = replay_repository
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
     ) -> Session:
         """Create a session owned by the caller.
+
+        A set replay id links the session to its replay: the session is
+        stored with origin ``replay`` and becomes the replay's result
+        session.
 
         Args:
             command: Session create command.
@@ -78,14 +88,26 @@ class SessionService:
             InvalidSession: The command violates the origin rules.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
+            ReplayNotFound: No replay has the referenced replay id.
+            ReplayNotActive: The replay is not claimed or running.
+            ReplayAlreadyLinked: The replay already has a result session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
         Returns:
             Created session.
         """
-        if command.origin is SessionOrigin.REPLAY:
-            raise InvalidSession("Session origin 'replay' is not supported")
+        origin = command.origin
+        replay = None
+        if command.replay_id is not None:
+            if command.origin is not SessionOrigin.RECORDED:
+                raise InvalidSession(
+                    "Sessions linked to a replay require origin 'recorded'"
+                )
+            replay = await self._replay_repository.get(command.replay_id)
+            origin = SessionOrigin.REPLAY
+        elif command.origin is SessionOrigin.REPLAY:
+            raise InvalidSession("Session origin 'replay' requires a replay id")
         if command.origin is SessionOrigin.RECORDED and command.status not in (
             None,
             SessionStatus.IN_PROGRESS,
@@ -103,7 +125,7 @@ class SessionService:
             owner_id=actor.account.id,
             agent_id=command.agent_id,
             agent_version_id=command.agent_version_id,
-            origin=command.origin,
+            origin=origin,
             status=command.status or SessionStatus.IN_PROGRESS,
             name=command.name,
             inputs=command.inputs,
@@ -119,7 +141,12 @@ class SessionService:
             adapter_version=command.adapter_version,
             log_uri=command.log_uri,
         )
-        return await self._repository.create(session)
+        if replay is not None:
+            replay.link_result_session(session.id)
+        session = await self._repository.create(session)
+        if replay is not None:
+            await self._replay_repository.update(replay)
+        return session
 
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.

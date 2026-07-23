@@ -15,9 +15,16 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 
 import pytest
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlmodel import SQLModel
 
 from conftest import (
     FakeAgentRepository,
@@ -29,6 +36,7 @@ from conftest import (
     FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    db_settings,
     pg_session,
     postgres_available,
 )
@@ -87,6 +95,7 @@ from kitaru.server.application.interfaces.session_repository import (
 from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import (
@@ -102,6 +111,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
 )
 from kitaru.server.domain.replay import (
+    HEARTBEAT_TIMEOUT_ERROR,
     DuplicateReplaySession,
     Replay,
     ReplayStatus,
@@ -417,10 +427,58 @@ async def test_count_by_status(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, replay_entities(run, seed))
-    counts = await setup.replays.count_by_status([created.id])
+    stale_before = datetime.now(UTC) - timedelta(seconds=60)
+    counts = await setup.replays.count_by_status([created.id], stale_before, 3)
     assert counts == {created.id: {ReplayStatus.PENDING: 2}}
-    assert await setup.replays.count_by_status([]) == {}
-    assert await setup.replays.count_by_status([uuid.uuid4()]) == {}
+    assert await setup.replays.count_by_status([], stale_before, 3) == {}
+    assert await setup.replays.count_by_status([uuid.uuid4()], stale_before, 3) == {}
+
+
+async def test_count_by_status_reports_staleness(setup: Setup) -> None:
+    """Report stale claims as pending or timed out without writing."""
+    seed = await seed_experiment(setup)
+    run = run_entity(setup, seed)
+    created = await setup.runs.create(run, replay_entities(run, seed))
+    claimed = await setup.replays.claim_pending(created.id, "worker-1", 2)
+    fresh = datetime.now(UTC) - timedelta(seconds=60)
+    counts = await setup.replays.count_by_status([created.id], fresh, 3)
+    assert counts == {created.id: {ReplayStatus.CLAIMED: 2}}
+    # A threshold in the future marks both claims stale: one requeues, one
+    # at the attempt limit times out.
+    exhausted = claimed[0]
+    exhausted = exhausted.model_copy(update={"attempt": 3})
+    await setup.replays.update(exhausted)
+    stale = datetime.now(UTC) + timedelta(seconds=60)
+    counts = await setup.replays.count_by_status([created.id], stale, 3)
+    assert counts == {created.id: {ReplayStatus.PENDING: 1, ReplayStatus.TIMED_OUT: 1}}
+    # Reporting never writes.
+    loaded = await setup.replays.get(exhausted.id)
+    assert loaded.status is ReplayStatus.CLAIMED
+
+
+async def test_update_run(setup: Setup) -> None:
+    """Persist run status changes and renew the updated timestamp."""
+    seed = await seed_experiment(setup)
+    created = await setup.runs.create(run_entity(setup, seed), [])
+    created.start()
+    updated = await setup.runs.update(created)
+    assert updated.status is ExperimentRunStatus.RUNNING
+    assert updated.started_at is not None
+    assert updated.updated is not None
+    assert created.updated is not None
+    assert updated.updated > created.updated
+    loaded = await setup.runs.get(created.id)
+    assert loaded == updated
+
+
+async def test_update_run_not_found(setup: Setup) -> None:
+    """Raise for an unknown experiment run id."""
+    seed = await seed_experiment(setup)
+    run = run_entity(setup, seed)
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {run.id} was not found"
+    ):
+        await setup.runs.update(run)
 
 
 async def test_duplicate_replay_session_within_run(setup: Setup) -> None:
@@ -454,3 +512,118 @@ async def test_agent_version_delete_blocked_by_run(setup: Setup) -> None:
         match=f"Agent version {seed.version.id} is referenced by",
     ):
         await setup.versions.delete(seed.version.id)
+
+
+async def test_claim_pending_claims_up_to_limit(setup: Setup) -> None:
+    """Claim pending replays in id order up to the limit."""
+    seed = await seed_experiment(setup, session_count=3)
+    run = run_entity(setup, seed)
+    created = await setup.runs.create(run, replay_entities(run, seed))
+    other_seed = await seed_experiment(setup, name="other")
+    other_run = run_entity(setup, other_seed)
+    await setup.runs.create(other_run, replay_entities(other_run, other_seed))
+
+    first = await setup.replays.claim_pending(created.id, "worker-1", 2)
+    assert len(first) == 2
+    for replay in first:
+        assert replay.status is ReplayStatus.CLAIMED
+        assert replay.worker_id == "worker-1"
+        assert replay.claimed_at is not None
+        assert replay.heartbeat_at is not None
+
+    second = await setup.replays.claim_pending(created.id, "worker-2", 5)
+    assert len(second) == 1
+    assert second[0].worker_id == "worker-2"
+    assert {replay.id for replay in first}.isdisjoint({replay.id for replay in second})
+    assert await setup.replays.claim_pending(created.id, "worker-2", 5) == []
+
+    # The other run's replays stay untouched.
+    others, _ = await setup.replays.query(ReplayFilter(experiment_run_id=other_run.id))
+    assert all(replay.status is ReplayStatus.PENDING for replay in others)
+
+
+async def test_requeue_stale_requeues_and_times_out(setup: Setup) -> None:
+    """Requeue stale claims and time them out at the attempt limit."""
+    seed = await seed_experiment(setup)
+    run = run_entity(setup, seed)
+    created = await setup.runs.create(run, replay_entities(run, seed))
+    claimed = await setup.replays.claim_pending(created.id, "worker-1", 2)
+    exhausted = claimed[0].model_copy(update={"attempt": 3})
+    await setup.replays.update(exhausted)
+
+    fresh = datetime.now(UTC) - timedelta(seconds=60)
+    await setup.replays.requeue_stale(created.id, fresh, 3)
+    loaded = await setup.replays.get(claimed[1].id)
+    assert loaded.status is ReplayStatus.CLAIMED
+
+    stale = datetime.now(UTC) + timedelta(seconds=60)
+    await setup.replays.requeue_stale(created.id, stale, 3)
+    requeued = await setup.replays.get(claimed[1].id)
+    assert requeued.status is ReplayStatus.PENDING
+    assert requeued.attempt == 2
+    assert requeued.worker_id is None
+    assert requeued.claimed_at is None
+    assert requeued.heartbeat_at is None
+    assert requeued.started_at is None
+    timed_out = await setup.replays.get(exhausted.id)
+    assert timed_out.status is ReplayStatus.TIMED_OUT
+    assert timed_out.error == HEARTBEAT_TIMEOUT_ERROR
+    assert timed_out.ended_at is not None
+
+
+async def test_concurrent_claims_do_not_double_claim() -> None:
+    """Skip rows locked by a concurrent claim instead of double-claiming."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    settings = db_settings()
+    await DatabaseService.create_db(settings, force_drop=True)
+    engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(SQLModel.metadata.create_all)
+        factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+        async with factory() as session:
+            accounts = SQLAccountRepository(session)
+            owner = await accounts.create(Account(name="owner"))
+            setup = Setup(
+                SQLExperimentRunRepository(session),
+                SQLReplayRepository(session),
+                SQLExperimentRepository(session),
+                SQLReplayConfigRepository(session),
+                SQLCohortRepository(session),
+                SQLSessionRepository(session),
+                SQLAgentVersionRepository(session),
+                SQLAgentRepository(session),
+                SQLTagRepository(session),
+                owner.id,
+            )
+            seed = await seed_experiment(setup, session_count=4)
+            run = run_entity(setup, seed)
+            created = await setup.runs.create(run, replay_entities(run, seed))
+            await session.commit()
+        # Two open transactions claim concurrently. FOR UPDATE SKIP LOCKED
+        # makes the second claim skip the rows the first one still locks.
+        async with factory() as first_session, factory() as second_session:
+            first_claimed = await SQLReplayRepository(first_session).claim_pending(
+                created.id, "worker-1", 2
+            )
+            second_claimed = await SQLReplayRepository(second_session).claim_pending(
+                created.id, "worker-2", 4
+            )
+            await first_session.commit()
+            await second_session.commit()
+        assert len(first_claimed) == 2
+        assert len(second_claimed) == 2
+        first_ids = {replay.id for replay in first_claimed}
+        second_ids = {replay.id for replay in second_claimed}
+        assert first_ids.isdisjoint(second_ids)
+        async with factory() as session:
+            replays, total = await SQLReplayRepository(session).query(
+                ReplayFilter(experiment_run_id=created.id)
+            )
+        assert total == 4
+        assert all(replay.status is ReplayStatus.CLAIMED for replay in replays)
+    finally:
+        await engine.dispose()

@@ -14,7 +14,7 @@
 """Experiment run entity, value objects, and errors."""
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -22,6 +22,7 @@ from pydantic import Field
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.base import (
+    ConflictError,
     DomainModel,
     NotFoundError,
     ValidationError,
@@ -41,6 +42,15 @@ class ExperimentRunStatus(StrEnum):
     CANCELED = "canceled"
 
 
+TERMINAL_RUN_STATUSES = frozenset(
+    {
+        ExperimentRunStatus.COMPLETED,
+        ExperimentRunStatus.FAILED,
+        ExperimentRunStatus.CANCELED,
+    }
+)
+
+
 class ExperimentRunNotFound(NotFoundError):
     """Raised when an experiment run lookup does not resolve."""
 
@@ -55,6 +65,27 @@ class ExperimentRunNotFound(NotFoundError):
 
 class InvalidExperimentRun(ValidationError):
     """Raised when an experiment run violates its shape rules."""
+
+
+class InvalidExperimentRunTransition(ConflictError):
+    """Raised when an experiment run status transition is illegal."""
+
+    def __init__(
+        self,
+        run_id: uuid.UUID,
+        status: ExperimentRunStatus,
+        target: ExperimentRunStatus,
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            run_id: Id of the experiment run.
+            status: Current status.
+            target: Requested status.
+        """
+        super().__init__(
+            f"Experiment run {run_id} cannot transition from '{status}' to '{target}'"
+        )
 
 
 class ExperimentRunProgress(FrozenModel):
@@ -101,3 +132,50 @@ class ExperimentRun(DomainModel):
     error: str | None = None
     created: datetime | None = None
     updated: datetime | None = None
+
+    def start(self) -> None:
+        """Start the run on its first claim.
+
+        Raises:
+            InvalidExperimentRunTransition: The run is not pending.
+        """
+        if self.status is not ExperimentRunStatus.PENDING:
+            raise InvalidExperimentRunTransition(
+                self.id, self.status, ExperimentRunStatus.RUNNING
+            )
+        self.status = ExperimentRunStatus.RUNNING
+        self.started_at = datetime.now(UTC)
+
+    def cancel(self) -> None:
+        """Request cancellation of the run.
+
+        Raises:
+            InvalidExperimentRunTransition: The run is already terminal.
+        """
+        if self.status in TERMINAL_RUN_STATUSES:
+            raise InvalidExperimentRunTransition(
+                self.id, self.status, ExperimentRunStatus.CANCELING
+            )
+        self.status = ExperimentRunStatus.CANCELING
+
+    def finalize(self, summary: dict[str, Any]) -> None:
+        """Finalize the run once its last replay is terminal.
+
+        A canceling run lands on canceled, any other run on completed.
+
+        Args:
+            summary: Aggregate diff summary.
+
+        Raises:
+            InvalidExperimentRunTransition: The run is already terminal.
+        """
+        target = (
+            ExperimentRunStatus.CANCELED
+            if self.status is ExperimentRunStatus.CANCELING
+            else ExperimentRunStatus.COMPLETED
+        )
+        if self.status in TERMINAL_RUN_STATUSES:
+            raise InvalidExperimentRunTransition(self.id, self.status, target)
+        self.status = target
+        self.summary = summary
+        self.ended_at = datetime.now(UTC)

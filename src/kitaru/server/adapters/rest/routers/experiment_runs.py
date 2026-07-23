@@ -20,7 +20,11 @@ from fastapi import APIRouter, Depends, Query
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.experiment_runs import ExperimentRunResponse
-from kitaru.api_models.v1.replays import ReplayResponse
+from kitaru.api_models.v1.replays import (
+    ReplayClaimRequest,
+    ReplayClaimResponse,
+    ReplayResponse,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_run_service,
@@ -128,3 +132,66 @@ async def list_experiment_run_replays(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post("/{run_id}/claim")
+async def claim_replays(
+    run_id: uuid.UUID,
+    body: ReplayClaimRequest,
+    service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ReplayClaimResponse:
+    """Atomically claim pending replays of an experiment run for a worker.
+
+    Stale claimed or running replays are requeued or timed out first. The
+    first claim moves a pending run to running. Canceling and terminal
+    runs yield no replays.
+
+    Clients observe HTTP 200 on success, 404 when no experiment run has
+    this id, and 422 on invalid input.
+
+    Args:
+        run_id: Id of the experiment run.
+        body: Replay claim request.
+        service: Experiment run service.
+        actor: Caller context.
+
+    Returns:
+        Claimed replays.
+    """
+    replays = await service.claim_replays(
+        run_id,
+        worker_id=body.worker_id,
+        max_replays=body.max_replays,
+        actor=actor,
+    )
+    return ReplayClaimResponse(
+        replays=[replay_to_response(replay, config) for replay, config in replays]
+    )
+
+
+@router.post("/{run_id}/cancel")
+async def cancel_experiment_run(
+    run_id: uuid.UUID,
+    service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ExperimentRunResponse:
+    """Cancel an experiment run.
+
+    Pending and claimed replays are canceled immediately, running ones
+    drain through the heartbeat path. The run lands on canceled right away
+    when no running replay remains.
+
+    Clients observe HTTP 200 on success, 404 when no experiment run has
+    this id, and 409 when the run is already terminal.
+
+    Args:
+        run_id: Id of the experiment run.
+        service: Experiment run service.
+        actor: Caller context.
+
+    Returns:
+        Updated experiment run.
+    """
+    run, progress = await service.cancel_run(run_id, actor=actor)
+    return experiment_run_to_response(run, progress)

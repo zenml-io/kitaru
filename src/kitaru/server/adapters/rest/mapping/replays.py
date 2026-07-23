@@ -13,20 +13,36 @@
 #  permissions and limitations under the License.
 """Replay DTO conversions."""
 
+from kitaru.api_models.v1.replays import DiffNode as DiffNodeModel
+from kitaru.api_models.v1.replays import DiffValue as DiffValueModel
 from kitaru.api_models.v1.replays import HistoryPolicy as HistoryPolicyModel
 from kitaru.api_models.v1.replays import HistoryScope as HistoryScopeModel
 from kitaru.api_models.v1.replays import LLMPolicy as LLMPolicyModel
+from kitaru.api_models.v1.replays import NodePairDiff as NodePairDiffModel
 from kitaru.api_models.v1.replays import (
     PassthroughPolicy as PassthroughPolicyModel,
 )
-from kitaru.api_models.v1.replays import ReplayCreateRequest, ReplayResponse
+from kitaru.api_models.v1.replays import (
+    ReplayCreateRequest,
+    ReplayDiffResponse,
+    ReplayResponse,
+    ReplaySpecResponse,
+    ReplaySpecRun,
+    ReplayUpdateRequest,
+    ToolLookupResponse,
+)
+from kitaru.api_models.v1.replays import (
+    ReplayInputDiff as ReplayInputDiffModel,
+)
 from kitaru.api_models.v1.replays import ReplayOverride as ReplayOverrideModel
 from kitaru.api_models.v1.replays import ReplayStatus as ReplayStatusModel
+from kitaru.api_models.v1.replays import ScoreDelta as ScoreDeltaModel
 from kitaru.api_models.v1.replays import ScorerConfig as ScorerConfigModel
 from kitaru.api_models.v1.replays import ScoringPolicy as ScoringPolicyModel
 from kitaru.api_models.v1.replays import StaticCase as StaticCaseModel
 from kitaru.api_models.v1.replays import StaticMatchMode as StaticMatchModeModel
 from kitaru.api_models.v1.replays import StaticPolicy as StaticPolicyModel
+from kitaru.api_models.v1.replays import TokenDeltas as TokenDeltasModel
 from kitaru.api_models.v1.replays import ToolPolicy as ToolPolicyModel
 from kitaru.api_models.v1.replays import (
     ToolPolicyConfig as ToolPolicyConfigModel,
@@ -34,8 +50,9 @@ from kitaru.api_models.v1.replays import (
 from kitaru.api_models.v1.replays import (
     ToolPolicyOnMiss as ToolPolicyOnMissModel,
 )
-from kitaru.server.application.models.replays import ReplayCreate
-from kitaru.server.domain.replay import Replay, ReplayStatus
+from kitaru.api_models.v1.session_nodes import NodeType as NodeTypeModel
+from kitaru.server.application.models.replays import ReplayCreate, ReplayUpdate
+from kitaru.server.domain.replay import Replay, ReplaySpec, ReplayStatus
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     HistoryScope,
@@ -53,6 +70,16 @@ from kitaru.server.domain.replay_config import (
     ToolPolicyConfig,
     ToolPolicyOnMiss,
 )
+from kitaru.server.domain.replay_diff import (
+    DiffNode,
+    DiffValue,
+    NodePairDiff,
+    ReplayDiff,
+    ReplayInputDiff,
+    ScoreDelta,
+    TokenDeltas,
+)
+from kitaru.server.domain.session_node import SessionNode
 
 
 def override_to_domain(override: ReplayOverrideModel | None) -> ReplayOverride | None:
@@ -309,4 +336,188 @@ def replay_to_response(replay: Replay, config: ReplayConfig) -> ReplayResponse:
         scoring_policy=scoring_policy_to_response(config.scoring_policy),
         created=replay.created,
         updated=replay.updated,
+    )
+
+
+def replay_update_to_command(body: ReplayUpdateRequest) -> ReplayUpdate:
+    """Convert a replay update request to its command.
+
+    Args:
+        body: Replay update request.
+
+    Returns:
+        Replay update command.
+    """
+    return ReplayUpdate(
+        status=ReplayStatus(body.status.value),
+        error=body.error,
+        passed=body.passed,
+        score=body.score,
+        scores=body.scores,
+    )
+
+
+def replay_spec_to_response(spec: ReplaySpec) -> ReplaySpecResponse:
+    """Convert a replay spec to its response DTO.
+
+    Args:
+        spec: Resolved replay spec.
+
+    Returns:
+        Replay spec response.
+    """
+    return ReplaySpecResponse(
+        replay_id=spec.replay_id,
+        inputs=spec.inputs,
+        override=override_to_response(spec.override),
+        tool_policy=tool_policy_config_to_response(spec.tool_policy),
+        scoring_policy=scoring_policy_to_response(spec.scoring_policy),
+        score_baselines=spec.score_baselines,
+        run=ReplaySpecRun(
+            command=spec.run_spec.command,
+            working_dir=spec.run_spec.working_dir,
+            env=spec.run_spec.env,
+            timeout_seconds=spec.run_spec.timeout_seconds,
+        ),
+        secret_env={
+            name: value.get_secret_value() for name, value in spec.secret_env.items()
+        },
+        original_session_id=spec.original_session_id,
+    )
+
+
+def tool_lookup_to_response(node: SessionNode | None) -> ToolLookupResponse:
+    """Convert a tool lookup result to its response DTO.
+
+    Args:
+        node: Matched tool call node, ``None`` on a miss.
+
+    Returns:
+        Tool lookup response.
+    """
+    if node is None:
+        return ToolLookupResponse(found=False, result=None)
+    return ToolLookupResponse(found=True, result=node.outputs)
+
+
+def _diff_value_to_response(value: DiffValue) -> DiffValueModel:
+    """Convert a domain diff value to its DTO.
+
+    Args:
+        value: Domain diff value.
+
+    Returns:
+        Diff value DTO.
+    """
+    return DiffValueModel(original=value.original, effective=value.effective)
+
+
+def _input_diff_to_response(diff: ReplayInputDiff) -> ReplayInputDiffModel:
+    """Convert a domain input diff to its DTO.
+
+    Args:
+        diff: Domain input diff.
+
+    Returns:
+        Input diff DTO.
+    """
+    return ReplayInputDiffModel(
+        inputs=_diff_value_to_response(diff.inputs),
+        model=_diff_value_to_response(diff.model),
+        system_prompt=_diff_value_to_response(diff.system_prompt),
+    )
+
+
+def _token_deltas_to_response(deltas: TokenDeltas) -> TokenDeltasModel:
+    """Convert domain token deltas to their DTO.
+
+    Args:
+        deltas: Domain token deltas.
+
+    Returns:
+        Token deltas DTO.
+    """
+    return TokenDeltasModel(
+        input_tokens=deltas.input_tokens,
+        output_tokens=deltas.output_tokens,
+        cached_input_tokens=deltas.cached_input_tokens,
+        reasoning_tokens=deltas.reasoning_tokens,
+    )
+
+
+def _node_pair_to_response(pair: NodePairDiff) -> NodePairDiffModel:
+    """Convert a domain node pair diff to its DTO.
+
+    Args:
+        pair: Domain node pair diff.
+
+    Returns:
+        Node pair diff DTO.
+    """
+    return NodePairDiffModel(
+        key=pair.key,
+        node_type=NodeTypeModel(pair.node_type.value),
+        original_node_id=pair.original_node_id,
+        result_node_id=pair.result_node_id,
+        cost_delta=pair.cost_delta,
+        token_deltas=_token_deltas_to_response(pair.token_deltas),
+        duration_delta=pair.duration_delta,
+        outputs_equal=pair.outputs_equal,
+        mocked=pair.mocked,
+        cache_key_changed=pair.cache_key_changed,
+    )
+
+
+def _diff_node_to_response(node: DiffNode) -> DiffNodeModel:
+    """Convert a domain unmatched diff node to its DTO.
+
+    Args:
+        node: Domain diff node.
+
+    Returns:
+        Diff node DTO.
+    """
+    return DiffNodeModel(
+        id=node.id,
+        key=node.key,
+        node_type=NodeTypeModel(node.node_type.value),
+        name=node.name,
+    )
+
+
+def _score_delta_to_response(delta: ScoreDelta) -> ScoreDeltaModel:
+    """Convert a domain score delta to its DTO.
+
+    Args:
+        delta: Domain score delta.
+
+    Returns:
+        Score delta DTO.
+    """
+    return ScoreDeltaModel(
+        original=delta.original, replay=delta.replay, delta=delta.delta
+    )
+
+
+def replay_diff_to_response(diff: ReplayDiff) -> ReplayDiffResponse:
+    """Convert a domain replay diff to its response DTO.
+
+    Args:
+        diff: Computed replay diff.
+
+    Returns:
+        Replay diff response.
+    """
+    return ReplayDiffResponse(
+        replay_id=diff.replay_id,
+        original_session_id=diff.original_session_id,
+        result_session_id=diff.result_session_id,
+        input_diff=_input_diff_to_response(diff.input_diff),
+        node_pairs=[_node_pair_to_response(pair) for pair in diff.node_pairs],
+        added_nodes=[_diff_node_to_response(node) for node in diff.added_nodes],
+        removed_nodes=[_diff_node_to_response(node) for node in diff.removed_nodes],
+        score_deltas={
+            name: _score_delta_to_response(delta)
+            for name, delta in diff.score_deltas.items()
+        },
     )

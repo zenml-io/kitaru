@@ -30,7 +30,15 @@ from kitaru.api_models.v1.replays import (
     HistoryScope,
     ReplayCreateRequest,
     ReplayStatus,
+    ReplayUpdateRequest,
+    ToolLookupRequest,
     ToolPolicyConfig,
+)
+from kitaru.api_models.v1.session_nodes import (
+    NodeStatus,
+    NodeType,
+    SessionNodeBatchRequest,
+    SessionNodeCreateRequest,
 )
 from kitaru.api_models.v1.sessions import (
     SessionCreateRequest,
@@ -40,6 +48,8 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.hashing import tool_call_cache_key
+from kitaru.server.domain.ids import uuid7
 
 
 @pytest.fixture
@@ -125,3 +135,139 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 404 as a NotFoundError."""
     with pytest.raises(NotFoundError):
         await api_client.replays.get(uuid.uuid4())
+
+
+async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a replay through spec, update, heartbeat, and diff."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session_id, scoring_policy=SCORING_POLICY
+        )
+    )
+    spec = await api_client.replays.get_spec(created.id)
+    assert spec.replay_id == created.id
+    assert spec.original_session_id == session_id
+    assert spec.score_baselines is True
+    assert spec.run.command == "python agent.py"
+    assert spec.secret_env == {}
+
+    running = await api_client.replays.update(
+        created.id, ReplayUpdateRequest(status=ReplayStatus.RUNNING)
+    )
+    assert running.status is ReplayStatus.RUNNING
+
+    heartbeat = await api_client.replays.heartbeat(created.id)
+    assert heartbeat.canceled is False
+
+    session = await api_client.sessions.get(session_id)
+    result = await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=session.agent_id,
+            origin=SessionOrigin.RECORDED,
+            replay_id=created.id,
+        )
+    )
+    assert result.origin is SessionOrigin.REPLAY
+    await api_client.sessions.update(
+        result.id, SessionUpdateRequest(status=SessionStatus.COMPLETED)
+    )
+
+    completed = await api_client.replays.update(
+        created.id,
+        ReplayUpdateRequest(
+            status=ReplayStatus.COMPLETED,
+            passed=True,
+            score=0.8,
+            scores={"conciseness": 0.8},
+        ),
+    )
+    assert completed.status is ReplayStatus.COMPLETED
+    assert completed.result_session_id == result.id
+    assert completed.diff is not None
+
+    diff = await api_client.replays.get_diff(created.id)
+    assert diff.replay_id == created.id
+    assert diff.original_session_id == session_id
+    assert diff.result_session_id == result.id
+    assert diff.node_pairs == []
+
+
+async def test_tool_lookup_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a history tool lookup."""
+    agent = await api_client.agents.create(AgentCreateRequest(name="lookup-bot"))
+    await api_client.agent_versions.create(
+        agent.id,
+        AgentVersionCreateRequest(
+            version="v1",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        ),
+    )
+    session = await api_client.sessions.create(
+        SessionCreateRequest(agent_id=agent.id, origin=SessionOrigin.RECORDED)
+    )
+    inputs = {"city": "Berlin"}
+    await api_client.session_nodes.upsert(
+        session.id,
+        SessionNodeBatchRequest(
+            nodes=[
+                SessionNodeCreateRequest(
+                    id=uuid7(),
+                    sequence=0,
+                    node_type=NodeType.TOOL_CALL,
+                    name="get_weather",
+                    status=NodeStatus.COMPLETED,
+                    tool_name="get_weather",
+                    inputs=inputs,
+                    outputs={"temp": 21},
+                )
+            ]
+        ),
+    )
+    await api_client.sessions.update(
+        session.id, SessionUpdateRequest(status=SessionStatus.COMPLETED)
+    )
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session.id, scoring_policy=SCORING_POLICY
+        )
+    )
+    found = await api_client.replays.tool_lookup(
+        created.id,
+        ToolLookupRequest(
+            tool_name="get_weather",
+            inputs=inputs,
+            cache_key=tool_call_cache_key("get_weather", inputs),
+        ),
+    )
+    assert found.found is True
+    assert found.result == {"temp": 21}
+
+    miss = await api_client.replays.tool_lookup(
+        created.id,
+        ToolLookupRequest(
+            tool_name="get_weather",
+            inputs={"city": "Paris"},
+            cache_key=tool_call_cache_key("get_weather", {"city": "Paris"}),
+        ),
+    )
+    assert miss.found is False
+    assert miss.result is None
+
+
+async def test_update_illegal_transition(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 409 for an illegal runner transition."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session_id, scoring_policy=SCORING_POLICY
+        )
+    )
+    with pytest.raises(APIError) as exc_info:
+        await api_client.replays.update(
+            created.id,
+            ReplayUpdateRequest(
+                status=ReplayStatus.COMPLETED, passed=True, score=1.0, scores={}
+            ),
+        )
+    assert exc_info.value.status_code == 409

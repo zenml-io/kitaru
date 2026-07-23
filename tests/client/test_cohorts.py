@@ -22,6 +22,8 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeCohortRepository,
+    FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -75,12 +77,16 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     cohort_repository = FakeCohortRepository(
         session_repository, agent_repository, tag_repository
     )
+    replay_repository = FakeReplayRepository(
+        session_repository, version_repository, FakeReplayConfigRepository()
+    )
     agent_service = AgentService(repository=agent_repository)
     session_service = SessionService(
         repository=session_repository,
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
+        replay_repository=replay_repository,
     )
     cohort_service = CohortService(
         repository=cohort_repository,

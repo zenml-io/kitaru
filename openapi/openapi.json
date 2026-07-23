@@ -1041,6 +1041,58 @@
         "title": "CohortUpdateRequest",
         "type": "object"
       },
+      "DiffNode": {
+        "description": "Unmatched diff node.",
+        "properties": {
+          "id": {
+            "description": "Node id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "Node key.",
+            "title": "Key",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "node_type": {
+            "$ref": "#/components/schemas/NodeType",
+            "description": "Node type."
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "node_type",
+          "name"
+        ],
+        "title": "DiffNode",
+        "type": "object"
+      },
+      "DiffValue": {
+        "description": "Original and effective value pair.",
+        "properties": {
+          "effective": {
+            "description": "Effective value under the override.",
+            "title": "Effective"
+          },
+          "original": {
+            "description": "Original value.",
+            "title": "Original"
+          }
+        },
+        "required": [
+          "original",
+          "effective"
+        ],
+        "title": "DiffValue",
+        "type": "object"
+      },
       "ExperimentCreateRequest": {
         "additionalProperties": false,
         "description": "Experiment create request.",
@@ -1570,6 +1622,95 @@
         "title": "LLMPolicy",
         "type": "object"
       },
+      "NodePairDiff": {
+        "description": "Node pair diff.",
+        "properties": {
+          "cache_key_changed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the tool arguments drifted, null for non-tool nodes.",
+            "title": "Cache Key Changed"
+          },
+          "cost_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cost delta.",
+            "title": "Cost Delta"
+          },
+          "duration_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Duration delta in seconds.",
+            "title": "Duration Delta"
+          },
+          "key": {
+            "description": "Node key matched on.",
+            "title": "Key",
+            "type": "string"
+          },
+          "mocked": {
+            "description": "Whether the result node was mocked.",
+            "title": "Mocked",
+            "type": "boolean"
+          },
+          "node_type": {
+            "$ref": "#/components/schemas/NodeType",
+            "description": "Node type."
+          },
+          "original_node_id": {
+            "description": "Id of the original node.",
+            "format": "uuid",
+            "title": "Original Node Id",
+            "type": "string"
+          },
+          "outputs_equal": {
+            "description": "Whether the outputs are equal.",
+            "title": "Outputs Equal",
+            "type": "boolean"
+          },
+          "result_node_id": {
+            "description": "Id of the result node.",
+            "format": "uuid",
+            "title": "Result Node Id",
+            "type": "string"
+          },
+          "token_deltas": {
+            "$ref": "#/components/schemas/TokenDeltas"
+          }
+        },
+        "required": [
+          "key",
+          "node_type",
+          "original_node_id",
+          "result_node_id",
+          "cost_delta",
+          "token_deltas",
+          "duration_delta",
+          "outputs_equal",
+          "mocked",
+          "cache_key_changed"
+        ],
+        "title": "NodePairDiff",
+        "type": "object"
+      },
       "NodeStatus": {
         "description": "Session node status.",
         "enum": [
@@ -1946,6 +2087,49 @@
         "title": "PassthroughPolicy",
         "type": "object"
       },
+      "ReplayClaimRequest": {
+        "additionalProperties": false,
+        "description": "Replay claim request.",
+        "properties": {
+          "max_replays": {
+            "description": "Maximum replays to claim.",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Max Replays",
+            "type": "integer"
+          },
+          "worker_id": {
+            "description": "Id of the claiming worker.",
+            "maxLength": 255,
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "max_replays"
+        ],
+        "title": "ReplayClaimRequest",
+        "type": "object"
+      },
+      "ReplayClaimResponse": {
+        "description": "Replay claim response.",
+        "properties": {
+          "replays": {
+            "description": "Claimed replays.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayResponse"
+            },
+            "title": "Replays",
+            "type": "array"
+          }
+        },
+        "required": [
+          "replays"
+        ],
+        "title": "ReplayClaimResponse",
+        "type": "object"
+      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -2000,6 +2184,116 @@
           "scoring_policy"
         ],
         "title": "ReplayCreateRequest",
+        "type": "object"
+      },
+      "ReplayDiffResponse": {
+        "description": "Replay diff response.",
+        "properties": {
+          "added_nodes": {
+            "description": "Result nodes without an original counterpart.",
+            "items": {
+              "$ref": "#/components/schemas/DiffNode"
+            },
+            "title": "Added Nodes",
+            "type": "array"
+          },
+          "input_diff": {
+            "$ref": "#/components/schemas/ReplayInputDiff",
+            "description": "Input diff."
+          },
+          "node_pairs": {
+            "description": "Node pairs matched by key.",
+            "items": {
+              "$ref": "#/components/schemas/NodePairDiff"
+            },
+            "title": "Node Pairs",
+            "type": "array"
+          },
+          "original_session_id": {
+            "description": "Id of the original session.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "removed_nodes": {
+            "description": "Original nodes without a result counterpart.",
+            "items": {
+              "$ref": "#/components/schemas/DiffNode"
+            },
+            "title": "Removed Nodes",
+            "type": "array"
+          },
+          "replay_id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "result_session_id": {
+            "description": "Id of the result session.",
+            "format": "uuid",
+            "title": "Result Session Id",
+            "type": "string"
+          },
+          "score_deltas": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ScoreDelta"
+            },
+            "description": "Score deltas by scorer name.",
+            "title": "Score Deltas",
+            "type": "object"
+          }
+        },
+        "required": [
+          "replay_id",
+          "original_session_id",
+          "result_session_id",
+          "input_diff",
+          "node_pairs",
+          "added_nodes",
+          "removed_nodes",
+          "score_deltas"
+        ],
+        "title": "ReplayDiffResponse",
+        "type": "object"
+      },
+      "ReplayHeartbeatResponse": {
+        "description": "Replay heartbeat response.",
+        "properties": {
+          "canceled": {
+            "description": "Whether the replay was canceled or its run is canceling.",
+            "title": "Canceled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "canceled"
+        ],
+        "title": "ReplayHeartbeatResponse",
+        "type": "object"
+      },
+      "ReplayInputDiff": {
+        "description": "Replay input diff.",
+        "properties": {
+          "inputs": {
+            "$ref": "#/components/schemas/DiffValue",
+            "description": "Session inputs."
+          },
+          "model": {
+            "$ref": "#/components/schemas/DiffValue",
+            "description": "Models of the LLM calls."
+          },
+          "system_prompt": {
+            "$ref": "#/components/schemas/DiffValue",
+            "description": "System prompt, original is null since it is not recorded."
+          }
+        },
+        "required": [
+          "inputs",
+          "model",
+          "system_prompt"
+        ],
+        "title": "ReplayInputDiff",
         "type": "object"
       },
       "ReplayOverride": {
@@ -2306,6 +2600,118 @@
         "title": "ReplayResponse",
         "type": "object"
       },
+      "ReplaySpecResponse": {
+        "description": "Replay spec response.",
+        "properties": {
+          "inputs": {
+            "description": "Original session inputs.",
+            "title": "Inputs"
+          },
+          "original_session_id": {
+            "description": "Id of the replayed session.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "replay_id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "run": {
+            "$ref": "#/components/schemas/ReplaySpecRun",
+            "description": "Run command of the agent version."
+          },
+          "score_baselines": {
+            "description": "Whether the runner also scores originals missing scores.",
+            "title": "Score Baselines",
+            "type": "boolean"
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "secret_env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Resolved secret environment variables.",
+            "title": "Secret Env",
+            "type": "object"
+          },
+          "tool_policy": {
+            "$ref": "#/components/schemas/ToolPolicyConfig",
+            "description": "Tool policy."
+          }
+        },
+        "required": [
+          "replay_id",
+          "inputs",
+          "override",
+          "tool_policy",
+          "scoring_policy",
+          "score_baselines",
+          "run",
+          "secret_env",
+          "original_session_id"
+        ],
+        "title": "ReplaySpecResponse",
+        "type": "object"
+      },
+      "ReplaySpecRun": {
+        "description": "Replay spec run command.",
+        "properties": {
+          "command": {
+            "description": "Bash command starting the agent.",
+            "title": "Command",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Literal environment variables.",
+            "title": "Env",
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "description": "Wall clock limit.",
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "working_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Working directory for the command.",
+            "title": "Working Dir"
+          }
+        },
+        "required": [
+          "command",
+          "working_dir",
+          "env",
+          "timeout_seconds"
+        ],
+        "title": "ReplaySpecRun",
+        "type": "object"
+      },
       "ReplayStatus": {
         "description": "Replay status.",
         "enum": [
@@ -2319,6 +2725,72 @@
         ],
         "title": "ReplayStatus",
         "type": "string"
+      },
+      "ReplayUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Replay update request.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message, required for failed and timed out.",
+            "title": "Error"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring outcome, required for completed.",
+            "title": "Passed"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Weighted average, required for completed.",
+            "title": "Score"
+          },
+          "scores": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scores by scorer name, required for completed.",
+            "title": "Scores"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReplayStatus",
+            "description": "Target status."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReplayUpdateRequest",
+        "type": "object"
       },
       "RunSpec": {
         "additionalProperties": false,
@@ -2370,6 +2842,54 @@
           "timeout_seconds"
         ],
         "title": "RunSpec",
+        "type": "object"
+      },
+      "ScoreDelta": {
+        "description": "Score delta.",
+        "properties": {
+          "delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replay minus original.",
+            "title": "Delta"
+          },
+          "original": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Original session score.",
+            "title": "Original"
+          },
+          "replay": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replay score.",
+            "title": "Replay"
+          }
+        },
+        "required": [
+          "original",
+          "replay",
+          "delta"
+        ],
+        "title": "ScoreDelta",
         "type": "object"
       },
       "ScorerConfig": {
@@ -2790,6 +3310,19 @@
               }
             ],
             "description": "Source provider, imported sessions only."
+          },
+          "replay_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the replay this session is the result of.",
+            "title": "Replay Id"
           },
           "started_at": {
             "anyOf": [
@@ -3998,6 +4531,67 @@
         "title": "TagResponse",
         "type": "object"
       },
+      "TokenDeltas": {
+        "description": "Token count deltas.",
+        "properties": {
+          "cached_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cached input token delta.",
+            "title": "Cached Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input token delta.",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output token delta.",
+            "title": "Output Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reasoning token delta.",
+            "title": "Reasoning Tokens"
+          }
+        },
+        "required": [
+          "input_tokens",
+          "output_tokens",
+          "cached_input_tokens",
+          "reasoning_tokens"
+        ],
+        "title": "TokenDeltas",
+        "type": "object"
+      },
       "TokenResponse": {
         "description": "Token response.",
         "properties": {
@@ -4091,6 +4685,55 @@
           }
         },
         "title": "TokenUsage",
+        "type": "object"
+      },
+      "ToolLookupRequest": {
+        "additionalProperties": false,
+        "description": "Tool lookup request.",
+        "properties": {
+          "cache_key": {
+            "description": "Cache key of the tool call.",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Cache Key",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Tool call inputs.",
+            "title": "Inputs"
+          },
+          "tool_name": {
+            "description": "Name of the called tool.",
+            "maxLength": 255,
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name",
+          "cache_key"
+        ],
+        "title": "ToolLookupRequest",
+        "type": "object"
+      },
+      "ToolLookupResponse": {
+        "description": "Tool lookup response.",
+        "properties": {
+          "found": {
+            "description": "Whether a recorded result matched.",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "result": {
+            "description": "Recorded tool result, null on a miss.",
+            "title": "Result"
+          }
+        },
+        "required": [
+          "found",
+          "result"
+        ],
+        "title": "ToolLookupResponse",
         "type": "object"
       },
       "ToolPolicyConfig": {
@@ -5678,6 +6321,104 @@
         ]
       }
     },
+    "/v1/experiment-runs/{run_id}/cancel": {
+      "post": {
+        "description": "Cancel an experiment run.\n\nPending and claimed replays are canceled immediately, running ones\ndrain through the heartbeat path. The run lands on canceled right away\nwhen no running replay remains.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 409 when the run is already terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Updated experiment run.",
+        "operationId": "cancel_experiment_run_v1_experiment_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExperimentRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Experiment Run",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
+    "/v1/experiment-runs/{run_id}/claim": {
+      "post": {
+        "description": "Atomically claim pending replays of an experiment run for a worker.\n\nStale claimed or running replays are requeued or timed out first. The\nfirst claim moves a pending run to running. Canceling and terminal\nruns yield no replays.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid input.\n\nArgs:\n    run_id: Id of the experiment run.\n    body: Replay claim request.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Claimed replays.",
+        "operationId": "claim_replays_v1_experiment_runs__run_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Replays",
+        "tags": [
+          "experiment-runs"
+        ]
+      }
+    },
     "/v1/experiment-runs/{run_id}/replays": {
       "get": {
         "description": "List the replays of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
@@ -6366,6 +7107,244 @@
           }
         },
         "summary": "Get Replay",
+        "tags": [
+          "replays"
+        ]
+      },
+      "patch": {
+        "description": "Transition a replay through the runner status updates.\n\nCompleting stores the scoring result and the computed diff summary.\nThe transition that makes the last replay of a run terminal also\nfinalizes the run.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\n409 when the transition is illegal or completing without a linked\nresult session, and 422 when completing without a scoring result or\nfailing without an error.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Replay update request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Updated replay.",
+        "operationId": "update_replay_v1_replays__replay_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}/diff": {
+      "get": {
+        "description": "Compute the full diff between a replay's sessions.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay has no result session yet.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Computed replay diff.",
+        "operationId": "get_replay_diff_v1_replays__replay_id__diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayDiffResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Replay Diff",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}/heartbeat": {
+      "post": {
+        "description": "Record a worker heartbeat on a replay.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay is neither claimed, running, nor canceled.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the cancellation flag.",
+        "operationId": "heartbeat_replay_v1_replays__replay_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayHeartbeatResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}/spec": {
+      "get": {
+        "description": "Resolve the spec a runner executes a replay with.\n\nThe spec includes the resolved secret environment of the run spec's\nsecrets.\n\nClients observe HTTP 200 on success, 404 when no replay has this id or\na run spec secret was deleted, and 409 when the stamped agent version\nhas no run spec.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Resolved replay spec.",
+        "operationId": "get_replay_spec_v1_replays__replay_id__spec_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplaySpecResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Replay Spec",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}/tool-lookup": {
+      "post": {
+        "description": "Resolve a history tool policy lookup within its scope.\n\nClients observe HTTP 200 on success, including misses, 404 when no\nreplay has this id, and 422 when the cache key does not match the tool\nname and inputs, the tool resolves to no history policy, or a\nstandalone replay scopes to a cohort.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Tool lookup response.",
+        "operationId": "tool_lookup_v1_replays__replay_id__tool_lookup_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolLookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolLookupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tool Lookup",
         "tags": [
           "replays"
         ]

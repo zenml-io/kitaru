@@ -18,8 +18,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 
+from kitaru.server.base import FrozenModel
+from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -27,7 +29,12 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.replay_config import ScoringResult
+from kitaru.server.domain.replay_config import (
+    ReplayOverride,
+    ScoringPolicy,
+    ScoringResult,
+    ToolPolicyConfig,
+)
 
 
 class ReplayStatus(StrEnum):
@@ -50,6 +57,8 @@ TERMINAL_REPLAY_STATUSES = frozenset(
         ReplayStatus.CANCELED,
     }
 )
+
+HEARTBEAT_TIMEOUT_ERROR = "Replay heartbeat timed out"
 
 
 class ReplayNotFound(NotFoundError):
@@ -99,6 +108,60 @@ class InvalidReplayTransition(ConflictError):
         super().__init__(
             f"Replay {replay_id} cannot transition from '{status}' to '{target}'"
         )
+
+
+class ReplayNotActive(ConflictError):
+    """Raised when an operation requires a claimed or running replay."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} is not claimed or running")
+
+
+class ReplayAlreadyLinked(ConflictError):
+    """Raised when a replay already has a result session."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} already has a result session")
+
+
+class ReplayMissingResultSession(ConflictError):
+    """Raised when an operation requires a linked result session."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} has no result session")
+
+
+class InvalidToolLookup(ValidationError):
+    """Raised when a tool lookup request violates its shape rules."""
+
+
+class ReplaySpec(FrozenModel):
+    """Replay spec."""
+
+    replay_id: uuid.UUID
+    inputs: Any = None
+    override: ReplayOverride | None = None
+    tool_policy: ToolPolicyConfig
+    scoring_policy: ScoringPolicy
+    score_baselines: bool
+    run_spec: RunSpec
+    secret_env: dict[str, SecretStr]
+    original_session_id: uuid.UUID
 
 
 class Replay(DomainModel):
@@ -192,9 +255,12 @@ class Replay(DomainModel):
 
         Raises:
             InvalidReplayTransition: The replay is not running.
+            ReplayMissingResultSession: The replay has no result session.
         """
         if self.status is not ReplayStatus.RUNNING:
             raise InvalidReplayTransition(self.id, self.status, ReplayStatus.COMPLETED)
+        if self.result_session_id is None:
+            raise ReplayMissingResultSession(self.id)
         self.status = ReplayStatus.COMPLETED
         self.passed = result.passed
         self.score = result.score
@@ -242,3 +308,65 @@ class Replay(DomainModel):
             raise InvalidReplayTransition(self.id, self.status, ReplayStatus.CANCELED)
         self.status = ReplayStatus.CANCELED
         self.ended_at = datetime.now(UTC)
+
+    def heartbeat(self) -> None:
+        """Record a worker heartbeat.
+
+        Raises:
+            ReplayNotActive: The replay is not claimed or running.
+        """
+        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
+            raise ReplayNotActive(self.id)
+        self.heartbeat_at = datetime.now(UTC)
+
+    def link_result_session(self, session_id: uuid.UUID) -> None:
+        """Link the session recorded by the replayed agent.
+
+        Args:
+            session_id: Id of the result session.
+
+        Raises:
+            ReplayNotActive: The replay is not claimed or running.
+            ReplayAlreadyLinked: The replay already has a result session.
+        """
+        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
+            raise ReplayNotActive(self.id)
+        if self.result_session_id is not None:
+            raise ReplayAlreadyLinked(self.id)
+        self.result_session_id = session_id
+
+    def is_stale(self, stale_before: datetime) -> bool:
+        """Report whether the replay lost its worker heartbeat.
+
+        Args:
+            stale_before: Heartbeats older than this time count as lost.
+
+        Returns:
+            ``True`` for a claimed or running replay whose last heartbeat,
+            or claim when no heartbeat arrived yet, is older than the
+            threshold.
+        """
+        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
+            return False
+        last = self.heartbeat_at or self.claimed_at
+        return last is not None and last < stale_before
+
+    def with_staleness(self, stale_before: datetime, max_attempts: int) -> "Replay":
+        """Return the replay as the next claim would requeue or time it out.
+
+        Args:
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
+
+        Returns:
+            Copy with the staleness rule applied, the replay itself when it
+            is not stale.
+        """
+        if not self.is_stale(stale_before):
+            return self
+        copy = self.model_copy()
+        if copy.attempt >= max_attempts:
+            copy.time_out(HEARTBEAT_TIMEOUT_ERROR)
+        else:
+            copy.requeue()
+        return copy

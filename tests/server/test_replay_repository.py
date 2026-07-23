@@ -75,6 +75,7 @@ from kitaru.server.domain.replay_config import (
     ReplayConfigNotFound,
     ScorerConfig,
     ScoringPolicy,
+    ScoringResult,
     SourceRef,
     ToolPolicyConfig,
 )
@@ -349,3 +350,58 @@ async def test_config_delete_if_unreferenced_by_replay(setup: Setup) -> None:
     assert await setup.configs.delete_if_unreferenced(seed.config.id) is False
     loaded = await setup.configs.get(seed.config.id)
     assert loaded.id == seed.config.id
+
+
+async def test_update_round_trips_runner_fields(setup: Setup) -> None:
+    """Persist runner-side field changes and renew the updated timestamp."""
+    seed = await seed_rows(setup)
+    created = await setup.replays.create(replay_entity(seed))
+    result = await setup.sessions.create(
+        Session(
+            owner_id=setup.owner_id,
+            agent_id=seed.session.agent_id,
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    created.start()
+    created.link_result_session(result.id)
+    created.complete(
+        ScoringResult(passed=True, score=0.8, scores={"conciseness": 0.8}),
+        diff={"cost_delta": -0.1},
+    )
+    updated = await setup.replays.update(created)
+    assert updated.status is ReplayStatus.COMPLETED
+    assert updated.result_session_id == result.id
+    assert updated.started_at is not None
+    assert updated.ended_at is not None
+    assert updated.passed is True
+    assert updated.score == 0.8
+    assert updated.scores == {"conciseness": 0.8}
+    assert updated.diff == {"cost_delta": -0.1}
+    assert updated.updated is not None
+    assert created.updated is not None
+    assert updated.updated > created.updated
+    loaded = await setup.replays.get(created.id)
+    assert loaded == updated
+
+
+async def test_update_not_found(setup: Setup) -> None:
+    """Raise for an unknown replay id."""
+    seed = await seed_rows(setup)
+    with pytest.raises(ReplayNotFound):
+        await setup.replays.update(replay_entity(seed))
+
+
+async def test_update_unknown_result_session(setup: Setup) -> None:
+    """Raise for a result session id that does not resolve."""
+    seed = await seed_rows(setup)
+    created = await setup.replays.create(replay_entity(seed))
+    missing_id = uuid.uuid4()
+    created.start()
+    created.link_result_session(missing_id)
+    with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
+        await setup.replays.update(created)
+    # The failed update leaves the repository usable.
+    loaded = await setup.replays.get(created.id)
+    assert loaded.result_session_id is None
