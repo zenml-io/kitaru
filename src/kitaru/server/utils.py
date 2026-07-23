@@ -11,9 +11,21 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Generic helpers shared across server layers."""
 
-from kitaru.server.adapters.db.schemas.account import AccountSchema
-from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
+from datetime import UTC, datetime, tzinfo
 
-__all__ = ["AccountSchema", "ApiKeySchema"]
+
+def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:
+    """Normalize a datetime to the given timezone, treating naive values as being in it.
+
+    Args:
+        value: Datetime to normalize.
+        tz: Target timezone.
+
+    Returns:
+        Aware datetime in the target timezone.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=tz)
+    return value.astimezone(tz)

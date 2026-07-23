@@ -11,14 +11,29 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Authentication and caller context for use cases."""
+"""Account DTO conversions."""
 
-from kitaru.server.base import FrozenModel
+from kitaru.api_models.v1.accounts import AccountResponse
 from kitaru.server.domain.account import Account
 
 
-class AuthContext(FrozenModel):
-    """Resolved caller for application use cases."""
+def account_to_response(account: Account) -> AccountResponse:
+    """Convert an account entity to its response DTO.
 
-    account: Account
-    csrf_token: str | None = None
+    Args:
+        account: Stored account.
+
+    Returns:
+        Account response.
+    """
+    assert account.created is not None
+    assert account.updated is not None
+    return AccountResponse(
+        id=account.id,
+        name=account.name,
+        email=account.email,
+        is_service_account=account.is_service_account,
+        active=account.active,
+        created=account.created,
+        updated=account.updated,
+    )

@@ -1,4 +1,477 @@
 {
+  "components": {
+    "schemas": {
+      "AccountCreateRequest": {
+        "additionalProperties": false,
+        "description": "Account create request.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Login password.",
+            "title": "Password"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccountCreateRequest",
+        "type": "object"
+      },
+      "AccountResponse": {
+        "description": "Account response.",
+        "properties": {
+          "active": {
+            "description": "Whether the account can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "id": {
+            "description": "Account id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_service_account": {
+            "description": "Whether this is a service account.",
+            "title": "Is Service Account",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email",
+          "is_service_account",
+          "active",
+          "created",
+          "updated"
+        ],
+        "title": "AccountResponse",
+        "type": "object"
+      },
+      "AccountUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Account update request.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New active state.",
+            "title": "Active"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New login password.",
+            "title": "Password"
+          }
+        },
+        "title": "AccountUpdateRequest",
+        "type": "object"
+      },
+      "ApiKeyCreateRequest": {
+        "additionalProperties": false,
+        "description": "API key create request.",
+        "properties": {
+          "name": {
+            "description": "API key name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ApiKeyCreateRequest",
+        "type": "object"
+      },
+      "ApiKeyIssuedResponse": {
+        "description": "API key response carrying newly issued key material.",
+        "properties": {
+          "active": {
+            "description": "Whether the key can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "API key id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "Plaintext key, shown once.",
+            "title": "Key",
+            "type": "string"
+          },
+          "last_used": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last use for authentication.",
+            "title": "Last Used"
+          },
+          "name": {
+            "description": "API key name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "active",
+          "last_used",
+          "created",
+          "updated",
+          "key"
+        ],
+        "title": "ApiKeyIssuedResponse",
+        "type": "object"
+      },
+      "ApiKeyResponse": {
+        "description": "API key response.",
+        "properties": {
+          "active": {
+            "description": "Whether the key can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "API key id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last use for authentication.",
+            "title": "Last Used"
+          },
+          "name": {
+            "description": "API key name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "active",
+          "last_used",
+          "created",
+          "updated"
+        ],
+        "title": "ApiKeyResponse",
+        "type": "object"
+      },
+      "ApiKeyUpdateRequest": {
+        "additionalProperties": false,
+        "description": "API key update request.",
+        "properties": {
+          "active": {
+            "description": "New active state.",
+            "title": "Active",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "title": "ApiKeyUpdateRequest",
+        "type": "object"
+      },
+      "Body_login_v1_login_post": {
+        "properties": {
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "Body_login_v1_login_post",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Page_AccountResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[AccountResponse]",
+        "type": "object"
+      },
+      "Page_ApiKeyResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiKeyResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ApiKeyResponse]",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "description": "Token response.",
+        "properties": {
+          "access_token": {
+            "description": "Bearer token.",
+            "title": "Access Token",
+            "type": "string"
+          },
+          "csrf_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CSRF token for cookie authentication.",
+            "title": "Csrf Token"
+          },
+          "expires_in": {
+            "description": "Token lifetime in seconds.",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "token_type": {
+            "description": "Token type.",
+            "title": "Token Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "expires_in"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
   "info": {
     "title": "Kitaru",
     "version": "0.21.0"
@@ -54,6 +527,532 @@
         "summary": "Liveness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/accounts": {
+      "get": {
+        "description": "List accounts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Account service.\n    actor: Caller context.\n    name: Filter on account name.\n    active: Filter on active state.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of accounts.",
+        "operationId": "list_accounts_v1_accounts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AccountResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Accounts",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "post": {
+        "description": "Create an account.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "operationId": "create_account_v1_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}": {
+      "get": {
+        "description": "Get an account by id.\n\nClients observe HTTP 200 on success and 404 when the account does not\nexist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Stored account.",
+        "operationId": "get_account_v1_accounts__account_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Account",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "patch": {
+        "description": "Partially update an account.\n\nClients observe HTTP 200 on success, 404 when the account does not exist,\nand 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
+        "operationId": "update_account_v1_accounts__account_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/api-keys": {
+      "get": {
+        "description": "List API keys of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: API key service.\n    actor: Caller context.\n    name: Filter on API key name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of API keys.",
+        "operationId": "list_api_keys_v1_api_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ApiKeyResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Api Keys",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "post": {
+        "description": "Create an API key.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input. The response carries the plaintext\nkey exactly once.\n\nArgs:\n    body: API key create request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Created API key including the plaintext key.",
+        "operationId": "create_api_key_v1_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyIssuedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Api Key",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/v1/api-keys/{api_key_id}": {
+      "delete": {
+        "description": "Delete an API key.\n\nClients observe HTTP 204 on success and 404 when the caller owns no api\nkey with this id.\n\nArgs:\n    api_key_id: Id of the API key.\n    service: API key service.\n    actor: Caller context.",
+        "operationId": "delete_api_key_v1_api_keys__api_key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Api Key",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "get": {
+        "description": "Get an API key by id.\n\nClients observe HTTP 200 on success and 404 when the caller owns no api\nkey with this id.\n\nArgs:\n    api_key_id: Id of the API key.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Stored API key.",
+        "operationId": "get_api_key_v1_api_keys__api_key_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Api Key",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "patch": {
+        "description": "Update an API key.\n\nClients observe HTTP 200 on success, 404 when the caller owns no API key\nwith this id, and 422 on invalid input.\n\nArgs:\n    api_key_id: Id of the API key.\n    body: API key update request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Updated API key.",
+        "operationId": "update_api_key_v1_api_keys__api_key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Api Key",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/v1/login": {
+      "post": {
+        "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
+        "operationId": "login_v1_login_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_login_v1_login_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/logout": {
+      "post": {
+        "description": "Log out and clear the auth cookie.\n\nClients observe HTTP 204.\n\nArgs:\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.",
+        "operationId": "logout_v1_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
         ]
       }
     }

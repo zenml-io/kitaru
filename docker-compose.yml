@@ -16,6 +16,9 @@ services:
       KITARU_SERVER_DB_PWD: password
       KITARU_SERVER_DB_NAME: kitaru
       KITARU_SERVER_LOG_LEVEL: DEBUG
+      KITARU_SERVER_AUTH_SCHEME: local
+      KITARU_SERVER_JWT_SIGNING_KEY: dev
+      KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD: password
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 10s

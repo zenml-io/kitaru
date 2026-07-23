@@ -114,7 +114,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
 - **No postponed annotations.** Do not add `from __future__ import annotations`. Pydantic and FastAPI inspect annotations at runtime, and string annotations break that inspection.
-- **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Use standalone util files only for truly generic functions used across unrelated modules.
+- **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Put truly generic helpers in a standalone generic file, including helpers that are generic enough that other modules might use them in the future, even while they have a single caller.
 - **`_underscore` means private.** `_method()` on a class → only call from within that class. `_function()` in a module → only call from within that module. Do not call private methods/functions from outside their owning class or module.
 
 ## Versioning and changelog

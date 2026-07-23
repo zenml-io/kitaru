@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Accounts and API keys with username/password login. `POST /v1/login` authenticates with a username and password and returns a bearer token, and API keys authenticate requests directly as bearer tokens with revocation taking effect immediately. Keys are managed via `/v1/api-keys`. The server bootstraps a default account configurable through `KITARU_SERVER_DEFAULT_ACCOUNT_NAME` and `KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD`, and the new `local` auth scheme enables password login.
 - Local stacks can now use S3, GCS, or Azure Blob/ADLS artifact storage while keeping flow execution local, with existing-connector reuse and ambient provider credentials when explicit credentials are not supplied. (#593)
 - Flow and execution deletion is now available through the SDK, `kitaru flow delete` and `kitaru executions delete` CLI commands, and MCP tools.
 
