@@ -25,6 +25,8 @@ from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.session_nodes import SessionNodesResource
+from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 
 
@@ -61,6 +63,8 @@ class KitaruAPIClient:
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.secrets = SecretsResource(self)
+        self.session_nodes = SessionNodesResource(self)
+        self.sessions = SessionsResource(self)
         self.tags = TagsResource(self)
 
     async def request(

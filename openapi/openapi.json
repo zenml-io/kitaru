@@ -648,6 +648,27 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "NodeStatus": {
+        "description": "Session node status.",
+        "enum": [
+          "in_progress",
+          "completed",
+          "failed"
+        ],
+        "title": "NodeStatus",
+        "type": "string"
+      },
+      "NodeType": {
+        "description": "Session node type.",
+        "enum": [
+          "llm_call",
+          "tool_call",
+          "subagent_call",
+          "span"
+        ],
+        "title": "NodeType",
+        "type": "string"
+      },
       "Page_AccountResponse_": {
         "properties": {
           "items": {
@@ -801,6 +822,37 @@
           "page_size"
         ],
         "title": "Page[SecretResponse]",
+        "type": "object"
+      },
+      "Page_SessionResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[SessionResponse]",
         "type": "object"
       },
       "Page_TagResponse_": {
@@ -1085,6 +1137,1147 @@
         "title": "SecretWithValuesResponse",
         "type": "object"
       },
+      "SessionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Session create request.",
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Adapter version.",
+            "title": "Adapter Version"
+          },
+          "agent_id": {
+            "description": "Id of the agent.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version.",
+            "title": "Agent Version Id"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "expected": {
+            "description": "Ground truth for reference-based scorers.",
+            "title": "Expected"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External session or conversation id.",
+            "title": "External Id"
+          },
+          "framework": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recording framework.",
+            "title": "Framework"
+          },
+          "inputs": {
+            "description": "Initial task inputs.",
+            "title": "Inputs"
+          },
+          "log_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Log location.",
+            "title": "Log Uri"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "User metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display label.",
+            "title": "Name"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SessionOrigin"
+          },
+          "outputs": {
+            "description": "Final agent outputs.",
+            "title": "Outputs"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionProvider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source provider, imported sessions only."
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initial status, in progress when omitted."
+          }
+        },
+        "required": [
+          "agent_id",
+          "origin"
+        ],
+        "title": "SessionCreateRequest",
+        "type": "object"
+      },
+      "SessionNodeBatchRequest": {
+        "additionalProperties": false,
+        "description": "Session node batch request.",
+        "properties": {
+          "nodes": {
+            "description": "Nodes in parent-before-child order.",
+            "items": {
+              "$ref": "#/components/schemas/SessionNodeCreateRequest"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "SessionNodeBatchRequest",
+        "type": "object"
+      },
+      "SessionNodeCreateRequest": {
+        "additionalProperties": false,
+        "description": "Session node create request.",
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "description": "Provider or adapter attributes.",
+            "title": "Attributes",
+            "type": "object"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Call cost.",
+            "title": "Cost"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider observation or span id.",
+            "title": "External Id"
+          },
+          "id": {
+            "description": "Client-generated node id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Node inputs.",
+            "title": "Inputs"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "User metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model that answered.",
+            "title": "Model"
+          },
+          "model_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model parameters.",
+            "title": "Model Params"
+          },
+          "name": {
+            "description": "Display name.",
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "node_type": {
+            "$ref": "#/components/schemas/NodeType",
+            "description": "Node type."
+          },
+          "outputs": {
+            "description": "Node outputs.",
+            "title": "Outputs"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the primary parent, absent for roots.",
+            "title": "Parent Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM provider.",
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model asked for.",
+            "title": "Requested Model"
+          },
+          "secondary_parent_ids": {
+            "description": "Extra fan-in parent ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Secondary Parent Ids",
+            "type": "array"
+          },
+          "sequence": {
+            "description": "Producer-assigned order within the session.",
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatus",
+            "description": "Node status."
+          },
+          "subagent_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Harness id of the subagent.",
+            "title": "Subagent Id"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token usage."
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the called tool.",
+            "title": "Tool Name"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider or OTel trace id.",
+            "title": "Trace Id"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "node_type",
+          "name",
+          "status"
+        ],
+        "title": "SessionNodeCreateRequest",
+        "type": "object"
+      },
+      "SessionNodeResponse": {
+        "description": "Session node response.",
+        "properties": {
+          "attributes": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider or adapter attributes, null unless payloads are requested.",
+            "title": "Attributes"
+          },
+          "cache_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool call cache key, computed by the server.",
+            "title": "Cache Key"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Call cost.",
+            "title": "Cost"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider observation or span id.",
+            "title": "External Id"
+          },
+          "id": {
+            "description": "Node id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Node inputs, null unless payloads are requested.",
+            "title": "Inputs"
+          },
+          "key": {
+            "description": "Stable path key, computed by the server.",
+            "title": "Key",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "User metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model that answered.",
+            "title": "Model"
+          },
+          "model_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model parameters.",
+            "title": "Model Params"
+          },
+          "name": {
+            "description": "Display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "node_type": {
+            "$ref": "#/components/schemas/NodeType",
+            "description": "Node type."
+          },
+          "outputs": {
+            "description": "Node outputs, null unless payloads are requested.",
+            "title": "Outputs"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the primary parent, null for roots.",
+            "title": "Parent Id"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "LLM provider.",
+            "title": "Provider"
+          },
+          "requested_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model asked for.",
+            "title": "Requested Model"
+          },
+          "secondary_parent_ids": {
+            "description": "Extra fan-in parent ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Secondary Parent Ids",
+            "type": "array"
+          },
+          "sequence": {
+            "description": "Producer-assigned order within the session.",
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "session_id": {
+            "description": "Id of the session.",
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatus",
+            "description": "Node status."
+          },
+          "subagent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Harness id of the subagent.",
+            "title": "Subagent Id"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token usage."
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the called tool.",
+            "title": "Tool Name"
+          },
+          "trace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider or OTel trace id.",
+            "title": "Trace Id"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "key",
+          "parent_id",
+          "secondary_parent_ids",
+          "sequence",
+          "external_id",
+          "trace_id",
+          "node_type",
+          "name",
+          "status",
+          "error",
+          "started_at",
+          "ended_at",
+          "requested_model",
+          "model",
+          "provider",
+          "tokens",
+          "cost",
+          "model_params",
+          "tool_name",
+          "cache_key",
+          "subagent_id",
+          "metadata",
+          "created",
+          "updated"
+        ],
+        "title": "SessionNodeResponse",
+        "type": "object"
+      },
+      "SessionOrigin": {
+        "description": "Session origin.",
+        "enum": [
+          "imported",
+          "recorded",
+          "replay"
+        ],
+        "title": "SessionOrigin",
+        "type": "string"
+      },
+      "SessionProvider": {
+        "description": "Session provider.",
+        "enum": [
+          "langfuse",
+          "braintrust",
+          "otlp"
+        ],
+        "title": "SessionProvider",
+        "type": "string"
+      },
+      "SessionResponse": {
+        "description": "Session response.",
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Adapter version.",
+            "title": "Adapter Version"
+          },
+          "agent_id": {
+            "description": "Id of the agent.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version.",
+            "title": "Agent Version Id"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total cost rolled up from the nodes.",
+            "title": "Cost"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "expected": {
+            "description": "Ground truth for reference-based scorers.",
+            "title": "Expected"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External session or conversation id.",
+            "title": "External Id"
+          },
+          "framework": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recording framework.",
+            "title": "Framework"
+          },
+          "id": {
+            "description": "Session id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Initial task inputs.",
+            "title": "Inputs"
+          },
+          "llm_call_count": {
+            "description": "Number of LLM call nodes.",
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "log_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Log location.",
+            "title": "Log Uri"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "User metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display label.",
+            "title": "Name"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SessionOrigin"
+          },
+          "outputs": {
+            "description": "Final agent outputs.",
+            "title": "Outputs"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionProvider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source provider, imported sessions only."
+          },
+          "scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Score values by scorer name.",
+            "title": "Scores",
+            "type": "object"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Token usage rolled up from the nodes."
+          },
+          "tool_call_count": {
+            "description": "Number of tool call nodes.",
+            "title": "Tool Call Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "agent_id",
+          "agent_version_id",
+          "origin",
+          "status",
+          "name",
+          "inputs",
+          "outputs",
+          "expected",
+          "error",
+          "started_at",
+          "ended_at",
+          "external_id",
+          "metadata",
+          "provider",
+          "framework",
+          "adapter_version",
+          "log_uri",
+          "scores",
+          "cost",
+          "tokens",
+          "llm_call_count",
+          "tool_call_count",
+          "created",
+          "updated"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
+      "SessionScoresRequest": {
+        "additionalProperties": false,
+        "description": "Session scores request.",
+        "properties": {
+          "scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Score values by scorer name, latest wins.",
+            "title": "Scores",
+            "type": "object"
+          }
+        },
+        "required": [
+          "scores"
+        ],
+        "title": "SessionScoresRequest",
+        "type": "object"
+      },
+      "SessionStatus": {
+        "description": "Session status.",
+        "enum": [
+          "in_progress",
+          "completed",
+          "failed"
+        ],
+        "title": "SessionStatus",
+        "type": "string"
+      },
+      "SessionUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Session update request.",
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time, applied on finish.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message, applied on finish.",
+            "title": "Error"
+          },
+          "expected": {
+            "description": "New expected outputs.",
+            "title": "Expected"
+          },
+          "log_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Log location, applied on finish.",
+            "title": "Log Uri"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New user metadata.",
+            "title": "Metadata"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New display label.",
+            "title": "Name"
+          },
+          "outputs": {
+            "description": "Final agent outputs, applied on finish.",
+            "title": "Outputs"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Terminal status finishing the session."
+          }
+        },
+        "title": "SessionUpdateRequest",
+        "type": "object"
+      },
       "TagCreateRequest": {
         "additionalProperties": false,
         "description": "Tag create request.",
@@ -1263,6 +2456,62 @@
           "expires_in"
         ],
         "title": "TokenResponse",
+        "type": "object"
+      },
+      "TokenUsage": {
+        "additionalProperties": false,
+        "description": "Token usage.",
+        "properties": {
+          "cached_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cached input token count.",
+            "title": "Cached Input Tokens"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Input token count.",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Output token count.",
+            "title": "Output Tokens"
+          },
+          "reasoning_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reasoning token count.",
+            "title": "Reasoning Tokens"
+          }
+        },
+        "title": "TokenUsage",
         "type": "object"
       },
       "ValidationError": {
@@ -2644,6 +3893,688 @@
         "summary": "Update Secret",
         "tags": [
           "secrets"
+        ]
+      }
+    },
+    "/v1/sessions": {
+      "get": {
+        "description": "List sessions.\n\nClients observe HTTP 200 on success, 404 when no agent has the filtered\nagent id, and 422 on invalid filter or pagination parameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    agent_id: Filter on agent id.\n    agent_version_id: Filter on agent version id.\n    origin: Filter on session origin.\n    status: Filter on session status.\n    provider: Filter on session provider.\n    external_id: Filter on external id.\n    name: Filter on session name.\n    tag: Filter on attached tag name.\n    started_after: Earliest start time.\n    started_before: Latest start time.\n    ended_after: Earliest end time.\n    ended_before: Latest end time.\n    has_score: Filter on the presence of scores.\n    min_cost: Lowest cost.\n    max_cost: Highest cost.\n    min_total_tokens: Lowest total token count.\n    max_total_tokens: Highest total token count.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of sessions.",
+        "operationId": "list_sessions_v1_sessions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "agent_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Version Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SessionOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Origin"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SessionStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SessionProvider"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "external_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "External Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Started After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "started_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Started Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ended_after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ended After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ended_before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ended Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_score",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Score"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_cost",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Cost"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_cost",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Cost"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_total_tokens",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Total Tokens"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_total_tokens",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Total Tokens"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SessionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "post": {
+        "description": "Create a session.\n\nClients observe HTTP 201 on success, 404 when no agent or agent version\nhas the referenced id, 409 when the provider and external id pair is\nalready registered, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
+        "operationId": "create_session_v1_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}": {
+      "delete": {
+        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "operationId": "delete_session_v1_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Session",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "get": {
+        "description": "Get a session by id.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Stored session.",
+        "operationId": "get_session_v1_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "patch": {
+        "description": "Update a session, finishing it when a status is set.\n\nA set status finishes the session with the request's outputs, error,\nended_at, and log_uri, and computes the rollups from its nodes. Name,\nexpected, and metadata apply to any session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when a status is set but the session is not in progress, and 422 on\ninvalid input.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
+        "operationId": "update_session_v1_sessions__session_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Session",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/nodes": {
+      "get": {
+        "description": "List the nodes of a session ordered by sequence.\n\nInputs, outputs, and attributes are null unless ``include_payloads`` is\nset.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    include_payloads: Whether to include inputs, outputs, and\n        attributes.\n\nReturns:\n    Nodes ordered by sequence.",
+        "operationId": "list_session_nodes_v1_sessions__session_id__nodes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionNodeResponse"
+                  },
+                  "title": "Response List Session Nodes V1 Sessions  Session Id  Nodes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Session Nodes",
+        "tags": [
+          "sessions"
+        ]
+      },
+      "post": {
+        "description": "Upsert a batch of session nodes.\n\nNodes upsert on their client-generated id, so retries are idempotent.\nNodes must arrive parent-before-child within and across batches.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session does not accept node ingest or a sequence or\nexternal id is already registered, and 422 when a node references an\nunknown parent or the input is invalid.\n\nArgs:\n    session_id: Id of the session.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order.",
+        "operationId": "upsert_session_nodes_v1_sessions__session_id__nodes_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionNodeBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionNodeResponse"
+                  },
+                  "title": "Response Upsert Session Nodes V1 Sessions  Session Id  Nodes Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upsert Session Nodes",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/scores": {
+      "post": {
+        "description": "Merge values into a session's scores map, latest wins per name.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\nand 422 on invalid input.\n\nArgs:\n    session_id: Id of the session.\n    body: Session scores request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
+        "operationId": "merge_session_scores_v1_sessions__session_id__scores_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionScoresRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Merge Session Scores",
+        "tags": [
+          "sessions"
         ]
       }
     },

@@ -40,6 +40,7 @@ from kitaru.server.application.models.agent_versions import AgentVersionFilter
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
 from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
@@ -71,6 +72,18 @@ from kitaru.server.domain.secret import (
     Secret,
     SecretInUse,
     SecretNotFound,
+)
+from kitaru.server.domain.session import (
+    DuplicateSessionExternalId,
+    Session,
+    SessionNotFound,
+)
+from kitaru.server.domain.session_node import (
+    DuplicateNodeExternalId,
+    DuplicateNodeKey,
+    DuplicateNodeSequence,
+    DuplicateSessionNodeId,
+    SessionNode,
 )
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
@@ -775,6 +788,40 @@ class FakeTagRepository:
                 return
         raise TagLinkNotFound(tag_id, resource_type, resource_id)
 
+    def linked_resource_ids(
+        self, tag_name: str, resource_type: TagResourceType
+    ) -> set[uuid.UUID]:
+        """Return the resource ids a tag name is attached to.
+
+        Args:
+            tag_name: Name of the tag.
+            resource_type: Type of the linked resources.
+
+        Returns:
+            Ids of the linked resources.
+        """
+        tag_ids = {tag.id for tag in self._tags.values() if tag.name == tag_name}
+        return {
+            link.resource_id
+            for link in self._links.values()
+            if link.tag_id in tag_ids and link.resource_type == resource_type
+        }
+
+    def remove_links_for_resource(
+        self, resource_type: TagResourceType, resource_id: uuid.UUID
+    ) -> None:
+        """Remove every tag link of a resource.
+
+        Args:
+            resource_type: Type of the resource.
+            resource_id: Id of the resource.
+        """
+        self._links = {
+            link_id: link
+            for link_id, link in self._links.items()
+            if link.resource_type != resource_type or link.resource_id != resource_id
+        }
+
 
 async def create_secret(
     repository: FakeSecretRepository,
@@ -1062,3 +1109,343 @@ class FakeAgentVersionRepository:
         if version_id not in self._versions:
             raise AgentVersionNotFound(version_id)
         del self._versions[version_id]
+
+
+class FakeSessionRepository:
+    """In-memory session repository."""
+
+    def __init__(
+        self,
+        agent_repository: FakeAgentRepository,
+        agent_version_repository: FakeAgentVersionRepository | None = None,
+        tag_repository: FakeTagRepository | None = None,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            agent_repository: Fake agent repository backing the agent ids.
+            agent_version_repository: Fake agent version repository backing
+                the agent version ids.
+            tag_repository: Fake tag repository backing the tag filter and
+                link cleanup.
+        """
+        self._sessions: dict[uuid.UUID, Session] = {}
+        self._agent_repository = agent_repository
+        self._agent_version_repository = agent_version_repository
+        self._tag_repository = tag_repository
+        self.node_repository: FakeSessionNodeRepository | None = None
+
+    def _check_duplicate_external_id(self, session: Session) -> None:
+        if session.provider is None or session.external_id is None:
+            return
+        for other in self._sessions.values():
+            if (
+                other.id != session.id
+                and other.provider == session.provider
+                and other.external_id == session.external_id
+            ):
+                raise DuplicateSessionExternalId(session.provider, session.external_id)
+
+    async def create(self, session: Session) -> Session:
+        """Persist a new session.
+
+        Args:
+            session: Session to store.
+
+        Raises:
+            AgentNotFound: No agent has the session's agent id.
+            AgentVersionNotFound: No agent version has the session's agent
+                version id.
+            DuplicateSessionExternalId: The provider and external id pair is
+                already registered.
+
+        Returns:
+            Stored session with timestamps set.
+        """
+        await self._agent_repository.get(session.agent_id)
+        if (
+            session.agent_version_id is not None
+            and self._agent_version_repository is not None
+        ):
+            await self._agent_version_repository.get(session.agent_version_id)
+        self._check_duplicate_external_id(session)
+        now = datetime.now(UTC)
+        stored = session.model_copy(update={"created": now, "updated": now})
+        self._sessions[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, session_id: uuid.UUID) -> Session:
+        """Load a session by id.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            SessionNotFound: No session has this id.
+
+        Returns:
+            Stored session.
+        """
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise SessionNotFound(session_id)
+        return session.model_copy()
+
+    def _matches(self, session: Session, session_filter: SessionFilter) -> bool:
+        if (
+            session_filter.agent_id is not None
+            and session.agent_id != session_filter.agent_id
+        ):
+            return False
+        if (
+            session_filter.agent_version_id is not None
+            and session.agent_version_id != session_filter.agent_version_id
+        ):
+            return False
+        if (
+            session_filter.origin is not None
+            and session.origin != session_filter.origin
+        ):
+            return False
+        if (
+            session_filter.status is not None
+            and session.status != session_filter.status
+        ):
+            return False
+        if (
+            session_filter.provider is not None
+            and session.provider != session_filter.provider
+        ):
+            return False
+        if (
+            session_filter.external_id is not None
+            and session.external_id != session_filter.external_id
+        ):
+            return False
+        if session_filter.name is not None and session.name != session_filter.name:
+            return False
+        if session_filter.tag is not None:
+            tagged_ids: set[uuid.UUID] = set()
+            if self._tag_repository is not None:
+                tagged_ids = self._tag_repository.linked_resource_ids(
+                    session_filter.tag, TagResourceType.SESSION
+                )
+            if session.id not in tagged_ids:
+                return False
+        if session_filter.started_after is not None and (
+            session.started_at is None
+            or session.started_at < session_filter.started_after
+        ):
+            return False
+        if session_filter.started_before is not None and (
+            session.started_at is None
+            or session.started_at > session_filter.started_before
+        ):
+            return False
+        if session_filter.ended_after is not None and (
+            session.ended_at is None or session.ended_at < session_filter.ended_after
+        ):
+            return False
+        if session_filter.ended_before is not None and (
+            session.ended_at is None or session.ended_at > session_filter.ended_before
+        ):
+            return False
+        if session_filter.has_score is not None and (
+            bool(session.scores) != session_filter.has_score
+        ):
+            return False
+        if session_filter.min_cost is not None and (
+            session.cost is None or session.cost < session_filter.min_cost
+        ):
+            return False
+        if session_filter.max_cost is not None and (
+            session.cost is None or session.cost > session_filter.max_cost
+        ):
+            return False
+        tokens = session.tokens
+        total_tokens = 0
+        if tokens is not None:
+            total_tokens = (
+                (tokens.input_tokens or 0)
+                + (tokens.output_tokens or 0)
+                + (tokens.cached_input_tokens or 0)
+                + (tokens.reasoning_tokens or 0)
+            )
+        if (
+            session_filter.min_total_tokens is not None
+            and total_tokens < session_filter.min_total_tokens
+        ):
+            return False
+        return (
+            session_filter.max_total_tokens is None
+            or total_tokens <= session_filter.max_total_tokens
+        )
+
+    async def query(self, session_filter: SessionFilter) -> tuple[list[Session], int]:
+        """Query sessions matching a filter.
+
+        Args:
+            session_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching sessions and the total match count.
+        """
+        sessions = sorted(self._sessions.values(), key=lambda session: session.id.int)
+        sessions = [
+            session for session in sessions if self._matches(session, session_filter)
+        ]
+        total = len(sessions)
+        start = (session_filter.page - 1) * session_filter.page_size
+        page = sessions[start : start + session_filter.page_size]
+        return [session.model_copy() for session in page], total
+
+    async def update(self, session: Session) -> Session:
+        """Persist changes to an existing session.
+
+        Args:
+            session: Session with modified fields.
+
+        Raises:
+            SessionNotFound: No session has this id.
+            DuplicateSessionExternalId: The provider and external id pair is
+                already registered.
+
+        Returns:
+            Stored session with the updated timestamp renewed.
+        """
+        stored = self._sessions.get(session.id)
+        if stored is None:
+            raise SessionNotFound(session.id)
+        self._check_duplicate_external_id(session)
+        now = _renewed_timestamp(stored.updated)
+        updated = session.model_copy(update={"created": stored.created, "updated": now})
+        self._sessions[session.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, session_id: uuid.UUID) -> None:
+        """Delete a session by id, including its nodes and tag links.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            SessionNotFound: No session has this id.
+        """
+        if session_id not in self._sessions:
+            raise SessionNotFound(session_id)
+        del self._sessions[session_id]
+        if self.node_repository is not None:
+            self.node_repository.remove_for_session(session_id)
+        if self._tag_repository is not None:
+            self._tag_repository.remove_links_for_resource(
+                TagResourceType.SESSION, session_id
+            )
+
+
+class FakeSessionNodeRepository:
+    """In-memory session node repository."""
+
+    def __init__(self, session_repository: FakeSessionRepository) -> None:
+        """Initialize the repository and wire the cascade.
+
+        Args:
+            session_repository: Fake session repository backing the session
+                ids.
+        """
+        self._nodes: dict[uuid.UUID, SessionNode] = {}
+        self._session_repository = session_repository
+        session_repository.node_repository = self
+
+    def remove_for_session(self, session_id: uuid.UUID) -> None:
+        """Remove every node of a session.
+
+        Args:
+            session_id: Id of the session.
+        """
+        self._nodes = {
+            node_id: node
+            for node_id, node in self._nodes.items()
+            if node.session_id != session_id
+        }
+
+    def _check_conflicts(
+        self, node: SessionNode, staged: dict[uuid.UUID, SessionNode]
+    ) -> None:
+        stored = staged.get(node.id)
+        if stored is not None and stored.session_id != node.session_id:
+            raise DuplicateSessionNodeId(node.id)
+        for other in staged.values():
+            if other.id == node.id or other.session_id != node.session_id:
+                continue
+            if other.sequence == node.sequence:
+                raise DuplicateNodeSequence(node.session_id)
+            if node.external_id is not None and other.external_id == node.external_id:
+                raise DuplicateNodeExternalId(node.session_id)
+            if other.key == node.key:
+                raise DuplicateNodeKey(node.session_id)
+
+    async def upsert(self, nodes: list[SessionNode]) -> list[SessionNode]:
+        """Insert or update nodes by id as one atomic batch.
+
+        Args:
+            nodes: Nodes to store, all belonging to one session.
+
+        Raises:
+            SessionNotFound: No session has the nodes' session id.
+            DuplicateSessionNodeId: A node id is already registered in
+                another session.
+            DuplicateNodeSequence: A node sequence is already registered in
+                the session.
+            DuplicateNodeExternalId: A node external id is already
+                registered in the session.
+            DuplicateNodeKey: A node key is already registered in the
+                session.
+
+        Returns:
+            Stored nodes in batch order with timestamps set.
+        """
+        staged = dict(self._nodes)
+        results: list[uuid.UUID] = []
+        for node in nodes:
+            await self._session_repository.get(node.session_id)
+            self._check_conflicts(node, staged)
+            stored = staged.get(node.id)
+            now = datetime.now(UTC)
+            if stored is None:
+                staged[node.id] = node.model_copy(
+                    update={"created": now, "updated": now}
+                )
+            else:
+                staged[node.id] = node.model_copy(
+                    update={
+                        "created": stored.created,
+                        "updated": _renewed_timestamp(stored.updated),
+                    }
+                )
+            results.append(node.id)
+        self._nodes = staged
+        return [self._nodes[node_id].model_copy() for node_id in results]
+
+    async def list_for_session(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Load the nodes of a session ordered by sequence.
+
+        Args:
+            session_id: Id of the session.
+            include_payloads: Whether to load inputs, outputs, and
+                attributes.
+
+        Returns:
+            Nodes ordered by sequence.
+        """
+        nodes = sorted(
+            (node for node in self._nodes.values() if node.session_id == session_id),
+            key=lambda node: node.sequence,
+        )
+        if include_payloads:
+            return [node.model_copy() for node in nodes]
+        return [
+            node.model_copy(update={"inputs": None, "outputs": None, "attributes": {}})
+            for node in nodes
+        ]
