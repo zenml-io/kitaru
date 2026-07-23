@@ -12,8 +12,8 @@
 - Entities that expose timestamps declare `created: datetime | None = None`
   and `updated: datetime | None = None`. `None` means not stored yet. Never
   fill them with placeholder defaults.
-- Name fields validate through `domain.names.validate_name` in a
-  `_validate_name` field validator.
+- Name fields use the `domain.names.Name` annotated type, which validates
+  through `domain.names.validate_name`.
 - Domain errors subclass the `domain.base` taxonomy and follow its naming:
   `XNotFound(NotFoundError)`, `DuplicateXName(ConflictError)`.
 - Error messages follow the canonical formats, which tests assert on:

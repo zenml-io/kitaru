@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -36,6 +37,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,
@@ -49,6 +51,11 @@ from kitaru.server.domain.api_key import (
     encode_api_key,
     generate_secret,
     hash_secret,
+)
+from kitaru.server.domain.secret import (
+    DuplicateSecretName,
+    Secret,
+    SecretNotFound,
 )
 
 
@@ -65,6 +72,7 @@ def db_settings(**overrides: Any) -> APISettings:
         DB_HOST=os.environ.get("KITARU_TEST_DB_HOST", "localhost"),
         DB_PORT=int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
         DB_NAME="kitaru_test",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
         **overrides,
     )
 
@@ -86,7 +94,9 @@ def local_settings(use_db: bool = False, **overrides: Any) -> APISettings:
     }
     if use_db:
         return db_settings(**values)
-    return APISettings(DB_HOST="localhost", **values)
+    return APISettings(
+        DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key", **values
+    )
 
 
 _postgres_available: bool | None = None
@@ -480,3 +490,143 @@ async def create_api_key(
         )
     )
     return api_key, encode_api_key(api_key.id, secret)
+
+
+class FakeSecretRepository:
+    """In-memory secret repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._secrets: dict[uuid.UUID, Secret] = {}
+
+    def _check_duplicate_name(self, secret: Secret) -> None:
+        for other in self._secrets.values():
+            if other.id != secret.id and other.name == secret.name:
+                raise DuplicateSecretName(secret.name)
+
+    async def create(self, secret: Secret) -> Secret:
+        """Persist a new secret.
+
+        Args:
+            secret: Secret to store.
+
+        Raises:
+            DuplicateSecretName: The secret name is already registered.
+
+        Returns:
+            Stored secret with timestamps set.
+        """
+        self._check_duplicate_name(secret)
+        now = datetime.now(UTC)
+        stored = secret.model_copy(update={"created": now, "updated": now})
+        self._secrets[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, secret_id: uuid.UUID) -> Secret:
+        """Load a secret by id.
+
+        Args:
+            secret_id: Id of the secret.
+
+        Raises:
+            SecretNotFound: No secret has this id.
+
+        Returns:
+            Stored secret.
+        """
+        secret = self._secrets.get(secret_id)
+        if secret is None:
+            raise SecretNotFound(secret_id)
+        return secret.model_copy()
+
+    async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
+        """Query secrets matching a filter.
+
+        Args:
+            secret_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching secrets and the total match count.
+        """
+        secrets = sorted(self._secrets.values(), key=lambda secret: secret.id.int)
+        if secret_filter.name is not None:
+            secrets = [
+                secret for secret in secrets if secret.name == secret_filter.name
+            ]
+        if secret_filter.owner_id is not None:
+            secrets = [
+                secret
+                for secret in secrets
+                if secret.owner_id == secret_filter.owner_id
+            ]
+        if secret_filter.internal is not None:
+            secrets = [
+                secret
+                for secret in secrets
+                if secret.internal == secret_filter.internal
+            ]
+        total = len(secrets)
+        start = (secret_filter.page - 1) * secret_filter.page_size
+        page = secrets[start : start + secret_filter.page_size]
+        return [secret.model_copy() for secret in page], total
+
+    async def update(self, secret: Secret) -> Secret:
+        """Persist changes to an existing secret.
+
+        Args:
+            secret: Secret with modified fields.
+
+        Raises:
+            SecretNotFound: No secret has this id.
+            DuplicateSecretName: The secret name is already registered.
+
+        Returns:
+            Stored secret with the updated timestamp renewed.
+        """
+        stored = self._secrets.get(secret.id)
+        if stored is None:
+            raise SecretNotFound(secret.id)
+        self._check_duplicate_name(secret)
+        now = _renewed_timestamp(stored.updated)
+        updated = secret.model_copy(update={"created": stored.created, "updated": now})
+        self._secrets[secret.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, secret_id: uuid.UUID) -> None:
+        """Delete a secret by id.
+
+        Args:
+            secret_id: Id of the secret.
+
+        Raises:
+            SecretNotFound: No secret has this id.
+        """
+        if secret_id not in self._secrets:
+            raise SecretNotFound(secret_id)
+        del self._secrets[secret_id]
+
+
+async def create_secret(
+    repository: FakeSecretRepository,
+    owner_id: uuid.UUID,
+    name: str = "db",
+    internal: bool = False,
+    values: dict[str, SecretStr] | None = None,
+) -> Secret:
+    """Store a secret in the fake repository.
+
+    Args:
+        repository: Fake secret repository.
+        owner_id: Id of the owning account.
+        name: Secret name.
+        internal: Internal state.
+        values: Secret values.
+
+    Returns:
+        Stored secret.
+    """
+    if values is None:
+        values = {"password": SecretStr("hunter2")}
+    return await repository.create(
+        Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
