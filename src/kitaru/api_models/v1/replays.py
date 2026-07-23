@@ -118,13 +118,26 @@ class StaticCase(RequestModel):
     result: Any = Field(default=None, description="Tool result to return.")
 
 
-class PassthroughPolicy(RequestModel):
+class ToolPolicyBase(RequestModel):
+    """Tool policy union member base."""
+
+    def model_post_init(self, context: Any) -> None:
+        """Mark the type discriminator as set so exclude_unset dumps keep it.
+
+        Args:
+            context: Pydantic validation context.
+        """
+        _ = context
+        self.model_fields_set.add("type")
+
+
+class PassthroughPolicy(ToolPolicyBase):
     """Passthrough tool policy."""
 
     type: Literal["passthrough"] = "passthrough"
 
 
-class HistoryPolicy(RequestModel):
+class HistoryPolicy(ToolPolicyBase):
     """History tool policy."""
 
     type: Literal["history"] = "history"
@@ -136,7 +149,7 @@ class HistoryPolicy(RequestModel):
     )
 
 
-class StaticPolicy(RequestModel):
+class StaticPolicy(ToolPolicyBase):
     """Static tool policy."""
 
     type: Literal["static"] = "static"
@@ -148,7 +161,7 @@ class StaticPolicy(RequestModel):
     )
 
 
-class LLMPolicy(RequestModel):
+class LLMPolicy(ToolPolicyBase):
     """LLM tool policy."""
 
     type: Literal["llm"] = "llm"

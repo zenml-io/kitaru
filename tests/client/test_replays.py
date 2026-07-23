@@ -28,6 +28,7 @@ from kitaru.api_models.v1.agents import AgentCreateRequest
 from kitaru.api_models.v1.replays import (
     HistoryPolicy,
     HistoryScope,
+    PassthroughPolicy,
     ReplayCreateRequest,
     ReplayStatus,
     ReplayUpdateRequest,
@@ -113,6 +114,24 @@ async def test_create_get_list_round_trip(api_client: KitaruAPIClient) -> None:
 
     page = await api_client.replays.list(standalone=False)
     assert page.total == 0
+
+
+async def test_create_with_default_constructed_policy(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Round-trip a tool policy whose members carry only defaulted fields."""
+    session_id, _ = await create_session(api_client)
+    tool_policy = ToolPolicyConfig(
+        default=PassthroughPolicy(), tools={"get_weather": HistoryPolicy()}
+    )
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session_id,
+            scoring_policy=SCORING_POLICY,
+            tool_policy=tool_policy,
+        )
+    )
+    assert created.tool_policy == tool_policy
 
 
 async def test_create_rejects_cohort_scope(api_client: KitaruAPIClient) -> None:
