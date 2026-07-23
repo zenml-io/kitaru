@@ -134,6 +134,325 @@
         "title": "AccountUpdateRequest",
         "type": "object"
       },
+      "AgentCapabilities": {
+        "additionalProperties": false,
+        "description": "Agent capabilities.",
+        "properties": {
+          "mcp_servers": {
+            "description": "MCP server names.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Mcp Servers",
+            "type": "array"
+          },
+          "skills": {
+            "description": "Skill names.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "tools": {
+            "description": "Tool names.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "title": "AgentCapabilities",
+        "type": "object"
+      },
+      "AgentCreateRequest": {
+        "additionalProperties": false,
+        "description": "Agent create request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent description.",
+            "title": "Description"
+          },
+          "name": {
+            "description": "Agent name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AgentCreateRequest",
+        "type": "object"
+      },
+      "AgentResponse": {
+        "description": "Agent response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Agent id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Agent name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "description",
+          "created",
+          "updated"
+        ],
+        "title": "AgentResponse",
+        "type": "object"
+      },
+      "AgentUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Agent update request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New agent description.",
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New agent name.",
+            "title": "Name"
+          }
+        },
+        "title": "AgentUpdateRequest",
+        "type": "object"
+      },
+      "AgentVersionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Agent version create request.",
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent capabilities."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version description.",
+            "title": "Description"
+          },
+          "run_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run specification."
+          },
+          "version": {
+            "description": "Version label.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "AgentVersionCreateRequest",
+        "type": "object"
+      },
+      "AgentVersionResponse": {
+        "description": "Agent version response.",
+        "properties": {
+          "agent_id": {
+            "description": "Id of the agent.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/AgentCapabilities"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version description.",
+            "title": "Description"
+          },
+          "id": {
+            "description": "Agent version id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "run_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run specification."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          },
+          "version": {
+            "description": "Version label.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "agent_id",
+          "version",
+          "description",
+          "run_spec",
+          "capabilities",
+          "created",
+          "updated"
+        ],
+        "title": "AgentVersionResponse",
+        "type": "object"
+      },
+      "AgentVersionUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Agent version update request.",
+        "properties": {
+          "capabilities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentCapabilities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New agent capabilities."
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New version description.",
+            "title": "Description"
+          },
+          "run_spec": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New run specification."
+          }
+        },
+        "title": "AgentVersionUpdateRequest",
+        "type": "object"
+      },
       "ApiKeyCreateRequest": {
         "additionalProperties": false,
         "description": "API key create request.",
@@ -360,6 +679,68 @@
         "title": "Page[AccountResponse]",
         "type": "object"
       },
+      "Page_AgentResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[AgentResponse]",
+        "type": "object"
+      },
+      "Page_AgentVersionResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[AgentVersionResponse]",
+        "type": "object"
+      },
       "Page_ApiKeyResponse_": {
         "properties": {
           "items": {
@@ -420,6 +801,58 @@
           "page_size"
         ],
         "title": "Page[SecretResponse]",
+        "type": "object"
+      },
+      "RunSpec": {
+        "additionalProperties": false,
+        "description": "Agent run specification.",
+        "properties": {
+          "command": {
+            "description": "Bash command starting the agent.",
+            "title": "Command",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Literal environment variables.",
+            "title": "Env",
+            "type": "object"
+          },
+          "secret_ids": {
+            "description": "Ids of secrets whose entries become environment variables.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Secret Ids",
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "description": "Wall clock limit.",
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "working_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Working directory for the command.",
+            "title": "Working Dir"
+          }
+        },
+        "required": [
+          "command",
+          "timeout_seconds"
+        ],
+        "title": "RunSpec",
         "type": "object"
       },
       "SecretCreateRequest": {
@@ -982,6 +1415,500 @@
         "summary": "Update Account",
         "tags": [
           "accounts"
+        ]
+      }
+    },
+    "/v1/agent-versions/{version_id}": {
+      "delete": {
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "operationId": "delete_agent_version_v1_agent_versions__version_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Agent Version",
+        "tags": [
+          "agent-versions"
+        ]
+      },
+      "get": {
+        "description": "Get an agent version by id.\n\nClients observe HTTP 200 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Stored agent version.",
+        "operationId": "get_agent_version_v1_agent_versions__version_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent Version",
+        "tags": [
+          "agent-versions"
+        ]
+      },
+      "patch": {
+        "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has\nthis id or a referenced secret does not exist, and 422 on invalid\ninput.\n\nArgs:\n    version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
+        "operationId": "update_agent_version_v1_agent_versions__version_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentVersionUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Agent Version",
+        "tags": [
+          "agent-versions"
+        ]
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "description": "List agents.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Agent service.\n    actor: Caller context.\n    name: Filter on agent name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of agents.",
+        "operationId": "list_agents_v1_agents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AgentResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Agents",
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "description": "Create an agent.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Agent create request.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Created agent.",
+        "operationId": "create_agent_v1_agents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/v1/agents/{agent_id}": {
+      "delete": {
+        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id,\nand 409 while the agent still has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "operationId": "delete_agent_v1_agents__agent_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Agent",
+        "tags": [
+          "agents"
+        ]
+      },
+      "get": {
+        "description": "Get an agent by id.\n\nClients observe HTTP 200 on success and 404 when no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Stored agent.",
+        "operationId": "get_agent_v1_agents__agent_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent",
+        "tags": [
+          "agents"
+        ]
+      },
+      "patch": {
+        "description": "Update an agent.\n\nClients observe HTTP 200 on success, 404 when no agent has this id,\n409 when the new name is already registered, and 422 on invalid input.\n\nArgs:\n    agent_id: Id of the agent.\n    body: Agent update request.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Updated agent.",
+        "operationId": "update_agent_v1_agents__agent_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Agent",
+        "tags": [
+          "agents"
+        ]
+      }
+    },
+    "/v1/agents/{agent_id}/versions": {
+      "get": {
+        "description": "List the versions of an agent.\n\nClients observe HTTP 200 on success, 404 when no agent has this id,\nand 422 on invalid pagination parameters.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent version service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of agent versions.",
+        "operationId": "list_agent_versions_v1_agents__agent_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_AgentVersionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Agent Versions",
+        "tags": [
+          "agents"
+        ]
+      },
+      "post": {
+        "description": "Create an agent version.\n\nClients observe HTTP 201 on success, 404 when no agent has this id or\na referenced secret does not exist, 409 when the version is already\nregistered for the agent, and 422 on invalid input.\n\nArgs:\n    agent_id: Id of the agent.\n    body: Agent version create request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Created agent version.",
+        "operationId": "create_agent_version_v1_agents__agent_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Agent Version",
+        "tags": [
+          "agents"
         ]
       }
     },

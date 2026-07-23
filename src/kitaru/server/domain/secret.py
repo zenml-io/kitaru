@@ -57,6 +57,18 @@ class DuplicateSecretName(ConflictError):
         super().__init__(f"Secret name '{name}' is already registered")
 
 
+class SecretInUse(ConflictError):
+    """Raised when a secret deletion is blocked by existing references."""
+
+    def __init__(self, secret_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            secret_id: Id of the referenced secret.
+        """
+        super().__init__(f"Secret {secret_id} is referenced by agent versions")
+
+
 class InvalidSecretType(ValidationError):
     """Raised when a secret type exceeds the length limit."""
 

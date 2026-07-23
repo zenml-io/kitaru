@@ -41,3 +41,16 @@ def unique_constraint_name(table: str, columns: list[str]) -> str:
         Constraint name of the form ``uq_<table>_<columns>``.
     """
     return f"uq_{table}_{'_'.join(columns)}"[:_MAX_IDENTIFIER_LENGTH]
+
+
+def foreign_key_name(table: str, columns: list[str]) -> str:
+    """Build the name for a foreign key constraint.
+
+    Args:
+        table: Table the constraint belongs to.
+        columns: Columns the constraint spans, in order.
+
+    Returns:
+        Constraint name of the form ``fk_<table>_<columns>``.
+    """
+    return f"fk_{table}_{'_'.join(columns)}"[:_MAX_IDENTIFIER_LENGTH]

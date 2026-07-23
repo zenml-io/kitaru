@@ -36,6 +36,8 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.agent_versions import AgentVersionFilter
+from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.database.service import DatabaseService
@@ -43,6 +45,17 @@ from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
     DuplicateAccountName,
+)
+from kitaru.server.domain.agent import (
+    Agent,
+    AgentInUse,
+    AgentNotFound,
+    DuplicateAgentName,
+)
+from kitaru.server.domain.agent_version import (
+    AgentVersion,
+    AgentVersionNotFound,
+    DuplicateAgentVersion,
 )
 from kitaru.server.domain.api_key import (
     ApiKey,
@@ -55,6 +68,7 @@ from kitaru.server.domain.api_key import (
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
+    SecretInUse,
     SecretNotFound,
 )
 
@@ -498,6 +512,7 @@ class FakeSecretRepository:
     def __init__(self) -> None:
         """Initialize the repository."""
         self._secrets: dict[uuid.UUID, Secret] = {}
+        self.version_repository: FakeAgentVersionRepository | None = None
 
     def _check_duplicate_name(self, secret: Secret) -> None:
         for other in self._secrets.values():
@@ -600,9 +615,15 @@ class FakeSecretRepository:
 
         Raises:
             SecretNotFound: No secret has this id.
+            SecretInUse: The secret is referenced by an agent version.
         """
         if secret_id not in self._secrets:
             raise SecretNotFound(secret_id)
+        if (
+            self.version_repository is not None
+            and self.version_repository.references_secret(secret_id)
+        ):
+            raise SecretInUse(secret_id)
         del self._secrets[secret_id]
 
 
@@ -630,3 +651,265 @@ async def create_secret(
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
     )
+
+
+class FakeAgentRepository:
+    """In-memory agent repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._agents: dict[uuid.UUID, Agent] = {}
+        self.version_repository: FakeAgentVersionRepository | None = None
+
+    def _check_duplicate_name(self, agent: Agent) -> None:
+        for other in self._agents.values():
+            if other.id != agent.id and other.name == agent.name:
+                raise DuplicateAgentName(agent.name)
+
+    async def create(self, agent: Agent) -> Agent:
+        """Persist a new agent.
+
+        Args:
+            agent: Agent to store.
+
+        Raises:
+            DuplicateAgentName: The agent name is already registered.
+
+        Returns:
+            Stored agent with timestamps set.
+        """
+        self._check_duplicate_name(agent)
+        now = datetime.now(UTC)
+        stored = agent.model_copy(update={"created": now, "updated": now})
+        self._agents[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, agent_id: uuid.UUID) -> Agent:
+        """Load an agent by id.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            Stored agent.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise AgentNotFound(agent_id)
+        return agent.model_copy()
+
+    async def query(self, agent_filter: AgentFilter) -> tuple[list[Agent], int]:
+        """Query agents matching a filter.
+
+        Args:
+            agent_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching agents and the total match count.
+        """
+        agents = sorted(self._agents.values(), key=lambda agent: agent.id.int)
+        if agent_filter.name is not None:
+            agents = [agent for agent in agents if agent.name == agent_filter.name]
+        if agent_filter.owner_id is not None:
+            agents = [
+                agent for agent in agents if agent.owner_id == agent_filter.owner_id
+            ]
+        total = len(agents)
+        start = (agent_filter.page - 1) * agent_filter.page_size
+        page = agents[start : start + agent_filter.page_size]
+        return [agent.model_copy() for agent in page], total
+
+    async def update(self, agent: Agent) -> Agent:
+        """Persist changes to an existing agent.
+
+        Args:
+            agent: Agent with modified fields.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+            DuplicateAgentName: The agent name is already registered.
+
+        Returns:
+            Stored agent with the updated timestamp renewed.
+        """
+        stored = self._agents.get(agent.id)
+        if stored is None:
+            raise AgentNotFound(agent.id)
+        self._check_duplicate_name(agent)
+        now = _renewed_timestamp(stored.updated)
+        updated = agent.model_copy(update={"created": stored.created, "updated": now})
+        self._agents[agent.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, agent_id: uuid.UUID) -> None:
+        """Delete an agent by id.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+            AgentInUse: The agent still has versions.
+        """
+        if agent_id not in self._agents:
+            raise AgentNotFound(agent_id)
+        if self.version_repository is not None and self.version_repository.has_versions(
+            agent_id
+        ):
+            raise AgentInUse(agent_id)
+        del self._agents[agent_id]
+
+
+class FakeAgentVersionRepository:
+    """In-memory agent version repository."""
+
+    def __init__(
+        self,
+        agent_repository: FakeAgentRepository,
+        secret_repository: FakeSecretRepository | None = None,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            agent_repository: Fake agent repository backing the agent ids.
+            secret_repository: Fake secret repository backing the secret ids.
+        """
+        self._versions: dict[uuid.UUID, AgentVersion] = {}
+        self._agent_repository = agent_repository
+        agent_repository.version_repository = self
+        if secret_repository is not None:
+            secret_repository.version_repository = self
+
+    def has_versions(self, agent_id: uuid.UUID) -> bool:
+        """Report whether an agent has stored versions.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            ``True`` when a stored version belongs to the agent.
+        """
+        return any(version.agent_id == agent_id for version in self._versions.values())
+
+    def references_secret(self, secret_id: uuid.UUID) -> bool:
+        """Report whether a stored version references a secret.
+
+        Args:
+            secret_id: Id of the secret.
+
+        Returns:
+            ``True`` when a stored run spec references the secret.
+        """
+        return any(
+            version.run_spec is not None and secret_id in version.run_spec.secret_ids
+            for version in self._versions.values()
+        )
+
+    def _check_duplicate_version(self, version: AgentVersion) -> None:
+        for other in self._versions.values():
+            if (
+                other.id != version.id
+                and other.agent_id == version.agent_id
+                and other.version == version.version
+            ):
+                raise DuplicateAgentVersion(version.version)
+
+    async def create(self, version: AgentVersion) -> AgentVersion:
+        """Persist a new agent version.
+
+        Args:
+            version: Agent version to store.
+
+        Raises:
+            AgentNotFound: No agent has the version's agent id.
+            DuplicateAgentVersion: The version is already registered for
+                the agent.
+
+        Returns:
+            Stored agent version with timestamps set.
+        """
+        await self._agent_repository.get(version.agent_id)
+        self._check_duplicate_version(version)
+        now = datetime.now(UTC)
+        stored = version.model_copy(update={"created": now, "updated": now})
+        self._versions[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, version_id: uuid.UUID) -> AgentVersion:
+        """Load an agent version by id.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Stored agent version.
+        """
+        version = self._versions.get(version_id)
+        if version is None:
+            raise AgentVersionNotFound(version_id)
+        return version.model_copy()
+
+    async def query(
+        self, version_filter: AgentVersionFilter
+    ) -> tuple[list[AgentVersion], int]:
+        """Query agent versions matching a filter.
+
+        Args:
+            version_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching agent versions and the total match count.
+        """
+        versions = sorted(self._versions.values(), key=lambda version: version.id.int)
+        if version_filter.agent_id is not None:
+            versions = [
+                version
+                for version in versions
+                if version.agent_id == version_filter.agent_id
+            ]
+        total = len(versions)
+        start = (version_filter.page - 1) * version_filter.page_size
+        page = versions[start : start + version_filter.page_size]
+        return [version.model_copy() for version in page], total
+
+    async def update(self, version: AgentVersion) -> AgentVersion:
+        """Persist changes to an existing agent version.
+
+        Args:
+            version: Agent version with modified fields.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+            DuplicateAgentVersion: The version is already registered for
+                the agent.
+
+        Returns:
+            Stored agent version with the updated timestamp renewed.
+        """
+        stored = self._versions.get(version.id)
+        if stored is None:
+            raise AgentVersionNotFound(version.id)
+        self._check_duplicate_version(version)
+        now = _renewed_timestamp(stored.updated)
+        updated = version.model_copy(update={"created": stored.created, "updated": now})
+        self._versions[version.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, version_id: uuid.UUID) -> None:
+        """Delete an agent version by id.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+        """
+        if version_id not in self._versions:
+            raise AgentVersionNotFound(version_id)
+        del self._versions[version_id]

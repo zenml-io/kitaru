@@ -11,22 +11,28 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Agent DTO conversions."""
 
-from kitaru.server.adapters.db.schemas.account import AccountSchema
-from kitaru.server.adapters.db.schemas.agent import AgentSchema
-from kitaru.server.adapters.db.schemas.agent_version import (
-    AgentVersionSchema,
-    AgentVersionSecretSchema,
-)
-from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
-from kitaru.server.adapters.db.schemas.secret import SecretSchema
+from kitaru.api_models.v1.agents import AgentResponse
+from kitaru.server.domain.agent import Agent
 
-__all__ = [
-    "AccountSchema",
-    "AgentSchema",
-    "AgentVersionSchema",
-    "AgentVersionSecretSchema",
-    "ApiKeySchema",
-    "SecretSchema",
-]
+
+def agent_to_response(agent: Agent) -> AgentResponse:
+    """Convert an agent entity to its response DTO.
+
+    Args:
+        agent: Stored agent.
+
+    Returns:
+        Agent response.
+    """
+    assert agent.created is not None
+    assert agent.updated is not None
+    return AgentResponse(
+        id=agent.id,
+        owner_id=agent.owner_id,
+        name=agent.name,
+        description=agent.description,
+        created=agent.created,
+        updated=agent.updated,
+    )
