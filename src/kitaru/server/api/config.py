@@ -26,7 +26,7 @@ class AuthScheme(StrEnum):
     """Authentication scheme."""
 
     NONE = "none"
-    CONTROL_PLANE = "control-plane"
+    LOCAL = "local"
 
 
 class APISettings(Settings):
@@ -57,22 +57,20 @@ class APISettings(Settings):
     JWT_LIFETIME_SECONDS: int = 3600
     AUTH_COOKIE_NAME: str = ""
 
+    DEFAULT_ACCOUNT_NAME: str = "default"
+    DEFAULT_ACCOUNT_PASSWORD: str | None = None
+
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:
         """Validate authentication settings.
 
         Raises:
-            ValueError: Control plane authentication is enabled without its
-                required settings.
+            ValueError: Local authentication is enabled without its required
+                settings.
 
         Returns:
             The validated settings object.
         """
-        if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
-            if not self.CONTROL_PLANE_API_URL:
-                raise ValueError("Set KITARU_SERVER_CONTROL_PLANE_API_URL")
-            if self.SERVER_ID.int == 0:
-                raise ValueError("Set KITARU_SERVER_ID")
-            if not self.JWT_SIGNING_KEY:
-                raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
+        if self.AUTH_SCHEME is AuthScheme.LOCAL and not self.JWT_SIGNING_KEY:
+            raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
         return self

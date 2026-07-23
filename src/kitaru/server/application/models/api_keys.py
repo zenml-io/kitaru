@@ -11,9 +11,19 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""API key filter model."""
 
-from kitaru.server.adapters.db.schemas.account import AccountSchema
-from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
+import uuid
 
-__all__ = ["AccountSchema", "ApiKeySchema"]
+from pydantic import Field, PositiveInt
+
+from kitaru.server.base import FrozenModel
+
+
+class ApiKeyFilter(FrozenModel):
+    """API key list filter."""
+
+    name: str | None = None
+    owner_id: uuid.UUID | None = None
+    page: PositiveInt = 1
+    page_size: int = Field(default=20, ge=1, le=1000)

@@ -23,10 +23,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthUser
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,16 @@ class ControlPlaneError(Exception):
     """Raised when the control plane API cannot authorize a request."""
 
 
-class ControlPlaneUser(AuthUser):
+class ControlPlaneUser(BaseModel):
     """Control plane API user accepted for server access."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: uuid.UUID
+    username: str | None = None
+    email: str | None = None
+    is_service_account: bool = False
+    is_superuser: bool = False
 
 
 class ServerAuthorization(BaseModel):

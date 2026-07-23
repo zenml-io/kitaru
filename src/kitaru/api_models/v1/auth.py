@@ -11,9 +11,19 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Auth API models."""
 
-from kitaru.server.adapters.db.schemas.account import AccountSchema
-from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
+from pydantic import Field
 
-__all__ = ["AccountSchema", "ApiKeySchema"]
+from kitaru.api_models.v1.base import ResponseModel
+
+
+class TokenResponse(ResponseModel):
+    """Token response."""
+
+    access_token: str = Field(description="Bearer token.")
+    token_type: str = Field(description="Token type.")
+    expires_in: int = Field(description="Token lifetime in seconds.")
+    csrf_token: str | None = Field(
+        default=None, description="CSRF token for cookie authentication."
+    )
