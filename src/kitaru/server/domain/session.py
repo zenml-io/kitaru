@@ -83,6 +83,18 @@ class DuplicateSessionExternalId(ConflictError):
         )
 
 
+class SessionInUse(ConflictError):
+    """Raised when a session deletion is blocked by existing references."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the referenced session.
+        """
+        super().__init__(f"Session {session_id} is referenced by cohorts")
+
+
 class SessionNotInProgress(ConflictError):
     """Raised when an operation requires an in-progress session."""
 

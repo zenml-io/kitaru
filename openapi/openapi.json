@@ -635,6 +635,412 @@
         "title": "Body_login_v1_login_post",
         "type": "object"
       },
+      "CohortCreateRequest": {
+        "additionalProperties": false,
+        "description": "Cohort create request.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent, required with session ids.",
+            "title": "Agent Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cohort description.",
+            "title": "Description"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CohortSessionFilter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session filter resolving the members, mutually exclusive with session ids."
+          },
+          "name": {
+            "description": "Cohort name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "session_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ids of the member sessions in position order, mutually exclusive with the filter.",
+            "title": "Session Ids"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CohortCreateRequest",
+        "type": "object"
+      },
+      "CohortResponse": {
+        "description": "Cohort response.",
+        "properties": {
+          "agent_id": {
+            "description": "Id of the agent.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cohort description.",
+            "title": "Description"
+          },
+          "filter_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter the members were resolved from.",
+            "title": "Filter Snapshot"
+          },
+          "id": {
+            "description": "Cohort id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Cohort name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "session_count": {
+            "description": "Number of member sessions.",
+            "title": "Session Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "description",
+          "agent_id",
+          "session_count",
+          "filter_snapshot",
+          "created",
+          "updated"
+        ],
+        "title": "CohortResponse",
+        "type": "object"
+      },
+      "CohortSessionFilter": {
+        "additionalProperties": false,
+        "description": "Cohort session filter.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on agent id, sets the cohort's agent.",
+            "title": "Agent Id"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on agent version id.",
+            "title": "Agent Version Id"
+          },
+          "ended_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Earliest end time.",
+            "title": "Ended After"
+          },
+          "ended_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest end time.",
+            "title": "Ended Before"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on external id.",
+            "title": "External Id"
+          },
+          "has_score": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on the presence of scores.",
+            "title": "Has Score"
+          },
+          "max_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Highest cost.",
+            "title": "Max Cost"
+          },
+          "max_total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Highest total token count.",
+            "title": "Max Total Tokens"
+          },
+          "min_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest cost.",
+            "title": "Min Cost"
+          },
+          "min_total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest total token count.",
+            "title": "Min Total Tokens"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on session name.",
+            "title": "Name"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on session origin."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionProvider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on session provider."
+          },
+          "started_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Earliest start time.",
+            "title": "Started After"
+          },
+          "started_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Latest start time.",
+            "title": "Started Before"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on session status."
+          },
+          "tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter on attached tag name.",
+            "title": "Tag"
+          }
+        },
+        "title": "CohortSessionFilter",
+        "type": "object"
+      },
+      "CohortUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Cohort update request.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New cohort description.",
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New cohort name.",
+            "title": "Name"
+          }
+        },
+        "title": "CohortUpdateRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -791,6 +1197,37 @@
           "page_size"
         ],
         "title": "Page[ApiKeyResponse]",
+        "type": "object"
+      },
+      "Page_CohortResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CohortResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[CohortResponse]",
         "type": "object"
       },
       "Page_SecretResponse_": {
@@ -3577,6 +4014,333 @@
         ]
       }
     },
+    "/v1/cohorts": {
+      "get": {
+        "description": "List cohorts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Cohort service.\n    actor: Caller context.\n    name: Filter on cohort name.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of cohorts.",
+        "operationId": "list_cohorts_v1_cohorts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CohortResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cohorts",
+        "tags": [
+          "cohorts"
+        ]
+      },
+      "post": {
+        "description": "Create a cohort from explicit session ids or a session filter.\n\nExplicit session ids require an agent id and keep their order as the\nmember positions. A filter must pin an agent, resolves every matching\nsession, and is stored as the cohort's provenance snapshot. Membership\nis immutable after creation.\n\nClients observe HTTP 201 on success, 404 when no agent or session has a\nreferenced id, 409 when the name is already registered, and 422 when\nthe membership is empty, a member belongs to another agent or is in\nprogress, or the input is invalid.\n\nArgs:\n    body: Cohort create request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Created cohort.",
+        "operationId": "create_cohort_v1_cohorts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CohortCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CohortResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Cohort",
+        "tags": [
+          "cohorts"
+        ]
+      }
+    },
+    "/v1/cohorts/{cohort_id}": {
+      "delete": {
+        "description": "Delete a cohort, including its membership and tag links.\n\nClients observe HTTP 204 on success and 404 when no cohort has this\nid.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
+        "operationId": "delete_cohort_v1_cohorts__cohort_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cohort_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Cohort Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Cohort",
+        "tags": [
+          "cohorts"
+        ]
+      },
+      "get": {
+        "description": "Get a cohort by id.\n\nClients observe HTTP 200 on success and 404 when no cohort has this\nid.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Stored cohort.",
+        "operationId": "get_cohort_v1_cohorts__cohort_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cohort_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Cohort Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CohortResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Cohort",
+        "tags": [
+          "cohorts"
+        ]
+      },
+      "patch": {
+        "description": "Update a cohort's name and description.\n\nClients observe HTTP 200 on success, 404 when no cohort has this id,\n409 when the new name is already registered, and 422 on invalid input.\n\nArgs:\n    cohort_id: Id of the cohort.\n    body: Cohort update request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Updated cohort.",
+        "operationId": "update_cohort_v1_cohorts__cohort_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cohort_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Cohort Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CohortUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CohortResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Cohort",
+        "tags": [
+          "cohorts"
+        ]
+      }
+    },
+    "/v1/cohorts/{cohort_id}/sessions": {
+      "get": {
+        "description": "List the member sessions of a cohort ordered by position.\n\nClients observe HTTP 200 on success, 404 when no cohort has this id,\nand 422 on invalid pagination parameters.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of member sessions.",
+        "operationId": "list_cohort_sessions_v1_cohorts__cohort_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cohort_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Cohort Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SessionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cohort Sessions",
+        "tags": [
+          "cohorts"
+        ]
+      }
+    },
     "/v1/login": {
       "post": {
         "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
@@ -4281,7 +5045,7 @@
     },
     "/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success, 404 when no session has this id,\nand 409 while the session is a member of a cohort.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_v1_sessions__session_id__delete",
         "parameters": [
           {

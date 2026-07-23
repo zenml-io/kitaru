@@ -231,6 +231,7 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session is a member of a cohort.
         """
         _ = actor
         await self._repository.delete(session_id)

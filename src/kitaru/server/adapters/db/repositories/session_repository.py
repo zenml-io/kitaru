@@ -23,19 +23,24 @@ from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.schemas.cohort import (
+    COHORT_SESSION_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.schemas.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
     SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionSchema,
 )
-from kitaru.server.adapters.db.schemas.tag import TagLinkSchema, TagSchema
+from kitaru.server.adapters.db.schemas.tag import TagLinkSchema
+from kitaru.server.adapters.db.tag_filtering import tagged_resource_ids
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
+    SessionInUse,
     SessionNotFound,
 )
 from kitaru.server.domain.tag import TagResourceType
@@ -163,15 +168,11 @@ class SQLSessionRepository:
         if session_filter.name is not None:
             statement = statement.where(col(SessionSchema.name) == session_filter.name)
         if session_filter.tag is not None:
-            tagged_ids = (
-                select(col(TagLinkSchema.resource_id))
-                .join(TagSchema, col(TagLinkSchema.tag_id) == col(TagSchema.id))
-                .where(
-                    col(TagSchema.name) == session_filter.tag,
-                    col(TagLinkSchema.resource_type) == TagResourceType.SESSION.value,
+            statement = statement.where(
+                col(SessionSchema.id).in_(
+                    tagged_resource_ids(session_filter.tag, TagResourceType.SESSION)
                 )
             )
-            statement = statement.where(col(SessionSchema.id).in_(tagged_ids))
         if session_filter.started_after is not None:
             statement = statement.where(
                 col(SessionSchema.started_at) >= session_filter.started_after
@@ -296,15 +297,23 @@ class SQLSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session is a member of a cohort.
         """
         row = await self._session.get(SessionSchema, session_id)
         if row is None:
             raise SessionNotFound(session_id)
-        await self._session.execute(
-            delete(TagLinkSchema).where(
-                col(TagLinkSchema.resource_type) == TagResourceType.SESSION.value,
-                col(TagLinkSchema.resource_id) == session_id,
-            )
-        )
-        await self._session.delete(row)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                await self._session.execute(
+                    delete(TagLinkSchema).where(
+                        col(TagLinkSchema.resource_type)
+                        == TagResourceType.SESSION.value,
+                        col(TagLinkSchema.resource_id) == session_id,
+                    )
+                )
+                await self._session.delete(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if violated_constraint(exc) == COHORT_SESSION_SESSION_ID_FOREIGN_KEY:
+                raise SessionInUse(session_id) from exc
+            raise

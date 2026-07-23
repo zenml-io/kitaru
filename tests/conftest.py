@@ -39,6 +39,10 @@ from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.application.models.agent_versions import AgentVersionFilter
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.cohorts import (
+    CohortFilter,
+    CohortSessionsFilter,
+)
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
@@ -67,6 +71,11 @@ from kitaru.server.domain.api_key import (
     generate_secret,
     hash_secret,
 )
+from kitaru.server.domain.cohort import (
+    Cohort,
+    CohortNotFound,
+    DuplicateCohortName,
+)
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -76,6 +85,7 @@ from kitaru.server.domain.secret import (
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
+    SessionInUse,
     SessionNotFound,
 )
 from kitaru.server.domain.session_node import (
@@ -1134,6 +1144,7 @@ class FakeSessionRepository:
         self._agent_version_repository = agent_version_repository
         self._tag_repository = tag_repository
         self.node_repository: FakeSessionNodeRepository | None = None
+        self.cohort_repository: FakeCohortRepository | None = None
 
     def _check_duplicate_external_id(self, session: Session) -> None:
         if session.provider is None or session.external_id is None:
@@ -1330,9 +1341,15 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session is a member of a cohort.
         """
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
+        if (
+            self.cohort_repository is not None
+            and self.cohort_repository.references_session(session_id)
+        ):
+            raise SessionInUse(session_id)
         del self._sessions[session_id]
         if self.node_repository is not None:
             self.node_repository.remove_for_session(session_id)
@@ -1449,3 +1466,176 @@ class FakeSessionNodeRepository:
             node.model_copy(update={"inputs": None, "outputs": None, "attributes": {}})
             for node in nodes
         ]
+
+
+class FakeCohortRepository:
+    """In-memory cohort repository."""
+
+    def __init__(
+        self,
+        session_repository: FakeSessionRepository,
+        agent_repository: FakeAgentRepository | None = None,
+        tag_repository: FakeTagRepository | None = None,
+    ) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            session_repository: Fake session repository backing the session
+                ids.
+            agent_repository: Fake agent repository backing the agent ids.
+            tag_repository: Fake tag repository backing the tag filter and
+                link cleanup.
+        """
+        self._cohorts: dict[uuid.UUID, Cohort] = {}
+        self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
+        self._session_repository = session_repository
+        self._agent_repository = agent_repository
+        self._tag_repository = tag_repository
+        session_repository.cohort_repository = self
+
+    def references_session(self, session_id: uuid.UUID) -> bool:
+        """Report whether a stored cohort contains a session.
+
+        Args:
+            session_id: Id of the session.
+
+        Returns:
+            ``True`` when a stored membership references the session.
+        """
+        return any(session_id in members for members in self._members.values())
+
+    def _check_duplicate_name(self, cohort: Cohort) -> None:
+        for other in self._cohorts.values():
+            if other.id != cohort.id and other.name == cohort.name:
+                raise DuplicateCohortName(cohort.name)
+
+    async def create(self, cohort: Cohort, session_ids: list[uuid.UUID]) -> Cohort:
+        """Persist a new cohort with its ordered membership.
+
+        Args:
+            cohort: Cohort to store.
+            session_ids: Ids of the member sessions, in position order.
+
+        Raises:
+            DuplicateCohortName: The cohort name is already registered.
+            AgentNotFound: No agent has the cohort's agent id.
+
+        Returns:
+            Stored cohort with timestamps set.
+        """
+        if self._agent_repository is not None:
+            await self._agent_repository.get(cohort.agent_id)
+        self._check_duplicate_name(cohort)
+        now = datetime.now(UTC)
+        stored = cohort.model_copy(update={"created": now, "updated": now})
+        self._cohorts[stored.id] = stored
+        self._members[stored.id] = list(session_ids)
+        return stored.model_copy()
+
+    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+        """Load a cohort by id.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+
+        Returns:
+            Stored cohort.
+        """
+        cohort = self._cohorts.get(cohort_id)
+        if cohort is None:
+            raise CohortNotFound(cohort_id)
+        return cohort.model_copy()
+
+    async def query(self, cohort_filter: CohortFilter) -> tuple[list[Cohort], int]:
+        """Query cohorts matching a filter.
+
+        Args:
+            cohort_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching cohorts and the total match count.
+        """
+        cohorts = sorted(self._cohorts.values(), key=lambda cohort: cohort.id.int)
+        if cohort_filter.name is not None:
+            cohorts = [
+                cohort for cohort in cohorts if cohort.name == cohort_filter.name
+            ]
+        if cohort_filter.tag is not None:
+            tagged_ids: set[uuid.UUID] = set()
+            if self._tag_repository is not None:
+                tagged_ids = self._tag_repository.linked_resource_ids(
+                    cohort_filter.tag, TagResourceType.COHORT
+                )
+            cohorts = [cohort for cohort in cohorts if cohort.id in tagged_ids]
+        total = len(cohorts)
+        start = (cohort_filter.page - 1) * cohort_filter.page_size
+        page = cohorts[start : start + cohort_filter.page_size]
+        return [cohort.model_copy() for cohort in page], total
+
+    async def query_sessions(
+        self, cohort_id: uuid.UUID, sessions_filter: CohortSessionsFilter
+    ) -> tuple[list[Session], int]:
+        """Query the member sessions of a cohort ordered by position.
+
+        Args:
+            cohort_id: Id of the cohort.
+            sessions_filter: Pagination parameters.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+
+        Returns:
+            Page of member sessions and the total member count.
+        """
+        if cohort_id not in self._cohorts:
+            raise CohortNotFound(cohort_id)
+        member_ids = self._members[cohort_id]
+        total = len(member_ids)
+        start = (sessions_filter.page - 1) * sessions_filter.page_size
+        page_ids = member_ids[start : start + sessions_filter.page_size]
+        return [
+            await self._session_repository.get(session_id) for session_id in page_ids
+        ], total
+
+    async def update(self, cohort: Cohort) -> Cohort:
+        """Persist changes to an existing cohort.
+
+        Args:
+            cohort: Cohort with modified fields.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+            DuplicateCohortName: The cohort name is already registered.
+
+        Returns:
+            Stored cohort with the updated timestamp renewed.
+        """
+        stored = self._cohorts.get(cohort.id)
+        if stored is None:
+            raise CohortNotFound(cohort.id)
+        self._check_duplicate_name(cohort)
+        now = _renewed_timestamp(stored.updated)
+        updated = cohort.model_copy(update={"created": stored.created, "updated": now})
+        self._cohorts[cohort.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, cohort_id: uuid.UUID) -> None:
+        """Delete a cohort by id, including its membership and tag links.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+        """
+        if cohort_id not in self._cohorts:
+            raise CohortNotFound(cohort_id)
+        del self._cohorts[cohort_id]
+        del self._members[cohort_id]
+        if self._tag_repository is not None:
+            self._tag_repository.remove_links_for_resource(
+                TagResourceType.COHORT, cohort_id
+            )

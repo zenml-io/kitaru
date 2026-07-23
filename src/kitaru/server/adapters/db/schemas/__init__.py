@@ -20,6 +20,10 @@ from kitaru.server.adapters.db.schemas.agent_version import (
     AgentVersionSecretSchema,
 )
 from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
+from kitaru.server.adapters.db.schemas.cohort import (
+    CohortSchema,
+    CohortSessionSchema,
+)
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.session import SessionSchema
 from kitaru.server.adapters.db.schemas.session_node import SessionNodeSchema
@@ -31,6 +35,8 @@ __all__ = [
     "AgentVersionSchema",
     "AgentVersionSecretSchema",
     "ApiKeySchema",
+    "CohortSchema",
+    "CohortSessionSchema",
     "SecretSchema",
     "SessionNodeSchema",
     "SessionSchema",

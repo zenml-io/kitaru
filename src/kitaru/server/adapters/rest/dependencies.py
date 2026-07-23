@@ -37,6 +37,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.cohort_repository import (
+    SQLCohortRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
@@ -57,6 +60,7 @@ from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -165,6 +169,24 @@ def get_agent_version_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+    )
+
+
+def get_cohort_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CohortService:
+    """Return a cohort service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Cohort service bound to the SQL repositories.
+    """
+    return CohortService(
+        repository=SQLCohortRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_repository=SQLAgentRepository(session),
     )
 
 
