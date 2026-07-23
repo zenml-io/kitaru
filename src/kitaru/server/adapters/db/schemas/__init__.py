@@ -14,12 +14,20 @@
 """ORM table definitions."""
 
 from kitaru.server.adapters.db.schemas.account import AccountSchema
+from kitaru.server.adapters.db.schemas.agent import AgentSchema
+from kitaru.server.adapters.db.schemas.agent_version import (
+    AgentVersionSchema,
+    AgentVersionSecretSchema,
+)
 from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.tag import TagLinkSchema, TagSchema
 
 __all__ = [
     "AccountSchema",
+    "AgentSchema",
+    "AgentVersionSchema",
+    "AgentVersionSecretSchema",
     "ApiKeySchema",
     "SecretSchema",
     "TagLinkSchema",

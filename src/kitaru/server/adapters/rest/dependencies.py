@@ -28,6 +28,12 @@ from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import (
+    SQLAgentRepository,
+)
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
@@ -40,6 +46,10 @@ from kitaru.server.adapters.db.repositories.tag_repository import (
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.agent_service import AgentService
+from kitaru.server.application.services.agent_version_service import (
+    AgentVersionService,
+)
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.tag_service import TagService
@@ -110,6 +120,42 @@ def get_api_key_service(
         API key service bound to the SQL repository.
     """
     return ApiKeyService(repository=SQLApiKeyRepository(session))
+
+
+def get_agent_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentService:
+    """Return an agent service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Agent service bound to the SQL repository.
+    """
+    return AgentService(repository=SQLAgentRepository(session))
+
+
+def get_agent_version_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> AgentVersionService:
+    """Return an agent version service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Agent version service bound to the SQL repositories.
+    """
+    return AgentVersionService(
+        repository=SQLAgentVersionRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+    )
 
 
 def get_secret_service(

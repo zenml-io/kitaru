@@ -25,6 +25,9 @@ from sqlmodel import col
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.schemas.agent_version import (
+    AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.schemas.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
     SecretSchema,
@@ -33,6 +36,7 @@ from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
+    SecretInUse,
     SecretNotFound,
 )
 
@@ -183,9 +187,16 @@ class SQLSecretRepository:
 
         Raises:
             SecretNotFound: No secret has this id.
+            SecretInUse: The secret is referenced by an agent version.
         """
         row = await self._session.get(SecretSchema, secret_id)
         if row is None:
             raise SecretNotFound(secret_id)
-        await self._session.delete(row)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                await self._session.delete(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if violated_constraint(exc) == AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY:
+                raise SecretInUse(secret_id) from exc
+            raise

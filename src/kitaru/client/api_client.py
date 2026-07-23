@@ -20,6 +20,8 @@ import httpx
 
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
+from kitaru.client.resources.agent_versions import AgentVersionsResource
+from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.secrets import SecretsResource
@@ -54,6 +56,8 @@ class KitaruAPIClient:
             transport=httpx.AsyncHTTPTransport(retries=retries),
         )
         self.accounts = AccountsResource(self)
+        self.agent_versions = AgentVersionsResource(self)
+        self.agents = AgentsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.secrets = SecretsResource(self)

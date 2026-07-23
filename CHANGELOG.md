@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Tags managed via `/v1/tags`, attachable to sessions, cohorts, experiments, and experiment runs through `/v1/tags/{id}/links`. Deleting a tag removes its links.
+- Agents and agent versions, managed via `/v1/agents` and `/v1/agent-versions`. A version carries an optional run spec (command, working directory, environment variables, secret references, timeout) that makes it runnable, plus its declared capabilities. Deleting an agent with versions, or a secret referenced by a run spec, returns a conflict.
 - Secrets holding string key-value pairs, managed via `/v1/secrets`. Values are encrypted at rest with AES-GCM using the new required `KITARU_SERVER_SECRET_ENCRYPTION_KEY` setting, and reads return them only when explicitly requested, never in list responses.
 - Accounts and API keys with username/password login. `POST /v1/login` authenticates with a username and password and returns a bearer token, and API keys authenticate requests directly as bearer tokens with revocation taking effect immediately. Keys are managed via `/v1/api-keys`. The server bootstraps a default account configurable through `KITARU_SERVER_DEFAULT_ACCOUNT_NAME` and `KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD`, and the new `local` auth scheme enables password login.
 - Local stacks can now use S3, GCS, or Azure Blob/ADLS artifact storage while keeping flow execution local, with existing-connector reuse and ambient provider credentials when explicit credentials are not supplied. (#593)
