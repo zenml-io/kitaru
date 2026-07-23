@@ -34,11 +34,15 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.tag_repository import (
+    SQLTagRepository,
+)
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.secret_service import SecretService
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
 
@@ -126,6 +130,20 @@ def get_secret_service(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         )
     )
+
+
+def get_tag_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TagService:
+    """Return a tag service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Tag service bound to the SQL repository.
+    """
+    return TagService(repository=SQLTagRepository(session))
 
 
 def get_auth_service(

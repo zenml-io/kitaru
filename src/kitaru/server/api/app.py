@@ -24,7 +24,13 @@ from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.rest.routers import accounts, api_keys, auth, secrets
+from kitaru.server.adapters.rest.routers import (
+    accounts,
+    api_keys,
+    auth,
+    secrets,
+    tags,
+)
 from kitaru.server.api import health
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.account_service import AccountService
@@ -111,4 +117,5 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
     return app

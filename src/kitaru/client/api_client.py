@@ -23,6 +23,7 @@ from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.tags import TagsResource
 
 
 class KitaruAPIClient:
@@ -56,6 +57,7 @@ class KitaruAPIClient:
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.secrets = SecretsResource(self)
+        self.tags = TagsResource(self)
 
     async def request(
         self,
