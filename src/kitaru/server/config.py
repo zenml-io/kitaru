@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     REPLAY_HEARTBEAT_TIMEOUT_SECONDS: int = 60
     REPLAY_MAX_ATTEMPTS: int = 3
 
+    WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
+
     DB_HOST: str | None = None
     DB_PORT: int = 5432
     DB_USER: str = "postgres"

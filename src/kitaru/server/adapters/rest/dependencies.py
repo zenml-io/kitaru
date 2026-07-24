@@ -64,6 +64,9 @@ from kitaru.server.adapters.db.repositories.session_repository import (
 from kitaru.server.adapters.db.repositories.tag_repository import (
     SQLTagRepository,
 )
+from kitaru.server.adapters.db.repositories.worker_repository import (
+    SQLWorkerRepository,
+)
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -86,6 +89,7 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
 
@@ -353,6 +357,25 @@ def get_tag_service(
         Tag service bound to the SQL repository.
     """
     return TagService(repository=SQLTagRepository(session))
+
+
+def get_worker_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> WorkerService:
+    """Return a worker service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Worker service bound to the SQL repository.
+    """
+    return WorkerService(
+        repository=SQLWorkerRepository(session),
+        liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
 
 
 def get_auth_service(

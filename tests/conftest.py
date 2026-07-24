@@ -62,6 +62,7 @@ from kitaru.server.application.models.replays import ReplayFilter
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
+from kitaru.server.application.models.workers import WorkerFilter
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
@@ -160,6 +161,11 @@ from kitaru.server.domain.tag import (
     TagLinkNotFound,
     TagNotFound,
     TagResourceType,
+)
+from kitaru.server.domain.worker import (
+    DuplicateWorkerName,
+    Worker,
+    WorkerNotFound,
 )
 
 
@@ -913,6 +919,183 @@ async def create_secret(
         values = {"password": SecretStr("hunter2")}
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
+
+
+class FakeWorkerRepository:
+    """In-memory worker repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._workers: dict[uuid.UUID, Worker] = {}
+
+    def _check_duplicate_name(self, worker: Worker) -> None:
+        for other in self._workers.values():
+            if other.id != worker.id and other.name == worker.name:
+                raise DuplicateWorkerName(worker.name)
+
+    async def create(self, worker: Worker) -> Worker:
+        """Persist a new worker.
+
+        Args:
+            worker: Worker to store.
+
+        Raises:
+            DuplicateWorkerName: The worker name is already registered.
+
+        Returns:
+            Stored worker with timestamps set.
+        """
+        self._check_duplicate_name(worker)
+        now = datetime.now(UTC)
+        stored = worker.model_copy(update={"created": now, "updated": now})
+        self._workers[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, worker_id: uuid.UUID) -> Worker:
+        """Load a worker by id.
+
+        Args:
+            worker_id: Id of the worker.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+
+        Returns:
+            Stored worker.
+        """
+        worker = self._workers.get(worker_id)
+        if worker is None:
+            raise WorkerNotFound(worker_id)
+        return worker.model_copy()
+
+    async def get_by_name(self, name: str) -> Worker:
+        """Load a worker by name.
+
+        Args:
+            name: Name of the worker.
+
+        Raises:
+            WorkerNotFound: No worker has this name.
+
+        Returns:
+            Stored worker.
+        """
+        for worker in self._workers.values():
+            if worker.name == name:
+                return worker.model_copy()
+        raise WorkerNotFound(name)
+
+    async def query(self, worker_filter: WorkerFilter) -> tuple[list[Worker], int]:
+        """Query workers matching a filter.
+
+        The agent id filter matches workers serving the agent, including
+        workers serving all agents.
+
+        Args:
+            worker_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching workers and the total match count.
+        """
+        workers = sorted(self._workers.values(), key=lambda worker: worker.id.int)
+        if worker_filter.name is not None:
+            workers = [
+                worker for worker in workers if worker.name == worker_filter.name
+            ]
+        if worker_filter.agent_id is not None:
+            workers = [
+                worker
+                for worker in workers
+                if not worker.agent_ids or worker_filter.agent_id in worker.agent_ids
+            ]
+        total = len(workers)
+        start = (worker_filter.page - 1) * worker_filter.page_size
+        page = workers[start : start + worker_filter.page_size]
+        return [worker.model_copy() for worker in page], total
+
+    async def update(self, worker: Worker) -> Worker:
+        """Persist changes to an existing worker.
+
+        Args:
+            worker: Worker with modified fields.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+            DuplicateWorkerName: The worker name is already registered.
+
+        Returns:
+            Stored worker with the updated timestamp renewed.
+        """
+        stored = self._workers.get(worker.id)
+        if stored is None:
+            raise WorkerNotFound(worker.id)
+        self._check_duplicate_name(worker)
+        now = _renewed_timestamp(stored.updated)
+        updated = worker.model_copy(update={"created": stored.created, "updated": now})
+        self._workers[worker.id] = updated
+        return updated.model_copy()
+
+    async def touch(self, worker_id: uuid.UUID, last_seen_at: datetime) -> None:
+        """Record a worker sighting, bumping only the last seen time.
+
+        Args:
+            worker_id: Id of the worker.
+            last_seen_at: Time of the sighting.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+        """
+        stored = self._workers.get(worker_id)
+        if stored is None:
+            raise WorkerNotFound(worker_id)
+        self._workers[worker_id] = stored.model_copy(
+            update={
+                "last_seen_at": last_seen_at,
+                "updated": _renewed_timestamp(stored.updated),
+            }
+        )
+
+    async def delete(self, worker_id: uuid.UUID) -> None:
+        """Delete a worker by id.
+
+        Args:
+            worker_id: Id of the worker.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+        """
+        if worker_id not in self._workers:
+            raise WorkerNotFound(worker_id)
+        del self._workers[worker_id]
+
+
+async def create_worker(
+    repository: FakeWorkerRepository,
+    owner_id: uuid.UUID,
+    name: str = "runner",
+    agent_ids: list[uuid.UUID] | None = None,
+    last_seen_at: datetime | None = None,
+) -> Worker:
+    """Store a worker in the fake repository.
+
+    Args:
+        repository: Fake worker repository.
+        owner_id: Id of the owning account.
+        name: Worker name.
+        agent_ids: Ids of the served agents.
+        last_seen_at: Time of the last sighting.
+
+    Returns:
+        Stored worker.
+    """
+    return await repository.create(
+        Worker(
+            owner_id=owner_id,
+            name=name,
+            agent_ids=agent_ids or [],
+            last_seen_at=last_seen_at or datetime.now(UTC),
+        )
     )
 
 

@@ -32,6 +32,7 @@ from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.session import SessionSchema
 from kitaru.server.adapters.db.schemas.session_node import SessionNodeSchema
 from kitaru.server.adapters.db.schemas.tag import TagLinkSchema, TagSchema
+from kitaru.server.adapters.db.schemas.worker import WorkerSchema
 
 __all__ = [
     "AccountSchema",
@@ -50,4 +51,5 @@ __all__ = [
     "SessionSchema",
     "TagLinkSchema",
     "TagSchema",
+    "WorkerSchema",
 ]

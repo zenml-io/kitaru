@@ -1811,6 +1811,37 @@
         "title": "Page[TagResponse]",
         "type": "object"
       },
+      "Page_WorkerResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[WorkerResponse]",
+        "type": "object"
+      },
       "PassthroughPolicy": {
         "additionalProperties": false,
         "description": "Passthrough tool policy.",
@@ -4611,6 +4642,110 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WorkerCreateRequest": {
+        "additionalProperties": false,
+        "description": "Worker create request.",
+        "properties": {
+          "agent_ids": {
+            "description": "Ids of the served agents, empty means all agents.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Agent Ids",
+            "type": "array"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Worker metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Worker name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WorkerCreateRequest",
+        "type": "object"
+      },
+      "WorkerResponse": {
+        "description": "Worker response.",
+        "properties": {
+          "agent_ids": {
+            "description": "Ids of the served agents, empty means all agents.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Agent Ids",
+            "type": "array"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "Worker id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_seen_at": {
+            "description": "Time of the last registration.",
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "live": {
+            "description": "Whether the worker was seen within the liveness timeout.",
+            "title": "Live",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Worker metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Worker name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "agent_ids",
+          "last_seen_at",
+          "live",
+          "metadata",
+          "created",
+          "updated"
+        ],
+        "title": "WorkerResponse",
         "type": "object"
       }
     }
@@ -8602,6 +8737,198 @@
         "summary": "Delete Tag Link",
         "tags": [
           "tags"
+        ]
+      }
+    },
+    "/v1/workers": {
+      "get": {
+        "description": "List workers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Worker service.\n    actor: Caller context.\n    name: Filter on worker name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of workers.",
+        "operationId": "list_workers_v1_workers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkerResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Workers",
+        "tags": [
+          "workers"
+        ]
+      },
+      "post": {
+        "description": "Register a worker, upserting by name.\n\nA worker already registered under the name gets its served agents and\nmetadata replaced and its last seen time bumped, so clients observe\nHTTP 200 instead of 201 on success, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    actor: Caller context.\n\nReturns:\n    Registered worker.",
+        "operationId": "register_worker_v1_workers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Worker",
+        "tags": [
+          "workers"
+        ]
+      }
+    },
+    "/v1/workers/{worker_id}": {
+      "delete": {
+        "description": "Delete a worker.\n\nClients observe HTTP 204 on success and 404 when no worker has this\nid.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.",
+        "operationId": "delete_worker_v1_workers__worker_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Worker",
+        "tags": [
+          "workers"
+        ]
+      },
+      "get": {
+        "description": "Get a worker by id.\n\nClients observe HTTP 200 on success and 404 when no worker has this\nid.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.\n\nReturns:\n    Stored worker.",
+        "operationId": "get_worker_v1_workers__worker_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Worker",
+        "tags": [
+          "workers"
         ]
       }
     }
