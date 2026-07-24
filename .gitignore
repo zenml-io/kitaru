@@ -256,6 +256,8 @@ src/kitaru/_ui/bundle_manifest.json
 # Codex
 .codex/*
 !.codex/skills/
+/$CODEX_HOME/
+/docs/superpowers/
 AGENTS.override.md
 .agents/skills/*
 !.agents/skills/kitaru-dev/

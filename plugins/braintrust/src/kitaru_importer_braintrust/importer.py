@@ -1,0 +1,500 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Braintrust project-log and UI JSON importer."""
+
+import hashlib
+import json
+from collections import defaultdict
+from datetime import UTC, datetime
+from importlib.metadata import version
+from pathlib import Path
+from typing import Any
+
+from kitaru.importers import (
+    ImportContext,
+    ImporterDescriptor,
+    InvalidImport,
+    NodeStatus,
+    NodeType,
+    NormalizationError,
+    NormalizedImport,
+    NormalizedNode,
+    NormalizedSession,
+    NormalizedTurn,
+    ReplayReadiness,
+    SessionStatus,
+    TokenUsage,
+)
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_SESSION_FIELDS = ("session_id", "sessionId", "thread_id", "conversation_id")
+_ALLOWED_METADATA = {
+    "conversation_id",
+    "model",
+    "provider",
+    "session_id",
+    "sessionId",
+    "thread_id",
+    "turn_index",
+}
+
+
+def _digest(value: Any) -> str:
+    """Return a stable digest for normalized JSON-compatible data."""
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), default=str
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    """Return a dictionary or an empty dictionary."""
+    return value if isinstance(value, dict) else {}
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    """Parse an ISO timestamp or Unix timestamp."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return datetime.fromtimestamp(value, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
+    """Parse Braintrust JSON, JSONL, or API fetch output."""
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InvalidImport("Import file must be UTF-8 JSON or JSONL") from exc
+    if not text.strip():
+        raise InvalidImport("Import file contains no records")
+
+    value: Any
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        records: list[dict[str, Any]] = []
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
+            if not isinstance(row, dict):
+                raise InvalidImport(
+                    f"Line {line_number} must contain a JSON object"
+                ) from None
+            records.append(row)
+        if not records:
+            raise InvalidImport("Import file contains no records") from None
+        return records, _is_full_export(records)
+
+    if isinstance(value, dict) and isinstance(value.get("events"), list):
+        value = value["events"]
+    elif isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list) or not all(
+        isinstance(record, dict) for record in value
+    ):
+        raise InvalidImport("Braintrust export must contain JSON objects")
+    records = list(value)
+    if not records:
+        raise InvalidImport("Import file contains no records")
+    return records, _is_full_export(records)
+
+
+def _is_full_export(records: list[dict[str, Any]]) -> bool:
+    """Return whether records contain Braintrust span identity fields."""
+    return any(
+        record.get("span_id")
+        or record.get("root_span_id")
+        or isinstance(record.get("span_attributes"), dict)
+        for record in records
+    )
+
+
+def _metadata(record: dict[str, Any]) -> dict[str, Any]:
+    """Return allowlisted Braintrust metadata."""
+    metadata = _dict(record.get("metadata"))
+    return {key: metadata[key] for key in _ALLOWED_METADATA if key in metadata}
+
+
+def _session_id(record: dict[str, Any]) -> str | None:
+    """Extract the configured Braintrust session identifier."""
+    metadata = _dict(record.get("metadata"))
+    for field in _SESSION_FIELDS:
+        value = metadata.get(field)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _source_instance(record: dict[str, Any], context: ImportContext) -> str:
+    """Resolve project identity with a stable filename fallback."""
+    project_id = record.get("project_id")
+    if project_id not in (None, ""):
+        return str(project_id)
+    if context.source_instance:
+        return context.source_instance
+    if context.filename:
+        stem = Path(context.filename).stem.strip()
+        if stem:
+            return stem
+    raise InvalidImport("Braintrust export has no project id; provide source_instance")
+
+
+def _metrics(record: dict[str, Any]) -> dict[str, Any]:
+    """Return Braintrust metrics."""
+    return _dict(record.get("metrics"))
+
+
+def _started_at(record: dict[str, Any]) -> datetime | None:
+    """Return the span start timestamp."""
+    metrics = _metrics(record)
+    return _parse_datetime(metrics.get("start")) or _parse_datetime(
+        record.get("created")
+    )
+
+
+def _ended_at(record: dict[str, Any]) -> datetime | None:
+    """Return the span end timestamp."""
+    return _parse_datetime(_metrics(record).get("end"))
+
+
+def _node_type(record: dict[str, Any], *, full_export: bool) -> NodeType:
+    """Map a Braintrust span type conservatively."""
+    span_type = str(_dict(record.get("span_attributes")).get("type") or "").lower()
+    if span_type == "llm":
+        return NodeType.LLM_CALL
+    if span_type == "tool":
+        return NodeType.TOOL_CALL
+    if not full_export:
+        metrics = _metrics(record)
+        metadata = _dict(record.get("metadata"))
+        if (
+            metadata.get("model")
+            or metrics.get("prompt_tokens") is not None
+            or metrics.get("completion_tokens") is not None
+        ):
+            return NodeType.LLM_CALL
+    return NodeType.SPAN
+
+
+def _token_usage(record: dict[str, Any]) -> TokenUsage | None:
+    """Map Braintrust token metrics."""
+    metrics = _metrics(record)
+    values = (
+        metrics.get("prompt_tokens"),
+        metrics.get("completion_tokens"),
+        metrics.get("prompt_cached_tokens"),
+    )
+    if all(value is None for value in values):
+        return None
+    return TokenUsage.from_counts(
+        int(values[0]) if values[0] is not None else None,
+        int(values[1]) if values[1] is not None else None,
+        int(values[2]) if values[2] is not None else None,
+        None,
+    )
+
+
+def _node_status(record: dict[str, Any]) -> NodeStatus:
+    """Map a Braintrust error to node status."""
+    if record.get("error") not in (None, ""):
+        return NodeStatus.FAILED
+    return NodeStatus.COMPLETED
+
+
+def _trace_id(record: dict[str, Any]) -> str:
+    """Return a stable trace identifier."""
+    value = record.get("root_span_id") or record.get("span_id") or record.get("id")
+    if value not in (None, ""):
+        return str(value)
+    metadata = _dict(record.get("metadata"))
+    turn_index = metadata.get("turn_index")
+    created = record.get("created")
+    if turn_index is not None:
+        return f"turn-{turn_index}"
+    if created:
+        return f"created-{created}"
+    return f"row-{_digest(record)[:16]}"
+
+
+def _root_record(records: list[dict[str, Any]], trace_id: str) -> dict[str, Any]:
+    """Choose the root record for one trace."""
+    for record in records:
+        if str(record.get("span_id") or "") == trace_id:
+            return record
+
+    def duration(record: dict[str, Any]) -> float:
+        metrics = _metrics(record)
+        start = metrics.get("start")
+        end = metrics.get("end")
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)):
+            return end - start
+        return -1
+
+    return max(records, key=duration)
+
+
+class BraintrustProjectLogImporter:
+    """Normalize Braintrust project logs and lower-fidelity UI exports."""
+
+    @property
+    def descriptor(self) -> ImporterDescriptor:
+        """Return importer metadata."""
+        return ImporterDescriptor(
+            id="braintrust",
+            display_name="Braintrust project logs",
+            version=version("kitaru-importer-braintrust"),
+            file_extensions=[".json", ".jsonl", ".ndjson"],
+            max_upload_bytes=MAX_UPLOAD_BYTES,
+        )
+
+    def parse(self, content: bytes, context: ImportContext) -> NormalizedImport:
+        """Parse a Braintrust project-log or UI export."""
+        records, full_export = _parse_records(content)
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        errors: list[NormalizationError] = []
+        for record in records:
+            try:
+                source_instance = _source_instance(record, context)
+            except InvalidImport as exc:
+                errors.append(NormalizationError(message=str(exc)))
+                continue
+            session_id = _session_id(record) or _trace_id(record)
+            grouped[(source_instance, session_id)].append(record)
+
+        sessions: list[NormalizedSession] = []
+        for (source_instance, source_id), session_records in sorted(grouped.items()):
+            try:
+                sessions.append(
+                    self._normalize_session(
+                        source_instance,
+                        source_id,
+                        session_records,
+                        full_export=full_export,
+                    )
+                )
+            except InvalidImport as exc:
+                errors.append(NormalizationError(source_id=source_id, message=str(exc)))
+        return NormalizedImport(sessions=sessions, errors=errors)
+
+    def _normalize_session(
+        self,
+        source_instance: str,
+        source_id: str,
+        records: list[dict[str, Any]],
+        *,
+        full_export: bool,
+    ) -> NormalizedSession:
+        """Normalize one Braintrust session."""
+        trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in records:
+            trace_records[_trace_id(record)].append(record)
+
+        warnings: list[str] = []
+        if not full_export:
+            warnings.append("Braintrust UI export omits span identity and hierarchy")
+
+        turns: list[NormalizedTurn] = []
+        nodes: list[NormalizedNode] = []
+        missing_parent = False
+        for trace_id, rows in trace_records.items():
+            ordered = sorted(
+                rows,
+                key=lambda row: (
+                    _started_at(row) or datetime.min.replace(tzinfo=UTC),
+                    str(row.get("span_id") or row.get("id") or row.get("name")),
+                ),
+            )
+            root = _root_record(ordered, trace_id)
+            turns.append(
+                NormalizedTurn(
+                    trace_id=trace_id,
+                    inputs=root.get("input"),
+                    outputs=root.get("output"),
+                    started_at=min(
+                        (value for row in ordered if (value := _started_at(row))),
+                        default=None,
+                    ),
+                    ended_at=max(
+                        (value for row in ordered if (value := _ended_at(row))),
+                        default=None,
+                    ),
+                )
+            )
+            span_ids = {
+                str(row.get("span_id"))
+                for row in ordered
+                if row.get("span_id") not in (None, "")
+            }
+            for row in ordered:
+                span_id = str(row.get("span_id") or row.get("id") or _digest(row)[:16])
+                parents = [str(value) for value in (row.get("span_parents") or [])]
+                parent_span_id = parents[-1] if parents else None
+                if parent_span_id and parent_span_id not in span_ids:
+                    missing_parent = True
+                parent_source_id = (
+                    f"{trace_id}:{parent_span_id}"
+                    if parent_span_id in span_ids
+                    else None
+                )
+                node_type = _node_type(row, full_export=full_export)
+                status = _node_status(row)
+                attributes = _dict(row.get("span_attributes"))
+                nodes.append(
+                    NormalizedNode(
+                        source_id=f"{trace_id}:{span_id}",
+                        parent_source_id=parent_source_id,
+                        trace_id=trace_id,
+                        node_type=node_type,
+                        name=str(attributes.get("name") or row.get("name") or "span"),
+                        status=status,
+                        error=(
+                            str(row.get("error"))
+                            if status is NodeStatus.FAILED
+                            else None
+                        ),
+                        started_at=_started_at(row),
+                        ended_at=_ended_at(row),
+                        inputs=row.get("input"),
+                        outputs=row.get("output"),
+                        model=_dict(row.get("metadata")).get("model"),
+                        provider=_dict(row.get("metadata")).get("provider"),
+                        tokens=_token_usage(row),
+                        tool_name=(
+                            str(attributes.get("name") or row.get("name") or "tool")
+                            if node_type is NodeType.TOOL_CALL
+                            else None
+                        ),
+                        attributes={
+                            "braintrust.type": attributes.get("type"),
+                        },
+                        source_metadata=_metadata(row),
+                    )
+                )
+
+        turns.sort(
+            key=lambda turn: (
+                turn.started_at or datetime.min.replace(tzinfo=UTC),
+                turn.trace_id,
+            )
+        )
+        nodes.sort(
+            key=lambda node: (
+                node.started_at or datetime.min.replace(tzinfo=UTC),
+                node.source_id,
+            )
+        )
+        if missing_parent:
+            warnings.append("One or more spans reference a missing parent")
+        graph_complete = full_export and not missing_parent
+        tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
+        replayable_tools = [
+            node
+            for node in tool_nodes
+            if node.tool_name and node.inputs is not None and node.outputs is not None
+        ]
+        root_inputs_available = bool(turns) and all(
+            turn.inputs is not None for turn in turns
+        )
+        reasons = list(warnings)
+        if not root_inputs_available:
+            reasons.append("One or more turns have no root input")
+        if len(replayable_tools) != len(tool_nodes):
+            reasons.append("One or more tool calls lack a name, input, or output")
+        if not root_inputs_available:
+            readiness_level = "unavailable"
+        elif graph_complete and len(replayable_tools) == len(tool_nodes):
+            readiness_level = "ready"
+        else:
+            readiness_level = "partial"
+        failed_nodes = [node for node in nodes if node.status is NodeStatus.FAILED]
+        inputs = {
+            "schema_version": 1,
+            "turns": [
+                {
+                    "source_trace_id": turn.trace_id,
+                    "inputs": turn.inputs,
+                    "outputs": turn.outputs,
+                }
+                for turn in turns
+            ],
+        }
+        digest_payload = {
+            "source_id": source_id,
+            "source_instance": source_instance,
+            "turns": [turn.model_dump(mode="json") for turn in turns],
+            "nodes": [node.model_dump(mode="json") for node in nodes],
+        }
+        project_ids = sorted(
+            {
+                str(row["project_id"])
+                for row in records
+                if row.get("project_id") not in (None, "")
+            }
+        )
+        root = _root_record(records, turns[-1].trace_id) if turns else {}
+        return NormalizedSession(
+            source_id=source_id,
+            source_instance=source_instance,
+            name=str(
+                _dict(root.get("span_attributes")).get("name")
+                or root.get("name")
+                or source_id
+            ),
+            status=(SessionStatus.FAILED if failed_nodes else SessionStatus.COMPLETED),
+            turns=turns,
+            nodes=nodes,
+            inputs=inputs,
+            outputs=turns[-1].outputs if turns else None,
+            error=failed_nodes[-1].error if failed_nodes else None,
+            started_at=min(
+                (turn.started_at for turn in turns if turn.started_at),
+                default=None,
+            ),
+            ended_at=max(
+                (turn.ended_at for turn in turns if turn.ended_at),
+                default=None,
+            ),
+            source_metadata={
+                "braintrust.project_ids": project_ids,
+                "braintrust.session_id": source_id,
+                "braintrust.trace_ids": [turn.trace_id for turn in turns],
+                "source_trace_count": len(turns),
+                "source_completeness": "full" if full_export else "flat",
+            },
+            warnings=warnings,
+            readiness=ReplayReadiness(
+                level=readiness_level,
+                root_inputs_available=root_inputs_available,
+                graph_complete=graph_complete,
+                tool_call_count=len(tool_nodes),
+                replayable_tool_call_count=len(replayable_tools),
+                reasons=reasons,
+            ),
+            content_digest=_digest(digest_payload),
+        )
