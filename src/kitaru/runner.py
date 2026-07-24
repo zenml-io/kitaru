@@ -18,10 +18,11 @@ import contextlib
 import json
 import logging
 import os
+import re
 import signal
 import socket
-import tempfile
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kitaru.api_models.v1.experiment_runs import (
@@ -35,11 +36,9 @@ from kitaru.api_models.v1.jobs import (
     JobSpecResponse,
     JobStatus,
     JobUpdateRequest,
-    ReplayOverride,
     StandaloneJobClaimRequest,
 )
 from kitaru.api_models.v1.sessions import (
-    SessionResponse,
     SessionScoresRequest,
     SessionStatus,
 )
@@ -74,14 +73,8 @@ _TERMINAL_RUN_STATUSES = frozenset(
 _CONTRACT_ENV_VARS = (
     "KITARU_JOB_ID",
     "KITARU_INPUTS",
-    "KITARU_OVERRIDE",
     "KITARU_SESSION_NAME",
-    "KITARU_SESSION_ID_FILE",
 )
-
-
-class RunnerError(RuntimeError):
-    """Raised when a session run does not produce a recorded session."""
 
 
 class _TailBuffer:
@@ -136,25 +129,6 @@ def _kill_process_group(process: asyncio.subprocess.Process) -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
-def _read_session_id(path: str) -> uuid.UUID | None:
-    """Read the session id the adapter wrote to the handoff file.
-
-    Args:
-        path: Path of the session id file.
-
-    Returns:
-        Session id, ``None`` when the file is missing or empty.
-    """
-    try:
-        with open(path, encoding="utf-8") as file:
-            content = file.read().strip()
-    except OSError:
-        return None
-    if not content:
-        return None
-    return uuid.UUID(content)
-
-
 def _log_tail(stdout: _TailBuffer, stderr: _TailBuffer) -> str:
     """Format the captured output tails for an error message.
 
@@ -188,6 +162,19 @@ def _with_tail(error: str, tail: str) -> str:
     return f"{error}\n{tail}"
 
 
+def _default_worker_name() -> str:
+    """Derive a worker name from the hostname and pid.
+
+    Characters outside the server's worker name charset are replaced
+    with dashes.
+
+    Returns:
+        Worker name.
+    """
+    hostname = re.sub(r"[^A-Za-z0-9_-]", "-", socket.gethostname())
+    return f"{hostname}-{os.getpid()}".strip("-_")
+
+
 def _encode_inputs(inputs: Any) -> tuple[str, bool]:
     """JSON-encode inputs and report whether they fit the env threshold.
 
@@ -201,222 +188,28 @@ def _encode_inputs(inputs: Any) -> tuple[str, bool]:
     return encoded, len(encoded.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES
 
 
-class Runner:
-    """Job runner."""
+class JobRunner:
+    """Runner of one claimed job."""
 
     def __init__(
         self,
         api_url: str,
         api_key: str,
-        worker_id: str | None = None,
-        concurrency: int = 1,
         heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
-        claim_batch_size: int | None = None,
     ) -> None:
-        """Initialize the runner.
+        """Initialize the job runner.
 
         Args:
             api_url: Server base URL.
             api_key: API key sent as a bearer token.
-            worker_id: Id of this worker, hostname and pid when omitted.
-            concurrency: Maximum number of jobs executed at once.
             heartbeat_interval: Seconds between heartbeats.
-            claim_batch_size: Maximum jobs claimed per request, the
-                concurrency when omitted.
         """
         self._api_url = api_url
         self._api_key = api_key
-        self._worker_id = worker_id or f"{socket.gethostname()}-{os.getpid()}"
-        self._concurrency = concurrency
         self._heartbeat_interval = heartbeat_interval
-        self._claim_batch_size = claim_batch_size or concurrency
 
-    async def run_experiment_run(self, run_id: uuid.UUID) -> ExperimentRunResponse:
-        """Execute the jobs of an experiment run until it is terminal.
-
-        Args:
-            run_id: Id of the experiment run.
-
-        Raises:
-            APIError: A claim or experiment run read failed.
-
-        Returns:
-            Terminal experiment run.
-        """
-        async with KitaruAPIClient(
-            base_url=self._api_url, api_key=self._api_key
-        ) as client:
-            worker_id = await self._register_worker(client)
-            semaphore = asyncio.Semaphore(self._concurrency)
-            while True:
-                claim = await client.jobs.claim(
-                    JobClaimRequest(
-                        worker_id=worker_id,
-                        max_jobs=self._claim_batch_size,
-                        experiment_run_id=run_id,
-                    ),
-                )
-                if claim.jobs:
-                    await asyncio.gather(
-                        *(
-                            self._execute_claimed(client, semaphore, job.id)
-                            for job in claim.jobs
-                        )
-                    )
-                    continue
-                run = await client.experiment_runs.get(run_id)
-                if run.status in _TERMINAL_RUN_STATUSES:
-                    return run
-                await asyncio.sleep(RUN_POLL_INTERVAL_SECONDS)
-
-    async def run_job(self, job_id: uuid.UUID) -> JobResponse:
-        """Execute a standalone job.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            APIError: The job does not exist, the claim was rejected,
-                its spec does not resolve, or a status update was
-                rejected.
-
-        Returns:
-            Terminal job.
-        """
-        async with KitaruAPIClient(
-            base_url=self._api_url, api_key=self._api_key
-        ) as client:
-            worker_id = await self._register_worker(client)
-            await client.jobs.claim_standalone(
-                job_id, StandaloneJobClaimRequest(worker_id=worker_id)
-            )
-            return await self._execute_job(client, job_id)
-
-    async def run_session(
-        self,
-        agent_version_id: uuid.UUID,
-        inputs: Any = None,
-        override: ReplayOverride | None = None,
-    ) -> SessionResponse:
-        """Execute an agent version once, recording a fresh session.
-
-        Args:
-            agent_version_id: Id of the agent version to execute.
-            inputs: Session inputs, the agent's default inputs when omitted.
-            override: Execution override, a set prompt replaces the inputs.
-
-        Raises:
-            APIError: The agent version, a secret, or the recorded session
-                could not be read.
-            RunnerError: The agent version has no run spec, the inputs
-                exceed the environment threshold, the process timed out, or
-                it exited without recording a session.
-
-        Returns:
-            Recorded session.
-        """
-        async with KitaruAPIClient(
-            base_url=self._api_url, api_key=self._api_key
-        ) as client:
-            version = await client.agent_versions.get(agent_version_id)
-            if version.run_spec is None:
-                raise RunnerError(f"Agent version {agent_version_id} has no run spec")
-            secrets = await asyncio.gather(
-                *(
-                    client.secrets.get(secret_id, include_values=True)
-                    for secret_id in version.run_spec.secret_ids
-                )
-            )
-            secret_env: dict[str, str] = {}
-            for secret in secrets:
-                secret_env.update(
-                    {
-                        name: value.get_secret_value()
-                        for name, value in secret.values.items()
-                    }
-                )
-            env = self._agent_env(version.run_spec.env, secret_env)
-            if override is not None:
-                if override.prompt is not None:
-                    inputs = override.prompt
-                # The prompt is delivered through the inputs, the adapter
-                # only applies the remaining override fields.
-                encoded_override = override.model_dump_json(
-                    exclude_none=True, exclude={"prompt"}
-                )
-                if encoded_override != "{}":
-                    env["KITARU_OVERRIDE"] = encoded_override
-            if inputs is not None:
-                encoded_inputs, fits = _encode_inputs(inputs)
-                if not fits:
-                    raise RunnerError(
-                        f"Session inputs exceed {MAX_INPUTS_ENV_BYTES} bytes"
-                    )
-                env["KITARU_INPUTS"] = encoded_inputs
-            with tempfile.TemporaryDirectory(prefix="kitaru-run-") as tmp_dir:
-                session_id_path = os.path.join(tmp_dir, "session_id")
-                env["KITARU_SESSION_ID_FILE"] = session_id_path
-                returncode, tail = await self._run_agent_process(
-                    version.run_spec.command,
-                    version.run_spec.working_dir,
-                    env,
-                    version.run_spec.timeout_seconds,
-                )
-                session_id = _read_session_id(session_id_path)
-            if returncode is None:
-                error = (
-                    "Session run timed out after "
-                    f"{version.run_spec.timeout_seconds} seconds."
-                )
-                if session_id is not None:
-                    error = f"{error} Recorded session: {session_id}."
-                raise RunnerError(_with_tail(error, tail))
-            if session_id is None:
-                error = (
-                    f"Agent process exited with code {returncode} "
-                    "without recording a session."
-                )
-                raise RunnerError(_with_tail(error, tail))
-            return await client.sessions.get(session_id)
-
-    async def _register_worker(self, client: KitaruAPIClient) -> uuid.UUID:
-        """Register this runner as a worker, upserting by name.
-
-        Args:
-            client: API client.
-
-        Raises:
-            APIError: The registration failed.
-
-        Returns:
-            Id of the registered worker.
-        """
-        worker = await client.workers.create(WorkerCreateRequest(name=self._worker_id))
-        return worker.id
-
-    async def _execute_claimed(
-        self,
-        client: KitaruAPIClient,
-        semaphore: asyncio.Semaphore,
-        job_id: uuid.UUID,
-    ) -> None:
-        """Execute a claimed job within the concurrency bound.
-
-        Args:
-            client: API client.
-            semaphore: Concurrency bound.
-            job_id: Id of the job.
-        """
-        async with semaphore:
-            try:
-                await self._execute_job(client, job_id)
-            except Exception:
-                logger.exception("Job %s failed", job_id)
-
-    async def _execute_job(
-        self, client: KitaruAPIClient, job_id: uuid.UUID
-    ) -> JobResponse:
-        """Execute one job from spec fetch to its terminal status.
+    async def execute(self, client: KitaruAPIClient, job_id: uuid.UUID) -> JobResponse:
+        """Execute a claimed job from spec fetch to its terminal status.
 
         Args:
             client: API client.
@@ -751,3 +544,197 @@ class Runner:
         if fits:
             env["KITARU_INPUTS"] = encoded_inputs
         return env
+
+
+class Runner:
+    """Job runner."""
+
+    def __init__(
+        self,
+        api_url: str,
+        api_key: str,
+        worker_name: str | None = None,
+        concurrency: int = 1,
+        heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        claim_batch_size: int | None = None,
+        poll_interval: float = RUN_POLL_INTERVAL_SECONDS,
+    ) -> None:
+        """Initialize the runner.
+
+        Args:
+            api_url: Server base URL.
+            api_key: API key sent as a bearer token.
+            worker_name: Name this runner registers its worker under,
+                hostname and pid when omitted.
+            concurrency: Maximum number of jobs executed at once.
+            heartbeat_interval: Seconds between heartbeats.
+            claim_batch_size: Maximum jobs claimed per request, the
+                concurrency when omitted.
+            poll_interval: Seconds between claims when a claim returns no
+                jobs.
+        """
+        self._api_url = api_url
+        self._api_key = api_key
+        self._worker_name = worker_name or _default_worker_name()
+        self._concurrency = concurrency
+        self._claim_batch_size = claim_batch_size or concurrency
+        self._poll_interval = poll_interval
+        self._job_runner = JobRunner(
+            api_url=api_url, api_key=api_key, heartbeat_interval=heartbeat_interval
+        )
+
+    async def run_job(self, job_id: uuid.UUID) -> JobResponse:
+        """Claim and execute a standalone job.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            APIError: The job does not exist, the claim was rejected,
+                its spec does not resolve, or a status update was
+                rejected.
+
+        Returns:
+            Terminal job.
+        """
+        async with KitaruAPIClient(
+            base_url=self._api_url, api_key=self._api_key
+        ) as client:
+            worker_id = await self._register_worker(client)
+            await client.jobs.claim_standalone(
+                job_id, StandaloneJobClaimRequest(worker_id=worker_id)
+            )
+            return await self._job_runner.execute(client, job_id)
+
+    async def run_experiment_run(self, run_id: uuid.UUID) -> ExperimentRunResponse:
+        """Execute the jobs of an experiment run until it is terminal.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            APIError: A claim or experiment run read failed.
+
+        Returns:
+            Terminal experiment run.
+        """
+        async with KitaruAPIClient(
+            base_url=self._api_url, api_key=self._api_key
+        ) as client:
+            worker_id = await self._register_worker(client)
+
+            async def run_is_terminal() -> bool:
+                run = await client.experiment_runs.get(run_id)
+                return run.status in _TERMINAL_RUN_STATUSES
+
+            await self._claim_loop(
+                client, worker_id, run_is_terminal, experiment_run_id=run_id
+            )
+            return await client.experiment_runs.get(run_id)
+
+    async def run_worker(
+        self,
+        agent_ids: list[uuid.UUID] | None = None,
+        stop: asyncio.Event | None = None,
+    ) -> None:
+        """Claim and execute pool jobs until stopped.
+
+        Args:
+            agent_ids: Ids of the agents to claim for, any agent when
+                omitted.
+            stop: Event ending the loop once its claims drain, the loop
+                runs until cancellation when omitted.
+
+        Raises:
+            APIError: The registration or a claim failed.
+        """
+        async with KitaruAPIClient(
+            base_url=self._api_url, api_key=self._api_key
+        ) as client:
+            worker_id = await self._register_worker(client, agent_ids)
+
+            async def stopped() -> bool:
+                return stop is not None and stop.is_set()
+
+            await self._claim_loop(client, worker_id, stopped, agent_ids=agent_ids)
+
+    async def _claim_loop(
+        self,
+        client: KitaruAPIClient,
+        worker_id: uuid.UUID,
+        should_stop: Callable[[], Awaitable[bool]],
+        agent_ids: list[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
+    ) -> None:
+        """Claim and execute jobs until an empty claim meets the stop condition.
+
+        Args:
+            client: API client.
+            worker_id: Id of the registered worker.
+            should_stop: Condition checked after an empty claim.
+            agent_ids: Ids of the agents to claim for.
+            experiment_run_id: Id of the experiment run to claim for.
+
+        Raises:
+            APIError: A claim or stop condition read failed.
+        """
+        semaphore = asyncio.Semaphore(self._concurrency)
+        while True:
+            claim = await client.jobs.claim(
+                JobClaimRequest(
+                    worker_id=worker_id,
+                    max_jobs=self._claim_batch_size,
+                    agent_ids=agent_ids,
+                    experiment_run_id=experiment_run_id,
+                )
+            )
+            if claim.jobs:
+                await asyncio.gather(
+                    *(
+                        self._execute_claimed(client, semaphore, job.id)
+                        for job in claim.jobs
+                    )
+                )
+                continue
+            if await should_stop():
+                return
+            await asyncio.sleep(self._poll_interval)
+
+    async def _execute_claimed(
+        self,
+        client: KitaruAPIClient,
+        semaphore: asyncio.Semaphore,
+        job_id: uuid.UUID,
+    ) -> None:
+        """Execute a claimed job within the concurrency bound.
+
+        Args:
+            client: API client.
+            semaphore: Concurrency bound.
+            job_id: Id of the job.
+        """
+        async with semaphore:
+            try:
+                await self._job_runner.execute(client, job_id)
+            except Exception:
+                logger.exception("Job %s failed", job_id)
+
+    async def _register_worker(
+        self, client: KitaruAPIClient, agent_ids: list[uuid.UUID] | None = None
+    ) -> uuid.UUID:
+        """Register this runner as a worker, upserting by name.
+
+        Args:
+            client: API client.
+            agent_ids: Ids of the agents this worker serves.
+
+        Raises:
+            APIError: The registration failed.
+
+        Returns:
+            Id of the registered worker.
+        """
+        worker = await client.workers.create(
+            WorkerCreateRequest(name=self._worker_name, agent_ids=agent_ids or [])
+        )
+        return worker.id

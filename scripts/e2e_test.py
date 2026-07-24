@@ -63,11 +63,15 @@ from kitaru.api_models.v1.session_nodes import (  # noqa: E402
     NodeType,
     SessionNodeResponse,
 )
+from kitaru.api_models.v1.session_runs import (  # noqa: E402
+    SessionRunCreateRequest,
+)
 from kitaru.api_models.v1.sessions import (  # noqa: E402
     SessionOrigin,
     SessionResponse,
     SessionStatus,
 )
+from kitaru.api_models.v1.workers import WorkerCreateRequest  # noqa: E402
 from kitaru.client import KitaruAPIClient  # noqa: E402
 from kitaru.client.exceptions import APIError  # noqa: E402
 
@@ -259,7 +263,7 @@ async def check_replay_result(
     assert job.diff is not None
     for field in ("cost", "tokens", "tool_calls", "score_deltas"):
         check(field in job.diff, f"diff summary lacks {field}")
-    for side in ("original", "job"):
+    for side in ("original", "replay"):
         check(
             job.diff["cost"][side] is not None and job.diff["cost"][side] > 0,
             f"diff summary lacks {side} cost: {job.diff['cost']}",
@@ -352,7 +356,7 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
     scores = run.summary["scores"]
     check(set(scores) == set(SCORER_NAMES), f"summary scorer names {set(scores)}")
     for name in SCORER_NAMES:
-        for side in ("baseline", "job"):
+        for side in ("baseline", "replay"):
             stats = scores[name][side]
             check(
                 stats["mean"] is not None and stats["median"] is not None,
@@ -368,7 +372,7 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
         f"job total cost {total_cost}",
     )
     total_tokens = run.summary["total_tokens"]
-    for side in ("baseline", "job"):
+    for side in ("baseline", "replay"):
         for kind in ("input_tokens", "output_tokens"):
             count = total_tokens[side][kind]
             check(
@@ -566,29 +570,38 @@ async def main() -> int:
         await check_replay_diff(client, standalone, ORIGINAL_MODEL, ORIGINAL_MODEL)
         ok("standalone job completed, scored, and diffed")
 
-        # Step h: live session run with an override.
+        # Step h: session run executed as a standalone job.
         live_inputs = {"question": "Live run: Berlin weather and 21 * 2?"}
-        live = await runner.run_session(
-            version.id,
-            inputs=live_inputs,
-            override=ReplayOverride(
-                model=OVERRIDE_MODEL, system_prompt="Answer tersely."
-            ),
+        live_job = await client.session_runs.create(
+            SessionRunCreateRequest(
+                agent_version_id=version.id,
+                inputs=live_inputs,
+                name="e2e-live-run",
+            )
         )
+        live_job = await runner.run_job(live_job.id)
+        check(
+            live_job.status is JobStatus.COMPLETED,
+            f"session run job is {live_job.status}: {live_job.error}",
+        )
+        check(live_job.result_session_id is not None, "session run has no session")
+        assert live_job.result_session_id is not None
+        live = await client.sessions.get(live_job.result_session_id)
         check(live.origin is SessionOrigin.RECORDED, "live session origin")
         check(
             live.status is SessionStatus.COMPLETED,
             f"live session is {live.status}: {live.error}",
         )
         check(live.inputs == live_inputs, f"live session inputs {live.inputs}")
+        check(live.name == "e2e-live-run", f"live session name {live.name}")
         check(
             live.agent_version_id == version.id,
             "live session agent version not recorded",
         )
         live_nodes = await client.session_nodes.list(live.id, include_payloads=True)
         check_session_tree(live, live_nodes)
-        check_llm_models(live_nodes, OVERRIDE_MODEL)
-        ok("live session recorded with the model and system prompt override")
+        check_llm_models(live_nodes, ORIGINAL_MODEL)
+        ok("session run job completed with a recorded live session")
 
         # Step i: negative controls.
         try:
@@ -603,8 +616,15 @@ async def main() -> int:
             )
         else:
             raise AssertionError("config update on a frozen experiment succeeded")
-        claim = await client.experiment_runs.claim(
-            run.id, JobClaimRequest(worker_id="e2e-negative", max_jobs=10)
+        negative_worker = await client.workers.create(
+            WorkerCreateRequest(name="e2e-negative")
+        )
+        claim = await client.jobs.claim(
+            JobClaimRequest(
+                worker_id=negative_worker.id,
+                max_jobs=10,
+                experiment_run_id=run.id,
+            )
         )
         check(claim.jobs == [], "claim on a completed run returned jobs")
         ok("frozen experiment rejects config updates, drained run claims nothing")

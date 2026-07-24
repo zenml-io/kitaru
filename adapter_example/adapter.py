@@ -154,11 +154,8 @@ class KitaruAdapter(AgentHooks):
             self._spec = self._run(self._client.jobs.get_spec(self._job_id))
             if self._spec.override is not None:
                 self._apply_override(self._spec.override)
-            agent.tool_interceptor = self._intercept_tool
-        else:
-            raw_override = os.environ.get("KITARU_OVERRIDE")
-            if raw_override:
-                self._apply_override(ReplayOverride.model_validate_json(raw_override))
+            if self._spec.tool_policy is not None:
+                agent.tool_interceptor = self._intercept_tool
         agent.register_hooks(self)
 
     @property
@@ -205,6 +202,7 @@ class KitaruAdapter(AgentHooks):
         """Resolve a tool call against the job tool policy."""
         assert self._spec is not None
         config = self._spec.tool_policy
+        assert config is not None
         policy = config.tools.get(tool_name, config.default)
         if isinstance(policy, PassthroughPolicy):
             return execute(tool_name, arguments)
@@ -287,10 +285,6 @@ class KitaruAdapter(AgentHooks):
             )
         )
         self._session_id = session.id
-        session_id_path = os.environ.get("KITARU_SESSION_ID_FILE")
-        if session_id_path:
-            with open(session_id_path, "w", encoding="utf-8") as file:
-                file.write(str(session.id))
         self._root_id = _uuid7()
         self._last_llm_id = None
         self._sequence = 0

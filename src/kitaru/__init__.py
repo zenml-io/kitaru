@@ -14,12 +14,12 @@
 """Kitaru."""
 
 from kitaru.job_context import job_id, job_inputs
-from kitaru.runner import Runner, RunnerError
+from kitaru.runner import JobRunner, Runner
 from kitaru.scoring import SessionView, evaluate_scoring_policy, load_scorer
 
 __all__ = [
+    "JobRunner",
     "Runner",
-    "RunnerError",
     "SessionView",
     "evaluate_scoring_policy",
     "job_id",

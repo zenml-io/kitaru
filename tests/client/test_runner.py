@@ -13,13 +13,14 @@
 #  permissions and limitations under the License.
 """Tests for the job runner against a fake API client."""
 
+import asyncio
 import json
 import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -53,7 +54,8 @@ from kitaru.api_models.v1.sessions import (
     SessionStatus,
 )
 from kitaru.api_models.v1.workers import WorkerCreateRequest, WorkerResponse
-from kitaru.runner import Runner
+from kitaru.client.api_client import KitaruAPIClient
+from kitaru.runner import JobRunner, Runner
 from kitaru.scoring import SessionView
 
 NOW = datetime.now(UTC)
@@ -395,6 +397,14 @@ class FakeClient:
         """Exit the context manager."""
 
 
+async def execute_job(
+    fake: FakeClient, job_id: uuid.UUID, **kwargs: Any
+) -> JobResponse:
+    """Execute one claimed job with a job runner backed by the fake client."""
+    job_runner = JobRunner(api_url="http://server", api_key="key", **kwargs)
+    return await job_runner.execute(cast(KitaruAPIClient, fake), job_id)
+
+
 def make_runner(
     monkeypatch: pytest.MonkeyPatch, fake: FakeClient, **kwargs: Any
 ) -> Runner:
@@ -403,9 +413,7 @@ def make_runner(
     return Runner(api_url="http://server", api_key="key", **kwargs)
 
 
-async def test_success_flow_completes_and_scores_baselines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_execute_completes_and_scores_baselines() -> None:
     """Complete a job with scores and post missing baseline scores."""
     job_id = uuid.uuid4()
     result_id = uuid.uuid4()
@@ -423,12 +431,8 @@ async def test_success_flow_completes_and_scores_baselines(
             original_id: make_session(original_id),
         },
     )
-    runner = make_runner(monkeypatch, fake, worker_id="worker-1")
-    final = await runner.run_job(job_id)
+    final = await execute_job(fake, job_id)
 
-    assert len(fake.standalone_claims) == 1
-    assert fake.worker_registrations[0].name == "worker-1"
-    assert fake.standalone_claims[0].worker_id == fake.worker_id
     assert [update.status for update in fake.updates] == [
         JobStatus.RUNNING,
         JobStatus.COMPLETED,
@@ -443,9 +447,7 @@ async def test_success_flow_completes_and_scores_baselines(
     assert (original_id, True) in fake.node_requests
 
 
-async def test_baselines_skip_present_scores(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_baselines_skip_present_scores() -> None:
     """Skip baseline scoring when the original already has all scores."""
     job_id = uuid.uuid4()
     result_id = uuid.uuid4()
@@ -463,24 +465,20 @@ async def test_baselines_skip_present_scores(
             original_id: make_session(original_id, scores={"quality": 0.4}),
         },
     )
-    runner = make_runner(monkeypatch, fake)
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id)
 
     assert fake.merged_scores == []
     assert fake.updates[-1].status is JobStatus.COMPLETED
 
 
-async def test_nonzero_exit_fails_with_log_tail(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_nonzero_exit_fails_with_log_tail() -> None:
     """Fail a job whose agent process exits non-zero."""
     job_id = uuid.uuid4()
     fake = FakeClient(
         spec=make_spec(job_id, command="echo boom >&2 && exit 3"),
         job=make_job(job_id),
     )
-    runner = make_runner(monkeypatch, fake)
-    final = await runner.run_job(job_id)
+    final = await execute_job(fake, job_id)
 
     assert [update.status for update in fake.updates] == [
         JobStatus.RUNNING,
@@ -493,16 +491,15 @@ async def test_nonzero_exit_fails_with_log_tail(
     assert final.status is JobStatus.FAILED
 
 
-async def test_timeout_kills_process(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_timeout_kills_process() -> None:
     """Kill the agent process and time the job out on expiry."""
     job_id = uuid.uuid4()
     fake = FakeClient(
         spec=make_spec(job_id, command="sleep 30", timeout_seconds=1),
         job=make_job(job_id),
     )
-    runner = make_runner(monkeypatch, fake)
     started = time.monotonic()
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id)
 
     assert time.monotonic() - started < 10
     assert [update.status for update in fake.updates] == [
@@ -514,9 +511,7 @@ async def test_timeout_kills_process(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "timed out after 1 seconds" in error
 
 
-async def test_heartbeat_cancel_kills_process(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_heartbeat_cancel_kills_process() -> None:
     """Kill the agent process and cancel the job on a canceled heartbeat."""
     job_id = uuid.uuid4()
     fake = FakeClient(
@@ -524,9 +519,8 @@ async def test_heartbeat_cancel_kills_process(
         job=make_job(job_id),
         cancel_on_heartbeat=True,
     )
-    runner = make_runner(monkeypatch, fake, heartbeat_interval=0.05)
     started = time.monotonic()
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id, heartbeat_interval=0.05)
 
     assert time.monotonic() - started < 10
     assert fake.heartbeat_count >= 1
@@ -536,17 +530,14 @@ async def test_heartbeat_cancel_kills_process(
     ]
 
 
-async def test_missing_result_session_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_missing_result_session_fails() -> None:
     """Fail a job whose agent recorded no result session."""
     job_id = uuid.uuid4()
     fake = FakeClient(
         spec=make_spec(job_id, command="true"),
         job=make_job(job_id, result_session_id=None),
     )
-    runner = make_runner(monkeypatch, fake)
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id)
 
     failed = fake.updates[-1]
     assert failed.status is JobStatus.FAILED
@@ -554,7 +545,7 @@ async def test_missing_result_session_fails(
     assert "without recording a result session" in failed.error
 
 
-async def test_scorer_error_fails_job(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_scorer_error_fails_job() -> None:
     """Fail a job when a scorer raises."""
     job_id = uuid.uuid4()
     result_id = uuid.uuid4()
@@ -567,8 +558,7 @@ async def test_scorer_error_fails_job(monkeypatch: pytest.MonkeyPatch) -> None:
         job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={result_id: make_session(result_id)},
     )
-    runner = make_runner(monkeypatch, fake)
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id)
 
     failed = fake.updates[-1]
     assert failed.status is JobStatus.FAILED
@@ -599,8 +589,7 @@ async def run_env_dump(
         job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={result_id: make_session(result_id)},
     )
-    runner = make_runner(monkeypatch, fake)
-    await runner.run_job(job_id)
+    await execute_job(fake, job_id)
     env = dict(
         line.split("=", 1) for line in out_file.read_text().splitlines() if "=" in line
     )
@@ -636,38 +625,6 @@ async def test_inputs_env_omitted_over_threshold(
     assert "KITARU_JOB_ID" in env
 
 
-async def test_run_experiment_run_claims_until_terminal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Claim and execute jobs until the claim drains and the run ends."""
-    job_id = uuid.uuid4()
-    result_id = uuid.uuid4()
-    run_id = uuid.uuid4()
-    job = make_job(job_id, result_session_id=result_id)
-    fake = FakeClient(
-        spec=make_spec(job_id, command="true"),
-        job=job,
-        sessions_by_id={result_id: make_session(result_id)},
-        claim_batches=[[job]],
-        run=make_run(ExperimentRunStatus.COMPLETED),
-    )
-    runner = make_runner(
-        monkeypatch, fake, worker_id="worker-1", concurrency=2, claim_batch_size=5
-    )
-    final = await runner.run_experiment_run(run_id)
-
-    assert final.status is ExperimentRunStatus.COMPLETED
-    assert len(fake.claim_requests) == 2
-    assert fake.worker_registrations[0].name == "worker-1"
-    assert fake.claim_requests[0].worker_id == fake.worker_id
-    assert fake.claim_requests[0].max_jobs == 5
-    assert fake.claim_requests[0].experiment_run_id == run_id
-    assert [update.status for update in fake.updates] == [
-        JobStatus.RUNNING,
-        JobStatus.COMPLETED,
-    ]
-
-
 async def test_session_run_completes_without_scoring(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -688,8 +645,7 @@ async def test_session_run_completes_without_scoring(
         job=make_job(job_id, result_session_id=result_id, kind=JobKind.SESSION_RUN),
         sessions_by_id={result_id: make_session(result_id)},
     )
-    runner = make_runner(monkeypatch, fake)
-    final = await runner.run_job(job_id)
+    final = await execute_job(fake, job_id)
 
     assert [update.status for update in fake.updates] == [
         JobStatus.RUNNING,
@@ -707,3 +663,133 @@ async def test_session_run_completes_without_scoring(
     )
     assert env["KITARU_SESSION_NAME"] == "smoke"
     assert json.loads(env["KITARU_INPUTS"]) == {"question": "hi"}
+
+
+async def test_run_job_registers_and_claims_standalone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Register the worker, claim the standalone job, and execute it."""
+    job_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    fake = FakeClient(
+        spec=make_spec(job_id, command="true"),
+        job=make_job(job_id, result_session_id=result_id),
+        sessions_by_id={result_id: make_session(result_id)},
+    )
+    runner = make_runner(monkeypatch, fake, worker_name="worker-1")
+    final = await runner.run_job(job_id)
+
+    assert fake.worker_registrations[0].name == "worker-1"
+    assert fake.worker_registrations[0].agent_ids == []
+    assert len(fake.standalone_claims) == 1
+    assert fake.standalone_claims[0].worker_id == fake.worker_id
+    assert [update.status for update in fake.updates] == [
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
+    ]
+    assert final.status is JobStatus.COMPLETED
+
+
+async def test_default_worker_name_sanitizes_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replace hostname characters the server rejects in worker names."""
+    monkeypatch.setattr("kitaru.runner.socket.gethostname", lambda: "host.local")
+    job_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    fake = FakeClient(
+        spec=make_spec(job_id, command="true"),
+        job=make_job(job_id, result_session_id=result_id),
+        sessions_by_id={result_id: make_session(result_id)},
+    )
+    runner = make_runner(monkeypatch, fake)
+    await runner.run_job(job_id)
+
+    name = fake.worker_registrations[0].name
+    assert name.startswith("host-local-")
+    assert "." not in name
+
+
+async def test_run_experiment_run_claims_until_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claim and execute jobs until the claim drains and the run ends."""
+    job_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    job = make_job(job_id, result_session_id=result_id)
+    fake = FakeClient(
+        spec=make_spec(job_id, command="true"),
+        job=job,
+        sessions_by_id={result_id: make_session(result_id)},
+        claim_batches=[[job]],
+        run=make_run(ExperimentRunStatus.COMPLETED),
+    )
+    runner = make_runner(
+        monkeypatch, fake, worker_name="worker-1", concurrency=2, claim_batch_size=5
+    )
+    final = await runner.run_experiment_run(run_id)
+
+    assert final.status is ExperimentRunStatus.COMPLETED
+    assert len(fake.claim_requests) == 2
+    assert fake.worker_registrations[0].name == "worker-1"
+    assert fake.worker_registrations[0].agent_ids == []
+    assert fake.claim_requests[0].worker_id == fake.worker_id
+    assert fake.claim_requests[0].max_jobs == 5
+    assert fake.claim_requests[0].experiment_run_id == run_id
+    assert [update.status for update in fake.updates] == [
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
+    ]
+
+
+async def test_run_worker_claims_until_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Register with agent ids and claim pool jobs until the stop event."""
+    agent_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    job = make_job(job_id, result_session_id=result_id)
+    fake = FakeClient(
+        spec=make_spec(job_id, command="true"),
+        job=job,
+        sessions_by_id={result_id: make_session(result_id)},
+        claim_batches=[[job]],
+    )
+    runner = make_runner(monkeypatch, fake, worker_name="worker-1", poll_interval=0.01)
+    stop = asyncio.Event()
+    async with asyncio.timeout(10):
+        task = asyncio.create_task(runner.run_worker(agent_ids=[agent_id], stop=stop))
+        while len(fake.updates) < 2:
+            await asyncio.sleep(0.01)
+        stop.set()
+        await task
+
+    assert fake.worker_registrations[0].name == "worker-1"
+    assert fake.worker_registrations[0].agent_ids == [agent_id]
+    assert fake.claim_requests[0].agent_ids == [agent_id]
+    assert fake.claim_requests[0].experiment_run_id is None
+    assert [update.status for update in fake.updates] == [
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
+    ]
+
+
+async def test_run_worker_without_stop_polls_until_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Poll empty claims until the task is cancelled when no stop event is set."""
+    job_id = uuid.uuid4()
+    fake = FakeClient(spec=make_spec(job_id), job=make_job(job_id))
+    runner = make_runner(monkeypatch, fake, poll_interval=0.01)
+    async with asyncio.timeout(10):
+        task = asyncio.create_task(runner.run_worker())
+        while len(fake.claim_requests) < 2:
+            await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert fake.worker_registrations[0].agent_ids == []
+    assert fake.claim_requests[0].agent_ids is None
