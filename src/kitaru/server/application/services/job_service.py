@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Replay use cases."""
+"""Job use cases."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -32,11 +32,11 @@ from kitaru.server.application.interfaces.experiment_repository import (
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
+from kitaru.server.application.interfaces.job_repository import (
+    JobRepository,
+)
 from kitaru.server.application.interfaces.replay_config_repository import (
     ReplayConfigRepository,
-)
-from kitaru.server.application.interfaces.replay_repository import (
-    ReplayRepository,
 )
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
@@ -49,10 +49,10 @@ from kitaru.server.application.interfaces.session_repository import (
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohorts import CohortSessionsFilter
-from kitaru.server.application.models.replays import (
+from kitaru.server.application.models.jobs import (
+    JobFilter,
+    JobUpdate,
     ReplayCreate,
-    ReplayFilter,
-    ReplayUpdate,
 )
 from kitaru.server.application.services.run_finalization import (
     finalize_run_if_drained,
@@ -63,17 +63,17 @@ from kitaru.server.domain.agent_version import (
     NoRunnableAgentVersion,
 )
 from kitaru.server.domain.experiment_run import ExperimentRunStatus
-from kitaru.server.domain.replay import (
-    TERMINAL_REPLAY_STATUSES,
-    InvalidReplay,
-    InvalidReplayTransition,
+from kitaru.server.domain.job import (
+    TERMINAL_JOB_STATUSES,
+    InvalidJob,
+    InvalidJobTransition,
     InvalidToolLookup,
-    Replay,
-    ReplayActive,
-    ReplayMissingResultSession,
-    ReplayNotStandalone,
-    ReplaySpec,
-    ReplayStatus,
+    Job,
+    JobActive,
+    JobMissingResultSession,
+    JobNotStandalone,
+    JobSpec,
+    JobStatus,
 )
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
@@ -96,12 +96,12 @@ from kitaru.server.domain.session_node import SessionNode
 _MEMBER_RESOLUTION_PAGE_SIZE = 1000
 
 
-class ReplayService:
-    """Replay use cases."""
+class JobService:
+    """Job use cases."""
 
     def __init__(
         self,
-        repository: ReplayRepository,
+        repository: JobRepository,
         replay_config_repository: ReplayConfigRepository,
         session_repository: SessionRepository,
         agent_version_repository: AgentVersionRepository,
@@ -116,7 +116,7 @@ class ReplayService:
         """Initialize the service.
 
         Args:
-            repository: Replay repository.
+            repository: Job repository.
             replay_config_repository: Replay config repository.
             session_repository: Session repository.
             agent_version_repository: Agent version repository.
@@ -127,7 +127,7 @@ class ReplayService:
             secret_repository: Secret repository.
             heartbeat_timeout_seconds: Seconds after which a heartbeat
                 counts as lost.
-            max_attempts: Attempt count at which a stale replay times out.
+            max_attempts: Attempt count at which a stale job times out.
         """
         self._repository = repository
         self._replay_config_repository = replay_config_repository
@@ -152,7 +152,7 @@ class ReplayService:
     async def _resolve_agent_version(
         self, agent_id: uuid.UUID, version_id: uuid.UUID | None
     ) -> AgentVersion:
-        """Resolve the agent version a replay executes.
+        """Resolve the agent version a job executes.
 
         Args:
             agent_id: Id of the original session's agent.
@@ -162,7 +162,7 @@ class ReplayService:
         Raises:
             NoRunnableAgentVersion: The agent has no runnable version.
             AgentVersionNotFound: No agent version has the explicit id.
-            InvalidReplay: The explicit version belongs to another agent.
+            InvalidJob: The explicit version belongs to another agent.
             AgentVersionNotRunnable: The explicit version has no run spec.
 
         Returns:
@@ -175,7 +175,7 @@ class ReplayService:
             return version
         version = await self._agent_version_repository.get(version_id)
         if version.agent_id != agent_id:
-            raise InvalidReplay(
+            raise InvalidJob(
                 f"Agent version {version_id} does not belong to agent {agent_id}"
             )
         if version.run_spec is None:
@@ -184,7 +184,7 @@ class ReplayService:
 
     async def create_replay(
         self, command: ReplayCreate, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
+    ) -> tuple[Job, ReplayConfig]:
         """Create a standalone replay of one session.
 
         The inline config is normalized into a replay config row. The tool
@@ -196,7 +196,7 @@ class ReplayService:
 
         Raises:
             SessionNotFound: No session has the original session id.
-            InvalidReplay: The original session is in progress or the
+            InvalidJob: The original session is in progress or the
                 explicit version belongs to another agent.
             InvalidReplayConfig: A history policy scopes to a cohort.
             NoRunnableAgentVersion: The session's agent has no runnable
@@ -205,11 +205,11 @@ class ReplayService:
             AgentVersionNotRunnable: The explicit version has no run spec.
 
         Returns:
-            Created replay and its replay config.
+            Created job and its replay config.
         """
         session = await self._session_repository.get(command.original_session_id)
         if session.status is SessionStatus.IN_PROGRESS:
-            raise InvalidReplay(f"Session {session.id} is in progress")
+            raise InvalidJob(f"Session {session.id} is in progress")
         version = await self._resolve_agent_version(
             session.agent_id, command.agent_version_id
         )
@@ -222,94 +222,91 @@ class ReplayService:
         )
         config.check_standalone()
         config = await self._replay_config_repository.create(config)
-        replay = Replay(
+        job = Job(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=session.id,
         )
-        return await self._repository.create(replay), config
+        return await self._repository.create(job), config
 
-    async def get_replay(
-        self, replay_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
-        """Get a replay by id, reporting lost heartbeats as pending.
+    async def get_job(
+        self, job_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Job, ReplayConfig]:
+        """Get a job by id, reporting lost heartbeats as pending.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
+            JobNotFound: No job has this id.
 
         Returns:
-            Stored replay and its replay config.
+            Stored job and its replay config.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        replay = replay.with_staleness(self._stale_before(), self._max_attempts)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        return replay, config
+        job = await self._repository.get(job_id)
+        job = job.with_staleness(self._stale_before(), self._max_attempts)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        return job, config
 
-    async def list_replays(
-        self, replay_filter: ReplayFilter, actor: AuthContext
-    ) -> tuple[list[tuple[Replay, ReplayConfig]], int]:
-        """List replays matching a filter, reporting lost heartbeats.
+    async def list_jobs(
+        self, job_filter: JobFilter, actor: AuthContext
+    ) -> tuple[list[tuple[Job, ReplayConfig]], int]:
+        """List jobs matching a filter, reporting lost heartbeats.
 
         Args:
-            replay_filter: Filter and pagination parameters.
+            job_filter: Filter and pagination parameters.
             actor: Caller context.
 
         Returns:
-            Page of matching replays with their replay configs and the
+            Page of matching jobs with their replay configs and the
             total match count.
         """
         _ = actor
         stale_before = self._stale_before()
-        replay_filter = replay_filter.model_copy(
+        job_filter = job_filter.model_copy(
             update={"stale_before": stale_before, "max_attempts": self._max_attempts}
         )
-        replays, total = await self._repository.query(replay_filter)
-        replays = [
-            replay.with_staleness(stale_before, self._max_attempts)
-            for replay in replays
-        ]
+        jobs, total = await self._repository.query(job_filter)
+        jobs = [job.with_staleness(stale_before, self._max_attempts) for job in jobs]
         configs = await self._replay_config_repository.get_many(
-            [replay.replay_config_id for replay in replays]
+            [job.replay_config_id for job in jobs]
         )
-        return [(replay, configs[replay.replay_config_id]) for replay in replays], total
+        return [(job, configs[job.replay_config_id]) for job in jobs], total
 
-    async def get_spec(self, replay_id: uuid.UUID, actor: AuthContext) -> ReplaySpec:
-        """Resolve the spec a runner executes a replay with.
+    async def get_spec(self, job_id: uuid.UUID, actor: AuthContext) -> JobSpec:
+        """Resolve the spec a runner executes a job with.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
+            JobNotFound: No job has this id.
             AgentVersionNotRunnable: The stamped agent version has no run
                 spec.
 
         Returns:
-            Resolved replay spec.
+            Resolved job spec.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        version = await self._agent_version_repository.get(replay.agent_version_id)
+        job = await self._repository.get(job_id)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        version = await self._agent_version_repository.get(job.agent_version_id)
         if version.run_spec is None:
             raise AgentVersionNotRunnable(version.id)
-        session = await self._session_repository.get(replay.original_session_id)
+        session = await self._session_repository.get(job.original_session_id)
         score_baselines = True
-        if replay.experiment_run_id is not None:
-            run = await self._experiment_run_repository.get(replay.experiment_run_id)
+        if job.experiment_run_id is not None:
+            run = await self._experiment_run_repository.get(job.experiment_run_id)
             score_baselines = run.score_baselines
         secret_env: dict[str, SecretStr] = {}
         for secret_id in version.run_spec.secret_ids:
             secret = await self._secret_repository.get(secret_id)
             secret_env.update(secret.values)
-        return ReplaySpec(
-            replay_id=replay.id,
+        return JobSpec(
+            job_id=job.id,
             inputs=effective_inputs(session.inputs, config.override),
             override=config.override,
             tool_policy=config.tool_policy,
@@ -321,20 +318,20 @@ class ReplayService:
         )
 
     async def _compute_summary(
-        self, replay: Replay, scores: dict[str, float]
+        self, job: Job, scores: dict[str, float]
     ) -> dict[str, Any]:
-        """Compute the diff summary stored on a completing replay.
+        """Compute the diff summary stored on a completing job.
 
         Args:
-            replay: Replay with a linked result session.
+            job: Job with a linked result session.
             scores: Scores reported by the runner.
 
         Returns:
             Diff summary.
         """
-        assert replay.result_session_id is not None
-        original = await self._session_repository.get(replay.original_session_id)
-        result = await self._session_repository.get(replay.result_session_id)
+        assert job.result_session_id is not None
+        original = await self._session_repository.get(job.original_session_id)
+        result = await self._session_repository.get(job.result_session_id)
         original_nodes = await self._session_node_repository.list_for_session(
             original.id, include_payloads=True
         )
@@ -345,52 +342,48 @@ class ReplayService:
             scores, original, result, original_nodes, result_nodes
         )
 
-    async def update_replay(
-        self, replay_id: uuid.UUID, command: ReplayUpdate, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
-        """Transition a replay through the runner status updates.
+    async def update_job(
+        self, job_id: uuid.UUID, command: JobUpdate, actor: AuthContext
+    ) -> tuple[Job, ReplayConfig]:
+        """Transition a job through the runner status updates.
 
         Completing stores the scoring result and the computed diff summary.
-        The transition that makes the last replay of a run terminal also
+        The transition that makes the last job of a run terminal also
         finalizes the run.
 
         Args:
-            replay_id: Id of the replay.
-            command: Replay update command.
+            job_id: Id of the job.
+            command: Job update command.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            InvalidReplayTransition: The transition is illegal.
-            ReplayMissingResultSession: Completing without a linked result
+            JobNotFound: No job has this id.
+            InvalidJobTransition: The transition is illegal.
+            JobMissingResultSession: Completing without a linked result
                 session.
-            InvalidReplay: Completing without a scoring result or failing
+            InvalidJob: Completing without a scoring result or failing
                 without an error.
 
         Returns:
-            Updated replay and its replay config.
+            Updated job and its replay config.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if command.status is ReplayStatus.RUNNING:
-            replay.start()
-        elif command.status is ReplayStatus.COMPLETED:
-            if replay.status is not ReplayStatus.RUNNING:
-                raise InvalidReplayTransition(
-                    replay.id, replay.status, ReplayStatus.COMPLETED
-                )
-            if replay.result_session_id is None:
-                raise ReplayMissingResultSession(replay.id)
+        job = await self._repository.get(job_id)
+        if command.status is JobStatus.RUNNING:
+            job.start()
+        elif command.status is JobStatus.COMPLETED:
+            if job.status is not JobStatus.RUNNING:
+                raise InvalidJobTransition(job.id, job.status, JobStatus.COMPLETED)
+            if job.result_session_id is None:
+                raise JobMissingResultSession(job.id)
             if (
                 command.passed is None
                 or command.score is None
                 or command.scores is None
             ):
-                raise InvalidReplay(
-                    "Completing a replay requires passed, score, and scores"
-                )
-            diff = await self._compute_summary(replay, command.scores)
-            replay.complete(
+                raise InvalidJob("Completing a job requires passed, score, and scores")
+            diff = await self._compute_summary(job, command.scores)
+            job.complete(
                 ScoringResult(
                     passed=command.passed,
                     score=command.score,
@@ -398,172 +391,169 @@ class ReplayService:
                 ),
                 diff,
             )
-        elif command.status is ReplayStatus.FAILED:
+        elif command.status is JobStatus.FAILED:
             if command.error is None:
-                raise InvalidReplay("Failing a replay requires an error")
-            replay.fail(command.error)
-        elif command.status is ReplayStatus.TIMED_OUT:
+                raise InvalidJob("Failing a job requires an error")
+            job.fail(command.error)
+        elif command.status is JobStatus.TIMED_OUT:
             if command.error is None:
-                raise InvalidReplay("Timing out a replay requires an error")
-            replay.time_out(command.error)
-        elif command.status is ReplayStatus.CANCELED:
-            replay.cancel()
+                raise InvalidJob("Timing out a job requires an error")
+            job.time_out(command.error)
+        elif command.status is JobStatus.CANCELED:
+            job.cancel()
         else:
-            raise InvalidReplayTransition(replay.id, replay.status, command.status)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        replay = await self._repository.update(replay)
-        if (
-            replay.experiment_run_id is not None
-            and replay.status in TERMINAL_REPLAY_STATUSES
-        ):
+            raise InvalidJobTransition(job.id, job.status, command.status)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        job = await self._repository.update(job)
+        if job.experiment_run_id is not None and job.status in TERMINAL_JOB_STATUSES:
             await finalize_run_if_drained(
                 self._experiment_run_repository,
                 self._repository,
                 self._session_repository,
-                replay.experiment_run_id,
+                job.experiment_run_id,
             )
-        return replay, config
+        return job, config
 
-    async def heartbeat_replay(
-        self, replay_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[ReplayStatus, bool]:
-        """Record a worker heartbeat on a replay.
+    async def heartbeat_job(
+        self, job_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[JobStatus, bool]:
+        """Record a worker heartbeat on a job.
 
-        Terminal replays record nothing and report the stop flag, so the
-        worker abandons the replay.
+        Terminal jobs record nothing and report the stop flag, so the
+        worker abandons the job.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            ReplayNotActive: The replay is pending.
+            JobNotFound: No job has this id.
+            JobNotActive: The job is pending.
 
         Returns:
-            Replay status and whether the worker should stop working on
-            the replay.
+            Job status and whether the worker should stop working on
+            the job.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if replay.status in TERMINAL_REPLAY_STATUSES:
-            return replay.status, True
-        replay.heartbeat()
-        await self._repository.update(replay)
-        if replay.experiment_run_id is None:
-            return replay.status, False
-        run = await self._experiment_run_repository.get(replay.experiment_run_id)
-        return replay.status, run.status is ExperimentRunStatus.CANCELING
+        job = await self._repository.get(job_id)
+        if job.status in TERMINAL_JOB_STATUSES:
+            return job.status, True
+        job.heartbeat()
+        await self._repository.update(job)
+        if job.experiment_run_id is None:
+            return job.status, False
+        run = await self._experiment_run_repository.get(job.experiment_run_id)
+        return job.status, run.status is ExperimentRunStatus.CANCELING
 
-    async def claim_replay(
-        self, replay_id: uuid.UUID, worker_id: str, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
-        """Claim a standalone replay for a worker.
+    async def claim_job(
+        self, job_id: uuid.UUID, worker_id: str, actor: AuthContext
+    ) -> tuple[Job, ReplayConfig]:
+        """Claim a standalone job for a worker.
 
-        A stale claim or start is requeued or timed out first, so a replay
+        A stale claim or start is requeued or timed out first, so a job
         whose worker died is claimable again.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             worker_id: Id of the claiming worker.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            ReplayNotStandalone: The replay belongs to an experiment run.
-            InvalidReplayTransition: The replay is not pending after the
+            JobNotFound: No job has this id.
+            JobNotStandalone: The job belongs to an experiment run.
+            InvalidJobTransition: The job is not pending after the
                 staleness resolution.
 
         Returns:
-            Claimed replay and its replay config.
+            Claimed job and its replay config.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if not replay.standalone:
-            raise ReplayNotStandalone(replay.id)
-        resolved = replay.with_staleness(self._stale_before(), self._max_attempts)
-        if resolved is not replay:
+        job = await self._repository.get(job_id)
+        if not job.standalone:
+            raise JobNotStandalone(job.id)
+        resolved = job.with_staleness(self._stale_before(), self._max_attempts)
+        if resolved is not job:
             resolved = await self._repository.update(resolved)
         resolved.claim(worker_id)
-        replay = await self._repository.update(resolved)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        return replay, config
+        job = await self._repository.update(resolved)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        return job, config
 
-    async def release_replay(
-        self, replay_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
-        """Requeue a claimed or running replay for another attempt.
+    async def release_job(
+        self, job_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Job, ReplayConfig]:
+        """Requeue a claimed or running job for another attempt.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            InvalidReplayTransition: The replay is not claimed or running.
+            JobNotFound: No job has this id.
+            InvalidJobTransition: The job is not claimed or running.
 
         Returns:
-            Requeued replay and its replay config.
+            Requeued job and its replay config.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        replay.requeue()
-        replay = await self._repository.update(replay)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        return replay, config
+        job = await self._repository.get(job_id)
+        job.requeue()
+        job = await self._repository.update(job)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        return job, config
 
-    async def retry_replay(
-        self, replay_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[Replay, ReplayConfig]:
-        """Requeue a finished standalone replay for another attempt.
+    async def retry_job(
+        self, job_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Job, ReplayConfig]:
+        """Requeue a finished standalone job for another attempt.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            ReplayNotStandalone: The replay belongs to an experiment run.
-            InvalidReplayTransition: The replay is not failed, timed out,
+            JobNotFound: No job has this id.
+            JobNotStandalone: The job belongs to an experiment run.
+            InvalidJobTransition: The job is not failed, timed out,
                 or canceled.
 
         Returns:
-            Requeued replay and its replay config.
+            Requeued job and its replay config.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if not replay.standalone:
-            raise ReplayNotStandalone(replay.id)
-        replay = replay.with_staleness(self._stale_before(), self._max_attempts)
-        replay.retry()
-        replay = await self._repository.update(replay)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        return replay, config
+        job = await self._repository.get(job_id)
+        if not job.standalone:
+            raise JobNotStandalone(job.id)
+        job = job.with_staleness(self._stale_before(), self._max_attempts)
+        job.retry()
+        job = await self._repository.update(job)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        return job, config
 
-    async def delete_replay(self, replay_id: uuid.UUID, actor: AuthContext) -> None:
-        """Delete a standalone replay.
+    async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
+        """Delete a standalone job.
 
-        Deletes the replay's config when nothing else references it.
+        Deletes the job's config when nothing else references it.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            ReplayNotStandalone: The replay belongs to an experiment run.
-            ReplayActive: The replay is claimed or running.
+            JobNotFound: No job has this id.
+            JobNotStandalone: The job belongs to an experiment run.
+            JobActive: The job is claimed or running.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if not replay.standalone:
-            raise ReplayNotStandalone(replay.id)
-        resolved = replay.with_staleness(self._stale_before(), self._max_attempts)
-        if resolved.status in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise ReplayActive(replay.id)
-        await self._repository.delete(replay.id)
+        job = await self._repository.get(job_id)
+        if not job.standalone:
+            raise JobNotStandalone(job.id)
+        resolved = job.with_staleness(self._stale_before(), self._max_attempts)
+        if resolved.status in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise JobActive(job.id)
+        await self._repository.delete(job.id)
         await self._replay_config_repository.delete_if_unreferenced(
-            replay.replay_config_id
+            job.replay_config_id
         )
 
     async def _resolve_cohort_session_ids(
@@ -591,7 +581,7 @@ class ReplayService:
 
     async def tool_lookup(
         self,
-        replay_id: uuid.UUID,
+        job_id: uuid.UUID,
         tool_name: str,
         inputs: Any,
         cache_key: str,
@@ -600,74 +590,72 @@ class ReplayService:
         """Resolve a history tool policy lookup within its scope.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             tool_name: Name of the called tool.
             inputs: Tool call inputs.
             cache_key: Cache key claimed by the caller.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
+            JobNotFound: No job has this id.
             InvalidToolLookup: The cache key does not match or the tool
                 resolves to no history policy.
-            InvalidReplayConfig: A standalone replay scopes to a cohort.
+            InvalidReplayConfig: A standalone job scopes to a cohort.
 
         Returns:
             Most recent matching tool call node, ``None`` on a miss.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
+        job = await self._repository.get(job_id)
         if tool_call_cache_key(tool_name, inputs) != cache_key:
             raise InvalidToolLookup("Cache key does not match the tool name and inputs")
-        config = await self._replay_config_repository.get(replay.replay_config_id)
+        config = await self._replay_config_repository.get(job.replay_config_id)
         policy = config.tool_policy.tools.get(tool_name, config.tool_policy.default)
         if not isinstance(policy, HistoryPolicy):
             raise InvalidToolLookup(f"Tool '{tool_name}' resolves to no history policy")
         if policy.scope is HistoryScope.ORIGINAL_SESSION:
             return await self._session_node_repository.find_tool_result(
                 cache_key,
-                session_ids=[replay.original_session_id],
+                session_ids=[job.original_session_id],
                 agent_id=None,
             )
         if policy.scope is HistoryScope.COHORT:
-            if replay.experiment_run_id is None:
+            if job.experiment_run_id is None:
                 raise InvalidReplayConfig(
                     "Standalone replays cannot use history scope 'cohort'"
                 )
-            run = await self._experiment_run_repository.get(replay.experiment_run_id)
+            run = await self._experiment_run_repository.get(job.experiment_run_id)
             experiment = await self._experiment_repository.get(run.experiment_id)
             session_ids = await self._resolve_cohort_session_ids(experiment.cohort_id)
             return await self._session_node_repository.find_tool_result(
                 cache_key, session_ids=session_ids, agent_id=None
             )
-        session = await self._session_repository.get(replay.original_session_id)
+        session = await self._session_repository.get(job.original_session_id)
         return await self._session_node_repository.find_tool_result(
             cache_key, session_ids=None, agent_id=session.agent_id
         )
 
-    async def compute_diff(
-        self, replay_id: uuid.UUID, actor: AuthContext
-    ) -> ReplayDiff:
-        """Compute the full diff between a replay's sessions.
+    async def compute_diff(self, job_id: uuid.UUID, actor: AuthContext) -> ReplayDiff:
+        """Compute the full diff between a job's sessions.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             actor: Caller context.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            ReplayMissingResultSession: The replay has no result session.
+            JobNotFound: No job has this id.
+            JobMissingResultSession: The job has no result session.
 
         Returns:
             Full replay diff.
         """
         _ = actor
-        replay = await self._repository.get(replay_id)
-        if replay.result_session_id is None:
-            raise ReplayMissingResultSession(replay.id)
-        config = await self._replay_config_repository.get(replay.replay_config_id)
-        original = await self._session_repository.get(replay.original_session_id)
-        result = await self._session_repository.get(replay.result_session_id)
+        job = await self._repository.get(job_id)
+        if job.result_session_id is None:
+            raise JobMissingResultSession(job.id)
+        config = await self._replay_config_repository.get(job.replay_config_id)
+        original = await self._session_repository.get(job.original_session_id)
+        result = await self._session_repository.get(job.result_session_id)
         original_nodes = await self._session_node_repository.list_for_session(
             original.id, include_payloads=True
         )
@@ -675,5 +663,5 @@ class ReplayService:
             result.id, include_payloads=True
         )
         return compute_replay_diff(
-            replay, config.override, original, result, original_nodes, result_nodes
+            job, config.override, original, result, original_nodes, result_nodes
         )

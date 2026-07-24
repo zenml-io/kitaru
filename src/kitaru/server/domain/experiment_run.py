@@ -30,7 +30,7 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.replay import ReplayStatus
+from kitaru.server.domain.job import JobStatus
 
 
 class ExperimentRunStatus(StrEnum):
@@ -115,11 +115,11 @@ class ExperimentRunProgress(FrozenModel):
     total: int = 0
 
     @classmethod
-    def from_counts(cls, counts: dict[ReplayStatus, int]) -> "ExperimentRunProgress":
-        """Build a progress from replay counts by status.
+    def from_counts(cls, counts: dict[JobStatus, int]) -> "ExperimentRunProgress":
+        """Build a progress from job counts by status.
 
         Args:
-            counts: Replay counts by status.
+            counts: Job counts by status.
 
         Returns:
             Progress with the total set.
@@ -175,25 +175,23 @@ class ExperimentRun(DomainModel):
         self.status = ExperimentRunStatus.CANCELING
 
     def finalize(
-        self, summary: dict[str, Any], replay_statuses: Sequence[ReplayStatus]
+        self, summary: dict[str, Any], job_statuses: Sequence[JobStatus]
     ) -> None:
-        """Finalize the run once its last replay is terminal.
+        """Finalize the run once its last job is terminal.
 
         A canceling run lands on canceled, a run with failed or timed out
-        replays on failed with the counts as its error, any other run on
+        jobs on failed with the counts as its error, any other run on
         completed.
 
         Args:
             summary: Aggregate diff summary.
-            replay_statuses: Statuses of the run's replays.
+            job_statuses: Statuses of the run's jobs.
 
         Raises:
             InvalidExperimentRunTransition: The run is already terminal.
         """
-        failed = sum(1 for status in replay_statuses if status is ReplayStatus.FAILED)
-        timed_out = sum(
-            1 for status in replay_statuses if status is ReplayStatus.TIMED_OUT
-        )
+        failed = sum(1 for status in job_statuses if status is JobStatus.FAILED)
+        timed_out = sum(1 for status in job_statuses if status is JobStatus.TIMED_OUT)
         if self.status is ExperimentRunStatus.CANCELING:
             target = ExperimentRunStatus.CANCELED
         elif failed or timed_out:
@@ -203,15 +201,15 @@ class ExperimentRun(DomainModel):
         if self.status in TERMINAL_RUN_STATUSES:
             raise InvalidExperimentRunTransition(self.id, self.status, target)
         if target is ExperimentRunStatus.FAILED:
-            total = len(replay_statuses)
+            total = len(job_statuses)
             parts = []
             if failed:
-                parts.append(f"{failed} of {total} replays failed")
+                parts.append(f"{failed} of {total} jobs failed")
             if timed_out:
                 if failed:
                     parts.append(f"{timed_out} timed out")
                 else:
-                    parts.append(f"{timed_out} of {total} replays timed out")
+                    parts.append(f"{timed_out} of {total} jobs timed out")
             self.error = ", ".join(parts)
         self.status = target
         self.summary = summary

@@ -268,7 +268,7 @@ async def test_update(setup: Setup) -> None:
     )
     created.update_description("Tuned prompt")
     run_spec = RunSpec(
-        command="python agent.py --replay",
+        command="python agent.py --job",
         working_dir="/app",
         env={"MODE": "replay"},
         secret_ids=[smtp.id],

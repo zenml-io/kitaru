@@ -21,8 +21,8 @@ from kitaru.server.application.interfaces.agent_repository import (
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
-from kitaru.server.application.interfaces.replay_repository import (
-    ReplayRepository,
+from kitaru.server.application.interfaces.job_repository import (
+    JobRepository,
 )
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
@@ -49,7 +49,7 @@ class AgentVersionService:
         repository: AgentVersionRepository,
         agent_repository: AgentRepository,
         secret_repository: SecretRepository,
-        replay_repository: ReplayRepository,
+        job_repository: JobRepository,
     ) -> None:
         """Initialize the service.
 
@@ -57,12 +57,12 @@ class AgentVersionService:
             repository: Agent version repository.
             agent_repository: Agent repository.
             secret_repository: Secret repository.
-            replay_repository: Replay repository.
+            job_repository: Job repository.
         """
         self._repository = repository
         self._agent_repository = agent_repository
         self._secret_repository = secret_repository
-        self._replay_repository = replay_repository
+        self._job_repository = job_repository
 
     async def _check_secrets_exist(self, run_spec: RunSpec) -> None:
         """Check that every secret a run spec references exists.
@@ -169,7 +169,7 @@ class AgentVersionService:
         """Partially update an agent version.
 
         The description updates on any version. Run spec and capability
-        changes are rejected once a replay references the version. Fields
+        changes are rejected once a job references the version. Fields
         absent from the command stay unchanged. An explicit null clears the
         description and run spec and is rejected for the capabilities.
 
@@ -181,7 +181,7 @@ class AgentVersionService:
         Raises:
             AgentVersionNotFound: No agent version has this id.
             InvalidAgentVersion: The capabilities are null.
-            AgentVersionFrozen: A replay references the version.
+            AgentVersionFrozen: A job references the version.
             SecretNotFound: A referenced secret does not exist or is
                 internal.
 
@@ -196,7 +196,7 @@ class AgentVersionService:
             "run_spec" in command.model_fields_set
             or "capabilities" in command.model_fields_set
         ):
-            frozen = await self._replay_repository.references_agent_version(version_id)
+            frozen = await self._job_repository.references_agent_version(version_id)
             if "run_spec" in command.model_fields_set:
                 if command.run_spec is not None:
                     await self._check_secrets_exist(command.run_spec)
@@ -219,7 +219,7 @@ class AgentVersionService:
         Raises:
             AgentVersionNotFound: No agent version has this id.
             AgentVersionInUse: The version is referenced by a session, an
-                experiment run, or a replay.
+                experiment run, or a job.
         """
         _ = actor
         await self._repository.delete(version_id)

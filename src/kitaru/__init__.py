@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Kitaru."""
 
-from kitaru.replay_context import replay_id, replay_inputs
+from kitaru.job_context import job_id, job_inputs
 from kitaru.runner import Runner, RunnerError
 from kitaru.scoring import SessionView, evaluate_scoring_policy, load_scorer
 
@@ -22,7 +22,7 @@ __all__ = [
     "RunnerError",
     "SessionView",
     "evaluate_scoring_policy",
+    "job_id",
+    "job_inputs",
     "load_scorer",
-    "replay_id",
-    "replay_inputs",
 ]

@@ -32,7 +32,7 @@ from kitaru.api_models.v1.experiments import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     PassthroughPolicy,
     ReplayOverride,
     ScorerConfig,

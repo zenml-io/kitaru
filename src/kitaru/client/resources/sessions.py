@@ -223,6 +223,6 @@ class SessionsResource:
         Raises:
             APIError: The request failed, including 404 for a missing
                 session and 409 while the session is a member of a cohort
-                or referenced by a replay.
+                or referenced by a job.
         """
         await self._client.request("DELETE", f"/v1/sessions/{session_id}")

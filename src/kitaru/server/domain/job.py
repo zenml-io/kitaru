@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Replay entity and errors."""
+"""Job entity and errors."""
 
 import uuid
 from datetime import UTC, datetime
@@ -37,8 +37,8 @@ from kitaru.server.domain.replay_config import (
 )
 
 
-class ReplayStatus(StrEnum):
-    """Replay status."""
+class JobStatus(StrEnum):
+    """Job status."""
 
     PENDING = "pending"
     CLAIMED = "claimed"
@@ -49,28 +49,28 @@ class ReplayStatus(StrEnum):
     CANCELED = "canceled"
 
 
-TERMINAL_REPLAY_STATUSES = frozenset(
+TERMINAL_JOB_STATUSES = frozenset(
     {
-        ReplayStatus.COMPLETED,
-        ReplayStatus.FAILED,
-        ReplayStatus.TIMED_OUT,
-        ReplayStatus.CANCELED,
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.TIMED_OUT,
+        JobStatus.CANCELED,
     }
 )
 
-HEARTBEAT_TIMEOUT_ERROR = "Replay heartbeat timed out"
+HEARTBEAT_TIMEOUT_ERROR = "Job heartbeat timed out"
 
 
-class ReplayNotFound(NotFoundError):
-    """Raised when a replay lookup does not resolve."""
+class JobNotFound(NotFoundError):
+    """Raised when a job lookup does not resolve."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the missing replay.
+            job_id: Id of the missing job.
         """
-        super().__init__(f"Replay {replay_id} was not found")
+        super().__init__(f"Job {job_id} was not found")
 
 
 class DuplicateReplaySession(ConflictError):
@@ -88,96 +88,94 @@ class DuplicateReplaySession(ConflictError):
         )
 
 
-class InvalidReplay(ValidationError):
-    """Raised when a replay violates its shape rules."""
+class InvalidJob(ValidationError):
+    """Raised when a job violates its shape rules."""
 
 
-class InvalidReplayTransition(ConflictError):
-    """Raised when a replay status transition is illegal."""
+class InvalidJobTransition(ConflictError):
+    """Raised when a job status transition is illegal."""
 
-    def __init__(
-        self, replay_id: uuid.UUID, status: ReplayStatus, target: ReplayStatus
-    ) -> None:
+    def __init__(self, job_id: uuid.UUID, status: JobStatus, target: JobStatus) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             status: Current status.
             target: Requested status.
         """
         super().__init__(
-            f"Replay {replay_id} cannot transition from '{status}' to '{target}'"
+            f"Job {job_id} cannot transition from '{status}' to '{target}'"
         )
 
 
-class ReplayNotActive(ConflictError):
-    """Raised when an operation requires a claimed or running replay."""
+class JobNotActive(ConflictError):
+    """Raised when an operation requires a claimed or running job."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
-        super().__init__(f"Replay {replay_id} is not claimed or running")
+        super().__init__(f"Job {job_id} is not claimed or running")
 
 
-class ReplayActive(ConflictError):
-    """Raised when an operation requires a replay that is not claimed or running."""
+class JobActive(ConflictError):
+    """Raised when an operation requires a job that is not claimed or running."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
-        super().__init__(f"Replay {replay_id} is claimed or running")
+        super().__init__(f"Job {job_id} is claimed or running")
 
 
-class ReplayNotStandalone(ConflictError):
-    """Raised when an operation requires a standalone replay."""
+class JobNotStandalone(ConflictError):
+    """Raised when an operation requires a standalone job."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
-        super().__init__(f"Replay {replay_id} belongs to an experiment run")
+        super().__init__(f"Job {job_id} belongs to an experiment run")
 
 
-class ReplayAlreadyLinked(ConflictError):
-    """Raised when a replay already has a result session."""
+class JobAlreadyLinked(ConflictError):
+    """Raised when a job already has a result session."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
-        super().__init__(f"Replay {replay_id} already has a result session")
+        super().__init__(f"Job {job_id} already has a result session")
 
 
-class ReplayMissingResultSession(ConflictError):
+class JobMissingResultSession(ConflictError):
     """Raised when an operation requires a linked result session."""
 
-    def __init__(self, replay_id: uuid.UUID) -> None:
+    def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
-        super().__init__(f"Replay {replay_id} has no result session")
+        super().__init__(f"Job {job_id} has no result session")
 
 
 class InvalidToolLookup(ValidationError):
     """Raised when a tool lookup request violates its shape rules."""
 
 
-class ReplaySpec(FrozenModel):
-    """Replay spec."""
+class JobSpec(FrozenModel):
+    """Job spec."""
 
-    replay_id: uuid.UUID
+    job_id: uuid.UUID
     inputs: Any = None
     override: ReplayOverride | None = None
     tool_policy: ToolPolicyConfig
@@ -188,8 +186,8 @@ class ReplaySpec(FrozenModel):
     original_session_id: uuid.UUID
 
 
-class Replay(DomainModel):
-    """Replay."""
+class Job(DomainModel):
+    """Job."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
     experiment_run_id: uuid.UUID | None = None
@@ -197,7 +195,7 @@ class Replay(DomainModel):
     agent_version_id: uuid.UUID
     original_session_id: uuid.UUID
     result_session_id: uuid.UUID | None = None
-    status: ReplayStatus = ReplayStatus.PENDING
+    status: JobStatus = JobStatus.PENDING
     attempt: int = 1
     worker_id: str | None = None
     claimed_at: datetime | None = None
@@ -214,61 +212,61 @@ class Replay(DomainModel):
 
     @property
     def standalone(self) -> bool:
-        """Whether the replay belongs to no experiment run.
+        """Whether the job belongs to no experiment run.
 
         Returns:
-            Whether the replay belongs to no experiment run.
+            Whether the job belongs to no experiment run.
         """
         return self.experiment_run_id is None
 
     def claim(self, worker_id: str) -> None:
-        """Claim the replay for a worker.
+        """Claim the job for a worker.
 
         Args:
             worker_id: Id of the claiming worker.
 
         Raises:
-            InvalidReplayTransition: The replay is not pending.
+            InvalidJobTransition: The job is not pending.
         """
-        if self.status is not ReplayStatus.PENDING:
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.CLAIMED)
+        if self.status is not JobStatus.PENDING:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.CLAIMED)
         now = datetime.now(UTC)
-        self.status = ReplayStatus.CLAIMED
+        self.status = JobStatus.CLAIMED
         self.worker_id = worker_id
         self.claimed_at = now
         self.heartbeat_at = now
 
     def start(self) -> None:
-        """Start executing the replay.
+        """Start executing the job.
 
-        Run-created replays start from claimed, standalone replays start
+        Run-created jobs start from claimed, standalone jobs start
         from claimed or skip the claim and start from pending.
 
         Raises:
-            InvalidReplayTransition: The replay is not in a required
+            InvalidJobTransition: The job is not in a required
                 status.
         """
         allowed = (
-            (ReplayStatus.PENDING, ReplayStatus.CLAIMED)
+            (JobStatus.PENDING, JobStatus.CLAIMED)
             if self.standalone
-            else (ReplayStatus.CLAIMED,)
+            else (JobStatus.CLAIMED,)
         )
         if self.status not in allowed:
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.RUNNING)
+            raise InvalidJobTransition(self.id, self.status, JobStatus.RUNNING)
         now = datetime.now(UTC)
-        self.status = ReplayStatus.RUNNING
+        self.status = JobStatus.RUNNING
         self.started_at = now
         self.heartbeat_at = now
 
     def requeue(self) -> None:
-        """Requeue the replay for another attempt.
+        """Requeue the job for another attempt.
 
         Raises:
-            InvalidReplayTransition: The replay is not claimed or running.
+            InvalidJobTransition: The job is not claimed or running.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.PENDING)
-        self.status = ReplayStatus.PENDING
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise InvalidJobTransition(self.id, self.status, JobStatus.PENDING)
+        self.status = JobStatus.PENDING
         self.attempt += 1
         self.worker_id = None
         self.claimed_at = None
@@ -276,19 +274,19 @@ class Replay(DomainModel):
         self.started_at = None
 
     def retry(self) -> None:
-        """Requeue the replay for another attempt after it finished.
+        """Requeue the job for another attempt after it finished.
 
         Raises:
-            InvalidReplayTransition: The replay is not failed, timed out,
+            InvalidJobTransition: The job is not failed, timed out,
                 or canceled.
         """
         if self.status not in (
-            ReplayStatus.FAILED,
-            ReplayStatus.TIMED_OUT,
-            ReplayStatus.CANCELED,
+            JobStatus.FAILED,
+            JobStatus.TIMED_OUT,
+            JobStatus.CANCELED,
         ):
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.PENDING)
-        self.status = ReplayStatus.PENDING
+            raise InvalidJobTransition(self.id, self.status, JobStatus.PENDING)
+        self.status = JobStatus.PENDING
         self.attempt += 1
         self.worker_id = None
         self.claimed_at = None
@@ -299,21 +297,21 @@ class Replay(DomainModel):
         self.result_session_id = None
 
     def complete(self, result: ScoringResult, diff: dict[str, Any] | None) -> None:
-        """Complete the replay with its scoring result.
+        """Complete the job with its scoring result.
 
         Args:
             result: Scoring result reported by the runner.
             diff: Diff summary.
 
         Raises:
-            InvalidReplayTransition: The replay is not running.
-            ReplayMissingResultSession: The replay has no result session.
+            InvalidJobTransition: The job is not running.
+            JobMissingResultSession: The job has no result session.
         """
-        if self.status is not ReplayStatus.RUNNING:
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.COMPLETED)
+        if self.status is not JobStatus.RUNNING:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
         if self.result_session_id is None:
-            raise ReplayMissingResultSession(self.id)
-        self.status = ReplayStatus.COMPLETED
+            raise JobMissingResultSession(self.id)
+        self.status = JobStatus.COMPLETED
         self.passed = result.passed
         self.score = result.score
         self.scores = result.scores
@@ -321,54 +319,54 @@ class Replay(DomainModel):
         self.ended_at = datetime.now(UTC)
 
     def fail(self, error: str) -> None:
-        """Fail the replay.
+        """Fail the job.
 
         Args:
             error: Error message.
 
         Raises:
-            InvalidReplayTransition: The replay is not claimed or running.
+            InvalidJobTransition: The job is not claimed or running.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.FAILED)
-        self.status = ReplayStatus.FAILED
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise InvalidJobTransition(self.id, self.status, JobStatus.FAILED)
+        self.status = JobStatus.FAILED
         self.error = error
         self.ended_at = datetime.now(UTC)
 
     def time_out(self, error: str) -> None:
-        """Time out the replay.
+        """Time out the job.
 
         Args:
             error: Error message.
 
         Raises:
-            InvalidReplayTransition: The replay is not claimed or running.
+            InvalidJobTransition: The job is not claimed or running.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.TIMED_OUT)
-        self.status = ReplayStatus.TIMED_OUT
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise InvalidJobTransition(self.id, self.status, JobStatus.TIMED_OUT)
+        self.status = JobStatus.TIMED_OUT
         self.error = error
         self.ended_at = datetime.now(UTC)
 
     def cancel(self) -> None:
-        """Cancel the replay.
+        """Cancel the job.
 
         Raises:
-            InvalidReplayTransition: The replay is already terminal.
+            InvalidJobTransition: The job is already terminal.
         """
-        if self.status in TERMINAL_REPLAY_STATUSES:
-            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.CANCELED)
-        self.status = ReplayStatus.CANCELED
+        if self.status in TERMINAL_JOB_STATUSES:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.CANCELED)
+        self.status = JobStatus.CANCELED
         self.ended_at = datetime.now(UTC)
 
     def heartbeat(self) -> None:
         """Record a worker heartbeat.
 
         Raises:
-            ReplayNotActive: The replay is not claimed or running.
+            JobNotActive: The job is not claimed or running.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise ReplayNotActive(self.id)
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise JobNotActive(self.id)
         self.heartbeat_at = datetime.now(UTC)
 
     def link_result_session(self, session_id: uuid.UUID) -> None:
@@ -378,40 +376,40 @@ class Replay(DomainModel):
             session_id: Id of the result session.
 
         Raises:
-            ReplayNotActive: The replay is not claimed or running.
-            ReplayAlreadyLinked: The replay already has a result session.
+            JobNotActive: The job is not claimed or running.
+            JobAlreadyLinked: The job already has a result session.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
-            raise ReplayNotActive(self.id)
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+            raise JobNotActive(self.id)
         if self.result_session_id is not None:
-            raise ReplayAlreadyLinked(self.id)
+            raise JobAlreadyLinked(self.id)
         self.result_session_id = session_id
 
     def is_stale(self, stale_before: datetime) -> bool:
-        """Report whether the replay lost its worker heartbeat.
+        """Report whether the job lost its worker heartbeat.
 
         Args:
             stale_before: Heartbeats older than this time count as lost.
 
         Returns:
-            ``True`` for a claimed or running replay whose last heartbeat,
+            ``True`` for a claimed or running job whose last heartbeat,
             or claim when no heartbeat arrived yet, is older than the
             threshold.
         """
-        if self.status not in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
             return False
         last = self.heartbeat_at or self.claimed_at
         return last is not None and last < stale_before
 
-    def with_staleness(self, stale_before: datetime, max_attempts: int) -> "Replay":
-        """Return the replay as the next claim would requeue or time it out.
+    def with_staleness(self, stale_before: datetime, max_attempts: int) -> "Job":
+        """Return the job as the next claim would requeue or time it out.
 
         Args:
             stale_before: Heartbeats older than this time count as lost.
-            max_attempts: Attempt count at which a stale replay times out.
+            max_attempts: Attempt count at which a stale job times out.
 
         Returns:
-            Copy with the staleness rule applied, the replay itself when it
+            Copy with the staleness rule applied, the job itself when it
             is not stale.
         """
         if not self.is_stale(stale_before):

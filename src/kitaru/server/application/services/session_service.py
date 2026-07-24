@@ -21,8 +21,8 @@ from kitaru.server.application.interfaces.agent_repository import (
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
-from kitaru.server.application.interfaces.replay_repository import (
-    ReplayRepository,
+from kitaru.server.application.interfaces.job_repository import (
+    JobRepository,
 )
 from kitaru.server.application.interfaces.session_node_repository import (
     SessionNodeRepository,
@@ -54,7 +54,7 @@ class SessionService:
         agent_repository: AgentRepository,
         agent_version_repository: AgentVersionRepository,
         node_repository: SessionNodeRepository,
-        replay_repository: ReplayRepository,
+        job_repository: JobRepository,
     ) -> None:
         """Initialize the service.
 
@@ -63,21 +63,21 @@ class SessionService:
             agent_repository: Agent repository.
             agent_version_repository: Agent version repository.
             node_repository: Session node repository.
-            replay_repository: Replay repository.
+            job_repository: Job repository.
         """
         self._repository = repository
         self._agent_repository = agent_repository
         self._agent_version_repository = agent_version_repository
         self._node_repository = node_repository
-        self._replay_repository = replay_repository
+        self._job_repository = job_repository
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
     ) -> Session:
         """Create a session owned by the caller.
 
-        A set replay id links the session to its replay: the session is
-        stored with origin ``replay`` and becomes the replay's result
+        A set job id links the session to its job: the session is
+        stored with origin ``replay`` and becomes the job's result
         session.
 
         Args:
@@ -88,9 +88,9 @@ class SessionService:
             InvalidSession: The command violates the origin rules.
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
-            ReplayNotFound: No replay has the referenced replay id.
-            ReplayNotActive: The replay is not claimed or running.
-            ReplayAlreadyLinked: The replay already has a result session.
+            JobNotFound: No job has the referenced job id.
+            JobNotActive: The job is not claimed or running.
+            JobAlreadyLinked: The job already has a result session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
@@ -98,16 +98,16 @@ class SessionService:
             Created session.
         """
         origin = command.origin
-        replay = None
-        if command.replay_id is not None:
+        job = None
+        if command.job_id is not None:
             if command.origin is not SessionOrigin.RECORDED:
                 raise InvalidSession(
-                    "Sessions linked to a replay require origin 'recorded'"
+                    "Sessions linked to a job require origin 'recorded'"
                 )
-            replay = await self._replay_repository.get(command.replay_id)
+            job = await self._job_repository.get(command.job_id)
             origin = SessionOrigin.REPLAY
         elif command.origin is SessionOrigin.REPLAY:
-            raise InvalidSession("Session origin 'replay' requires a replay id")
+            raise InvalidSession("Session origin 'replay' requires a job id")
         if command.origin is SessionOrigin.RECORDED and command.status not in (
             None,
             SessionStatus.IN_PROGRESS,
@@ -141,11 +141,11 @@ class SessionService:
             adapter_version=command.adapter_version,
             log_uri=command.log_uri,
         )
-        if replay is not None:
-            replay.link_result_session(session.id)
+        if job is not None:
+            job.link_result_session(session.id)
         session = await self._repository.create(session)
-        if replay is not None:
-            await self._replay_repository.update(replay)
+        if job is not None:
+            await self._job_repository.update(job)
         return session
 
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
@@ -264,7 +264,7 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id.
             SessionInUse: The session is a member of a cohort or referenced
-                by a replay.
+                by a job.
         """
         _ = actor
         await self._repository.delete(session_id)

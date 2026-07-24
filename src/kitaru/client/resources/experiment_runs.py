@@ -21,11 +21,11 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replays import (
-    ReplayClaimRequest,
-    ReplayClaimResponse,
-    ReplayResponse,
-    ReplayStatus,
+from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobClaimResponse,
+    JobResponse,
+    JobStatus,
 )
 
 if TYPE_CHECKING:
@@ -95,18 +95,18 @@ class ExperimentRunsResource:
         response = await self._client.request("GET", f"/v1/experiment-runs/{run_id}")
         return ExperimentRunResponse.model_validate(response.json())
 
-    async def list_replays(
+    async def list_jobs(
         self,
         run_id: uuid.UUID,
-        status: ReplayStatus | None = None,
+        status: JobStatus | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> Page[ReplayResponse]:
-        """List the replays of an experiment run.
+    ) -> Page[JobResponse]:
+        """List the jobs of an experiment run.
 
         Args:
             run_id: Id of the experiment run.
-            status: Filter on replay status.
+            status: Filter on job status.
             page: Page number.
             page_size: Page size.
 
@@ -115,40 +115,40 @@ class ExperimentRunsResource:
                 experiment run.
 
         Returns:
-            Page of replays.
+            Page of jobs.
         """
         params: dict[str, Any] = {"page": page, "page_size": page_size}
         if status is not None:
             params["status"] = status.value
         response = await self._client.request(
             "GET",
-            f"/v1/experiment-runs/{run_id}/replays",
+            f"/v1/experiment-runs/{run_id}/jobs",
             params=params,
         )
-        return Page[ReplayResponse].model_validate(response.json())
+        return Page[JobResponse].model_validate(response.json())
 
     async def claim(
-        self, run_id: uuid.UUID, request: ReplayClaimRequest
-    ) -> ReplayClaimResponse:
-        """Atomically claim pending replays of an experiment run.
+        self, run_id: uuid.UUID, request: JobClaimRequest
+    ) -> JobClaimResponse:
+        """Atomically claim pending jobs of an experiment run.
 
         Args:
             run_id: Id of the experiment run.
-            request: Replay claim request.
+            request: Job claim request.
 
         Raises:
             APIError: The request failed, including 404 for a missing
                 experiment run.
 
         Returns:
-            Claimed replays.
+            Claimed jobs.
         """
         response = await self._client.request(
             "POST",
             f"/v1/experiment-runs/{run_id}/claim",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
-        return ReplayClaimResponse.model_validate(response.json())
+        return JobClaimResponse.model_validate(response.json())
 
     async def cancel(self, run_id: uuid.UUID) -> ExperimentRunResponse:
         """Cancel an experiment run.
@@ -169,7 +169,7 @@ class ExperimentRunsResource:
         return ExperimentRunResponse.model_validate(response.json())
 
     async def delete(self, run_id: uuid.UUID) -> None:
-        """Delete a terminal experiment run, including its replays.
+        """Delete a terminal experiment run, including its jobs.
 
         Args:
             run_id: Id of the experiment run.

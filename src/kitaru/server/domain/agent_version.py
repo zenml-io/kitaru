@@ -77,7 +77,7 @@ class AgentVersionFrozen(ConflictError):
         Args:
             version_id: Id of the frozen agent version.
         """
-        super().__init__(f"Agent version {version_id} is frozen by existing replays")
+        super().__init__(f"Agent version {version_id} is frozen by existing jobs")
 
 
 class AgentVersionNotRunnable(ConflictError):
@@ -190,10 +190,10 @@ class AgentVersion(DomainModel):
 
         Args:
             run_spec: New run specification, ``None`` clears it.
-            frozen: Whether a replay references the version.
+            frozen: Whether a job references the version.
 
         Raises:
-            AgentVersionFrozen: A replay references the version.
+            AgentVersionFrozen: A job references the version.
         """
         if frozen:
             raise AgentVersionFrozen(self.id)
@@ -206,10 +206,10 @@ class AgentVersion(DomainModel):
 
         Args:
             capabilities: New capabilities.
-            frozen: Whether a replay references the version.
+            frozen: Whether a job references the version.
 
         Raises:
-            AgentVersionFrozen: A replay references the version.
+            AgentVersionFrozen: A job references the version.
         """
         if frozen:
             raise AgentVersionFrozen(self.id)

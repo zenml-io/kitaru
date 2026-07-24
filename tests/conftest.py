@@ -40,7 +40,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_cohort_service,
     get_experiment_run_service,
     get_experiment_service,
-    get_replay_service,
+    get_job_service,
     get_session_node_service,
     get_session_service,
     get_tag_service,
@@ -58,7 +58,7 @@ from kitaru.server.application.models.cohorts import (
 )
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.application.models.experiments import ExperimentFilter
-from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
@@ -74,7 +74,7 @@ from kitaru.server.application.services.experiment_run_service import (
 from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
-from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -122,11 +122,11 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunNotFound,
 )
-from kitaru.server.domain.replay import (
+from kitaru.server.domain.job import (
     DuplicateReplaySession,
-    Replay,
-    ReplayNotFound,
-    ReplayStatus,
+    Job,
+    JobNotFound,
+    JobStatus,
 )
 from kitaru.server.domain.replay_config import (
     ReplayConfig,
@@ -1240,7 +1240,7 @@ class FakeAgentVersionRepository:
         self._agent_repository = agent_repository
         self.session_repository: FakeSessionRepository | None = None
         self.run_repository: FakeExperimentRunRepository | None = None
-        self.replay_repository: FakeReplayRepository | None = None
+        self.job_repository: FakeJobRepository | None = None
         agent_repository.version_repository = self
         if secret_repository is not None:
             secret_repository.version_repository = self
@@ -1390,7 +1390,7 @@ class FakeAgentVersionRepository:
         Raises:
             AgentVersionNotFound: No agent version has this id.
             AgentVersionInUse: The version is referenced by a session, an
-                experiment run, or a replay.
+                experiment run, or a job.
         """
         if version_id not in self._versions:
             raise AgentVersionNotFound(version_id)
@@ -1404,10 +1404,10 @@ class FakeAgentVersionRepository:
         ):
             raise AgentVersionInUse(version_id, "experiment runs")
         if (
-            self.replay_repository is not None
-            and await self.replay_repository.references_agent_version(version_id)
+            self.job_repository is not None
+            and await self.job_repository.references_agent_version(version_id)
         ):
-            raise AgentVersionInUse(version_id, "replays")
+            raise AgentVersionInUse(version_id, "jobs")
         del self._versions[version_id]
 
 
@@ -1435,7 +1435,7 @@ class FakeSessionRepository:
         self._tag_repository = tag_repository
         self.node_repository: FakeSessionNodeRepository | None = None
         self.cohort_repository: FakeCohortRepository | None = None
-        self.replay_repository: FakeReplayRepository | None = None
+        self.job_repository: FakeJobRepository | None = None
         agent_repository.session_repository = self
         if agent_version_repository is not None:
             agent_version_repository.session_repository = self
@@ -1665,7 +1665,7 @@ class FakeSessionRepository:
         Raises:
             SessionNotFound: No session has this id.
             SessionInUse: The session is a member of a cohort or referenced
-                by a replay.
+                by a job.
         """
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
@@ -1674,11 +1674,10 @@ class FakeSessionRepository:
             and self.cohort_repository.references_session(session_id)
         ):
             raise SessionInUse(session_id, "cohorts")
-        if (
-            self.replay_repository is not None
-            and self.replay_repository.references_session(session_id)
+        if self.job_repository is not None and self.job_repository.references_session(
+            session_id
         ):
-            raise SessionInUse(session_id, "replays")
+            raise SessionInUse(session_id, "jobs")
         del self._sessions[session_id]
         if self.node_repository is not None:
             self.node_repository.remove_for_session(session_id)
@@ -2044,7 +2043,7 @@ class FakeReplayConfigRepository:
         """Initialize the repository."""
         self._configs: dict[uuid.UUID, ReplayConfig] = {}
         self.experiment_repository: FakeExperimentRepository | None = None
-        self.replay_repository: FakeReplayRepository | None = None
+        self.job_repository: FakeJobRepository | None = None
 
     async def create(self, config: ReplayConfig) -> ReplayConfig:
         """Persist a new replay config.
@@ -2110,9 +2109,8 @@ class FakeReplayConfigRepository:
             and self.experiment_repository.references_config(config_id)
         ):
             return False
-        if (
-            self.replay_repository is not None
-            and self.replay_repository.references_config(config_id)
+        if self.job_repository is not None and self.job_repository.references_config(
+            config_id
         ):
             return False
         del self._configs[config_id]
@@ -2307,8 +2305,8 @@ class FakeExperimentRepository:
             )
 
 
-class FakeReplayRepository:
-    """In-memory replay repository."""
+class FakeJobRepository:
+    """In-memory job repository."""
 
     def __init__(
         self,
@@ -2326,312 +2324,300 @@ class FakeReplayRepository:
             replay_config_repository: Fake replay config repository backing
                 the config ids.
         """
-        self._replays: dict[uuid.UUID, Replay] = {}
+        self._jobs: dict[uuid.UUID, Job] = {}
         self._session_repository = session_repository
         self.agent_version_repository = agent_version_repository
         self._replay_config_repository = replay_config_repository
         self.run_repository: FakeExperimentRunRepository | None = None
-        session_repository.replay_repository = self
-        agent_version_repository.replay_repository = self
-        replay_config_repository.replay_repository = self
+        session_repository.job_repository = self
+        agent_version_repository.job_repository = self
+        replay_config_repository.job_repository = self
 
     def references_session(self, session_id: uuid.UUID) -> bool:
-        """Report whether a stored replay references a session.
+        """Report whether a stored job references a session.
 
         Args:
             session_id: Id of the session.
 
         Returns:
-            ``True`` when a stored replay references the session.
+            ``True`` when a stored job references the session.
         """
         return any(
-            replay.original_session_id == session_id
-            or replay.result_session_id == session_id
-            for replay in self._replays.values()
+            job.original_session_id == session_id or job.result_session_id == session_id
+            for job in self._jobs.values()
         )
 
     def references_config(self, config_id: uuid.UUID) -> bool:
-        """Report whether a stored replay references a replay config.
+        """Report whether a stored job references a replay config.
 
         Args:
             config_id: Id of the replay config.
 
         Returns:
-            ``True`` when a stored replay references the config.
+            ``True`` when a stored job references the config.
         """
-        return any(
-            replay.replay_config_id == config_id for replay in self._replays.values()
-        )
+        return any(job.replay_config_id == config_id for job in self._jobs.values())
 
     def remove_for_run(self, run_id: uuid.UUID) -> None:
-        """Remove every replay of an experiment run.
+        """Remove every job of an experiment run.
 
         Args:
             run_id: Id of the experiment run.
         """
-        self._replays = {
-            replay_id: replay
-            for replay_id, replay in self._replays.items()
-            if replay.experiment_run_id != run_id
+        self._jobs = {
+            job_id: job
+            for job_id, job in self._jobs.items()
+            if job.experiment_run_id != run_id
         }
 
-    def _check_duplicate_session(self, replay: Replay) -> None:
-        if replay.experiment_run_id is None:
+    def _check_duplicate_session(self, job: Job) -> None:
+        if job.experiment_run_id is None:
             return
-        for other in self._replays.values():
+        for other in self._jobs.values():
             if (
-                other.id != replay.id
-                and other.experiment_run_id == replay.experiment_run_id
-                and other.original_session_id == replay.original_session_id
+                other.id != job.id
+                and other.experiment_run_id == job.experiment_run_id
+                and other.original_session_id == job.original_session_id
             ):
                 raise DuplicateReplaySession(
-                    replay.experiment_run_id, replay.original_session_id
+                    job.experiment_run_id, job.original_session_id
                 )
 
-    async def create(self, replay: Replay) -> Replay:
-        """Persist a new replay.
+    async def create(self, job: Job) -> Job:
+        """Persist a new job.
 
         Args:
-            replay: Replay to store.
+            job: Job to store.
 
         Raises:
-            ExperimentRunNotFound: No experiment run has the replay's
+            ExperimentRunNotFound: No experiment run has the job's
                 experiment run id.
-            ReplayConfigNotFound: No replay config has the replay's replay
+            ReplayConfigNotFound: No replay config has the job's job
                 config id.
-            AgentVersionNotFound: No agent version has the replay's agent
+            AgentVersionNotFound: No agent version has the job's agent
                 version id.
-            SessionNotFound: No session has the replay's original session
+            SessionNotFound: No session has the job's original session
                 id.
             DuplicateReplaySession: The run already replays the original
                 session.
 
         Returns:
-            Stored replay with timestamps set.
+            Stored job with timestamps set.
         """
-        if replay.experiment_run_id is not None and self.run_repository is not None:
-            await self.run_repository.get(replay.experiment_run_id)
-        await self._replay_config_repository.get(replay.replay_config_id)
-        await self.agent_version_repository.get(replay.agent_version_id)
-        await self._session_repository.get(replay.original_session_id)
-        self._check_duplicate_session(replay)
+        if job.experiment_run_id is not None and self.run_repository is not None:
+            await self.run_repository.get(job.experiment_run_id)
+        await self._replay_config_repository.get(job.replay_config_id)
+        await self.agent_version_repository.get(job.agent_version_id)
+        await self._session_repository.get(job.original_session_id)
+        self._check_duplicate_session(job)
         now = datetime.now(UTC)
-        stored = replay.model_copy(update={"created": now, "updated": now})
-        self._replays[stored.id] = stored
+        stored = job.model_copy(update={"created": now, "updated": now})
+        self._jobs[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, replay_id: uuid.UUID) -> Replay:
-        """Load a replay by id.
+    async def get(self, job_id: uuid.UUID) -> Job:
+        """Load a job by id.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
 
         Raises:
-            ReplayNotFound: No replay has this id.
+            JobNotFound: No job has this id.
 
         Returns:
-            Stored replay.
+            Stored job.
         """
-        replay = self._replays.get(replay_id)
-        if replay is None:
-            raise ReplayNotFound(replay_id)
-        return replay.model_copy()
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise JobNotFound(job_id)
+        return job.model_copy()
 
-    def _effective_status(
-        self, replay: Replay, replay_filter: ReplayFilter
-    ) -> ReplayStatus:
-        """Compute a replay's status with the filter's staleness rule applied.
+    def _effective_status(self, job: Job, job_filter: JobFilter) -> JobStatus:
+        """Compute a job's status with the filter's staleness rule applied.
 
         Args:
-            replay: Stored replay.
-            replay_filter: Filter carrying the staleness context.
+            job: Stored job.
+            job_filter: Filter carrying the staleness context.
 
         Returns:
-            Replay status.
+            Job status.
         """
-        if replay_filter.stale_before is None or replay_filter.max_attempts is None:
-            return replay.status
-        return replay.with_staleness(
-            replay_filter.stale_before, replay_filter.max_attempts
+        if job_filter.stale_before is None or job_filter.max_attempts is None:
+            return job.status
+        return job.with_staleness(
+            job_filter.stale_before, job_filter.max_attempts
         ).status
 
-    async def query(self, replay_filter: ReplayFilter) -> tuple[list[Replay], int]:
-        """Query replays matching a filter.
+    async def query(self, job_filter: JobFilter) -> tuple[list[Job], int]:
+        """Query jobs matching a filter.
 
         With the staleness context set, the status filter matches claimed
-        or running replays with lost heartbeats as pending, or as timed
+        or running jobs with lost heartbeats as pending, or as timed
         out once the attempt count reached the maximum.
 
         Args:
-            replay_filter: Filter and pagination parameters.
+            job_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching replays and the total match count.
+            Page of matching jobs and the total match count.
         """
-        replays = sorted(self._replays.values(), key=lambda replay: replay.id.int)
-        if replay_filter.experiment_run_id is not None:
-            replays = [
-                replay
-                for replay in replays
-                if replay.experiment_run_id == replay_filter.experiment_run_id
+        jobs = sorted(self._jobs.values(), key=lambda job: job.id.int)
+        if job_filter.experiment_run_id is not None:
+            jobs = [
+                job
+                for job in jobs
+                if job.experiment_run_id == job_filter.experiment_run_id
             ]
-        if replay_filter.original_session_id is not None:
-            replays = [
-                replay
-                for replay in replays
-                if replay.original_session_id == replay_filter.original_session_id
+        if job_filter.original_session_id is not None:
+            jobs = [
+                job
+                for job in jobs
+                if job.original_session_id == job_filter.original_session_id
             ]
-        if replay_filter.status is not None:
-            replays = [
-                replay
-                for replay in replays
-                if self._effective_status(replay, replay_filter) == replay_filter.status
+        if job_filter.status is not None:
+            jobs = [
+                job
+                for job in jobs
+                if self._effective_status(job, job_filter) == job_filter.status
             ]
-        if replay_filter.worker_id is not None:
-            replays = [
-                replay
-                for replay in replays
-                if replay.worker_id == replay_filter.worker_id
+        if job_filter.worker_id is not None:
+            jobs = [job for job in jobs if job.worker_id == job_filter.worker_id]
+        if job_filter.standalone is not None:
+            jobs = [
+                job
+                for job in jobs
+                if (job.experiment_run_id is None) == job_filter.standalone
             ]
-        if replay_filter.standalone is not None:
-            replays = [
-                replay
-                for replay in replays
-                if (replay.experiment_run_id is None) == replay_filter.standalone
-            ]
-        total = len(replays)
-        start = (replay_filter.page - 1) * replay_filter.page_size
-        page = replays[start : start + replay_filter.page_size]
-        return [replay.model_copy() for replay in page], total
+        total = len(jobs)
+        start = (job_filter.page - 1) * job_filter.page_size
+        page = jobs[start : start + job_filter.page_size]
+        return [job.model_copy() for job in page], total
 
-    async def update(self, replay: Replay) -> Replay:
-        """Persist changes to an existing replay.
+    async def update(self, job: Job) -> Job:
+        """Persist changes to an existing job.
 
         Args:
-            replay: Replay with modified fields.
+            job: Job with modified fields.
 
         Raises:
-            ReplayNotFound: No replay has this id.
-            SessionNotFound: No session has the replay's result session id.
+            JobNotFound: No job has this id.
+            SessionNotFound: No session has the job's result session id.
 
         Returns:
-            Stored replay with the updated timestamp renewed.
+            Stored job with the updated timestamp renewed.
         """
-        stored = self._replays.get(replay.id)
+        stored = self._jobs.get(job.id)
         if stored is None:
-            raise ReplayNotFound(replay.id)
-        if replay.result_session_id is not None:
-            await self._session_repository.get(replay.result_session_id)
-        self._check_duplicate_session(replay)
+            raise JobNotFound(job.id)
+        if job.result_session_id is not None:
+            await self._session_repository.get(job.result_session_id)
+        self._check_duplicate_session(job)
         now = _renewed_timestamp(stored.updated)
-        updated = replay.model_copy(update={"created": stored.created, "updated": now})
-        self._replays[replay.id] = updated
+        updated = job.model_copy(update={"created": stored.created, "updated": now})
+        self._jobs[job.id] = updated
         return updated.model_copy()
 
-    async def delete(self, replay_id: uuid.UUID) -> None:
-        """Delete a replay by id.
+    async def delete(self, job_id: uuid.UUID) -> None:
+        """Delete a job by id.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
 
         Raises:
-            ReplayNotFound: No replay has this id.
+            JobNotFound: No job has this id.
         """
-        if replay_id not in self._replays:
-            raise ReplayNotFound(replay_id)
-        del self._replays[replay_id]
+        if job_id not in self._jobs:
+            raise JobNotFound(job_id)
+        del self._jobs[job_id]
 
     async def requeue_stale(
         self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
     ) -> None:
-        """Requeue or time out a run's replays with lost heartbeats.
+        """Requeue or time out a run's jobs with lost heartbeats.
 
         Args:
             run_id: Id of the experiment run.
             stale_before: Heartbeats older than this time count as lost.
-            max_attempts: Attempt count at which a stale replay times out.
+            max_attempts: Attempt count at which a stale job times out.
         """
-        for replay_id, replay in list(self._replays.items()):
-            if replay.experiment_run_id != run_id:
+        for job_id, job in list(self._jobs.items()):
+            if job.experiment_run_id != run_id:
                 continue
-            changed = replay.with_staleness(stale_before, max_attempts)
-            if changed is replay:
+            changed = job.with_staleness(stale_before, max_attempts)
+            if changed is job:
                 continue
-            self._replays[replay_id] = changed.model_copy(
-                update={"updated": _renewed_timestamp(replay.updated)}
+            self._jobs[job_id] = changed.model_copy(
+                update={"updated": _renewed_timestamp(job.updated)}
             )
 
     async def claim_pending(
         self, run_id: uuid.UUID, worker_id: str, limit: int
-    ) -> list[Replay]:
-        """Atomically claim pending replays of a run for a worker.
+    ) -> list[Job]:
+        """Atomically claim pending jobs of a run for a worker.
 
         Args:
             run_id: Id of the experiment run.
             worker_id: Id of the claiming worker.
-            limit: Maximum number of replays to claim.
+            limit: Maximum number of jobs to claim.
 
         Returns:
-            Claimed replays.
+            Claimed jobs.
         """
         pending = sorted(
             (
-                replay
-                for replay in self._replays.values()
-                if replay.experiment_run_id == run_id
-                and replay.status is ReplayStatus.PENDING
+                job
+                for job in self._jobs.values()
+                if job.experiment_run_id == run_id and job.status is JobStatus.PENDING
             ),
-            key=lambda replay: replay.id.int,
+            key=lambda job: job.id.int,
         )
-        claimed: list[Replay] = []
-        for replay in pending[:limit]:
-            changed = replay.model_copy()
+        claimed: list[Job] = []
+        for job in pending[:limit]:
+            changed = job.model_copy()
             changed.claim(worker_id)
             stored = changed.model_copy(
-                update={"updated": _renewed_timestamp(replay.updated)}
+                update={"updated": _renewed_timestamp(job.updated)}
             )
-            self._replays[replay.id] = stored
+            self._jobs[job.id] = stored
             claimed.append(stored.model_copy())
         return claimed
 
     async def count_by_status(
         self, run_ids: list[uuid.UUID], stale_before: datetime, max_attempts: int
-    ) -> dict[uuid.UUID, dict[ReplayStatus, int]]:
-        """Count replays by status for a set of experiment runs.
+    ) -> dict[uuid.UUID, dict[JobStatus, int]]:
+        """Count jobs by status for a set of experiment runs.
 
-        Claimed or running replays with lost heartbeats count as pending,
+        Claimed or running jobs with lost heartbeats count as pending,
         or as timed out once the attempt count reached the maximum, without
         writing.
 
         Args:
             run_ids: Ids of the experiment runs.
             stale_before: Heartbeats older than this time count as lost.
-            max_attempts: Attempt count at which a stale replay times out.
+            max_attempts: Attempt count at which a stale job times out.
 
         Returns:
-            Replay counts by status, keyed by experiment run id.
+            Job counts by status, keyed by experiment run id.
         """
-        counts: dict[uuid.UUID, dict[ReplayStatus, int]] = {}
-        for replay in self._replays.values():
-            if replay.experiment_run_id not in run_ids:
+        counts: dict[uuid.UUID, dict[JobStatus, int]] = {}
+        for job in self._jobs.values():
+            if job.experiment_run_id not in run_ids:
                 continue
-            status = replay.with_staleness(stale_before, max_attempts).status
-            run_counts = counts.setdefault(replay.experiment_run_id, {})
+            status = job.with_staleness(stale_before, max_attempts).status
+            run_counts = counts.setdefault(job.experiment_run_id, {})
             run_counts[status] = run_counts.get(status, 0) + 1
         return counts
 
     async def references_agent_version(self, version_id: uuid.UUID) -> bool:
-        """Report whether a stored replay references an agent version.
+        """Report whether a stored job references an agent version.
 
         Args:
             version_id: Id of the agent version.
 
         Returns:
-            ``True`` when a stored replay references the version.
+            ``True`` when a stored job references the version.
         """
-        return any(
-            replay.agent_version_id == version_id for replay in self._replays.values()
-        )
+        return any(job.agent_version_id == version_id for job in self._jobs.values())
 
 
 class FakeExperimentRunRepository:
@@ -2640,7 +2626,7 @@ class FakeExperimentRunRepository:
     def __init__(
         self,
         experiment_repository: FakeExperimentRepository,
-        replay_repository: FakeReplayRepository,
+        job_repository: FakeJobRepository,
         tag_repository: FakeTagRepository | None = None,
     ) -> None:
         """Initialize the repository and wire the reference checks.
@@ -2648,17 +2634,17 @@ class FakeExperimentRunRepository:
         Args:
             experiment_repository: Fake experiment repository backing the
                 experiment ids.
-            replay_repository: Fake replay repository storing the run's
-                replays.
+            job_repository: Fake job repository storing the run's
+                jobs.
             tag_repository: Fake tag repository backing the tag filter.
         """
         self._runs: dict[uuid.UUID, ExperimentRun] = {}
         self._experiment_repository = experiment_repository
-        self._replay_repository = replay_repository
+        self._job_repository = job_repository
         self._tag_repository = tag_repository
         experiment_repository.run_repository = self
-        replay_repository.run_repository = self
-        replay_repository.agent_version_repository.run_repository = self
+        job_repository.run_repository = self
+        job_repository.agent_version_repository.run_repository = self
 
     def references_version(self, version_id: uuid.UUID) -> bool:
         """Report whether a stored run references an agent version.
@@ -2671,12 +2657,12 @@ class FakeExperimentRunRepository:
         """
         return any(run.agent_version_id == version_id for run in self._runs.values())
 
-    async def create(self, run: ExperimentRun, replays: list[Replay]) -> ExperimentRun:
-        """Persist a new experiment run with its replays as one batch.
+    async def create(self, run: ExperimentRun, jobs: list[Job]) -> ExperimentRun:
+        """Persist a new experiment run with its jobs as one batch.
 
         Args:
             run: Experiment run to store.
-            replays: Replays to store with the run.
+            jobs: Jobs to store with the run.
 
         Raises:
             ExperimentNotFound: No experiment has the run's experiment id.
@@ -2701,8 +2687,8 @@ class FakeExperimentRunRepository:
             update={"number": number, "created": now, "updated": now}
         )
         self._runs[stored.id] = stored
-        for replay in replays:
-            await self._replay_repository.create(replay)
+        for job in jobs:
+            await self._job_repository.create(job)
         return stored.model_copy()
 
     async def get(self, run_id: uuid.UUID) -> ExperimentRun:
@@ -2773,7 +2759,7 @@ class FakeExperimentRunRepository:
         return updated.model_copy()
 
     async def delete(self, run_id: uuid.UUID) -> None:
-        """Delete an experiment run by id, including its replays and tag links.
+        """Delete an experiment run by id, including its jobs and tag links.
 
         Args:
             run_id: Id of the experiment run.
@@ -2784,7 +2770,7 @@ class FakeExperimentRunRepository:
         if run_id not in self._runs:
             raise ExperimentRunNotFound(run_id)
         del self._runs[run_id]
-        self._replay_repository.remove_for_run(run_id)
+        self._job_repository.remove_for_run(run_id)
         if self._tag_repository is not None:
             self._tag_repository.remove_links_for_resource(
                 TagResourceType.EXPERIMENT_RUN, run_id
@@ -2813,10 +2799,10 @@ def experiment_app(
     Args:
         heartbeat_timeout_seconds: Seconds after which a heartbeat counts
             as lost, a negative value marks every claim stale immediately.
-        max_attempts: Attempt count at which a stale replay times out.
+        max_attempts: Attempt count at which a stale job times out.
 
     Returns:
-        Application for experiment, run, and replay tests.
+        Application for experiment, run, and job tests.
     """
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
@@ -2836,25 +2822,25 @@ def experiment_app(
     experiment_repository = FakeExperimentRepository(
         cohort_repository, config_repository, tag_repository
     )
-    replay_repository = FakeReplayRepository(
+    job_repository = FakeJobRepository(
         session_repository, version_repository, config_repository
     )
     run_repository = FakeExperimentRunRepository(
-        experiment_repository, replay_repository, tag_repository
+        experiment_repository, job_repository, tag_repository
     )
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
         repository=version_repository,
         agent_repository=agent_repository,
         secret_repository=secret_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
     session_service = SessionService(
         repository=session_repository,
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
     cohort_service = CohortService(
         repository=cohort_repository,
@@ -2870,15 +2856,15 @@ def experiment_app(
     )
     run_service = ExperimentRunService(
         repository=run_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
         replay_config_repository=config_repository,
         experiment_repository=experiment_repository,
         session_repository=session_repository,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
         max_attempts=max_attempts,
     )
-    replay_service = ReplayService(
-        repository=replay_repository,
+    job_service = JobService(
+        repository=job_repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
         agent_version_repository=version_repository,
@@ -2902,7 +2888,7 @@ def experiment_app(
     app.dependency_overrides[get_cohort_service] = lambda: cohort_service
     app.dependency_overrides[get_experiment_service] = lambda: experiment_service
     app.dependency_overrides[get_experiment_run_service] = lambda: run_service
-    app.dependency_overrides[get_replay_service] = lambda: replay_service
+    app.dependency_overrides[get_job_service] = lambda: job_service
     app.dependency_overrides[get_tag_service] = lambda: tag_service
     app.dependency_overrides[authorize] = lambda: AuthContext(
         account=Account(id=EXPERIMENT_APP_ACCOUNT_ID, name="ann")

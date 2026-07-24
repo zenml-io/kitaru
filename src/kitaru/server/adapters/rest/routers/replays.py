@@ -13,40 +13,21 @@
 #  permissions and limitations under the License.
 """Replay routes."""
 
-import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, status
 
-from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.replays import (
-    ReplayCreateRequest,
-    ReplayDiffResponse,
-    ReplayHeartbeatResponse,
-    ReplayResponse,
-    ReplaySpecResponse,
-    ReplayStatus,
-    ReplayUpdateRequest,
-    StandaloneReplayClaimRequest,
-    ToolLookupRequest,
-    ToolLookupResponse,
-)
+from kitaru.api_models.v1.jobs import JobResponse, ReplayCreateRequest
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
-    get_replay_service,
+    get_job_service,
 )
-from kitaru.server.adapters.rest.mapping.replays import (
+from kitaru.server.adapters.rest.mapping.jobs import (
+    job_to_response,
     replay_create_to_command,
-    replay_diff_to_response,
-    replay_spec_to_response,
-    replay_status_to_domain,
-    replay_to_response,
-    replay_update_to_command,
-    tool_lookup_to_response,
 )
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.replays import ReplayFilter
-from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.job_service import JobService
 
 router = APIRouter()
 
@@ -54,9 +35,9 @@ router = APIRouter()
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_replay(
     body: ReplayCreateRequest,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
+    service: Annotated[JobService, Depends(get_job_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
+) -> JobResponse:
     """Create a standalone replay of one session with an inline config.
 
     The tool policy defaults to a history policy scoped to the original
@@ -70,328 +51,13 @@ async def create_replay(
 
     Args:
         body: Replay create request.
-        service: Replay service.
+        service: Job service.
         actor: Caller context.
 
     Returns:
-        Created replay.
+        Created job.
     """
-    replay, config = await service.create_replay(
+    job, config = await service.create_replay(
         replay_create_to_command(body), actor=actor
     )
-    return replay_to_response(replay, config)
-
-
-@router.get("")
-async def list_replays(
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-    experiment_run_id: uuid.UUID | None = None,
-    original_session_id: uuid.UUID | None = None,
-    replay_status: Annotated[ReplayStatus | None, Query(alias="status")] = None,
-    standalone: bool | None = None,
-    worker_id: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
-) -> Page[ReplayResponse]:
-    """List replays.
-
-    Clients observe HTTP 200 on success and 422 on invalid pagination
-    parameters.
-
-    Args:
-        service: Replay service.
-        actor: Caller context.
-        experiment_run_id: Filter on experiment run id.
-        original_session_id: Filter on the replayed session id.
-        replay_status: Filter on replay status.
-        standalone: Filter on standalone replays.
-        worker_id: Filter on the claiming worker id.
-        page: Page number.
-        page_size: Page size.
-
-    Returns:
-        Page of replays.
-    """
-    replay_filter = ReplayFilter(
-        experiment_run_id=experiment_run_id,
-        original_session_id=original_session_id,
-        status=replay_status_to_domain(replay_status),
-        standalone=standalone,
-        worker_id=worker_id,
-        page=page,
-        page_size=page_size,
-    )
-    replays, total = await service.list_replays(replay_filter, actor=actor)
-    return Page[ReplayResponse](
-        items=[replay_to_response(replay, config) for replay, config in replays],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/{replay_id}")
-async def get_replay(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
-    """Get a replay by id.
-
-    Clients observe HTTP 200 on success and 404 when no replay has this
-    id.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Stored replay.
-    """
-    replay, config = await service.get_replay(replay_id, actor=actor)
-    return replay_to_response(replay, config)
-
-
-@router.get("/{replay_id}/spec")
-async def get_replay_spec(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplaySpecResponse:
-    """Resolve the spec a runner executes a replay with.
-
-    The spec includes the resolved secret environment of the run spec's
-    secrets.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    and 409 when the stamped agent version has no run spec.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Resolved replay spec.
-    """
-    spec = await service.get_spec(replay_id, actor=actor)
-    return replay_spec_to_response(spec)
-
-
-@router.patch("/{replay_id}")
-async def update_replay(
-    replay_id: uuid.UUID,
-    body: ReplayUpdateRequest,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
-    """Transition a replay through the runner status updates.
-
-    Completing stores the scoring result and the computed diff summary.
-    The transition that makes the last replay of a run terminal also
-    finalizes the run.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    409 when the transition is illegal or completing without a linked
-    result session, and 422 when completing without a scoring result or
-    failing without an error.
-
-    Args:
-        replay_id: Id of the replay.
-        body: Replay update request.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Updated replay.
-    """
-    replay, config = await service.update_replay(
-        replay_id, replay_update_to_command(body), actor=actor
-    )
-    return replay_to_response(replay, config)
-
-
-@router.delete("/{replay_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_replay(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> None:
-    """Delete a standalone replay.
-
-    Deletes the replay's config when nothing else references it.
-
-    Clients observe HTTP 204 on success, 404 when no replay has this id,
-    and 409 when the replay belongs to an experiment run or is claimed or
-    running.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-    """
-    await service.delete_replay(replay_id, actor=actor)
-
-
-@router.post("/{replay_id}/claim")
-async def claim_replay(
-    replay_id: uuid.UUID,
-    body: StandaloneReplayClaimRequest,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
-    """Claim a standalone replay for a worker.
-
-    A stale claim or start is requeued or timed out first, so a replay
-    whose worker died is claimable again.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    409 when the replay belongs to an experiment run or is not pending
-    after the staleness resolution, and 422 on invalid input.
-
-    Args:
-        replay_id: Id of the replay.
-        body: Standalone replay claim request.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Claimed replay.
-    """
-    replay, config = await service.claim_replay(
-        replay_id, worker_id=body.worker_id, actor=actor
-    )
-    return replay_to_response(replay, config)
-
-
-@router.post("/{replay_id}/release")
-async def release_replay(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
-    """Requeue a claimed or running replay for another attempt.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    and 409 when the replay is not claimed or running.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Requeued replay.
-    """
-    replay, config = await service.release_replay(replay_id, actor=actor)
-    return replay_to_response(replay, config)
-
-
-@router.post("/{replay_id}/retry")
-async def retry_replay(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayResponse:
-    """Requeue a finished standalone replay for another attempt.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    and 409 when the replay belongs to an experiment run or is not
-    failed, timed out, or canceled.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Requeued replay.
-    """
-    replay, config = await service.retry_replay(replay_id, actor=actor)
-    return replay_to_response(replay, config)
-
-
-@router.post("/{replay_id}/heartbeat")
-async def heartbeat_replay(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayHeartbeatResponse:
-    """Record a worker heartbeat on a replay.
-
-    Terminal replays record nothing and report the stop flag, so the
-    worker abandons the replay.
-
-    Clients observe HTTP 200 on success, including terminal replays, 404
-    when no replay has this id, and 409 when the replay is pending.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Heartbeat response with the status and stop flag.
-    """
-    replay_status, canceled = await service.heartbeat_replay(replay_id, actor=actor)
-    return ReplayHeartbeatResponse(
-        status=ReplayStatus(replay_status.value), canceled=canceled
-    )
-
-
-@router.post("/{replay_id}/tool-lookup")
-async def tool_lookup(
-    replay_id: uuid.UUID,
-    body: ToolLookupRequest,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ToolLookupResponse:
-    """Resolve a history tool policy lookup within its scope.
-
-    Clients observe HTTP 200 on success, including misses, 404 when no
-    replay has this id, and 422 when the cache key does not match the tool
-    name and inputs, the tool resolves to no history policy, or a
-    standalone replay scopes to a cohort.
-
-    Args:
-        replay_id: Id of the replay.
-        body: Tool lookup request.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Tool lookup response.
-    """
-    node = await service.tool_lookup(
-        replay_id,
-        tool_name=body.tool_name,
-        inputs=body.inputs,
-        cache_key=body.cache_key,
-        actor=actor,
-    )
-    return tool_lookup_to_response(node)
-
-
-@router.get("/{replay_id}/diff")
-async def get_replay_diff(
-    replay_id: uuid.UUID,
-    service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayDiffResponse:
-    """Compute the full diff between a replay's sessions.
-
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    and 409 when the replay has no result session yet.
-
-    Args:
-        replay_id: Id of the replay.
-        service: Replay service.
-        actor: Caller context.
-
-    Returns:
-        Computed replay diff.
-    """
-    diff = await service.compute_diff(replay_id, actor=actor)
-    return replay_diff_to_response(diff)
+    return job_to_response(job, config)

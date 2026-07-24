@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""End-to-end replay tests against PostgreSQL."""
+"""End-to-end job tests against PostgreSQL."""
 
 from collections.abc import AsyncGenerator
 
@@ -26,7 +26,7 @@ from conftest import db_settings, lifespan_client
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app running its full lifespan."""
     # Under the none auth scheme every request runs as the account
-    # bootstrapped at startup, which owns all created replays.
+    # bootstrapped at startup, which owns all created jobs.
     async with lifespan_client(db_settings()) as client:
         yield client
 
@@ -63,10 +63,10 @@ async def seed_session(client: httpx.AsyncClient) -> str:
     return session_id
 
 
-async def test_standalone_replay_flow_persists_across_requests(
+async def test_standalone_job_flow_persists_across_requests(
     client: httpx.AsyncClient,
 ) -> None:
-    """Create standalone replays and read them back with filters."""
+    """Create standalone jobs and read them back with filters."""
     session_id = await seed_session(client)
     body = {"original_session_id": session_id, "scoring_policy": SCORING_POLICY}
     response = await client.post("/v1/replays", json=body)
@@ -76,48 +76,46 @@ async def test_standalone_replay_flow_persists_across_requests(
     assert first["tool_policy"]["default"]["type"] == "history"
 
     # Nulls are distinct in the unique constraint, so the same session
-    # replays standalone any number of times.
+    # jobs standalone any number of times.
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
 
-    response = await client.get(f"/v1/replays/{first['id']}")
+    response = await client.get(f"/v1/jobs/{first['id']}")
     assert response.status_code == 200
     assert response.json() == first
 
     response = await client.get(
-        "/v1/replays",
+        "/v1/jobs",
         params={"original_session_id": session_id, "standalone": "true"},
     )
     assert response.status_code == 200
     assert response.json()["total"] == 2
 
-    # The replay blocks session deletion.
+    # The job blocks session deletion.
     response = await client.delete(f"/v1/sessions/{session_id}")
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Session {session_id} is referenced by replays"
-    }
+    assert response.json() == {"detail": f"Session {session_id} is referenced by jobs"}
 
 
 async def test_standalone_worker_lifecycle_end_to_end(
     client: httpx.AsyncClient,
 ) -> None:
-    """Walk a standalone replay through claim, release, retry, and delete."""
+    """Walk a standalone job through claim, release, retry, and delete."""
     session_id = await seed_session(client)
     body = {"original_session_id": session_id, "scoring_policy": SCORING_POLICY}
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
-    replay_id = response.json()["id"]
+    job_id = response.json()["id"]
 
     response = await client.post(
-        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-1"}
+        f"/v1/jobs/{job_id}/claim", json={"worker_id": "worker-1"}
     )
     assert response.status_code == 200
     claimed = response.json()
     assert claimed["status"] == "claimed"
     assert claimed["worker_id"] == "worker-1"
 
-    response = await client.post(f"/v1/replays/{replay_id}/release")
+    response = await client.post(f"/v1/jobs/{job_id}/release")
     assert response.status_code == 200
     released = response.json()
     assert released["status"] == "pending"
@@ -125,20 +123,20 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert released["worker_id"] is None
 
     response = await client.post(
-        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-2"}
+        f"/v1/jobs/{job_id}/claim", json={"worker_id": "worker-2"}
     )
     assert response.status_code == 200
     response = await client.patch(
-        f"/v1/replays/{replay_id}",
+        f"/v1/jobs/{job_id}",
         json={"status": "failed", "error": "agent exited with code 1"},
     )
     assert response.status_code == 200
 
-    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
     assert response.status_code == 200
     assert response.json() == {"status": "failed", "canceled": True}
 
-    response = await client.post(f"/v1/replays/{replay_id}/retry")
+    response = await client.post(f"/v1/jobs/{job_id}/retry")
     assert response.status_code == 200
     retried = response.json()
     assert retried["status"] == "pending"
@@ -146,7 +144,7 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert retried["error"] is None
     assert retried["result_session_id"] is None
 
-    response = await client.delete(f"/v1/replays/{replay_id}")
+    response = await client.delete(f"/v1/jobs/{job_id}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/replays/{replay_id}")
+    response = await client.get(f"/v1/jobs/{job_id}")
     assert response.status_code == 404

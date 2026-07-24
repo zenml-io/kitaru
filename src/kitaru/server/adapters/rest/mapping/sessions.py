@@ -146,7 +146,7 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         framework=body.framework,
         adapter_version=body.adapter_version,
         log_uri=body.log_uri,
-        replay_id=body.replay_id,
+        job_id=body.job_id,
     )
 
 

@@ -19,7 +19,7 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.base import RequestModel, ResponseModel
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     ReplayOverride,
     ScoringPolicy,
     ToolPolicyConfig,

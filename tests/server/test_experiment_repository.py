@@ -25,8 +25,8 @@ from conftest import (
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
     pg_session,
@@ -145,8 +145,8 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         cohorts = FakeCohortRepository(sessions, agents, tags)
         configs = FakeReplayConfigRepository()
         experiments = FakeExperimentRepository(cohorts, configs, tags)
-        replays = FakeReplayRepository(sessions, versions, configs)
-        runs = FakeExperimentRunRepository(experiments, replays, tags)
+        jobs = FakeJobRepository(sessions, versions, configs)
+        runs = FakeExperimentRunRepository(experiments, jobs, tags)
         yield Setup(
             experiments,
             runs,

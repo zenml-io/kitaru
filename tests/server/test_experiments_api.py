@@ -553,7 +553,7 @@ async def test_delete_cohort_referenced_by_experiment(
 
 
 async def test_create_run_fans_out(client: httpx.AsyncClient) -> None:
-    """Start a run and observe the pending replay fan-out."""
+    """Start a run and observe the pending job fan-out."""
     agent_id = await create_agent(client)
     version_id = await create_runnable_version(client, agent_id)
     cohort_id = await create_cohort(client, agent_id, session_count=3)
@@ -694,7 +694,7 @@ async def test_list_experiment_runs(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_agent_version_frozen_by_replay(client: httpx.AsyncClient) -> None:
+async def test_agent_version_frozen_by_job(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a run spec change on a replayed version."""
     agent_id = await create_agent(client)
     version_id = await create_runnable_version(client, agent_id)
@@ -709,7 +709,7 @@ async def test_agent_version_frozen_by_replay(client: httpx.AsyncClient) -> None
     )
     assert response.status_code == 409
     assert response.json() == {
-        "detail": f"Agent version {version_id} is frozen by existing replays"
+        "detail": f"Agent version {version_id} is frozen by existing jobs"
     }
 
     response = await client.patch(

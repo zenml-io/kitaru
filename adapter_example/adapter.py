@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru recording and replay adapter for the mock agent."""
+"""Kitaru recording and job adapter for the mock agent."""
 
 import asyncio
 import json
@@ -33,11 +33,11 @@ from adapter_example.agent import (  # ty: ignore[unresolved-import]
     ToolCall,
     ToolExecutor,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
+    JobSpecResponse,
     PassthroughPolicy,
     ReplayOverride,
-    ReplaySpecResponse,
     StaticCase,
     StaticMatchMode,
     StaticPolicy,
@@ -114,21 +114,21 @@ class KitaruAdapter(AgentHooks):
         agent_version_id: uuid.UUID | None = None,
         api_url: str | None = None,
         api_key: str | None = None,
-        replay_id: uuid.UUID | None = None,
+        job_id: uuid.UUID | None = None,
         session_name: str | None = None,
         api_client: KitaruAPIClient | None = None,
         batch_size: int = 20,
     ) -> None:
-        """Initialize the adapter, wire the agent, and apply any replay spec."""
+        """Initialize the adapter, wire the agent, and apply any job spec."""
         self._agent = agent
         self._agent_id = agent_id
         self._agent_version_id = agent_version_id
         self._session_name = session_name or os.environ.get("KITARU_SESSION_NAME")
         self._batch_size = batch_size
-        if replay_id is None:
-            replay_env = os.environ.get("KITARU_REPLAY_ID")
-            replay_id = uuid.UUID(replay_env) if replay_env else None
-        self._replay_id = replay_id
+        if job_id is None:
+            job_env = os.environ.get("KITARU_JOB_ID")
+            job_id = uuid.UUID(job_env) if job_env else None
+        self._job_id = job_id
         if api_client is None:
             api_url = api_url or os.environ.get("KITARU_API_URL")
             if not api_url:
@@ -149,9 +149,9 @@ class KitaruAdapter(AgentHooks):
         self._mocked_call: _MockedCall | None = None
         self._run_started_at: datetime | None = None
         self._run_inputs: Any = None
-        self._spec: ReplaySpecResponse | None = None
-        if self._replay_id is not None:
-            self._spec = self._run(self._client.replays.get_spec(self._replay_id))
+        self._spec: JobSpecResponse | None = None
+        if self._job_id is not None:
+            self._spec = self._run(self._client.jobs.get_spec(self._job_id))
             if self._spec.override is not None:
                 self._apply_override(self._spec.override)
             agent.tool_interceptor = self._intercept_tool
@@ -178,7 +178,7 @@ class KitaruAdapter(AgentHooks):
         self._loop.close()
 
     def resolve_inputs(self, default: Any = None) -> Any:
-        """Resolve run inputs from the environment, the replay spec, or a default."""
+        """Resolve run inputs from the environment, the job spec, or a default."""
         raw = os.environ.get("KITARU_INPUTS")
         if raw is not None:
             return json.loads(raw)
@@ -202,7 +202,7 @@ class KitaruAdapter(AgentHooks):
     def _intercept_tool(
         self, tool_name: str, arguments: dict[str, Any], execute: ToolExecutor
     ) -> Any:
-        """Resolve a tool call against the replay tool policy."""
+        """Resolve a tool call against the job tool policy."""
         assert self._spec is not None
         config = self._spec.tool_policy
         policy = config.tools.get(tool_name, config.default)
@@ -217,15 +217,13 @@ class KitaruAdapter(AgentHooks):
                 policy.type, policy.on_miss, tool_name, arguments, execute
             )
         if isinstance(policy, HistoryPolicy):
-            assert self._replay_id is not None
+            assert self._job_id is not None
             request = ToolLookupRequest(
                 tool_name=tool_name,
                 inputs=arguments,
                 cache_key=tool_call_cache_key(tool_name, arguments),
             )
-            response = self._run(
-                self._client.replays.tool_lookup(self._replay_id, request)
-            )
+            response = self._run(self._client.jobs.tool_lookup(self._job_id, request))
             if response.found:
                 self._mocked_call = _MockedCall(policy=policy.type)
                 return response.result
@@ -284,7 +282,7 @@ class KitaruAdapter(AgentHooks):
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                    replay_id=self._replay_id,
+                    job_id=self._job_id,
                 )
             )
         )

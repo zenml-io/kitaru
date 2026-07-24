@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the replay runner against a fake API client."""
+"""Tests for the job runner against a fake API client."""
 
 import json
 import time
@@ -29,19 +29,19 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobClaimResponse,
+    JobHeartbeatResponse,
+    JobResponse,
+    JobSpecResponse,
+    JobSpecRun,
+    JobStatus,
+    JobUpdateRequest,
     PassthroughPolicy,
-    ReplayClaimRequest,
-    ReplayClaimResponse,
-    ReplayHeartbeatResponse,
-    ReplayResponse,
-    ReplaySpecResponse,
-    ReplaySpecRun,
-    ReplayStatus,
-    ReplayUpdateRequest,
     ScorerConfig,
     ScoringPolicy,
-    StandaloneReplayClaimRequest,
+    StandaloneJobClaimRequest,
     ToolPolicyConfig,
 )
 from kitaru.api_models.v1.session_nodes import SessionNodeResponse
@@ -79,7 +79,7 @@ def raising_scorer(session: SessionView) -> float:
 
 
 def make_spec(
-    replay_id: uuid.UUID,
+    job_id: uuid.UUID,
     command: str = "true",
     inputs: Any = None,
     run_env: dict[str, str] | None = None,
@@ -88,16 +88,16 @@ def make_spec(
     score_baselines: bool = False,
     scoring_policy: ScoringPolicy = SCORING_POLICY,
     original_session_id: uuid.UUID | None = None,
-) -> ReplaySpecResponse:
-    """Build a replay spec."""
-    return ReplaySpecResponse(
-        replay_id=replay_id,
+) -> JobSpecResponse:
+    """Build a job spec."""
+    return JobSpecResponse(
+        job_id=job_id,
         inputs=inputs,
         override=None,
         tool_policy=ToolPolicyConfig(default=PassthroughPolicy()),
         scoring_policy=scoring_policy,
         score_baselines=score_baselines,
-        run=ReplaySpecRun(
+        run=JobSpecRun(
             command=command,
             working_dir=None,
             env=run_env or {},
@@ -108,14 +108,14 @@ def make_spec(
     )
 
 
-def make_replay(
-    replay_id: uuid.UUID,
-    status: ReplayStatus = ReplayStatus.RUNNING,
+def make_job(
+    job_id: uuid.UUID,
+    status: JobStatus = JobStatus.RUNNING,
     result_session_id: uuid.UUID | None = None,
-) -> ReplayResponse:
-    """Build a replay."""
-    return ReplayResponse(
-        id=replay_id,
+) -> JobResponse:
+    """Build a job."""
+    return JobResponse(
+        id=job_id,
         experiment_run_id=None,
         agent_version_id=uuid.uuid4(),
         original_session_id=uuid.uuid4(),
@@ -208,39 +208,37 @@ def make_run(status: ExperimentRunStatus) -> ExperimentRunResponse:
 
 
 class FakeReplaysResource:
-    """Fake replays resource."""
+    """Fake jobs resource."""
 
     def __init__(self, client: "FakeClient") -> None:
         """Initialize the resource."""
         self._client = client
 
-    async def get_spec(self, replay_id: uuid.UUID) -> ReplaySpecResponse:
+    async def get_spec(self, job_id: uuid.UUID) -> JobSpecResponse:
         """Return the configured spec."""
         return self._client.spec
 
-    async def get(self, replay_id: uuid.UUID) -> ReplayResponse:
-        """Return the configured replay."""
-        return self._client.replay
+    async def get(self, job_id: uuid.UUID) -> JobResponse:
+        """Return the configured job."""
+        return self._client.job
 
-    async def update(
-        self, replay_id: uuid.UUID, request: ReplayUpdateRequest
-    ) -> ReplayResponse:
-        """Record the update and return the replay in the target status."""
+    async def update(self, job_id: uuid.UUID, request: JobUpdateRequest) -> JobResponse:
+        """Record the update and return the job in the target status."""
         self._client.updates.append(request)
-        return self._client.replay.model_copy(update={"status": request.status})
+        return self._client.job.model_copy(update={"status": request.status})
 
     async def claim(
-        self, replay_id: uuid.UUID, request: StandaloneReplayClaimRequest
-    ) -> ReplayResponse:
-        """Record the claim and return the configured replay."""
+        self, job_id: uuid.UUID, request: StandaloneJobClaimRequest
+    ) -> JobResponse:
+        """Record the claim and return the configured job."""
         self._client.standalone_claims.append(request)
-        return self._client.replay.model_copy(update={"status": ReplayStatus.CLAIMED})
+        return self._client.job.model_copy(update={"status": JobStatus.CLAIMED})
 
-    async def heartbeat(self, replay_id: uuid.UUID) -> ReplayHeartbeatResponse:
+    async def heartbeat(self, job_id: uuid.UUID) -> JobHeartbeatResponse:
         """Count the heartbeat and report the configured cancellation."""
         self._client.heartbeat_count += 1
-        return ReplayHeartbeatResponse(
-            status=self._client.replay.status,
+        return JobHeartbeatResponse(
+            status=self._client.job.status,
             canceled=self._client.cancel_on_heartbeat,
         )
 
@@ -287,12 +285,12 @@ class FakeExperimentRunsResource:
         self._client = client
 
     async def claim(
-        self, run_id: uuid.UUID, request: ReplayClaimRequest
-    ) -> ReplayClaimResponse:
+        self, run_id: uuid.UUID, request: JobClaimRequest
+    ) -> JobClaimResponse:
         """Record the claim and pop the next configured batch."""
         self._client.claim_requests.append(request)
         batches = self._client.claim_batches
-        return ReplayClaimResponse(replays=batches.pop(0) if batches else [])
+        return JobClaimResponse(jobs=batches.pop(0) if batches else [])
 
     async def get(self, run_id: uuid.UUID) -> ExperimentRunResponse:
         """Return the configured run."""
@@ -304,27 +302,27 @@ class FakeClient:
 
     def __init__(
         self,
-        spec: ReplaySpecResponse,
-        replay: ReplayResponse,
+        spec: JobSpecResponse,
+        job: JobResponse,
         sessions_by_id: dict[uuid.UUID, SessionResponse] | None = None,
-        claim_batches: list[list[ReplayResponse]] | None = None,
+        claim_batches: list[list[JobResponse]] | None = None,
         run: ExperimentRunResponse | None = None,
         cancel_on_heartbeat: bool = False,
     ) -> None:
         """Initialize the client."""
         self.spec = spec
-        self.replay = replay
+        self.job = job
         self.sessions_by_id = sessions_by_id or {}
         self.claim_batches = claim_batches or []
         self.run = run or make_run(ExperimentRunStatus.COMPLETED)
         self.cancel_on_heartbeat = cancel_on_heartbeat
-        self.updates: list[ReplayUpdateRequest] = []
+        self.updates: list[JobUpdateRequest] = []
         self.merged_scores: list[tuple[uuid.UUID, dict[str, float]]] = []
         self.node_requests: list[tuple[uuid.UUID, bool]] = []
-        self.claim_requests: list[ReplayClaimRequest] = []
-        self.standalone_claims: list[StandaloneReplayClaimRequest] = []
+        self.claim_requests: list[JobClaimRequest] = []
+        self.standalone_claims: list[StandaloneJobClaimRequest] = []
         self.heartbeat_count = 0
-        self.replays = FakeReplaysResource(self)
+        self.jobs = FakeReplaysResource(self)
         self.sessions = FakeSessionsResource(self)
         self.session_nodes = FakeSessionNodesResource(self)
         self.experiment_runs = FakeExperimentRunsResource(self)
@@ -353,37 +351,37 @@ def make_runner(
 async def test_success_flow_completes_and_scores_baselines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Complete a replay with scores and post missing baseline scores."""
-    replay_id = uuid.uuid4()
+    """Complete a job with scores and post missing baseline scores."""
+    job_id = uuid.uuid4()
     result_id = uuid.uuid4()
     original_id = uuid.uuid4()
     fake = FakeClient(
         spec=make_spec(
-            replay_id,
+            job_id,
             command="true",
             score_baselines=True,
             original_session_id=original_id,
         ),
-        replay=make_replay(replay_id, result_session_id=result_id),
+        job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={
             result_id: make_session(result_id),
             original_id: make_session(original_id),
         },
     )
     runner = make_runner(monkeypatch, fake, worker_id="worker-1")
-    final = await runner.run_replay(replay_id)
+    final = await runner.run_job(job_id)
 
     assert len(fake.standalone_claims) == 1
     assert fake.standalone_claims[0].worker_id == "worker-1"
     assert [update.status for update in fake.updates] == [
-        ReplayStatus.RUNNING,
-        ReplayStatus.COMPLETED,
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
     ]
     completed = fake.updates[-1]
     assert completed.passed is True
     assert completed.score == pytest.approx(0.8)
     assert completed.scores == {"quality": 0.8}
-    assert final.status is ReplayStatus.COMPLETED
+    assert final.status is JobStatus.COMPLETED
     assert fake.merged_scores == [(original_id, {"quality": 0.8})]
     assert (result_id, True) in fake.node_requests
     assert (original_id, True) in fake.node_requests
@@ -393,67 +391,67 @@ async def test_baselines_skip_present_scores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Skip baseline scoring when the original already has all scores."""
-    replay_id = uuid.uuid4()
+    job_id = uuid.uuid4()
     result_id = uuid.uuid4()
     original_id = uuid.uuid4()
     fake = FakeClient(
         spec=make_spec(
-            replay_id,
+            job_id,
             command="true",
             score_baselines=True,
             original_session_id=original_id,
         ),
-        replay=make_replay(replay_id, result_session_id=result_id),
+        job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={
             result_id: make_session(result_id),
             original_id: make_session(original_id, scores={"quality": 0.4}),
         },
     )
     runner = make_runner(monkeypatch, fake)
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
 
     assert fake.merged_scores == []
-    assert fake.updates[-1].status is ReplayStatus.COMPLETED
+    assert fake.updates[-1].status is JobStatus.COMPLETED
 
 
 async def test_nonzero_exit_fails_with_log_tail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail a replay whose agent process exits non-zero."""
-    replay_id = uuid.uuid4()
+    """Fail a job whose agent process exits non-zero."""
+    job_id = uuid.uuid4()
     fake = FakeClient(
-        spec=make_spec(replay_id, command="echo boom >&2 && exit 3"),
-        replay=make_replay(replay_id),
+        spec=make_spec(job_id, command="echo boom >&2 && exit 3"),
+        job=make_job(job_id),
     )
     runner = make_runner(monkeypatch, fake)
-    final = await runner.run_replay(replay_id)
+    final = await runner.run_job(job_id)
 
     assert [update.status for update in fake.updates] == [
-        ReplayStatus.RUNNING,
-        ReplayStatus.FAILED,
+        JobStatus.RUNNING,
+        JobStatus.FAILED,
     ]
     failed = fake.updates[-1]
     assert failed.error is not None
     assert "exited with code 3" in failed.error
     assert "boom" in failed.error
-    assert final.status is ReplayStatus.FAILED
+    assert final.status is JobStatus.FAILED
 
 
 async def test_timeout_kills_process(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Kill the agent process and time the replay out on expiry."""
-    replay_id = uuid.uuid4()
+    """Kill the agent process and time the job out on expiry."""
+    job_id = uuid.uuid4()
     fake = FakeClient(
-        spec=make_spec(replay_id, command="sleep 30", timeout_seconds=1),
-        replay=make_replay(replay_id),
+        spec=make_spec(job_id, command="sleep 30", timeout_seconds=1),
+        job=make_job(job_id),
     )
     runner = make_runner(monkeypatch, fake)
     started = time.monotonic()
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
 
     assert time.monotonic() - started < 10
     assert [update.status for update in fake.updates] == [
-        ReplayStatus.RUNNING,
-        ReplayStatus.TIMED_OUT,
+        JobStatus.RUNNING,
+        JobStatus.TIMED_OUT,
     ]
     error = fake.updates[-1].error
     assert error is not None
@@ -463,61 +461,61 @@ async def test_timeout_kills_process(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_heartbeat_cancel_kills_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Kill the agent process and cancel the replay on a canceled heartbeat."""
-    replay_id = uuid.uuid4()
+    """Kill the agent process and cancel the job on a canceled heartbeat."""
+    job_id = uuid.uuid4()
     fake = FakeClient(
-        spec=make_spec(replay_id, command="sleep 30", timeout_seconds=30),
-        replay=make_replay(replay_id),
+        spec=make_spec(job_id, command="sleep 30", timeout_seconds=30),
+        job=make_job(job_id),
         cancel_on_heartbeat=True,
     )
     runner = make_runner(monkeypatch, fake, heartbeat_interval=0.05)
     started = time.monotonic()
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
 
     assert time.monotonic() - started < 10
     assert fake.heartbeat_count >= 1
     assert [update.status for update in fake.updates] == [
-        ReplayStatus.RUNNING,
-        ReplayStatus.CANCELED,
+        JobStatus.RUNNING,
+        JobStatus.CANCELED,
     ]
 
 
 async def test_missing_result_session_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fail a replay whose agent recorded no result session."""
-    replay_id = uuid.uuid4()
+    """Fail a job whose agent recorded no result session."""
+    job_id = uuid.uuid4()
     fake = FakeClient(
-        spec=make_spec(replay_id, command="true"),
-        replay=make_replay(replay_id, result_session_id=None),
+        spec=make_spec(job_id, command="true"),
+        job=make_job(job_id, result_session_id=None),
     )
     runner = make_runner(monkeypatch, fake)
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
 
     failed = fake.updates[-1]
-    assert failed.status is ReplayStatus.FAILED
+    assert failed.status is JobStatus.FAILED
     assert failed.error is not None
     assert "without recording a result session" in failed.error
 
 
-async def test_scorer_error_fails_replay(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail a replay when a scorer raises."""
-    replay_id = uuid.uuid4()
+async def test_scorer_error_fails_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail a job when a scorer raises."""
+    job_id = uuid.uuid4()
     result_id = uuid.uuid4()
     policy = ScoringPolicy(
         scorers=[ScorerConfig(name="quality", source="test_runner:raising_scorer")],
         pass_threshold=0.5,
     )
     fake = FakeClient(
-        spec=make_spec(replay_id, command="true", scoring_policy=policy),
-        replay=make_replay(replay_id, result_session_id=result_id),
+        spec=make_spec(job_id, command="true", scoring_policy=policy),
+        job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={result_id: make_session(result_id)},
     )
     runner = make_runner(monkeypatch, fake)
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
 
     failed = fake.updates[-1]
-    assert failed.status is ReplayStatus.FAILED
+    assert failed.status is JobStatus.FAILED
     assert failed.error is not None
     assert "'quality' raised RuntimeError: boom" in failed.error
 
@@ -529,28 +527,28 @@ async def run_env_dump(
     run_env: dict[str, str] | None = None,
     secret_env: dict[str, str] | None = None,
 ) -> tuple[uuid.UUID, dict[str, str]]:
-    """Execute a replay dumping its environment to a file."""
+    """Execute a job dumping its environment to a file."""
     monkeypatch.delenv("KITARU_INPUTS", raising=False)
-    replay_id = uuid.uuid4()
+    job_id = uuid.uuid4()
     result_id = uuid.uuid4()
     out_file = tmp_path / "env.txt"
     fake = FakeClient(
         spec=make_spec(
-            replay_id,
+            job_id,
             command='env > "$KITARU_TEST_ENV_FILE"',
             inputs=inputs,
             run_env={**(run_env or {}), "KITARU_TEST_ENV_FILE": str(out_file)},
             secret_env=secret_env,
         ),
-        replay=make_replay(replay_id, result_session_id=result_id),
+        job=make_job(job_id, result_session_id=result_id),
         sessions_by_id={result_id: make_session(result_id)},
     )
     runner = make_runner(monkeypatch, fake)
-    await runner.run_replay(replay_id)
+    await runner.run_job(job_id)
     env = dict(
         line.split("=", 1) for line in out_file.read_text().splitlines() if "=" in line
     )
-    return replay_id, env
+    return job_id, env
 
 
 async def test_env_contract_and_merge_order(
@@ -558,7 +556,7 @@ async def test_env_contract_and_merge_order(
 ) -> None:
     """Layer run env over the process env, secrets over both, contract on top."""
     monkeypatch.setenv("KITARU_TEST_OS_VAR", "os")
-    replay_id, env = await run_env_dump(
+    job_id, env = await run_env_dump(
         monkeypatch,
         tmp_path,
         inputs={"question": "hi"},
@@ -569,7 +567,7 @@ async def test_env_contract_and_merge_order(
     assert env["KITARU_TEST_SHARED"] == "secret"
     assert env["KITARU_API_URL"] == "http://server"
     assert env["KITARU_API_KEY"] == "key"
-    assert env["KITARU_REPLAY_ID"] == str(replay_id)
+    assert env["KITARU_JOB_ID"] == str(job_id)
     assert json.loads(env["KITARU_INPUTS"]) == {"question": "hi"}
 
 
@@ -579,22 +577,22 @@ async def test_inputs_env_omitted_over_threshold(
     """Omit KITARU_INPUTS when the encoded inputs exceed the threshold."""
     _, env = await run_env_dump(monkeypatch, tmp_path, inputs="x" * 40_000)
     assert "KITARU_INPUTS" not in env
-    assert "KITARU_REPLAY_ID" in env
+    assert "KITARU_JOB_ID" in env
 
 
 async def test_run_experiment_run_claims_until_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Claim and execute replays until the claim drains and the run ends."""
-    replay_id = uuid.uuid4()
+    """Claim and execute jobs until the claim drains and the run ends."""
+    job_id = uuid.uuid4()
     result_id = uuid.uuid4()
     run_id = uuid.uuid4()
-    replay = make_replay(replay_id, result_session_id=result_id)
+    job = make_job(job_id, result_session_id=result_id)
     fake = FakeClient(
-        spec=make_spec(replay_id, command="true"),
-        replay=replay,
+        spec=make_spec(job_id, command="true"),
+        job=job,
         sessions_by_id={result_id: make_session(result_id)},
-        claim_batches=[[replay]],
+        claim_batches=[[job]],
         run=make_run(ExperimentRunStatus.COMPLETED),
     )
     runner = make_runner(
@@ -605,8 +603,8 @@ async def test_run_experiment_run_claims_until_terminal(
     assert final.status is ExperimentRunStatus.COMPLETED
     assert len(fake.claim_requests) == 2
     assert fake.claim_requests[0].worker_id == "worker-1"
-    assert fake.claim_requests[0].max_replays == 5
+    assert fake.claim_requests[0].max_jobs == 5
     assert [update.status for update in fake.updates] == [
-        ReplayStatus.RUNNING,
-        ReplayStatus.COMPLETED,
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
     ]

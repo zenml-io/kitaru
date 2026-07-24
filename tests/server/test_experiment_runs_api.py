@@ -124,7 +124,7 @@ async def test_list_experiment_runs_filters(client: httpx.AsyncClient) -> None:
     other = await create_run(client, other_experiment["id"])
     response = await client.post(
         f"/v1/experiment-runs/{first['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
     assert response.status_code == 200
 
@@ -201,10 +201,10 @@ async def test_list_experiment_runs_by_tag(client: httpx.AsyncClient) -> None:
     assert body["items"][0]["id"] == tagged["id"]
 
 
-async def test_list_experiment_run_replays(client: httpx.AsyncClient) -> None:
-    """List the replays of a run with their inlined config."""
+async def test_list_experiment_run_jobs(client: httpx.AsyncClient) -> None:
+    """List the jobs of a run with their inlined config."""
     created = await seed_run(client)
-    response = await client.get(f"/v1/experiment-runs/{created['id']}/replays")
+    response = await client.get(f"/v1/experiment-runs/{created['id']}/jobs")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
@@ -221,7 +221,7 @@ async def test_list_experiment_run_replays(client: httpx.AsyncClient) -> None:
         assert item["scoring_policy"] == SCORING_POLICY_RESPONSE
 
     response = await client.get(
-        f"/v1/experiment-runs/{created['id']}/replays",
+        f"/v1/experiment-runs/{created['id']}/jobs",
         params={"page": 2, "page_size": 1},
     )
     assert response.status_code == 200
@@ -230,20 +230,20 @@ async def test_list_experiment_run_replays(client: httpx.AsyncClient) -> None:
     assert len(body["items"]) == 1
 
 
-async def test_list_experiment_run_replays_by_status(
+async def test_list_experiment_run_jobs_by_status(
     client: httpx.AsyncClient,
 ) -> None:
-    """List the replays of a run filtered by status."""
+    """List the jobs of a run filtered by status."""
     created = await seed_run(client)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
     assert response.status_code == 200
-    claimed_id = response.json()["replays"][0]["id"]
+    claimed_id = response.json()["jobs"][0]["id"]
 
     response = await client.get(
-        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "claimed"}
+        f"/v1/experiment-runs/{created['id']}/jobs", params={"status": "claimed"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -251,7 +251,7 @@ async def test_list_experiment_run_replays_by_status(
     assert body["items"][0]["id"] == claimed_id
 
     response = await client.get(
-        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "pending"}
+        f"/v1/experiment-runs/{created['id']}/jobs", params={"status": "pending"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -259,69 +259,69 @@ async def test_list_experiment_run_replays_by_status(
     assert body["items"][0]["id"] != claimed_id
 
     response = await client.get(
-        f"/v1/experiment-runs/{created['id']}/replays",
+        f"/v1/experiment-runs/{created['id']}/jobs",
         params={"status": "completed"},
     )
     assert response.status_code == 200
     assert response.json()["total"] == 0
 
     response = await client.get(
-        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "bogus"}
+        f"/v1/experiment-runs/{created['id']}/jobs", params={"status": "bogus"}
     )
     assert response.status_code == 422
 
 
-async def test_list_experiment_run_replays_stale_claim_matches_pending() -> None:
-    """Match a stale claim as pending in the run replays status filter."""
+async def test_list_experiment_run_jobs_stale_claim_matches_pending() -> None:
+    """Match a stale claim as pending in the run jobs status filter."""
     transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         created = await seed_run(client, session_count=1)
         response = await client.post(
             f"/v1/experiment-runs/{created['id']}/claim",
-            json={"worker_id": "worker-1", "max_replays": 1},
+            json={"worker_id": "worker-1", "max_jobs": 1},
         )
         assert response.status_code == 200
-        replay_id = response.json()["replays"][0]["id"]
+        job_id = response.json()["jobs"][0]["id"]
 
         response = await client.get(
-            f"/v1/experiment-runs/{created['id']}/replays",
+            f"/v1/experiment-runs/{created['id']}/jobs",
             params={"status": "pending"},
         )
         assert response.status_code == 200
         body = response.json()
         assert body["total"] == 1
-        assert body["items"][0]["id"] == replay_id
+        assert body["items"][0]["id"] == job_id
         assert body["items"][0]["status"] == "pending"
 
         response = await client.get(
-            f"/v1/experiment-runs/{created['id']}/replays",
+            f"/v1/experiment-runs/{created['id']}/jobs",
             params={"status": "claimed"},
         )
         assert response.status_code == 200
         assert response.json()["total"] == 0
 
 
-async def test_list_experiment_run_replays_not_found(
+async def test_list_experiment_run_jobs_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 404 for an unknown experiment run id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/experiment-runs/{missing_id}/replays")
+    response = await client.get(f"/v1/experiment-runs/{missing_id}/jobs")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Experiment run {missing_id} was not found"}
 
 
-async def test_claim_replays(client: httpx.AsyncClient) -> None:
-    """Claim pending replays and move the run to running."""
+async def test_claim_jobs(client: httpx.AsyncClient) -> None:
+    """Claim pending jobs and move the run to running."""
     created = await seed_run(client)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
     assert response.status_code == 200
     body = response.json()
-    assert len(body["replays"]) == 1
-    claimed = body["replays"][0]
+    assert len(body["jobs"]) == 1
+    claimed = body["jobs"][0]
     assert claimed["status"] == "claimed"
     assert claimed["worker_id"] == "worker-1"
     assert claimed["claimed_at"] is not None
@@ -337,16 +337,16 @@ async def test_claim_replays(client: httpx.AsyncClient) -> None:
 
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-2", "max_replays": 5},
+        json={"worker_id": "worker-2", "max_jobs": 5},
     )
     assert response.status_code == 200
-    assert len(response.json()["replays"]) == 1
+    assert len(response.json()["jobs"]) == 1
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-2", "max_replays": 5},
+        json={"worker_id": "worker-2", "max_jobs": 5},
     )
     assert response.status_code == 200
-    assert response.json()["replays"] == []
+    assert response.json()["jobs"] == []
 
 
 async def test_claim_unknown_run(client: httpx.AsyncClient) -> None:
@@ -354,7 +354,7 @@ async def test_claim_unknown_run(client: httpx.AsyncClient) -> None:
     missing_id = uuid.uuid4()
     response = await client.post(
         f"/v1/experiment-runs/{missing_id}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
     assert response.status_code == 404
 
@@ -364,7 +364,7 @@ async def test_claim_invalid_body(client: httpx.AsyncClient) -> None:
     created = await seed_run(client)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 0},
+        json={"worker_id": "worker-1", "max_jobs": 0},
     )
     assert response.status_code == 422
 
@@ -389,38 +389,34 @@ async def test_cancel_run(client: httpx.AsyncClient) -> None:
 
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
     assert response.status_code == 200
-    assert response.json()["replays"] == []
+    assert response.json()["jobs"] == []
 
 
-async def test_cancel_run_drains_through_replay_patch(
+async def test_cancel_run_drains_through_job_patch(
     client: httpx.AsyncClient,
 ) -> None:
-    """Leave running replays to the heartbeat path and drain on patch."""
+    """Leave running jobs to the heartbeat path and drain on patch."""
     created = await seed_run(client, session_count=1)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 1},
+        json={"worker_id": "worker-1", "max_jobs": 1},
     )
-    replay_id = response.json()["replays"][0]["id"]
-    response = await client.patch(
-        f"/v1/replays/{replay_id}", json={"status": "running"}
-    )
+    job_id = response.json()["jobs"][0]["id"]
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
 
     response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
     assert response.status_code == 200
     assert response.json()["status"] == "canceling"
 
-    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
     assert response.status_code == 200
     assert response.json() == {"status": "running", "canceled": True}
 
-    response = await client.patch(
-        f"/v1/replays/{replay_id}", json={"status": "canceled"}
-    )
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "canceled"})
     assert response.status_code == 200
     assert response.json()["status"] == "canceled"
 
@@ -432,27 +428,25 @@ async def test_cancel_run_drains_through_replay_patch(
 
 
 async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
-    """Complete every replay of a run and observe the stored summary."""
+    """Complete every job of a run and observe the stored summary."""
     created = await seed_run(client, session_count=2)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 5},
+        json={"worker_id": "worker-1", "max_jobs": 5},
     )
-    replays = response.json()["replays"]
-    assert len(replays) == 2
-    for index, replay in enumerate(replays):
-        replay_id = replay["id"]
-        response = await client.patch(
-            f"/v1/replays/{replay_id}", json={"status": "running"}
-        )
+    jobs = response.json()["jobs"]
+    assert len(jobs) == 2
+    for index, job in enumerate(jobs):
+        job_id = job["id"]
+        response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
         assert response.status_code == 200
-        original = await client.get(f"/v1/sessions/{replay['original_session_id']}")
+        original = await client.get(f"/v1/sessions/{job['original_session_id']}")
         response = await client.post(
             "/v1/sessions",
             json={
                 "agent_id": original.json()["agent_id"],
                 "origin": "recorded",
-                "replay_id": replay_id,
+                "job_id": job_id,
             },
         )
         assert response.status_code == 201
@@ -463,7 +457,7 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
         )
         assert response.status_code == 200
         response = await client.patch(
-            f"/v1/replays/{replay_id}",
+            f"/v1/jobs/{job_id}",
             json={
                 "status": "completed",
                 "passed": index == 0,
@@ -485,21 +479,21 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
 
 
 async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> None:
-    """Land a run with failed and timed out replays on failed."""
+    """Land a run with failed and timed out jobs on failed."""
     created = await seed_run(client, session_count=2)
     response = await client.post(
         f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_replays": 5},
+        json={"worker_id": "worker-1", "max_jobs": 5},
     )
-    replays = response.json()["replays"]
-    assert len(replays) == 2
+    jobs = response.json()["jobs"]
+    assert len(jobs) == 2
     response = await client.patch(
-        f"/v1/replays/{replays[0]['id']}",
+        f"/v1/jobs/{jobs[0]['id']}",
         json={"status": "failed", "error": "agent exited with code 1"},
     )
     assert response.status_code == 200
     response = await client.patch(
-        f"/v1/replays/{replays[1]['id']}",
+        f"/v1/jobs/{jobs[1]['id']}",
         json={"status": "timed_out", "error": "wall clock limit exceeded"},
     )
     assert response.status_code == 200
@@ -507,7 +501,7 @@ async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> Non
     response = await client.get(f"/v1/experiment-runs/{created['id']}")
     body = response.json()
     assert body["status"] == "failed"
-    assert body["error"] == "1 of 2 replays failed, 1 timed out"
+    assert body["error"] == "1 of 2 jobs failed, 1 timed out"
     assert body["ended_at"] is not None
     assert body["summary"]["replay_counts_by_status"] == {
         "failed": 1,
@@ -517,7 +511,7 @@ async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> Non
 
 
 async def test_delete_run(client: httpx.AsyncClient) -> None:
-    """Delete a terminal run with its replays."""
+    """Delete a terminal run with its jobs."""
     created = await seed_run(client, session_count=1)
     response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
     assert response.status_code == 200
@@ -526,9 +520,7 @@ async def test_delete_run(client: httpx.AsyncClient) -> None:
     assert response.status_code == 204
     response = await client.get(f"/v1/experiment-runs/{created['id']}")
     assert response.status_code == 404
-    response = await client.get(
-        "/v1/replays", params={"experiment_run_id": created["id"]}
-    )
+    response = await client.get("/v1/jobs", params={"experiment_run_id": created["id"]})
     assert response.status_code == 200
     assert response.json()["total"] == 0
 

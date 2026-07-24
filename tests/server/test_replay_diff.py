@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import pytest
 
-from kitaru.server.domain.replay import Replay, ReplayStatus
+from kitaru.server.domain.job import Job, JobStatus
 from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.replay_diff import (
     compute_diff_summary,
@@ -90,14 +90,14 @@ def node(session_id: uuid.UUID, key: str, **overrides: object) -> SessionNode:
     return SessionNode.model_validate(values)
 
 
-def replay(**overrides: object) -> Replay:
+def replay(**overrides: object) -> Job:
     """Build a replay entity with a linked result session.
 
     Args:
         **overrides: Field overrides.
 
     Returns:
-        Replay entity.
+        Job entity.
     """
     values: dict[str, object] = {
         "replay_config_id": uuid.uuid4(),
@@ -106,7 +106,7 @@ def replay(**overrides: object) -> Replay:
         "result_session_id": uuid.uuid4(),
         **overrides,
     }
-    return Replay.model_validate(values)
+    return Job.model_validate(values)
 
 
 def test_diff_aligns_nodes_by_key_with_occurrences() -> None:
@@ -354,7 +354,7 @@ def test_run_summary_aggregates() -> None:
             experiment_run_id=run_id,
             original_session_id=originals[0].id,
             result_session_id=results[0].id,
-            status=ReplayStatus.COMPLETED,
+            status=JobStatus.COMPLETED,
             passed=True,
             score=0.8,
             scores={"conciseness": 0.8},
@@ -363,7 +363,7 @@ def test_run_summary_aggregates() -> None:
             experiment_run_id=run_id,
             original_session_id=originals[1].id,
             result_session_id=results[1].id,
-            status=ReplayStatus.COMPLETED,
+            status=JobStatus.COMPLETED,
             passed=False,
             score=0.2,
             scores={"conciseness": 0.2},
@@ -372,17 +372,17 @@ def test_run_summary_aggregates() -> None:
             experiment_run_id=run_id,
             original_session_id=originals[1].id,
             result_session_id=None,
-            status=ReplayStatus.FAILED,
+            status=JobStatus.FAILED,
         ),
         replay(
             experiment_run_id=run_id,
             result_session_id=None,
-            status=ReplayStatus.TIMED_OUT,
+            status=JobStatus.TIMED_OUT,
         ),
         replay(
             experiment_run_id=run_id,
             result_session_id=None,
-            status=ReplayStatus.CANCELED,
+            status=JobStatus.CANCELED,
         ),
     ]
     sessions = {entity.id: entity for entity in originals + results}
@@ -423,7 +423,7 @@ def test_run_summary_without_scores() -> None:
         experiment_run_id=uuid.uuid4(),
         original_session_id=original.id,
         result_session_id=None,
-        status=ReplayStatus.CANCELED,
+        status=JobStatus.CANCELED,
     )
     summary = compute_run_summary([subject], {original.id: original})
     assert summary["replay_counts_by_status"] == {"canceled": 1}

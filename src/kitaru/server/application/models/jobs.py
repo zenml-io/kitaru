@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Replay filter and command models."""
+"""Job filter and command models."""
 
 import uuid
 from datetime import datetime
@@ -19,7 +19,7 @@ from datetime import datetime
 from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
-from kitaru.server.domain.replay import ReplayStatus
+from kitaru.server.domain.job import JobStatus
 from kitaru.server.domain.replay_config import (
     ReplayOverride,
     ScoringPolicy,
@@ -27,12 +27,12 @@ from kitaru.server.domain.replay_config import (
 )
 
 
-class ReplayFilter(FrozenModel):
-    """Replay list filter."""
+class JobFilter(FrozenModel):
+    """Job list filter."""
 
     experiment_run_id: uuid.UUID | None = None
     original_session_id: uuid.UUID | None = None
-    status: ReplayStatus | None = None
+    status: JobStatus | None = None
     standalone: bool | None = None
     worker_id: str | None = None
     stale_before: datetime | None = None
@@ -51,10 +51,10 @@ class ReplayCreate(FrozenModel):
     scoring_policy: ScoringPolicy
 
 
-class ReplayUpdate(FrozenModel):
-    """Replay update command."""
+class JobUpdate(FrozenModel):
+    """Job update command."""
 
-    status: ReplayStatus
+    status: JobStatus
     error: str | None = None
     passed: bool | None = None
     score: float | None = None

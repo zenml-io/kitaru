@@ -20,7 +20,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from kitaru.api_models.v1.base import FiniteFloat, JsonValue
-from kitaru.api_models.v1.replays import ReplayStatus, ReplayUpdateRequest
+from kitaru.api_models.v1.jobs import JobStatus, JobUpdateRequest
 from kitaru.api_models.v1.session_nodes import (
     NodeStatus,
     NodeType,
@@ -120,11 +120,11 @@ def test_session_node_create_request_rejects_non_finite_outputs() -> None:
         )
 
 
-def test_replay_update_request_rejects_non_finite_score() -> None:
-    """Reject a non-finite replay score."""
+def test_job_update_request_rejects_non_finite_score() -> None:
+    """Reject a non-finite job score."""
     with pytest.raises(ValidationError):
-        ReplayUpdateRequest(
-            status=ReplayStatus.COMPLETED,
+        JobUpdateRequest(
+            status=JobStatus.COMPLETED,
             passed=True,
             score=math.nan,
             scores={"accuracy": 1.0},

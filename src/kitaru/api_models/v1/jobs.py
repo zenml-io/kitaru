@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Replay API models."""
+"""Job API models."""
 
 import uuid
 from datetime import datetime
@@ -31,8 +31,8 @@ from kitaru.api_models.v1.session_nodes import NodeType
 SOURCE_REF_PATTERN = r"^[^:\s]+:[^:\s]+$"
 
 
-class ReplayStatus(StrEnum):
-    """Replay status."""
+class JobStatus(StrEnum):
+    """Job status."""
 
     PENDING = "pending"
     CLAIMED = "claimed"
@@ -98,7 +98,7 @@ class ScorerConfig(RequestModel):
     weight: FiniteFloat = Field(default=1.0, ge=0, description="Weight in the average.")
     fail_below: FiniteFloat | None = Field(
         default=None,
-        description="Score at or below which the replay fails outright.",
+        description="Score at or below which the job fails outright.",
     )
 
 
@@ -211,17 +211,17 @@ class ReplayCreateRequest(RequestModel):
     scoring_policy: ScoringPolicy = Field(description="Scoring policy.")
 
 
-class ReplayResponse(ResponseModel):
-    """Replay response."""
+class JobResponse(ResponseModel):
+    """Job response."""
 
-    id: uuid.UUID = Field(description="Replay id.")
+    id: uuid.UUID = Field(description="Job id.")
     experiment_run_id: uuid.UUID | None = Field(
-        description="Id of the experiment run, null for standalone replays."
+        description="Id of the experiment run, null for standalone jobs."
     )
     agent_version_id: uuid.UUID = Field(description="Id of the agent version.")
     original_session_id: uuid.UUID = Field(description="Id of the replayed session.")
     result_session_id: uuid.UUID | None = Field(description="Id of the result session.")
-    status: ReplayStatus = Field(description="Replay status.")
+    status: JobStatus = Field(description="Job status.")
     attempt: int = Field(description="Attempt counter.")
     worker_id: str | None = Field(description="Id of the claiming worker.")
     claimed_at: datetime | None = Field(description="Claim time.")
@@ -244,10 +244,10 @@ class ReplayResponse(ResponseModel):
     updated: datetime = Field(description="Last modification time.")
 
 
-class ReplayUpdateRequest(RequestModel):
-    """Replay update request."""
+class JobUpdateRequest(RequestModel):
+    """Job update request."""
 
-    status: ReplayStatus = Field(description="Target status.")
+    status: JobStatus = Field(description="Target status.")
     error: str | None = Field(
         default=None, description="Error message, required for failed and timed out."
     )
@@ -262,36 +262,36 @@ class ReplayUpdateRequest(RequestModel):
     )
 
 
-class ReplayClaimRequest(RequestModel):
-    """Replay claim request."""
+class JobClaimRequest(RequestModel):
+    """Job claim request."""
 
     worker_id: str = Field(max_length=255, description="Id of the claiming worker.")
-    max_replays: int = Field(ge=1, le=100, description="Maximum replays to claim.")
+    max_jobs: int = Field(ge=1, le=100, description="Maximum jobs to claim.")
 
 
-class ReplayClaimResponse(ResponseModel):
-    """Replay claim response."""
+class JobClaimResponse(ResponseModel):
+    """Job claim response."""
 
-    replays: list[ReplayResponse] = Field(description="Claimed replays.")
+    jobs: list[JobResponse] = Field(description="Claimed jobs.")
 
 
-class StandaloneReplayClaimRequest(RequestModel):
-    """Standalone replay claim request."""
+class StandaloneJobClaimRequest(RequestModel):
+    """Standalone job claim request."""
 
     worker_id: str = Field(max_length=255, description="Id of the claiming worker.")
 
 
-class ReplayHeartbeatResponse(ResponseModel):
-    """Replay heartbeat response."""
+class JobHeartbeatResponse(ResponseModel):
+    """Job heartbeat response."""
 
-    status: ReplayStatus = Field(description="Replay status.")
+    status: JobStatus = Field(description="Job status.")
     canceled: bool = Field(
-        description="Whether the worker should stop working on the replay."
+        description="Whether the worker should stop working on the job."
     )
 
 
-class ReplaySpecRun(ResponseModel):
-    """Replay spec run command."""
+class JobSpecRun(ResponseModel):
+    """Job spec run command."""
 
     command: str = Field(description="Bash command starting the agent.")
     working_dir: str | None = Field(description="Working directory for the command.")
@@ -299,10 +299,10 @@ class ReplaySpecRun(ResponseModel):
     timeout_seconds: int = Field(description="Wall clock limit.")
 
 
-class ReplaySpecResponse(ResponseModel):
-    """Replay spec response."""
+class JobSpecResponse(ResponseModel):
+    """Job spec response."""
 
-    replay_id: uuid.UUID = Field(description="Replay id.")
+    job_id: uuid.UUID = Field(description="Job id.")
     inputs: Any = Field(
         description="Effective session inputs, with any prompt override applied."
     )
@@ -312,7 +312,7 @@ class ReplaySpecResponse(ResponseModel):
     score_baselines: bool = Field(
         description="Whether the runner also scores originals missing scores."
     )
-    run: ReplaySpecRun = Field(description="Run command of the agent version.")
+    run: JobSpecRun = Field(description="Run command of the agent version.")
     secret_env: dict[str, str] = Field(
         description="Resolved secret environment variables."
     )

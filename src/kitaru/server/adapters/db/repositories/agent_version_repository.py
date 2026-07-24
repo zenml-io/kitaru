@@ -31,8 +31,8 @@ from kitaru.server.adapters.db.schemas.agent_version import (
 from kitaru.server.adapters.db.schemas.experiment_run import (
     EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.schemas.replay import (
-    REPLAY_AGENT_VERSION_ID_FOREIGN_KEY,
+from kitaru.server.adapters.db.schemas.job import (
+    JOB_AGENT_VERSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.schemas.session import (
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
@@ -259,7 +259,7 @@ class SQLAgentVersionRepository:
         Raises:
             AgentVersionNotFound: No agent version has this id.
             AgentVersionInUse: The version is referenced by a session, an
-                experiment run, or a replay.
+                experiment run, or a job.
         """
         row = await self._session.get(AgentVersionSchema, version_id)
         if row is None:
@@ -274,6 +274,6 @@ class SQLAgentVersionRepository:
                 raise AgentVersionInUse(version_id, "sessions") from exc
             if constraint == EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY:
                 raise AgentVersionInUse(version_id, "experiment runs") from exc
-            if constraint == REPLAY_AGENT_VERSION_ID_FOREIGN_KEY:
-                raise AgentVersionInUse(version_id, "replays") from exc
+            if constraint == JOB_AGENT_VERSION_ID_FOREIGN_KEY:
+                raise AgentVersionInUse(version_id, "jobs") from exc
             raise

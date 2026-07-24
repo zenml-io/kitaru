@@ -22,8 +22,8 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeCohortRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -76,7 +76,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     cohort_repository = FakeCohortRepository(
         session_repository, agent_repository, tag_repository
     )
-    replay_repository = FakeReplayRepository(
+    job_repository = FakeJobRepository(
         session_repository, version_repository, FakeReplayConfigRepository()
     )
     agent_service = AgentService(repository=agent_repository)
@@ -85,7 +85,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
     cohort_service = CohortService(
         repository=cohort_repository,

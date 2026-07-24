@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""End-to-end test driver for the record, replay, and experiment loop."""
+"""End-to-end test driver for the record, job, and experiment loop."""
 
 import asyncio
 import os
@@ -42,14 +42,14 @@ from kitaru.api_models.v1.experiments import (  # noqa: E402
     ExperimentCreateRequest,
     ExperimentUpdateRequest,
 )
-from kitaru.api_models.v1.replays import (  # noqa: E402
+from kitaru.api_models.v1.jobs import (  # noqa: E402
     HistoryPolicy,
     HistoryScope,
-    ReplayClaimRequest,
+    JobClaimRequest,
+    JobResponse,
+    JobStatus,
     ReplayCreateRequest,
     ReplayOverride,
-    ReplayResponse,
-    ReplayStatus,
     ScorerConfig,
     ScoringPolicy,
     StaticCase,
@@ -94,7 +94,7 @@ POPULATE_RUNS: list[dict[str, str] | str] = [
 
 
 def scoring_policy() -> ScoringPolicy:
-    """Build the scoring policy shared by the experiment and standalone replay."""
+    """Build the scoring policy shared by the experiment and standalone job."""
     return ScoringPolicy(
         scorers=[
             ScorerConfig(
@@ -160,7 +160,7 @@ async def run_agent_process(env: dict[str, str], argument: str | None = None) ->
 def populate_env(api_key: str, agent_id: uuid.UUID, version_id: uuid.UUID) -> dict:
     """Build the base environment for regular agent executions."""
     env = dict(os.environ)
-    env.pop("KITARU_REPLAY_ID", None)
+    env.pop("KITARU_JOB_ID", None)
     env.pop("KITARU_INPUTS", None)
     env.pop("KITARU_SESSION_NAME", None)
     env["KITARU_API_URL"] = API_URL
@@ -239,40 +239,40 @@ def check_llm_models(nodes: list[SessionNodeResponse], expect_model: str) -> Non
 
 async def check_replay_result(
     client: KitaruAPIClient,
-    replay: ReplayResponse,
+    job: JobResponse,
     original: SessionResponse,
     expect_model: str,
     expect_calculate_policy: str,
 ) -> None:
-    """Assert a completed replay, its result session, and its node tree."""
+    """Assert a completed job, its result session, and its node tree."""
     check(
-        replay.status is ReplayStatus.COMPLETED,
-        f"replay {replay.id} is {replay.status}: {replay.error}",
+        job.status is JobStatus.COMPLETED,
+        f"job {job.id} is {job.status}: {job.error}",
     )
-    check(replay.passed is not None, "replay has no passed outcome")
-    check(replay.score is not None, "replay has no score")
+    check(job.passed is not None, "job has no passed outcome")
+    check(job.score is not None, "job has no score")
     check(
-        replay.scores is not None and set(replay.scores) == set(SCORER_NAMES),
-        f"replay scores incomplete: {replay.scores}",
+        job.scores is not None and set(job.scores) == set(SCORER_NAMES),
+        f"job scores incomplete: {job.scores}",
     )
-    check(replay.diff is not None, "replay has no diff summary")
-    assert replay.diff is not None
+    check(job.diff is not None, "job has no diff summary")
+    assert job.diff is not None
     for field in ("cost", "tokens", "tool_calls", "score_deltas"):
-        check(field in replay.diff, f"diff summary lacks {field}")
-    for side in ("original", "replay"):
+        check(field in job.diff, f"diff summary lacks {field}")
+    for side in ("original", "job"):
         check(
-            replay.diff["cost"][side] is not None and replay.diff["cost"][side] > 0,
-            f"diff summary lacks {side} cost: {replay.diff['cost']}",
+            job.diff["cost"][side] is not None and job.diff["cost"][side] > 0,
+            f"diff summary lacks {side} cost: {job.diff['cost']}",
         )
         check(
-            replay.diff["tokens"][side]["input_tokens"] is not None,
-            f"diff summary lacks {side} tokens: {replay.diff['tokens']}",
+            job.diff["tokens"][side]["input_tokens"] is not None,
+            f"diff summary lacks {side} tokens: {job.diff['tokens']}",
         )
-    check(replay.result_session_id is not None, "replay has no result session")
-    assert replay.result_session_id is not None
+    check(job.result_session_id is not None, "job has no result session")
+    assert job.result_session_id is not None
 
-    result = await client.sessions.get(replay.result_session_id)
-    check(result.origin is SessionOrigin.REPLAY, "result session origin is not replay")
+    result = await client.sessions.get(job.result_session_id)
+    check(result.origin is SessionOrigin.REPLAY, "result session origin is not job")
     nodes = await client.session_nodes.list(result.id, include_payloads=True)
     check_session_tree(result, nodes)
     check_llm_models(nodes, expect_model)
@@ -301,14 +301,14 @@ async def check_replay_result(
 
 async def check_replay_diff(
     client: KitaruAPIClient,
-    replay: ReplayResponse,
+    job: JobResponse,
     original_model: str,
     effective_model: str,
 ) -> None:
     """Assert the computed diff aligns the node trees and shows the override."""
-    diff = await client.replays.get_diff(replay.id)
-    check(diff.original_session_id == replay.original_session_id, "diff original id")
-    check(diff.result_session_id == replay.result_session_id, "diff result id")
+    diff = await client.jobs.get_diff(job.id)
+    check(diff.original_session_id == job.original_session_id, "diff original id")
+    check(diff.result_session_id == job.result_session_id, "diff result id")
     check(
         len(diff.node_pairs) == 5,
         f"expected 5 aligned node pairs, got {len(diff.node_pairs)}",
@@ -346,13 +346,13 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
     counts = run.summary["replay_counts_by_status"]
     check(
         counts == {"completed": replay_count},
-        f"unexpected replay counts {counts}",
+        f"unexpected job counts {counts}",
     )
     check(run.summary["pass_rate"] == 1.0, f"pass_rate {run.summary['pass_rate']}")
     scores = run.summary["scores"]
     check(set(scores) == set(SCORER_NAMES), f"summary scorer names {set(scores)}")
     for name in SCORER_NAMES:
-        for side in ("baseline", "replay"):
+        for side in ("baseline", "job"):
             stats = scores[name][side]
             check(
                 stats["mean"] is not None and stats["median"] is not None,
@@ -365,10 +365,10 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
     )
     check(
         total_cost["replay"] is not None and total_cost["replay"] > 0,
-        f"replay total cost {total_cost}",
+        f"job total cost {total_cost}",
     )
     total_tokens = run.summary["total_tokens"]
-    for side in ("baseline", "replay"):
+    for side in ("baseline", "job"):
         for kind in ("input_tokens", "output_tokens"):
             count = total_tokens[side][kind]
             check(
@@ -509,15 +509,15 @@ async def main() -> int:
             run.progress.pending == 4 and run.progress.total == 4,
             f"unexpected initial progress {run.progress}",
         )
-        replays_page = await client.experiment_runs.list_replays(run.id, page_size=50)
-        check(replays_page.total == 4, f"expected 4 replays, got {replays_page.total}")
-        spec = await client.replays.get_spec(replays_page.items[0].id)
+        replays_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
+        check(replays_page.total == 4, f"expected 4 jobs, got {replays_page.total}")
+        spec = await client.jobs.get_spec(replays_page.items[0].id)
         check(
             spec.secret_env == {"E2E_SECRET_TOKEN": SECRET_VALUE},
             f"secret env not resolved: {list(spec.secret_env)}",
         )
         check(spec.score_baselines is True, "spec does not carry score_baselines")
-        ok("experiment run created with 4 pending replays and resolved secret env")
+        ok("experiment run created with 4 pending jobs and resolved secret env")
 
         # Step f: execute the run with the in-process runner.
         runner = Runner(API_URL, api_key, concurrency=2)
@@ -525,19 +525,19 @@ async def main() -> int:
         check_run_summary(run, replay_count=4)
         ok("experiment run completed with an aggregate summary")
 
-        replays_page = await client.experiment_runs.list_replays(run.id, page_size=50)
+        replays_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
         sessions_by_id = {session.id: session for session in sessions}
-        for replay in replays_page.items:
-            original = sessions_by_id[replay.original_session_id]
+        for job in replays_page.items:
+            original = sessions_by_id[job.original_session_id]
             await check_replay_result(
                 client,
-                replay,
+                job,
                 original,
                 expect_model=OVERRIDE_MODEL,
                 expect_calculate_policy="static",
             )
-            await check_replay_diff(client, replay, ORIGINAL_MODEL, OVERRIDE_MODEL)
-        ok("all 4 replays completed, scored, mocked as configured, and diffed")
+            await check_replay_diff(client, job, ORIGINAL_MODEL, OVERRIDE_MODEL)
+        ok("all 4 jobs completed, scored, mocked as configured, and diffed")
 
         for session in sessions:
             refreshed = await client.sessions.get(session.id)
@@ -547,15 +547,15 @@ async def main() -> int:
             )
         ok("baseline scores written to every original session")
 
-        # Step g: standalone replay with the default tool policy.
+        # Step g: standalone job with the default tool policy.
         standalone = await client.replays.create(
             ReplayCreateRequest(
                 original_session_id=sessions[0].id,
                 scoring_policy=scoring_policy(),
             )
         )
-        check(standalone.experiment_run_id is None, "standalone replay has a run")
-        standalone = await runner.run_replay(standalone.id)
+        check(standalone.experiment_run_id is None, "standalone job has a run")
+        standalone = await runner.run_job(standalone.id)
         await check_replay_result(
             client,
             standalone,
@@ -564,7 +564,7 @@ async def main() -> int:
             expect_calculate_policy="history",
         )
         await check_replay_diff(client, standalone, ORIGINAL_MODEL, ORIGINAL_MODEL)
-        ok("standalone replay completed, scored, and diffed")
+        ok("standalone job completed, scored, and diffed")
 
         # Step h: live session run with an override.
         live_inputs = {"question": "Live run: Berlin weather and 21 * 2?"}
@@ -604,9 +604,9 @@ async def main() -> int:
         else:
             raise AssertionError("config update on a frozen experiment succeeded")
         claim = await client.experiment_runs.claim(
-            run.id, ReplayClaimRequest(worker_id="e2e-negative", max_replays=10)
+            run.id, JobClaimRequest(worker_id="e2e-negative", max_jobs=10)
         )
-        check(claim.replays == [], "claim on a completed run returned replays")
+        check(claim.jobs == [], "claim on a completed run returned jobs")
         ok("frozen experiment rejects config updates, drained run claims nothing")
 
     print("[e2e] ALL STEPS PASSED", flush=True)

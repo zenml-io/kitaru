@@ -18,8 +18,7 @@ from kitaru.api_models.v1.experiments import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
-from kitaru.server.adapters.rest.mapping.partial import set_fields
-from kitaru.server.adapters.rest.mapping.replays import (
+from kitaru.server.adapters.rest.mapping.jobs import (
     override_to_domain,
     override_to_response,
     scoring_policy_to_domain,
@@ -27,6 +26,7 @@ from kitaru.server.adapters.rest.mapping.replays import (
     tool_policy_config_to_domain,
     tool_policy_config_to_response,
 )
+from kitaru.server.adapters.rest.mapping.partial import set_fields
 from kitaru.server.application.models.experiments import (
     ExperimentCreate,
     ExperimentUpdate,

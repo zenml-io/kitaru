@@ -206,7 +206,7 @@ async def create_experiment_run(
 ) -> ExperimentRunResponse:
     """Start an experiment run.
 
-    Creates the run plus one pending replay per cohort session.
+    Creates the run plus one pending job per cohort session.
 
     Clients observe HTTP 201 on success, 404 when no experiment or agent
     version has the referenced id, 409 when no runnable agent version

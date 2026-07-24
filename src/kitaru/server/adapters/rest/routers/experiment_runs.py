@@ -23,11 +23,11 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replays import (
-    ReplayClaimRequest,
-    ReplayClaimResponse,
-    ReplayResponse,
-    ReplayStatus,
+from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobClaimResponse,
+    JobResponse,
+    JobStatus,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -37,14 +37,14 @@ from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_to_response,
     run_status_to_domain,
 )
-from kitaru.server.adapters.rest.mapping.replays import (
-    replay_status_to_domain,
-    replay_to_response,
+from kitaru.server.adapters.rest.mapping.jobs import (
+    job_status_to_domain,
+    job_to_response,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment_runs import (
     ExperimentRunFilter,
-    ExperimentRunReplaysFilter,
+    ExperimentRunJobsFilter,
 )
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -126,9 +126,9 @@ async def delete_experiment_run(
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> None:
-    """Delete a terminal experiment run, including its replays.
+    """Delete a terminal experiment run, including its jobs.
 
-    Deletes each replay's config when nothing else references it.
+    Deletes each job's config when nothing else references it.
 
     Clients observe HTTP 204 on success, 404 when no experiment run has
     this id, and 409 when the run is not terminal.
@@ -141,16 +141,16 @@ async def delete_experiment_run(
     await service.delete_run(run_id, actor=actor)
 
 
-@router.get("/{run_id}/replays")
-async def list_experiment_run_replays(
+@router.get("/{run_id}/jobs")
+async def list_experiment_run_jobs(
     run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    status: ReplayStatus | None = None,
+    status: JobStatus | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
-) -> Page[ReplayResponse]:
-    """List the replays of an experiment run.
+) -> Page[JobResponse]:
+    """List the jobs of an experiment run.
 
     Clients observe HTTP 200 on success, 404 when no experiment run has
     this id, and 422 on invalid filter or pagination parameters.
@@ -159,19 +159,19 @@ async def list_experiment_run_replays(
         run_id: Id of the experiment run.
         service: Experiment run service.
         actor: Caller context.
-        status: Filter on replay status.
+        status: Filter on job status.
         page: Page number.
         page_size: Page size.
 
     Returns:
-        Page of replays.
+        Page of jobs.
     """
-    replays_filter = ExperimentRunReplaysFilter(
-        status=replay_status_to_domain(status), page=page, page_size=page_size
+    jobs_filter = ExperimentRunJobsFilter(
+        status=job_status_to_domain(status), page=page, page_size=page_size
     )
-    replays, total = await service.list_run_replays(run_id, replays_filter, actor=actor)
-    return Page[ReplayResponse](
-        items=[replay_to_response(replay, config) for replay, config in replays],
+    jobs, total = await service.list_run_jobs(run_id, jobs_filter, actor=actor)
+    return Page[JobResponse](
+        items=[job_to_response(job, config) for job, config in jobs],
         total=total,
         page=page,
         page_size=page_size,
@@ -179,39 +179,37 @@ async def list_experiment_run_replays(
 
 
 @router.post("/{run_id}/claim")
-async def claim_replays(
+async def claim_jobs(
     run_id: uuid.UUID,
-    body: ReplayClaimRequest,
+    body: JobClaimRequest,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayClaimResponse:
-    """Atomically claim pending replays of an experiment run for a worker.
+) -> JobClaimResponse:
+    """Atomically claim pending jobs of an experiment run for a worker.
 
-    Stale claimed or running replays are requeued or timed out first. The
+    Stale claimed or running jobs are requeued or timed out first. The
     first claim moves a pending run to running. Canceling and terminal
-    runs yield no replays.
+    runs yield no jobs.
 
     Clients observe HTTP 200 on success, 404 when no experiment run has
     this id, and 422 on invalid input.
 
     Args:
         run_id: Id of the experiment run.
-        body: Replay claim request.
+        body: Job claim request.
         service: Experiment run service.
         actor: Caller context.
 
     Returns:
-        Claimed replays.
+        Claimed jobs.
     """
-    replays = await service.claim_replays(
+    jobs = await service.claim_jobs(
         run_id,
         worker_id=body.worker_id,
-        max_replays=body.max_replays,
+        max_jobs=body.max_jobs,
         actor=actor,
     )
-    return ReplayClaimResponse(
-        replays=[replay_to_response(replay, config) for replay, config in replays]
-    )
+    return JobClaimResponse(jobs=[job_to_response(job, config) for job, config in jobs])
 
 
 @router.post("/{run_id}/cancel")
@@ -222,9 +220,9 @@ async def cancel_experiment_run(
 ) -> ExperimentRunResponse:
     """Cancel an experiment run.
 
-    Pending and claimed replays are canceled immediately, running ones
+    Pending and claimed jobs are canceled immediately, running ones
     drain through the heartbeat path. The run lands on canceled right away
-    when no running replay remains.
+    when no running job remains.
 
     Clients observe HTTP 200 on success, 404 when no experiment run has
     this id, and 409 when the run is already terminal.

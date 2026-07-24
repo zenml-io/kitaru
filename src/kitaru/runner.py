@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Client-side replay runner."""
+"""Client-side job runner."""
 
 import asyncio
 import contextlib
@@ -28,14 +28,14 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replays import (
-    ReplayClaimRequest,
+from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobResponse,
+    JobSpecResponse,
+    JobStatus,
+    JobUpdateRequest,
     ReplayOverride,
-    ReplayResponse,
-    ReplaySpecResponse,
-    ReplayStatus,
-    ReplayUpdateRequest,
-    StandaloneReplayClaimRequest,
+    StandaloneJobClaimRequest,
 )
 from kitaru.api_models.v1.sessions import (
     SessionResponse,
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 10.0
 LOG_TAIL_MAX_BYTES = 8192
-# TODO: Serve this threshold from the server via the replay spec.
+# TODO: Serve this threshold from the server via the job spec.
 MAX_INPUTS_ENV_BYTES = 32768
 RUN_POLL_INTERVAL_SECONDS = 2.0
 
@@ -70,7 +70,7 @@ _TERMINAL_RUN_STATUSES = frozenset(
 # Contract variables the runner controls, cleared from the inherited
 # environment before each agent process.
 _CONTRACT_ENV_VARS = (
-    "KITARU_REPLAY_ID",
+    "KITARU_JOB_ID",
     "KITARU_INPUTS",
     "KITARU_OVERRIDE",
     "KITARU_SESSION_ID_FILE",
@@ -199,7 +199,7 @@ def _encode_inputs(inputs: Any) -> tuple[str, bool]:
 
 
 class Runner:
-    """Replay runner."""
+    """Job runner."""
 
     def __init__(
         self,
@@ -216,9 +216,9 @@ class Runner:
             api_url: Server base URL.
             api_key: API key sent as a bearer token.
             worker_id: Id of this worker, hostname and pid when omitted.
-            concurrency: Maximum number of replays executed at once.
+            concurrency: Maximum number of jobs executed at once.
             heartbeat_interval: Seconds between heartbeats.
-            claim_batch_size: Maximum replays claimed per request, the
+            claim_batch_size: Maximum jobs claimed per request, the
                 concurrency when omitted.
         """
         self._api_url = api_url
@@ -229,7 +229,7 @@ class Runner:
         self._claim_batch_size = claim_batch_size or concurrency
 
     async def run_experiment_run(self, run_id: uuid.UUID) -> ExperimentRunResponse:
-        """Execute the replays of an experiment run until it is terminal.
+        """Execute the jobs of an experiment run until it is terminal.
 
         Args:
             run_id: Id of the experiment run.
@@ -247,16 +247,16 @@ class Runner:
             while True:
                 claim = await client.experiment_runs.claim(
                     run_id,
-                    ReplayClaimRequest(
+                    JobClaimRequest(
                         worker_id=self._worker_id,
-                        max_replays=self._claim_batch_size,
+                        max_jobs=self._claim_batch_size,
                     ),
                 )
-                if claim.replays:
+                if claim.jobs:
                     await asyncio.gather(
                         *(
-                            self._execute_claimed(client, semaphore, replay.id)
-                            for replay in claim.replays
+                            self._execute_claimed(client, semaphore, job.id)
+                            for job in claim.jobs
                         )
                     )
                     continue
@@ -265,27 +265,27 @@ class Runner:
                     return run
                 await asyncio.sleep(RUN_POLL_INTERVAL_SECONDS)
 
-    async def run_replay(self, replay_id: uuid.UUID) -> ReplayResponse:
-        """Execute a standalone replay.
+    async def run_job(self, job_id: uuid.UUID) -> JobResponse:
+        """Execute a standalone job.
 
         Args:
-            replay_id: Id of the replay.
+            job_id: Id of the job.
 
         Raises:
-            APIError: The replay does not exist, the claim was rejected,
+            APIError: The job does not exist, the claim was rejected,
                 its spec does not resolve, or a status update was
                 rejected.
 
         Returns:
-            Terminal replay.
+            Terminal job.
         """
         async with KitaruAPIClient(
             base_url=self._api_url, api_key=self._api_key
         ) as client:
-            await client.replays.claim(
-                replay_id, StandaloneReplayClaimRequest(worker_id=self._worker_id)
+            await client.jobs.claim(
+                job_id, StandaloneJobClaimRequest(worker_id=self._worker_id)
             )
-            return await self._execute_replay(client, replay_id)
+            return await self._execute_job(client, job_id)
 
     async def run_session(
         self,
@@ -378,75 +378,73 @@ class Runner:
         self,
         client: KitaruAPIClient,
         semaphore: asyncio.Semaphore,
-        replay_id: uuid.UUID,
+        job_id: uuid.UUID,
     ) -> None:
-        """Execute a claimed replay within the concurrency bound.
+        """Execute a claimed job within the concurrency bound.
 
         Args:
             client: API client.
             semaphore: Concurrency bound.
-            replay_id: Id of the replay.
+            job_id: Id of the job.
         """
         async with semaphore:
             try:
-                await self._execute_replay(client, replay_id)
+                await self._execute_job(client, job_id)
             except Exception:
-                logger.exception("Replay %s failed", replay_id)
+                logger.exception("Job %s failed", job_id)
 
-    async def _execute_replay(
-        self, client: KitaruAPIClient, replay_id: uuid.UUID
-    ) -> ReplayResponse:
-        """Execute one replay from spec fetch to its terminal status.
+    async def _execute_job(
+        self, client: KitaruAPIClient, job_id: uuid.UUID
+    ) -> JobResponse:
+        """Execute one job from spec fetch to its terminal status.
 
         Args:
             client: API client.
-            replay_id: Id of the replay.
+            job_id: Id of the job.
 
         Raises:
             APIError: The spec does not resolve or a status update was
                 rejected.
 
         Returns:
-            Terminal replay.
+            Terminal job.
         """
         try:
-            spec = await client.replays.get_spec(replay_id)
+            spec = await client.jobs.get_spec(job_id)
         except APIError as exc:
             with contextlib.suppress(APIError):
                 await self._fail(
-                    client, replay_id, f"Failed to resolve the replay spec: {exc}"
+                    client, job_id, f"Failed to resolve the job spec: {exc}"
                 )
             raise
         canceled = asyncio.Event()
         heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(client, replay_id, canceled)
+            self._heartbeat_loop(client, job_id, canceled)
         )
         try:
-            await client.replays.update(
-                replay_id, ReplayUpdateRequest(status=ReplayStatus.RUNNING)
-            )
+            await client.jobs.update(job_id, JobUpdateRequest(status=JobStatus.RUNNING))
             returncode, tail = await self._run_agent_process(
                 spec.run.command,
                 spec.run.working_dir,
-                self._build_env(replay_id, spec),
+                self._build_env(job_id, spec),
                 spec.run.timeout_seconds,
                 canceled,
             )
             if returncode is not None:
                 if returncode == 0:
-                    return await self._score_and_complete(client, replay_id, spec)
+                    return await self._score_and_complete(client, job_id, spec)
                 error = f"Agent process exited with code {returncode}."
-                return await self._fail(client, replay_id, _with_tail(error, tail))
+                return await self._fail(client, job_id, _with_tail(error, tail))
             if canceled.is_set():
-                return await client.replays.update(
-                    replay_id, ReplayUpdateRequest(status=ReplayStatus.CANCELED)
+                return await client.jobs.update(
+                    job_id, JobUpdateRequest(status=JobStatus.CANCELED)
                 )
             error = _with_tail(
-                f"Replay timed out after {spec.run.timeout_seconds} seconds.", tail
+                f"Job timed out after {spec.run.timeout_seconds} seconds.", tail
             )
-            return await client.replays.update(
-                replay_id,
-                ReplayUpdateRequest(status=ReplayStatus.TIMED_OUT, error=error),
+            return await client.jobs.update(
+                job_id,
+                JobUpdateRequest(status=JobStatus.TIMED_OUT, error=error),
             )
         finally:
             heartbeat_task.cancel()
@@ -524,39 +522,39 @@ class Runner:
     async def _score_and_complete(
         self,
         client: KitaruAPIClient,
-        replay_id: uuid.UUID,
-        spec: ReplaySpecResponse,
-    ) -> ReplayResponse:
-        """Score the result session and complete the replay.
+        job_id: uuid.UUID,
+        spec: JobSpecResponse,
+    ) -> JobResponse:
+        """Score the result session and complete the job.
 
         Args:
             client: API client.
-            replay_id: Id of the replay.
-            spec: Replay spec.
+            job_id: Id of the job.
+            spec: Job spec.
 
         Raises:
             APIError: A read or status update failed.
 
         Returns:
-            Terminal replay.
+            Terminal job.
         """
-        replay = await client.replays.get(replay_id)
-        if replay.result_session_id is None:
+        job = await client.jobs.get(job_id)
+        if job.result_session_id is None:
             return await self._fail(
                 client,
-                replay_id,
+                job_id,
                 "Agent process exited successfully without recording a result session.",
             )
-        result_session = await client.sessions.get(replay.result_session_id)
+        result_session = await client.sessions.get(job.result_session_id)
         if result_session.status is not SessionStatus.COMPLETED:
             return await self._fail(
                 client,
-                replay_id,
+                job_id,
                 f"Result session {result_session.id} is {result_session.status}, "
                 "not completed.",
             )
         nodes = await client.session_nodes.list(
-            replay.result_session_id, include_payloads=True
+            job.result_session_id, include_payloads=True
         )
         view = SessionView(session=result_session, nodes=nodes)
         try:
@@ -564,11 +562,11 @@ class Runner:
             if spec.score_baselines:
                 await self._score_baselines(client, spec)
         except ScoringError as exc:
-            return await self._fail(client, replay_id, str(exc))
-        return await client.replays.update(
-            replay_id,
-            ReplayUpdateRequest(
-                status=ReplayStatus.COMPLETED,
+            return await self._fail(client, job_id, str(exc))
+        return await client.jobs.update(
+            job_id,
+            JobUpdateRequest(
+                status=JobStatus.COMPLETED,
                 passed=result.passed,
                 score=result.score,
                 scores=result.scores,
@@ -576,13 +574,13 @@ class Runner:
         )
 
     async def _score_baselines(
-        self, client: KitaruAPIClient, spec: ReplaySpecResponse
+        self, client: KitaruAPIClient, spec: JobSpecResponse
     ) -> None:
         """Score the original session for scorers missing from its scores map.
 
         Args:
             client: API client.
-            spec: Replay spec.
+            spec: Job spec.
 
         Raises:
             ScoringError: A scorer failed to load, raised, or returned an
@@ -606,46 +604,46 @@ class Runner:
     async def _heartbeat_loop(
         self,
         client: KitaruAPIClient,
-        replay_id: uuid.UUID,
+        job_id: uuid.UUID,
         canceled: asyncio.Event,
     ) -> None:
-        """Send heartbeats until the replay is canceled server-side.
+        """Send heartbeats until the job is canceled server-side.
 
         Args:
             client: API client.
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             canceled: Event set when the server reports cancellation.
         """
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             try:
-                response = await client.replays.heartbeat(replay_id)
+                response = await client.jobs.heartbeat(job_id)
             except APIError as exc:
-                logger.warning("Heartbeat for replay %s failed: %s", replay_id, exc)
+                logger.warning("Heartbeat for job %s failed: %s", job_id, exc)
                 continue
             if response.canceled:
                 canceled.set()
                 return
 
     async def _fail(
-        self, client: KitaruAPIClient, replay_id: uuid.UUID, error: str
-    ) -> ReplayResponse:
-        """Fail the replay with an error message.
+        self, client: KitaruAPIClient, job_id: uuid.UUID, error: str
+    ) -> JobResponse:
+        """Fail the job with an error message.
 
         Args:
             client: API client.
-            replay_id: Id of the replay.
+            job_id: Id of the job.
             error: Error message.
 
         Raises:
             APIError: The status update was rejected.
 
         Returns:
-            Failed replay.
+            Failed job.
         """
-        return await client.replays.update(
-            replay_id,
-            ReplayUpdateRequest(status=ReplayStatus.FAILED, error=error),
+        return await client.jobs.update(
+            job_id,
+            JobUpdateRequest(status=JobStatus.FAILED, error=error),
         )
 
     def _agent_env(
@@ -673,23 +671,21 @@ class Runner:
         env["KITARU_API_KEY"] = self._api_key
         return env
 
-    def _build_env(
-        self, replay_id: uuid.UUID, spec: ReplaySpecResponse
-    ) -> dict[str, str]:
-        """Build the replay agent process environment.
+    def _build_env(self, job_id: uuid.UUID, spec: JobSpecResponse) -> dict[str, str]:
+        """Build the job agent process environment.
 
         ``KITARU_INPUTS`` is set only when the JSON-encoded inputs fit the
         threshold.
 
         Args:
-            replay_id: Id of the replay.
-            spec: Replay spec.
+            job_id: Id of the job.
+            spec: Job spec.
 
         Returns:
             Environment variables for the agent process.
         """
         env = self._agent_env(spec.run.env, spec.secret_env)
-        env["KITARU_REPLAY_ID"] = str(replay_id)
+        env["KITARU_JOB_ID"] = str(job_id)
         encoded_inputs, fits = _encode_inputs(spec.inputs)
         if fits:
             env["KITARU_INPUTS"] = encoded_inputs

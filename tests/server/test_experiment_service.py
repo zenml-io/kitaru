@@ -23,8 +23,8 @@ from conftest import (
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
 )
@@ -34,7 +34,7 @@ from kitaru.server.application.models.experiments import (
     ExperimentFilter,
     ExperimentUpdate,
 )
-from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
@@ -61,7 +61,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.replay import ReplayStatus
+from kitaru.server.domain.job import JobStatus
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     PassthroughPolicy,
@@ -147,25 +147,23 @@ def repository(
 
 
 @pytest.fixture
-def replay_repository(
+def job_repository(
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
-) -> FakeReplayRepository:
-    """Provide a fake replay repository."""
-    return FakeReplayRepository(
-        session_repository, version_repository, config_repository
-    )
+) -> FakeJobRepository:
+    """Provide a fake job repository."""
+    return FakeJobRepository(session_repository, version_repository, config_repository)
 
 
 @pytest.fixture
 def run_repository(
     repository: FakeExperimentRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     tag_repository: FakeTagRepository,
 ) -> FakeExperimentRunRepository:
     """Provide a fake experiment run repository."""
-    return FakeExperimentRunRepository(repository, replay_repository, tag_repository)
+    return FakeExperimentRunRepository(repository, job_repository, tag_repository)
 
 
 @pytest.fixture
@@ -696,15 +694,15 @@ async def test_delete_experiment_with_runs(
         await service.delete_experiment(created.id, actor=ACTOR)
 
 
-async def test_start_run_fans_out_replays(
+async def test_start_run_fans_out_jobs(
     service: ExperimentService,
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
-    """Create one pending replay per cohort session with the stamped config."""
+    """Create one pending job per cohort session with the stamped config."""
     cohort, sessions = await create_cohort(
         cohort_repository, session_repository, agent.id, session_count=3
     )
@@ -725,18 +723,16 @@ async def test_start_run_fans_out_replays(
     assert progress.pending == 3
     assert progress.total == 3
 
-    replays, total = await replay_repository.query(
-        ReplayFilter(experiment_run_id=run.id)
-    )
+    jobs, total = await job_repository.query(JobFilter(experiment_run_id=run.id))
     assert total == 3
-    assert {replay.original_session_id for replay in replays} == {
+    assert {job.original_session_id for job in jobs} == {
         session.id for session in sessions
     }
-    for replay in replays:
-        assert replay.status is ReplayStatus.PENDING
-        assert replay.attempt == 1
-        assert replay.replay_config_id == config.id
-        assert replay.agent_version_id == version.id
+    for job in jobs:
+        assert job.status is JobStatus.PENDING
+        assert job.attempt == 1
+        assert job.replay_config_id == config.id
+        assert job.agent_version_id == version.id
 
 
 async def test_start_run_increments_number(

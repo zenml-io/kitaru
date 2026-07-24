@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Contract tests for replay repositories."""
+"""Contract tests for job repositories."""
 
 import uuid
 from collections.abc import AsyncGenerator
@@ -22,8 +22,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSessionRepository,
     pg_session,
     postgres_available,
@@ -37,11 +37,11 @@ from kitaru.server.adapters.db.repositories.agent_repository import (
 from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
+from kitaru.server.adapters.db.repositories.job_repository import (
+    SQLJobRepository,
+)
 from kitaru.server.adapters.db.repositories.replay_config_repository import (
     SQLReplayConfigRepository,
-)
-from kitaru.server.adapters.db.repositories.replay_repository import (
-    SQLReplayRepository,
 )
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
@@ -50,16 +50,16 @@ from kitaru.server.application.interfaces.agent_repository import AgentRepositor
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.job_repository import (
+    JobRepository,
+)
 from kitaru.server.application.interfaces.replay_config_repository import (
     ReplayConfigRepository,
-)
-from kitaru.server.application.interfaces.replay_repository import (
-    ReplayRepository,
 )
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
-from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import (
@@ -68,7 +68,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
-from kitaru.server.domain.replay import Replay, ReplayNotFound, ReplayStatus
+from kitaru.server.domain.job import Job, JobNotFound, JobStatus
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
@@ -99,9 +99,9 @@ SCORING_POLICY = ScoringPolicy(
 
 
 class Setup(NamedTuple):
-    """Repository bundle for replay contract tests."""
+    """Repository bundle for job contract tests."""
 
-    replays: ReplayRepository
+    jobs: JobRepository
     configs: ReplayConfigRepository
     sessions: SessionRepository
     versions: AgentVersionRepository
@@ -110,7 +110,7 @@ class Setup(NamedTuple):
 
 
 class Seed(NamedTuple):
-    """Seeded rows for replay contract tests."""
+    """Seeded rows for job contract tests."""
 
     session: Session
     version: AgentVersion
@@ -119,14 +119,14 @@ class Seed(NamedTuple):
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each replay repository implementation plus an owner id."""
+    """Provide each job repository implementation plus an owner id."""
     if request.param == "fake":
         agents = FakeAgentRepository()
         versions = FakeAgentVersionRepository(agents)
         sessions = FakeSessionRepository(agents, versions)
         configs = FakeReplayConfigRepository()
-        replays = FakeReplayRepository(sessions, versions, configs)
-        yield Setup(replays, configs, sessions, versions, agents, uuid.uuid4())
+        jobs = FakeJobRepository(sessions, versions, configs)
+        yield Setup(jobs, configs, sessions, versions, agents, uuid.uuid4())
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -136,7 +136,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         yield Setup(
-            SQLReplayRepository(session),
+            SQLJobRepository(session),
             SQLReplayConfigRepository(session),
             SQLSessionRepository(session),
             SQLAgentVersionRepository(session),
@@ -182,15 +182,15 @@ async def seed_rows(setup: Setup, name: str = "support-bot") -> Seed:
     return Seed(session, version, config)
 
 
-def replay_entity(seed: Seed, **overrides: object) -> Replay:
-    """Build a standalone replay entity.
+def job_entity(seed: Seed, **overrides: object) -> Job:
+    """Build a standalone job entity.
 
     Args:
         seed: Seeded rows.
         **overrides: Field overrides.
 
     Returns:
-        Replay entity.
+        Job entity.
     """
     values: dict[str, object] = {
         "replay_config_id": seed.config.id,
@@ -198,23 +198,23 @@ def replay_entity(seed: Seed, **overrides: object) -> Replay:
         "original_session_id": seed.session.id,
         **overrides,
     }
-    return Replay.model_validate(values)
+    return Job.model_validate(values)
 
 
 async def test_create_round_trips_all_fields(setup: Setup) -> None:
-    """Store a replay and round-trip every field."""
+    """Store a job and round-trip every field."""
     seed = await seed_rows(setup)
-    created = await setup.replays.create(replay_entity(seed))
+    created = await setup.jobs.create(job_entity(seed))
     assert created.created is not None
     assert created.updated is not None
-    loaded = await setup.replays.get(created.id)
+    loaded = await setup.jobs.get(created.id)
     assert loaded == created
     assert loaded.experiment_run_id is None
     assert loaded.replay_config_id == seed.config.id
     assert loaded.agent_version_id == seed.version.id
     assert loaded.original_session_id == seed.session.id
     assert loaded.result_session_id is None
-    assert loaded.status is ReplayStatus.PENDING
+    assert loaded.status is JobStatus.PENDING
     assert loaded.attempt == 1
     assert loaded.passed is None
     assert loaded.score is None
@@ -229,84 +229,76 @@ async def test_create_unknown_references(setup: Setup) -> None:
     with pytest.raises(
         ReplayConfigNotFound, match=f"Replay config {missing_id} was not found"
     ):
-        await setup.replays.create(replay_entity(seed, replay_config_id=missing_id))
+        await setup.jobs.create(job_entity(seed, replay_config_id=missing_id))
     with pytest.raises(
         AgentVersionNotFound, match=f"Agent version {missing_id} was not found"
     ):
-        await setup.replays.create(replay_entity(seed, agent_version_id=missing_id))
+        await setup.jobs.create(job_entity(seed, agent_version_id=missing_id))
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
-        await setup.replays.create(replay_entity(seed, original_session_id=missing_id))
+        await setup.jobs.create(job_entity(seed, original_session_id=missing_id))
 
 
-async def test_standalone_replays_repeat_freely(setup: Setup) -> None:
+async def test_standalone_jobs_repeat_freely(setup: Setup) -> None:
     """Replay the same session standalone any number of times."""
     seed = await seed_rows(setup)
-    first = await setup.replays.create(replay_entity(seed))
-    second = await setup.replays.create(replay_entity(seed))
+    first = await setup.jobs.create(job_entity(seed))
+    second = await setup.jobs.create(job_entity(seed))
     assert first.original_session_id == second.original_session_id
-    _, total = await setup.replays.query(
-        ReplayFilter(original_session_id=seed.session.id)
-    )
+    _, total = await setup.jobs.query(JobFilter(original_session_id=seed.session.id))
     assert total == 2
 
 
 async def test_get_not_found(setup: Setup) -> None:
-    """Raise for an unknown replay id."""
+    """Raise for an unknown job id."""
     missing_id = uuid.uuid4()
-    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
-        await setup.replays.get(missing_id)
+    with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
+        await setup.jobs.get(missing_id)
 
 
 async def test_query_filters(setup: Setup) -> None:
-    """Query replays by session, status, and standalone."""
+    """Query jobs by session, status, and standalone."""
     seed = await seed_rows(setup)
     other_seed = await seed_rows(setup, name="triage-bot")
-    first = await setup.replays.create(replay_entity(seed))
-    await setup.replays.create(replay_entity(other_seed))
+    first = await setup.jobs.create(job_entity(seed))
+    await setup.jobs.create(job_entity(other_seed))
 
-    replays, total = await setup.replays.query(ReplayFilter())
+    jobs, total = await setup.jobs.query(JobFilter())
     assert total == 2
 
-    replays, total = await setup.replays.query(
-        ReplayFilter(original_session_id=seed.session.id)
-    )
+    jobs, total = await setup.jobs.query(JobFilter(original_session_id=seed.session.id))
     assert total == 1
-    assert replays[0].id == first.id
+    assert jobs[0].id == first.id
 
-    replays, total = await setup.replays.query(
-        ReplayFilter(status=ReplayStatus.PENDING)
-    )
+    jobs, total = await setup.jobs.query(JobFilter(status=JobStatus.PENDING))
     assert total == 2
-    replays, total = await setup.replays.query(
-        ReplayFilter(status=ReplayStatus.RUNNING)
-    )
+    jobs, total = await setup.jobs.query(JobFilter(status=JobStatus.RUNNING))
     assert total == 0
 
-    replays, total = await setup.replays.query(ReplayFilter(standalone=True))
+    jobs, total = await setup.jobs.query(JobFilter(standalone=True))
     assert total == 2
-    replays, total = await setup.replays.query(ReplayFilter(standalone=False))
+    jobs, total = await setup.jobs.query(JobFilter(standalone=False))
     assert total == 0
 
-    replays, total = await setup.replays.query(ReplayFilter(page=2, page_size=1))
+    jobs, total = await setup.jobs.query(JobFilter(page=2, page_size=1))
     assert total == 2
-    assert len(replays) == 1
+    assert len(jobs) == 1
 
 
 async def test_references_agent_version(setup: Setup) -> None:
-    """Report whether a replay references an agent version."""
+    """Report whether a job references an agent version."""
     seed = await seed_rows(setup)
-    assert await setup.replays.references_agent_version(seed.version.id) is False
-    await setup.replays.create(replay_entity(seed))
-    assert await setup.replays.references_agent_version(seed.version.id) is True
-    assert await setup.replays.references_agent_version(uuid.uuid4()) is False
+    assert await setup.jobs.references_agent_version(seed.version.id) is False
+    await setup.jobs.create(job_entity(seed))
+    assert await setup.jobs.references_agent_version(seed.version.id) is True
+    assert await setup.jobs.references_agent_version(uuid.uuid4()) is False
 
 
-async def test_session_delete_blocked_by_replay(setup: Setup) -> None:
-    """Block deleting a session that a replay references."""
+async def test_session_delete_blocked_by_job(setup: Setup) -> None:
+    """Block deleting a session that a job references."""
     seed = await seed_rows(setup)
-    await setup.replays.create(replay_entity(seed))
+    await setup.jobs.create(job_entity(seed))
     with pytest.raises(
-        SessionInUse, match=f"Session {seed.session.id} is referenced by replays"
+        SessionInUse, match=f"Session {seed.session.id} is referenced by jobs"
     ):
         await setup.sessions.delete(seed.session.id)
     # The failed delete leaves the repository usable.
@@ -314,8 +306,8 @@ async def test_session_delete_blocked_by_replay(setup: Setup) -> None:
     assert loaded.id == seed.session.id
 
 
-async def test_result_session_delete_blocked_by_replay(setup: Setup) -> None:
-    """Block deleting a session that a replay links as its result."""
+async def test_result_session_delete_blocked_by_job(setup: Setup) -> None:
+    """Block deleting a session that a job links as its result."""
     seed = await seed_rows(setup)
     result = await setup.sessions.create(
         Session(
@@ -325,54 +317,54 @@ async def test_result_session_delete_blocked_by_replay(setup: Setup) -> None:
             status=SessionStatus.COMPLETED,
         )
     )
-    await setup.replays.create(replay_entity(seed, result_session_id=result.id))
+    await setup.jobs.create(job_entity(seed, result_session_id=result.id))
     with pytest.raises(
-        SessionInUse, match=f"Session {result.id} is referenced by replays"
+        SessionInUse, match=f"Session {result.id} is referenced by jobs"
     ):
         await setup.sessions.delete(result.id)
 
 
-async def test_agent_version_delete_blocked_by_replay(setup: Setup) -> None:
-    """Block deleting an agent version that a replay references."""
+async def test_agent_version_delete_blocked_by_job(setup: Setup) -> None:
+    """Block deleting an agent version that a job references."""
     seed = await seed_rows(setup)
-    await setup.replays.create(replay_entity(seed))
+    await setup.jobs.create(job_entity(seed))
     with pytest.raises(
         AgentVersionInUse,
-        match=f"Agent version {seed.version.id} is referenced by replays",
+        match=f"Agent version {seed.version.id} is referenced by jobs",
     ):
         await setup.versions.delete(seed.version.id)
 
 
-async def test_config_delete_if_unreferenced_by_replay(setup: Setup) -> None:
-    """Keep a config row while a replay references it."""
+async def test_config_delete_if_unreferenced_by_job(setup: Setup) -> None:
+    """Keep a config row while a job references it."""
     seed = await seed_rows(setup)
-    await setup.replays.create(replay_entity(seed))
+    await setup.jobs.create(job_entity(seed))
     assert await setup.configs.delete_if_unreferenced(seed.config.id) is False
     loaded = await setup.configs.get(seed.config.id)
     assert loaded.id == seed.config.id
 
 
-async def test_delete_removes_replay(setup: Setup) -> None:
-    """Delete a replay and free its config for deletion."""
+async def test_delete_removes_job(setup: Setup) -> None:
+    """Delete a job and free its config for deletion."""
     seed = await seed_rows(setup)
-    created = await setup.replays.create(replay_entity(seed))
-    await setup.replays.delete(created.id)
-    with pytest.raises(ReplayNotFound, match=f"Replay {created.id} was not found"):
-        await setup.replays.get(created.id)
+    created = await setup.jobs.create(job_entity(seed))
+    await setup.jobs.delete(created.id)
+    with pytest.raises(JobNotFound, match=f"Job {created.id} was not found"):
+        await setup.jobs.get(created.id)
     assert await setup.configs.delete_if_unreferenced(seed.config.id) is True
 
 
 async def test_delete_not_found(setup: Setup) -> None:
-    """Raise for an unknown replay id."""
+    """Raise for an unknown job id."""
     missing_id = uuid.uuid4()
-    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
-        await setup.replays.delete(missing_id)
+    with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
+        await setup.jobs.delete(missing_id)
 
 
 async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     """Persist runner-side field changes and renew the updated timestamp."""
     seed = await seed_rows(setup)
-    created = await setup.replays.create(replay_entity(seed))
+    created = await setup.jobs.create(job_entity(seed))
     result = await setup.sessions.create(
         Session(
             owner_id=setup.owner_id,
@@ -387,8 +379,8 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
         ScoringResult(passed=True, score=0.8, scores={"conciseness": 0.8}),
         diff={"cost_delta": -0.1},
     )
-    updated = await setup.replays.update(created)
-    assert updated.status is ReplayStatus.COMPLETED
+    updated = await setup.jobs.update(created)
+    assert updated.status is JobStatus.COMPLETED
     assert updated.result_session_id == result.id
     assert updated.started_at is not None
     assert updated.ended_at is not None
@@ -399,26 +391,26 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
-    loaded = await setup.replays.get(created.id)
+    loaded = await setup.jobs.get(created.id)
     assert loaded == updated
 
 
 async def test_update_not_found(setup: Setup) -> None:
-    """Raise for an unknown replay id."""
+    """Raise for an unknown job id."""
     seed = await seed_rows(setup)
-    with pytest.raises(ReplayNotFound):
-        await setup.replays.update(replay_entity(seed))
+    with pytest.raises(JobNotFound):
+        await setup.jobs.update(job_entity(seed))
 
 
 async def test_update_unknown_result_session(setup: Setup) -> None:
     """Raise for a result session id that does not resolve."""
     seed = await seed_rows(setup)
-    created = await setup.replays.create(replay_entity(seed))
+    created = await setup.jobs.create(job_entity(seed))
     missing_id = uuid.uuid4()
     created.start()
     created.link_result_session(missing_id)
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
-        await setup.replays.update(created)
+        await setup.jobs.update(created)
     # The failed update leaves the repository usable.
-    loaded = await setup.replays.get(created.id)
+    loaded = await setup.jobs.get(created.id)
     assert loaded.result_session_id is None

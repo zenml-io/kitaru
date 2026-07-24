@@ -102,6 +102,6 @@ class AgentVersionRepository(Protocol):
         Raises:
             AgentVersionNotFound: No agent version has this id.
             AgentVersionInUse: The version is referenced by a session, an
-                experiment run, or a replay.
+                experiment run, or a job.
         """
         ...

@@ -43,7 +43,7 @@ PUBLIC_MODULES = ["kitaru"]
 
 # Submodules to exclude from the reference even if they appear in a
 # public module's tree. These have their own docs or are not public.
-EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime", "replay_context"}
+EXCLUDED_SUBMODULES = {"cli", "adapters", "runtime", "job_context"}
 
 # Symbols that may still exist for compatibility or implementation reuse, but
 # should not be taught as current public reference entries.

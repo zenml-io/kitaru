@@ -26,9 +26,9 @@ from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.schemas.cohort import (
     COHORT_SESSION_SESSION_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.schemas.replay import (
-    REPLAY_ORIGINAL_SESSION_ID_FOREIGN_KEY,
-    REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
+from kitaru.server.adapters.db.schemas.job import (
+    JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY,
+    JOB_RESULT_SESSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.schemas.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
@@ -302,7 +302,7 @@ class SQLSessionRepository:
         Raises:
             SessionNotFound: No session has this id.
             SessionInUse: The session is a member of a cohort or referenced
-                by a replay.
+                by a job.
         """
         row = await self._session.get(SessionSchema, session_id)
         if row is None:
@@ -323,8 +323,8 @@ class SQLSessionRepository:
             if constraint == COHORT_SESSION_SESSION_ID_FOREIGN_KEY:
                 raise SessionInUse(session_id, "cohorts") from exc
             if constraint in (
-                REPLAY_ORIGINAL_SESSION_ID_FOREIGN_KEY,
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
+                JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY,
+                JOB_RESULT_SESSION_ID_FOREIGN_KEY,
             ):
-                raise SessionInUse(session_id, "replays") from exc
+                raise SessionInUse(session_id, "jobs") from exc
             raise

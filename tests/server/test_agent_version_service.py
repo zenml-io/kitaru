@@ -20,8 +20,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSecretRepository,
     FakeSessionRepository,
     create_secret,
@@ -45,7 +45,7 @@ from kitaru.server.domain.agent_version import (
     InvalidAgentVersion,
     RunSpec,
 )
-from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
@@ -101,13 +101,13 @@ def config_repository() -> FakeReplayConfigRepository:
 
 
 @pytest.fixture
-def replay_repository(
+def job_repository(
     session_repository: FakeSessionRepository,
     repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
-) -> FakeReplayRepository:
-    """Provide a fake replay repository."""
-    return FakeReplayRepository(session_repository, repository, config_repository)
+) -> FakeJobRepository:
+    """Provide a fake job repository."""
+    return FakeJobRepository(session_repository, repository, config_repository)
 
 
 @pytest.fixture
@@ -115,14 +115,14 @@ def service(
     repository: FakeAgentVersionRepository,
     agent_repository: FakeAgentRepository,
     secret_repository: FakeSecretRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
 ) -> AgentVersionService:
     """Provide an agent version service backed by the fake repositories."""
     return AgentVersionService(
         repository=repository,
         agent_repository=agent_repository,
         secret_repository=secret_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
 
 
@@ -517,16 +517,16 @@ async def test_delete_version_not_found(service: AgentVersionService) -> None:
 async def freeze_version(
     service: AgentVersionService,
     session_repository: FakeSessionRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     agent: Agent,
 ) -> uuid.UUID:
-    """Store a runnable version referenced by a replay.
+    """Store a runnable version referenced by a job.
 
     Args:
         service: Agent version service.
         session_repository: Fake session repository.
-        replay_repository: Fake replay repository.
+        job_repository: Fake job repository.
         config_repository: Fake replay config repository.
         agent: Stored agent.
 
@@ -566,8 +566,8 @@ async def freeze_version(
             ),
         )
     )
-    await replay_repository.create(
-        Replay(
+    await job_repository.create(
+        Job(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=session.id,
@@ -576,18 +576,18 @@ async def freeze_version(
     return version.id
 
 
-async def test_update_version_frozen_by_replay(
+async def test_update_version_frozen_by_job(
     service: AgentVersionService,
     session_repository: FakeSessionRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     agent: Agent,
 ) -> None:
     """Reject run spec and capability changes on a replayed version."""
     version_id = await freeze_version(
-        service, session_repository, replay_repository, config_repository, agent
+        service, session_repository, job_repository, config_repository, agent
     )
-    frozen_message = f"Agent version {version_id} is frozen by existing replays"
+    frozen_message = f"Agent version {version_id} is frozen by existing jobs"
     with pytest.raises(AgentVersionFrozen, match=frozen_message):
         await service.update_version(
             version_id,
@@ -612,19 +612,19 @@ async def test_update_version_frozen_by_replay(
     assert updated.description == "Still editable"
 
 
-async def test_delete_version_referenced_by_replay(
+async def test_delete_version_referenced_by_job(
     service: AgentVersionService,
     session_repository: FakeSessionRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     agent: Agent,
 ) -> None:
-    """Reject deleting a version that a replay references."""
+    """Reject deleting a version that a job references."""
     version_id = await freeze_version(
-        service, session_repository, replay_repository, config_repository, agent
+        service, session_repository, job_repository, config_repository, agent
     )
     with pytest.raises(
         AgentVersionInUse,
-        match=f"Agent version {version_id} is referenced by replays",
+        match=f"Agent version {version_id} is referenced by jobs",
     ):
         await service.delete_version(version_id, actor=ACTOR)

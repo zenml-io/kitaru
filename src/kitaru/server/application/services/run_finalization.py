@@ -18,82 +18,80 @@ import uuid
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
-from kitaru.server.application.interfaces.replay_repository import (
-    ReplayRepository,
+from kitaru.server.application.interfaces.job_repository import (
+    JobRepository,
 )
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
-from kitaru.server.application.models.replays import ReplayFilter
+from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.experiment_run import TERMINAL_RUN_STATUSES
-from kitaru.server.domain.replay import TERMINAL_REPLAY_STATUSES, Replay
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job
 from kitaru.server.domain.replay_diff import compute_run_summary
 from kitaru.server.domain.session import Session
 
-# Page size for resolving every replay of an experiment run.
-_REPLAY_RESOLUTION_PAGE_SIZE = 1000
+# Page size for resolving every job of an experiment run.
+_JOB_RESOLUTION_PAGE_SIZE = 1000
 
 
-async def load_run_replays(
-    replay_repository: ReplayRepository, run_id: uuid.UUID
-) -> list[Replay]:
-    """Load every replay of an experiment run across all pages.
+async def load_run_jobs(job_repository: JobRepository, run_id: uuid.UUID) -> list[Job]:
+    """Load every job of an experiment run across all pages.
 
     Args:
-        replay_repository: Replay repository.
+        job_repository: Job repository.
         run_id: Id of the experiment run.
 
     Returns:
-        Replays of the run.
+        Jobs of the run.
     """
-    replays: list[Replay] = []
+    jobs: list[Job] = []
     page = 1
     while True:
-        batch, total = await replay_repository.query(
-            ReplayFilter(
+        batch, total = await job_repository.query(
+            JobFilter(
                 experiment_run_id=run_id,
                 page=page,
-                page_size=_REPLAY_RESOLUTION_PAGE_SIZE,
+                page_size=_JOB_RESOLUTION_PAGE_SIZE,
             )
         )
-        replays.extend(batch)
-        if len(replays) >= total or not batch:
-            return replays
+        jobs.extend(batch)
+        if len(jobs) >= total or not batch:
+            return jobs
         page += 1
 
 
 async def finalize_run_if_drained(
     run_repository: ExperimentRunRepository,
-    replay_repository: ReplayRepository,
+    job_repository: JobRepository,
     session_repository: SessionRepository,
     run_id: uuid.UUID,
 ) -> None:
-    """Finalize an experiment run once its last replay went terminal.
+    """Finalize an experiment run once its last job went terminal.
 
     A canceling run lands on canceled, a run with failed or timed out
-    replays on failed, any other run on completed, with the aggregate
-    summary computed from the replays and their sessions. Runs with
-    non-terminal replays stay untouched.
+    jobs on failed, any other run on completed, with the aggregate
+    summary computed from the jobs and their sessions. Runs with
+    non-terminal jobs stay untouched.
 
     Args:
         run_repository: Experiment run repository.
-        replay_repository: Replay repository.
+        job_repository: Job repository.
         session_repository: Session repository.
         run_id: Id of the experiment run.
     """
     run = await run_repository.get(run_id)
     if run.status in TERMINAL_RUN_STATUSES:
         return
-    replays = await load_run_replays(replay_repository, run_id)
-    if any(replay.status not in TERMINAL_REPLAY_STATUSES for replay in replays):
+    jobs = await load_run_jobs(job_repository, run_id)
+    if any(job.status not in TERMINAL_JOB_STATUSES for job in jobs):
         return
     sessions: dict[uuid.UUID, Session] = {}
-    for replay in replays:
-        for session_id in (replay.original_session_id, replay.result_session_id):
+    for job in jobs:
+        for session_id in (job.original_session_id, job.result_session_id):
             if session_id is not None and session_id not in sessions:
                 sessions[session_id] = await session_repository.get(session_id)
     run.finalize(
-        compute_run_summary(replays, sessions),
-        [replay.status for replay in replays],
+        compute_run_summary(jobs, sessions),
+        [job.status for job in jobs],
     )
     await run_repository.update(run)

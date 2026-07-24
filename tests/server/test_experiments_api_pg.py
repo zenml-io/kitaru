@@ -117,7 +117,7 @@ async def test_experiment_flow_persists_across_requests(
     )
     assert response.status_code == 409
 
-    response = await client.get(f"/v1/experiment-runs/{run['id']}/replays")
+    response = await client.get(f"/v1/experiment-runs/{run['id']}/jobs")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2

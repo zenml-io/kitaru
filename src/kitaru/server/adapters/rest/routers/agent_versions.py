@@ -72,7 +72,7 @@ async def update_agent_version(
 
     Clients observe HTTP 200 on success, 404 when no agent version has
     this id or a referenced secret does not exist, 409 when a run spec or
-    capability change hits a version referenced by a replay, and 422 on
+    capability change hits a version referenced by a job, and 422 on
     invalid input.
 
     Args:
@@ -100,7 +100,7 @@ async def delete_agent_version(
 
     Clients observe HTTP 204 on success, 404 when no agent version has
     this id, and 409 while the version is referenced by a session, an
-    experiment run, or a replay.
+    experiment run, or a job.
 
     Args:
         version_id: Id of the agent version.

@@ -24,7 +24,7 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunCreateRequest,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replays import ReplayClaimRequest, ReplayStatus
+from kitaru.api_models.v1.jobs import JobClaimRequest, JobStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 
@@ -71,29 +71,29 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
         await api_client.experiment_runs.get(uuid.uuid4())
 
 
-async def test_list_replays(api_client: KitaruAPIClient) -> None:
-    """List the replays of a run with their inlined config."""
+async def test_list_jobs(api_client: KitaruAPIClient) -> None:
+    """List the jobs of a run with their inlined config."""
     cohort_id, version_id = await create_cohort(api_client)
     experiment = await create_experiment(api_client, cohort_id)
     created = await api_client.experiments.create_run(
         experiment.id, ExperimentRunCreateRequest()
     )
-    page = await api_client.experiment_runs.list_replays(created.id)
+    page = await api_client.experiment_runs.list_jobs(created.id)
     assert page.total == 1
-    replay = page.items[0]
-    assert replay.experiment_run_id == created.id
-    assert replay.agent_version_id == version_id
-    assert replay.status is ReplayStatus.PENDING
-    assert replay.scoring_policy == SCORING_POLICY
+    job = page.items[0]
+    assert job.experiment_run_id == created.id
+    assert job.agent_version_id == version_id
+    assert job.status is JobStatus.PENDING
+    assert job.scoring_policy == SCORING_POLICY
 
-    page = await api_client.experiment_runs.list_replays(
-        created.id, status=ReplayStatus.PENDING
+    page = await api_client.experiment_runs.list_jobs(
+        created.id, status=JobStatus.PENDING
     )
     assert page.total == 1
-    assert page.items[0].id == replay.id
+    assert page.items[0].id == job.id
 
-    page = await api_client.experiment_runs.list_replays(
-        created.id, status=ReplayStatus.CLAIMED
+    page = await api_client.experiment_runs.list_jobs(
+        created.id, status=JobStatus.CLAIMED
     )
     assert page.total == 0
 
@@ -106,20 +106,20 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
         experiment.id, ExperimentRunCreateRequest()
     )
     claimed = await api_client.experiment_runs.claim(
-        created.id, ReplayClaimRequest(worker_id="worker-1", max_replays=5)
+        created.id, JobClaimRequest(worker_id="worker-1", max_jobs=5)
     )
-    assert len(claimed.replays) == 1
-    assert claimed.replays[0].status is ReplayStatus.CLAIMED
-    assert claimed.replays[0].worker_id == "worker-1"
+    assert len(claimed.jobs) == 1
+    assert claimed.jobs[0].status is JobStatus.CLAIMED
+    assert claimed.jobs[0].worker_id == "worker-1"
 
     canceled = await api_client.experiment_runs.cancel(created.id)
     assert canceled.status is ExperimentRunStatus.CANCELED
     assert canceled.summary is not None
 
     empty = await api_client.experiment_runs.claim(
-        created.id, ReplayClaimRequest(worker_id="worker-1", max_replays=5)
+        created.id, JobClaimRequest(worker_id="worker-1", max_jobs=5)
     )
-    assert empty.replays == []
+    assert empty.jobs == []
 
     with pytest.raises(APIError) as exc_info:
         await api_client.experiment_runs.cancel(created.id)

@@ -95,7 +95,7 @@ def experiment_run_to_response(
 
     Args:
         run: Stored experiment run.
-        progress: Computed replay counts of the run.
+        progress: Computed job counts of the run.
 
     Returns:
         Experiment run response.

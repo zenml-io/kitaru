@@ -21,7 +21,7 @@ from statistics import fmean, median
 from typing import Any
 
 from kitaru.server.base import FrozenModel
-from kitaru.server.domain.replay import Replay, ReplayStatus
+from kitaru.server.domain.job import Job, JobStatus
 from kitaru.server.domain.replay_config import ReplayOverride, effective_inputs
 from kitaru.server.domain.session import Session, TokenUsage
 from kitaru.server.domain.session_node import NodeType, SessionNode
@@ -313,7 +313,7 @@ def _score_deltas(
 
 
 def compute_replay_diff(
-    replay: Replay,
+    replay: Job,
     override: ReplayOverride | None,
     original_session: Session,
     result_session: Session,
@@ -323,7 +323,7 @@ def compute_replay_diff(
     """Compute the full diff between a replay's original and result session.
 
     Args:
-        replay: Replay linking the two sessions.
+        replay: Job linking the two sessions.
         override: Execution override of the replay's config.
         original_session: Original session.
         result_session: Result session.
@@ -422,7 +422,7 @@ def compute_diff_summary(
 
 
 def compute_run_summary(
-    replays: Sequence[Replay], sessions: dict[uuid.UUID, Session]
+    replays: Sequence[Job], sessions: dict[uuid.UUID, Session]
 ) -> dict[str, Any]:
     """Compute the aggregate summary stored on a finalized experiment run.
 
@@ -439,8 +439,7 @@ def compute_run_summary(
     finished = [
         replay
         for replay in replays
-        if replay.status
-        in (ReplayStatus.COMPLETED, ReplayStatus.FAILED, ReplayStatus.TIMED_OUT)
+        if replay.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
     ]
     pass_rate = None
     if finished:

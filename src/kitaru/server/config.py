@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SKIP_DB_MIGRATION: bool = False
 
-    REPLAY_HEARTBEAT_TIMEOUT_SECONDS: int = 60
-    REPLAY_MAX_ATTEMPTS: int = 3
+    JOB_HEARTBEAT_TIMEOUT_SECONDS: int = 60
+    JOB_MAX_ATTEMPTS: int = 3
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
 

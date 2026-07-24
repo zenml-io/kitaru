@@ -23,8 +23,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
 )
@@ -59,7 +59,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     version_repository = FakeAgentVersionRepository(agent_repository)
     session_repository = FakeSessionRepository(agent_repository, version_repository)
     node_repository = FakeSessionNodeRepository(session_repository)
-    replay_repository = FakeReplayRepository(
+    job_repository = FakeJobRepository(
         session_repository, version_repository, FakeReplayConfigRepository()
     )
     agent_service = AgentService(repository=agent_repository)
@@ -68,7 +68,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         agent_repository=agent_repository,
         agent_version_repository=version_repository,
         node_repository=node_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository

@@ -1027,42 +1027,42 @@
         "description": "Experiment run progress.",
         "properties": {
           "canceled": {
-            "description": "Canceled replay count.",
+            "description": "Canceled job count.",
             "title": "Canceled",
             "type": "integer"
           },
           "claimed": {
-            "description": "Claimed replay count.",
+            "description": "Claimed job count.",
             "title": "Claimed",
             "type": "integer"
           },
           "completed": {
-            "description": "Completed replay count.",
+            "description": "Completed job count.",
             "title": "Completed",
             "type": "integer"
           },
           "failed": {
-            "description": "Failed replay count.",
+            "description": "Failed job count.",
             "title": "Failed",
             "type": "integer"
           },
           "pending": {
-            "description": "Pending replay count.",
+            "description": "Pending job count.",
             "title": "Pending",
             "type": "integer"
           },
           "running": {
-            "description": "Running replay count.",
+            "description": "Running job count.",
             "title": "Running",
             "type": "integer"
           },
           "timed_out": {
-            "description": "Timed out replay count.",
+            "description": "Timed out job count.",
             "title": "Timed Out",
             "type": "integer"
           },
           "total": {
-            "description": "Total replay count.",
+            "description": "Total job count.",
             "title": "Total",
             "type": "integer"
           }
@@ -1160,7 +1160,7 @@
           },
           "progress": {
             "$ref": "#/components/schemas/ExperimentRunProgress",
-            "description": "Replay counts by status."
+            "description": "Job counts by status."
           },
           "score_baselines": {
             "description": "Whether the runner also scores originals missing scores.",
@@ -1362,6 +1362,501 @@
         ],
         "title": "HistoryScope",
         "type": "string"
+      },
+      "JobClaimRequest": {
+        "additionalProperties": false,
+        "description": "Job claim request.",
+        "properties": {
+          "max_jobs": {
+            "description": "Maximum jobs to claim.",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Max Jobs",
+            "type": "integer"
+          },
+          "worker_id": {
+            "description": "Id of the claiming worker.",
+            "maxLength": 255,
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "max_jobs"
+        ],
+        "title": "JobClaimRequest",
+        "type": "object"
+      },
+      "JobClaimResponse": {
+        "description": "Job claim response.",
+        "properties": {
+          "jobs": {
+            "description": "Claimed jobs.",
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "title": "JobClaimResponse",
+        "type": "object"
+      },
+      "JobHeartbeatResponse": {
+        "description": "Job heartbeat response.",
+        "properties": {
+          "canceled": {
+            "description": "Whether the worker should stop working on the job.",
+            "title": "Canceled",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          }
+        },
+        "required": [
+          "status",
+          "canceled"
+        ],
+        "title": "JobHeartbeatResponse",
+        "type": "object"
+      },
+      "JobResponse": {
+        "description": "Job response.",
+        "properties": {
+          "agent_version_id": {
+            "description": "Id of the agent version.",
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
+          "attempt": {
+            "description": "Attempt counter.",
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claim time.",
+            "title": "Claimed At"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Diff summary, written at completion.",
+            "title": "Diff"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message.",
+            "title": "Error"
+          },
+          "experiment_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the experiment run, null for standalone jobs.",
+            "title": "Experiment Run Id"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last heartbeat time.",
+            "title": "Heartbeat At"
+          },
+          "id": {
+            "description": "Job id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "original_session_id": {
+            "description": "Id of the replayed session.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring outcome, null until scored.",
+            "title": "Passed"
+          },
+          "result_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the result session.",
+            "title": "Result Session Id"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Weighted average, null until scored.",
+            "title": "Score"
+          },
+          "scores": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scores by scorer name, null until scored.",
+            "title": "Scores"
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "tool_policy": {
+            "$ref": "#/components/schemas/ToolPolicyConfig",
+            "description": "Tool policy."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          },
+          "worker_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the claiming worker.",
+            "title": "Worker Id"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_run_id",
+          "agent_version_id",
+          "original_session_id",
+          "result_session_id",
+          "status",
+          "attempt",
+          "worker_id",
+          "claimed_at",
+          "heartbeat_at",
+          "started_at",
+          "ended_at",
+          "error",
+          "passed",
+          "score",
+          "scores",
+          "diff",
+          "override",
+          "tool_policy",
+          "scoring_policy",
+          "created",
+          "updated"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
+      "JobSpecResponse": {
+        "description": "Job spec response.",
+        "properties": {
+          "inputs": {
+            "description": "Effective session inputs, with any prompt override applied.",
+            "title": "Inputs"
+          },
+          "job_id": {
+            "description": "Job id.",
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "original_session_id": {
+            "description": "Id of the replayed session.",
+            "format": "uuid",
+            "title": "Original Session Id",
+            "type": "string"
+          },
+          "override": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplayOverride"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution override."
+          },
+          "run": {
+            "$ref": "#/components/schemas/JobSpecRun",
+            "description": "Run command of the agent version."
+          },
+          "score_baselines": {
+            "description": "Whether the runner also scores originals missing scores.",
+            "title": "Score Baselines",
+            "type": "boolean"
+          },
+          "scoring_policy": {
+            "$ref": "#/components/schemas/ScoringPolicy"
+          },
+          "secret_env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Resolved secret environment variables.",
+            "title": "Secret Env",
+            "type": "object"
+          },
+          "tool_policy": {
+            "$ref": "#/components/schemas/ToolPolicyConfig",
+            "description": "Tool policy."
+          }
+        },
+        "required": [
+          "job_id",
+          "inputs",
+          "override",
+          "tool_policy",
+          "scoring_policy",
+          "score_baselines",
+          "run",
+          "secret_env",
+          "original_session_id"
+        ],
+        "title": "JobSpecResponse",
+        "type": "object"
+      },
+      "JobSpecRun": {
+        "description": "Job spec run command.",
+        "properties": {
+          "command": {
+            "description": "Bash command starting the agent.",
+            "title": "Command",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Literal environment variables.",
+            "title": "Env",
+            "type": "object"
+          },
+          "timeout_seconds": {
+            "description": "Wall clock limit.",
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "working_dir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Working directory for the command.",
+            "title": "Working Dir"
+          }
+        },
+        "required": [
+          "command",
+          "working_dir",
+          "env",
+          "timeout_seconds"
+        ],
+        "title": "JobSpecRun",
+        "type": "object"
+      },
+      "JobStatus": {
+        "description": "Job status.",
+        "enum": [
+          "pending",
+          "claimed",
+          "running",
+          "completed",
+          "failed",
+          "timed_out",
+          "canceled"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "JobUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Job update request.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error message, required for failed and timed out.",
+            "title": "Error"
+          },
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring outcome, required for completed.",
+            "title": "Passed"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Weighted average, required for completed.",
+            "title": "Score"
+          },
+          "scores": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scores by scorer name, required for completed.",
+            "title": "Scores"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "Target status."
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "JobUpdateRequest",
+        "type": "object"
       },
       "LLMPolicy": {
         "additionalProperties": false,
@@ -1724,11 +2219,11 @@
         "title": "Page[ExperimentRunResponse]",
         "type": "object"
       },
-      "Page_ReplayResponse_": {
+      "Page_JobResponse_": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/ReplayResponse"
+              "$ref": "#/components/schemas/JobResponse"
             },
             "title": "Items",
             "type": "array"
@@ -1752,7 +2247,7 @@
           "page",
           "page_size"
         ],
-        "title": "Page[ReplayResponse]",
+        "title": "Page[JobResponse]",
         "type": "object"
       },
       "Page_SecretResponse_": {
@@ -1893,49 +2388,6 @@
         "title": "PassthroughPolicy",
         "type": "object"
       },
-      "ReplayClaimRequest": {
-        "additionalProperties": false,
-        "description": "Replay claim request.",
-        "properties": {
-          "max_replays": {
-            "description": "Maximum replays to claim.",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Max Replays",
-            "type": "integer"
-          },
-          "worker_id": {
-            "description": "Id of the claiming worker.",
-            "maxLength": 255,
-            "title": "Worker Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "worker_id",
-          "max_replays"
-        ],
-        "title": "ReplayClaimRequest",
-        "type": "object"
-      },
-      "ReplayClaimResponse": {
-        "description": "Replay claim response.",
-        "properties": {
-          "replays": {
-            "description": "Claimed replays.",
-            "items": {
-              "$ref": "#/components/schemas/ReplayResponse"
-            },
-            "title": "Replays",
-            "type": "array"
-          }
-        },
-        "required": [
-          "replays"
-        ],
-        "title": "ReplayClaimResponse",
-        "type": "object"
-      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -2063,25 +2515,6 @@
         "title": "ReplayDiffResponse",
         "type": "object"
       },
-      "ReplayHeartbeatResponse": {
-        "description": "Replay heartbeat response.",
-        "properties": {
-          "canceled": {
-            "description": "Whether the worker should stop working on the replay.",
-            "title": "Canceled",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ReplayStatus"
-          }
-        },
-        "required": [
-          "status",
-          "canceled"
-        ],
-        "title": "ReplayHeartbeatResponse",
-        "type": "object"
-      },
       "ReplayInputDiff": {
         "description": "Replay input diff.",
         "properties": {
@@ -2167,439 +2600,6 @@
           }
         },
         "title": "ReplayOverride",
-        "type": "object"
-      },
-      "ReplayResponse": {
-        "description": "Replay response.",
-        "properties": {
-          "agent_version_id": {
-            "description": "Id of the agent version.",
-            "format": "uuid",
-            "title": "Agent Version Id",
-            "type": "string"
-          },
-          "attempt": {
-            "description": "Attempt counter.",
-            "title": "Attempt",
-            "type": "integer"
-          },
-          "claimed_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Claim time.",
-            "title": "Claimed At"
-          },
-          "created": {
-            "description": "Creation time.",
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "diff": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Diff summary, written at completion.",
-            "title": "Diff"
-          },
-          "ended_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Execution end time.",
-            "title": "Ended At"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Error message.",
-            "title": "Error"
-          },
-          "experiment_run_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the experiment run, null for standalone replays.",
-            "title": "Experiment Run Id"
-          },
-          "heartbeat_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Last heartbeat time.",
-            "title": "Heartbeat At"
-          },
-          "id": {
-            "description": "Replay id.",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "original_session_id": {
-            "description": "Id of the replayed session.",
-            "format": "uuid",
-            "title": "Original Session Id",
-            "type": "string"
-          },
-          "override": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReplayOverride"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Execution override."
-          },
-          "passed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scoring outcome, null until scored.",
-            "title": "Passed"
-          },
-          "result_session_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the result session.",
-            "title": "Result Session Id"
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Weighted average, null until scored.",
-            "title": "Score"
-          },
-          "scores": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "number"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scores by scorer name, null until scored.",
-            "title": "Scores"
-          },
-          "scoring_policy": {
-            "$ref": "#/components/schemas/ScoringPolicy"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Execution start time.",
-            "title": "Started At"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ReplayStatus"
-          },
-          "tool_policy": {
-            "$ref": "#/components/schemas/ToolPolicyConfig",
-            "description": "Tool policy."
-          },
-          "updated": {
-            "description": "Last modification time.",
-            "format": "date-time",
-            "title": "Updated",
-            "type": "string"
-          },
-          "worker_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the claiming worker.",
-            "title": "Worker Id"
-          }
-        },
-        "required": [
-          "id",
-          "experiment_run_id",
-          "agent_version_id",
-          "original_session_id",
-          "result_session_id",
-          "status",
-          "attempt",
-          "worker_id",
-          "claimed_at",
-          "heartbeat_at",
-          "started_at",
-          "ended_at",
-          "error",
-          "passed",
-          "score",
-          "scores",
-          "diff",
-          "override",
-          "tool_policy",
-          "scoring_policy",
-          "created",
-          "updated"
-        ],
-        "title": "ReplayResponse",
-        "type": "object"
-      },
-      "ReplaySpecResponse": {
-        "description": "Replay spec response.",
-        "properties": {
-          "inputs": {
-            "description": "Effective session inputs, with any prompt override applied.",
-            "title": "Inputs"
-          },
-          "original_session_id": {
-            "description": "Id of the replayed session.",
-            "format": "uuid",
-            "title": "Original Session Id",
-            "type": "string"
-          },
-          "override": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReplayOverride"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Execution override."
-          },
-          "replay_id": {
-            "description": "Replay id.",
-            "format": "uuid",
-            "title": "Replay Id",
-            "type": "string"
-          },
-          "run": {
-            "$ref": "#/components/schemas/ReplaySpecRun",
-            "description": "Run command of the agent version."
-          },
-          "score_baselines": {
-            "description": "Whether the runner also scores originals missing scores.",
-            "title": "Score Baselines",
-            "type": "boolean"
-          },
-          "scoring_policy": {
-            "$ref": "#/components/schemas/ScoringPolicy"
-          },
-          "secret_env": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Resolved secret environment variables.",
-            "title": "Secret Env",
-            "type": "object"
-          },
-          "tool_policy": {
-            "$ref": "#/components/schemas/ToolPolicyConfig",
-            "description": "Tool policy."
-          }
-        },
-        "required": [
-          "replay_id",
-          "inputs",
-          "override",
-          "tool_policy",
-          "scoring_policy",
-          "score_baselines",
-          "run",
-          "secret_env",
-          "original_session_id"
-        ],
-        "title": "ReplaySpecResponse",
-        "type": "object"
-      },
-      "ReplaySpecRun": {
-        "description": "Replay spec run command.",
-        "properties": {
-          "command": {
-            "description": "Bash command starting the agent.",
-            "title": "Command",
-            "type": "string"
-          },
-          "env": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Literal environment variables.",
-            "title": "Env",
-            "type": "object"
-          },
-          "timeout_seconds": {
-            "description": "Wall clock limit.",
-            "title": "Timeout Seconds",
-            "type": "integer"
-          },
-          "working_dir": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Working directory for the command.",
-            "title": "Working Dir"
-          }
-        },
-        "required": [
-          "command",
-          "working_dir",
-          "env",
-          "timeout_seconds"
-        ],
-        "title": "ReplaySpecRun",
-        "type": "object"
-      },
-      "ReplayStatus": {
-        "description": "Replay status.",
-        "enum": [
-          "pending",
-          "claimed",
-          "running",
-          "completed",
-          "failed",
-          "timed_out",
-          "canceled"
-        ],
-        "title": "ReplayStatus",
-        "type": "string"
-      },
-      "ReplayUpdateRequest": {
-        "additionalProperties": false,
-        "description": "Replay update request.",
-        "properties": {
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Error message, required for failed and timed out.",
-            "title": "Error"
-          },
-          "passed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scoring outcome, required for completed.",
-            "title": "Passed"
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Weighted average, required for completed.",
-            "title": "Score"
-          },
-          "scores": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "number"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scores by scorer name, required for completed.",
-            "title": "Scores"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ReplayStatus",
-            "description": "Target status."
-          }
-        },
-        "required": [
-          "status"
-        ],
-        "title": "ReplayUpdateRequest",
         "type": "object"
       },
       "RunSpec": {
@@ -2732,7 +2732,7 @@
                 "type": "null"
               }
             ],
-            "description": "Score at or below which the replay fails outright.",
+            "description": "Score at or below which the job fails outright.",
             "title": "Fail Below"
           },
           "name": {
@@ -3089,6 +3089,19 @@
             "description": "Initial task inputs.",
             "title": "Inputs"
           },
+          "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the job this session is the result of.",
+            "title": "Job Id"
+          },
           "log_uri": {
             "anyOf": [
               {
@@ -3137,19 +3150,6 @@
               }
             ],
             "description": "Source provider, imported sessions only."
-          },
-          "replay_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the replay this session is the result of.",
-            "title": "Replay Id"
           },
           "started_at": {
             "anyOf": [
@@ -4148,9 +4148,9 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
-      "StandaloneReplayClaimRequest": {
+      "StandaloneJobClaimRequest": {
         "additionalProperties": false,
-        "description": "Standalone replay claim request.",
+        "description": "Standalone job claim request.",
         "properties": {
           "worker_id": {
             "description": "Id of the claiming worker.",
@@ -4162,7 +4162,7 @@
         "required": [
           "worker_id"
         ],
-        "title": "StandaloneReplayClaimRequest",
+        "title": "StandaloneJobClaimRequest",
         "type": "object"
       },
       "StaticCase": {
@@ -5089,7 +5089,7 @@
     },
     "/v1/agent-versions/{version_id}": {
       "delete": {
-        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 while the version is referenced by a session, an\nexperiment run, or a replay.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 while the version is referenced by a session, an\nexperiment run, or a job.\n\nArgs:\n    version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
         "operationId": "delete_agent_version_v1_agent_versions__version_id__delete",
         "parameters": [
           {
@@ -5166,7 +5166,7 @@
         ]
       },
       "patch": {
-        "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has\nthis id or a referenced secret does not exist, 409 when a run spec or\ncapability change hits a version referenced by a replay, and 422 on\ninvalid input.\n\nArgs:\n    version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
+        "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has\nthis id or a referenced secret does not exist, 409 when a run spec or\ncapability change hits a version referenced by a job, and 422 on\ninvalid input.\n\nArgs:\n    version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
         "operationId": "update_agent_version_v1_agent_versions__version_id__patch",
         "parameters": [
           {
@@ -6260,7 +6260,7 @@
     },
     "/v1/experiment-runs/{run_id}": {
       "delete": {
-        "description": "Delete a terminal experiment run, including its replays.\n\nDeletes each replay's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no experiment run has\nthis id, and 409 when the run is not terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.",
+        "description": "Delete a terminal experiment run, including its jobs.\n\nDeletes each job's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no experiment run has\nthis id, and 409 when the run is not terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.",
         "operationId": "delete_experiment_run_v1_experiment_runs__run_id__delete",
         "parameters": [
           {
@@ -6339,7 +6339,7 @@
     },
     "/v1/experiment-runs/{run_id}/cancel": {
       "post": {
-        "description": "Cancel an experiment run.\n\nPending and claimed replays are canceled immediately, running ones\ndrain through the heartbeat path. The run lands on canceled right away\nwhen no running replay remains.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 409 when the run is already terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Updated experiment run.",
+        "description": "Cancel an experiment run.\n\nPending and claimed jobs are canceled immediately, running ones\ndrain through the heartbeat path. The run lands on canceled right away\nwhen no running job remains.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 409 when the run is already terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Updated experiment run.",
         "operationId": "cancel_experiment_run_v1_experiment_runs__run_id__cancel_post",
         "parameters": [
           {
@@ -6383,8 +6383,8 @@
     },
     "/v1/experiment-runs/{run_id}/claim": {
       "post": {
-        "description": "Atomically claim pending replays of an experiment run for a worker.\n\nStale claimed or running replays are requeued or timed out first. The\nfirst claim moves a pending run to running. Canceling and terminal\nruns yield no replays.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid input.\n\nArgs:\n    run_id: Id of the experiment run.\n    body: Replay claim request.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Claimed replays.",
-        "operationId": "claim_replays_v1_experiment_runs__run_id__claim_post",
+        "description": "Atomically claim pending jobs of an experiment run for a worker.\n\nStale claimed or running jobs are requeued or timed out first. The\nfirst claim moves a pending run to running. Canceling and terminal\nruns yield no jobs.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid input.\n\nArgs:\n    run_id: Id of the experiment run.\n    body: Job claim request.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Claimed jobs.",
+        "operationId": "claim_jobs_v1_experiment_runs__run_id__claim_post",
         "parameters": [
           {
             "in": "path",
@@ -6401,7 +6401,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReplayClaimRequest"
+                "$ref": "#/components/schemas/JobClaimRequest"
               }
             }
           },
@@ -6412,7 +6412,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayClaimResponse"
+                  "$ref": "#/components/schemas/JobClaimResponse"
                 }
               }
             },
@@ -6429,16 +6429,16 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Claim Replays",
+        "summary": "Claim Jobs",
         "tags": [
           "experiment-runs"
         ]
       }
     },
-    "/v1/experiment-runs/{run_id}/replays": {
+    "/v1/experiment-runs/{run_id}/jobs": {
       "get": {
-        "description": "List the replays of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid filter or pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    status: Filter on replay status.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
-        "operationId": "list_experiment_run_replays_v1_experiment_runs__run_id__replays_get",
+        "description": "List the jobs of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid filter or pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    status: Filter on job status.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
+        "operationId": "list_experiment_run_jobs_v1_experiment_runs__run_id__jobs_get",
         "parameters": [
           {
             "in": "path",
@@ -6457,7 +6457,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/ReplayStatus"
+                  "$ref": "#/components/schemas/JobStatus"
                 },
                 {
                   "type": "null"
@@ -6495,7 +6495,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_ReplayResponse_"
+                  "$ref": "#/components/schemas/Page_JobResponse_"
                 }
               }
             },
@@ -6512,7 +6512,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Experiment Run Replays",
+        "summary": "List Experiment Run Jobs",
         "tags": [
           "experiment-runs"
         ]
@@ -6845,7 +6845,7 @@
         ]
       },
       "post": {
-        "description": "Start an experiment run.\n\nCreates the run plus one pending replay per cohort session.\n\nClients observe HTTP 201 on success, 404 when no experiment or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves or an on demand run resolves to a version without an image,\nand 422 when the version belongs to another agent.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment run.",
+        "description": "Start an experiment run.\n\nCreates the run plus one pending job per cohort session.\n\nClients observe HTTP 201 on success, 404 when no experiment or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves or an on demand run resolves to a version without an image,\nand 422 when the version belongs to another agent.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment run.",
         "operationId": "create_experiment_run_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
@@ -6897,66 +6897,10 @@
         ]
       }
     },
-    "/v1/login": {
-      "post": {
-        "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
-        "operationId": "login_v1_login_post",
-        "requestBody": {
-          "content": {
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_login_v1_login_post"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Login",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/v1/logout": {
-      "post": {
-        "description": "Log out and clear the auth cookie.\n\nClients observe HTTP 204.\n\nArgs:\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.",
-        "operationId": "logout_v1_logout_post",
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Logout",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/v1/replays": {
+    "/v1/jobs": {
       "get": {
-        "description": "List replays.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Replay service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    replay_status: Filter on replay status.\n    standalone: Filter on standalone replays.\n    worker_id: Filter on the claiming worker id.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
-        "operationId": "list_replays_v1_replays_get",
+        "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    job_status: Filter on job status.\n    standalone: Filter on standalone jobs.\n    worker_id: Filter on the claiming worker id.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
+        "operationId": "list_jobs_v1_jobs_get",
         "parameters": [
           {
             "in": "query",
@@ -6999,7 +6943,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/ReplayStatus"
+                  "$ref": "#/components/schemas/JobStatus"
                 },
                 {
                   "type": "null"
@@ -7069,7 +7013,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_ReplayResponse_"
+                  "$ref": "#/components/schemas/Page_JobResponse_"
                 }
               }
             },
@@ -7086,64 +7030,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Replays",
+        "summary": "List Jobs",
         "tags": [
-          "replays"
-        ]
-      },
-      "post": {
-        "description": "Create a standalone replay of one session with an inline config.\n\nThe tool policy defaults to a history policy scoped to the original\nsession.\n\nClients observe HTTP 201 on success, 404 when no session or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves, and 422 when the original session is in progress, the\nversion belongs to another agent, a history policy scopes to a\ncohort, or the input is invalid.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
-        "operationId": "create_replay_v1_replays_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReplayCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Replay",
-        "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}": {
+    "/v1/jobs/{job_id}": {
       "delete": {
-        "description": "Delete a standalone replay.\n\nDeletes the replay's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no replay has this id,\nand 409 when the replay belongs to an experiment run or is claimed or\nrunning.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.",
-        "operationId": "delete_replay_v1_replays__replay_id__delete",
+        "description": "Delete a standalone job.\n\nDeletes the job's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no job has this id,\nand 409 when the job belongs to an experiment run or is claimed or\nrunning.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
+        "operationId": "delete_job_v1_jobs__job_id__delete",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7163,22 +7067,22 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Replay",
+        "summary": "Delete Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       },
       "get": {
-        "description": "Get a replay by id.\n\nClients observe HTTP 200 on success and 404 when no replay has this\nid.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
-        "operationId": "get_replay_v1_replays__replay_id__get",
+        "description": "Get a job by id.\n\nClients observe HTTP 200 on success and 404 when no job has this\nid.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Stored job.",
+        "operationId": "get_job_v1_jobs__job_id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7188,7 +7092,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
@@ -7205,22 +7109,22 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Replay",
+        "summary": "Get Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       },
       "patch": {
-        "description": "Transition a replay through the runner status updates.\n\nCompleting stores the scoring result and the computed diff summary.\nThe transition that makes the last replay of a run terminal also\nfinalizes the run.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\n409 when the transition is illegal or completing without a linked\nresult session, and 422 when completing without a scoring result or\nfailing without an error.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Replay update request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Updated replay.",
-        "operationId": "update_replay_v1_replays__replay_id__patch",
+        "description": "Transition a job through the runner status updates.\n\nCompleting stores the scoring result and the computed diff summary.\nThe transition that makes the last job of a run terminal also\nfinalizes the run.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\n409 when the transition is illegal or completing without a linked\nresult session, and 422 when completing without a scoring result or\nfailing without an error.\n\nArgs:\n    job_id: Id of the job.\n    body: Job update request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Updated job.",
+        "operationId": "update_job_v1_jobs__job_id__patch",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7229,7 +7133,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReplayUpdateRequest"
+                "$ref": "#/components/schemas/JobUpdateRequest"
               }
             }
           },
@@ -7240,7 +7144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
@@ -7257,24 +7161,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Replay",
+        "summary": "Update Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/claim": {
+    "/v1/jobs/{job_id}/claim": {
       "post": {
-        "description": "Claim a standalone replay for a worker.\n\nA stale claim or start is requeued or timed out first, so a replay\nwhose worker died is claimable again.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\n409 when the replay belongs to an experiment run or is not pending\nafter the staleness resolution, and 422 on invalid input.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Standalone replay claim request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Claimed replay.",
-        "operationId": "claim_replay_v1_replays__replay_id__claim_post",
+        "description": "Claim a standalone job for a worker.\n\nA stale claim or start is requeued or timed out first, so a job\nwhose worker died is claimable again.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\n409 when the job belongs to an experiment run or is not pending\nafter the staleness resolution, and 422 on invalid input.\n\nArgs:\n    job_id: Id of the job.\n    body: Standalone job claim request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Claimed job.",
+        "operationId": "claim_job_v1_jobs__job_id__claim_post",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7283,7 +7187,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StandaloneReplayClaimRequest"
+                "$ref": "#/components/schemas/StandaloneJobClaimRequest"
               }
             }
           },
@@ -7294,7 +7198,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
@@ -7311,24 +7215,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Claim Replay",
+        "summary": "Claim Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/diff": {
+    "/v1/jobs/{job_id}/diff": {
       "get": {
-        "description": "Compute the full diff between a replay's sessions.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay has no result session yet.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Computed replay diff.",
-        "operationId": "get_replay_diff_v1_replays__replay_id__diff_get",
+        "description": "Compute the full diff between a job's sessions.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\nand 409 when the job has no result session yet.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Computed replay diff.",
+        "operationId": "get_job_diff_v1_jobs__job_id__diff_get",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7355,24 +7259,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Replay Diff",
+        "summary": "Get Job Diff",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/heartbeat": {
+    "/v1/jobs/{job_id}/heartbeat": {
       "post": {
-        "description": "Record a worker heartbeat on a replay.\n\nTerminal replays record nothing and report the stop flag, so the\nworker abandons the replay.\n\nClients observe HTTP 200 on success, including terminal replays, 404\nwhen no replay has this id, and 409 when the replay is pending.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the status and stop flag.",
-        "operationId": "heartbeat_replay_v1_replays__replay_id__heartbeat_post",
+        "description": "Record a worker heartbeat on a job.\n\nTerminal jobs record nothing and report the stop flag, so the\nworker abandons the job.\n\nClients observe HTTP 200 on success, including terminal jobs, 404\nwhen no job has this id, and 409 when the job is pending.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the status and stop flag.",
+        "operationId": "heartbeat_job_v1_jobs__job_id__heartbeat_post",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7382,7 +7286,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayHeartbeatResponse"
+                  "$ref": "#/components/schemas/JobHeartbeatResponse"
                 }
               }
             },
@@ -7399,24 +7303,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Heartbeat Replay",
+        "summary": "Heartbeat Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/release": {
+    "/v1/jobs/{job_id}/release": {
       "post": {
-        "description": "Requeue a claimed or running replay for another attempt.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay is not claimed or running.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Requeued replay.",
-        "operationId": "release_replay_v1_replays__replay_id__release_post",
+        "description": "Requeue a claimed or running job for another attempt.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\nand 409 when the job is not claimed or running.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Requeued job.",
+        "operationId": "release_job_v1_jobs__job_id__release_post",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7426,7 +7330,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
@@ -7443,24 +7347,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Release Replay",
+        "summary": "Release Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/retry": {
+    "/v1/jobs/{job_id}/retry": {
       "post": {
-        "description": "Requeue a finished standalone replay for another attempt.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay belongs to an experiment run or is not\nfailed, timed out, or canceled.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Requeued replay.",
-        "operationId": "retry_replay_v1_replays__replay_id__retry_post",
+        "description": "Requeue a finished standalone job for another attempt.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\nand 409 when the job belongs to an experiment run or is not\nfailed, timed out, or canceled.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Requeued job.",
+        "operationId": "retry_job_v1_jobs__job_id__retry_post",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7470,7 +7374,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplayResponse"
+                  "$ref": "#/components/schemas/JobResponse"
                 }
               }
             },
@@ -7487,24 +7391,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Retry Replay",
+        "summary": "Retry Job",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/spec": {
+    "/v1/jobs/{job_id}/spec": {
       "get": {
-        "description": "Resolve the spec a runner executes a replay with.\n\nThe spec includes the resolved secret environment of the run spec's\nsecrets.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the stamped agent version has no run spec.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Resolved replay spec.",
-        "operationId": "get_replay_spec_v1_replays__replay_id__spec_get",
+        "description": "Resolve the spec a runner executes a job with.\n\nThe spec includes the resolved secret environment of the run spec's\nsecrets.\n\nClients observe HTTP 200 on success, 404 when no job has this id,\nand 409 when the stamped agent version has no run spec.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Resolved job spec.",
+        "operationId": "get_job_spec_v1_jobs__job_id__spec_get",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7514,7 +7418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ReplaySpecResponse"
+                  "$ref": "#/components/schemas/JobSpecResponse"
                 }
               }
             },
@@ -7531,24 +7435,24 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Replay Spec",
+        "summary": "Get Job Spec",
         "tags": [
-          "replays"
+          "jobs"
         ]
       }
     },
-    "/v1/replays/{replay_id}/tool-lookup": {
+    "/v1/jobs/{job_id}/tool-lookup": {
       "post": {
-        "description": "Resolve a history tool policy lookup within its scope.\n\nClients observe HTTP 200 on success, including misses, 404 when no\nreplay has this id, and 422 when the cache key does not match the tool\nname and inputs, the tool resolves to no history policy, or a\nstandalone replay scopes to a cohort.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Tool lookup response.",
-        "operationId": "tool_lookup_v1_replays__replay_id__tool_lookup_post",
+        "description": "Resolve a history tool policy lookup within its scope.\n\nClients observe HTTP 200 on success, including misses, 404 when no\njob has this id, and 422 when the cache key does not match the tool\nname and inputs, the tool resolves to no history policy, or a\nstandalone job scopes to a cohort.\n\nArgs:\n    job_id: Id of the job.\n    body: Tool lookup request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Tool lookup response.",
+        "operationId": "tool_lookup_v1_jobs__job_id__tool_lookup_post",
         "parameters": [
           {
             "in": "path",
-            "name": "replay_id",
+            "name": "job_id",
             "required": true,
             "schema": {
               "format": "uuid",
-              "title": "Replay Id",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -7586,6 +7490,104 @@
           }
         },
         "summary": "Tool Lookup",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/login": {
+      "post": {
+        "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
+        "operationId": "login_v1_login_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_login_v1_login_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/logout": {
+      "post": {
+        "description": "Log out and clear the auth cookie.\n\nClients observe HTTP 204.\n\nArgs:\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.",
+        "operationId": "logout_v1_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/replays": {
+      "post": {
+        "description": "Create a standalone replay of one session with an inline config.\n\nThe tool policy defaults to a history policy scoped to the original\nsession.\n\nClients observe HTTP 201 on success, 404 when no session or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves, and 422 when the original session is in progress, the\nversion belongs to another agent, a history policy scopes to a\ncohort, or the input is invalid.\n\nArgs:\n    body: Replay create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "operationId": "create_replay_v1_replays_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplayCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Replay",
         "tags": [
           "replays"
         ]
@@ -8238,7 +8240,7 @@
     },
     "/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success, 404 when no session has this id,\nand 409 while the session is a member of a cohort or referenced by a\nreplay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session, including its nodes and tag links.\n\nClients observe HTTP 204 on success, 404 when no session has this id,\nand 409 while the session is a member of a cohort or referenced by a\njob.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_v1_sessions__session_id__delete",
         "parameters": [
           {

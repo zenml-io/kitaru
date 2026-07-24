@@ -22,8 +22,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSecretRepository,
     FakeSessionRepository,
     create_secret,
@@ -61,7 +61,7 @@ async def client(
     )
     agent_repository = FakeAgentRepository()
     version_repository = FakeAgentVersionRepository(agent_repository, secret_repository)
-    replay_repository = FakeReplayRepository(
+    job_repository = FakeJobRepository(
         FakeSessionRepository(agent_repository, version_repository),
         version_repository,
         FakeReplayConfigRepository(),
@@ -71,7 +71,7 @@ async def client(
         repository=version_repository,
         agent_repository=agent_repository,
         secret_repository=secret_repository,
-        replay_repository=replay_repository,
+        job_repository=job_repository,
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service

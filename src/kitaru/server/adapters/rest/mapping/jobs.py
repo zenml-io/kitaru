@@ -11,48 +11,48 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Replay DTO conversions."""
+"""Job DTO conversions."""
 
-from kitaru.api_models.v1.replays import DiffNode as DiffNodeModel
-from kitaru.api_models.v1.replays import DiffValue as DiffValueModel
-from kitaru.api_models.v1.replays import HistoryPolicy as HistoryPolicyModel
-from kitaru.api_models.v1.replays import HistoryScope as HistoryScopeModel
-from kitaru.api_models.v1.replays import LLMPolicy as LLMPolicyModel
-from kitaru.api_models.v1.replays import NodePairDiff as NodePairDiffModel
-from kitaru.api_models.v1.replays import (
-    PassthroughPolicy as PassthroughPolicyModel,
-)
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import DiffNode as DiffNodeModel
+from kitaru.api_models.v1.jobs import DiffValue as DiffValueModel
+from kitaru.api_models.v1.jobs import HistoryPolicy as HistoryPolicyModel
+from kitaru.api_models.v1.jobs import HistoryScope as HistoryScopeModel
+from kitaru.api_models.v1.jobs import (
+    JobResponse,
+    JobSpecResponse,
+    JobSpecRun,
+    JobUpdateRequest,
     ReplayCreateRequest,
     ReplayDiffResponse,
-    ReplayResponse,
-    ReplaySpecResponse,
-    ReplaySpecRun,
-    ReplayUpdateRequest,
     ToolLookupResponse,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import JobStatus as JobStatusModel
+from kitaru.api_models.v1.jobs import LLMPolicy as LLMPolicyModel
+from kitaru.api_models.v1.jobs import NodePairDiff as NodePairDiffModel
+from kitaru.api_models.v1.jobs import (
+    PassthroughPolicy as PassthroughPolicyModel,
+)
+from kitaru.api_models.v1.jobs import (
     ReplayInputDiff as ReplayInputDiffModel,
 )
-from kitaru.api_models.v1.replays import ReplayOverride as ReplayOverrideModel
-from kitaru.api_models.v1.replays import ReplayStatus as ReplayStatusModel
-from kitaru.api_models.v1.replays import ScoreDelta as ScoreDeltaModel
-from kitaru.api_models.v1.replays import ScorerConfig as ScorerConfigModel
-from kitaru.api_models.v1.replays import ScoringPolicy as ScoringPolicyModel
-from kitaru.api_models.v1.replays import StaticCase as StaticCaseModel
-from kitaru.api_models.v1.replays import StaticMatchMode as StaticMatchModeModel
-from kitaru.api_models.v1.replays import StaticPolicy as StaticPolicyModel
-from kitaru.api_models.v1.replays import TokenDeltas as TokenDeltasModel
-from kitaru.api_models.v1.replays import ToolPolicy as ToolPolicyModel
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import ReplayOverride as ReplayOverrideModel
+from kitaru.api_models.v1.jobs import ScoreDelta as ScoreDeltaModel
+from kitaru.api_models.v1.jobs import ScorerConfig as ScorerConfigModel
+from kitaru.api_models.v1.jobs import ScoringPolicy as ScoringPolicyModel
+from kitaru.api_models.v1.jobs import StaticCase as StaticCaseModel
+from kitaru.api_models.v1.jobs import StaticMatchMode as StaticMatchModeModel
+from kitaru.api_models.v1.jobs import StaticPolicy as StaticPolicyModel
+from kitaru.api_models.v1.jobs import TokenDeltas as TokenDeltasModel
+from kitaru.api_models.v1.jobs import ToolPolicy as ToolPolicyModel
+from kitaru.api_models.v1.jobs import (
     ToolPolicyConfig as ToolPolicyConfigModel,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     ToolPolicyOnMiss as ToolPolicyOnMissModel,
 )
 from kitaru.api_models.v1.session_nodes import NodeType as NodeTypeModel
-from kitaru.server.application.models.replays import ReplayCreate, ReplayUpdate
-from kitaru.server.domain.replay import Replay, ReplaySpec, ReplayStatus
+from kitaru.server.application.models.jobs import JobUpdate, ReplayCreate
+from kitaru.server.domain.job import Job, JobSpec, JobStatus
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     HistoryScope,
@@ -287,69 +287,69 @@ def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:
     )
 
 
-def replay_status_to_domain(status: ReplayStatusModel | None) -> ReplayStatus | None:
-    """Convert an optional replay status DTO to its domain enum.
+def job_status_to_domain(status: JobStatusModel | None) -> JobStatus | None:
+    """Convert an optional job status DTO to its domain enum.
 
     Args:
-        status: Replay status DTO.
+        status: Job status DTO.
 
     Returns:
-        Domain replay status, ``None`` for ``None``.
+        Domain job status, ``None`` for ``None``.
     """
     if status is None:
         return None
-    return ReplayStatus(status.value)
+    return JobStatus(status.value)
 
 
-def replay_to_response(replay: Replay, config: ReplayConfig) -> ReplayResponse:
-    """Convert a replay entity to its response DTO.
+def job_to_response(job: Job, config: ReplayConfig) -> JobResponse:
+    """Convert a job entity to its response DTO.
 
     Args:
-        replay: Stored replay.
-        config: Replay config of the replay.
+        job: Stored job.
+        config: Replay config of the job.
 
     Returns:
-        Replay response.
+        Job response.
     """
-    assert replay.created is not None
-    assert replay.updated is not None
-    return ReplayResponse(
-        id=replay.id,
-        experiment_run_id=replay.experiment_run_id,
-        agent_version_id=replay.agent_version_id,
-        original_session_id=replay.original_session_id,
-        result_session_id=replay.result_session_id,
-        status=ReplayStatusModel(replay.status.value),
-        attempt=replay.attempt,
-        worker_id=replay.worker_id,
-        claimed_at=replay.claimed_at,
-        heartbeat_at=replay.heartbeat_at,
-        started_at=replay.started_at,
-        ended_at=replay.ended_at,
-        error=replay.error,
-        passed=replay.passed,
-        score=replay.score,
-        scores=replay.scores,
-        diff=replay.diff,
+    assert job.created is not None
+    assert job.updated is not None
+    return JobResponse(
+        id=job.id,
+        experiment_run_id=job.experiment_run_id,
+        agent_version_id=job.agent_version_id,
+        original_session_id=job.original_session_id,
+        result_session_id=job.result_session_id,
+        status=JobStatusModel(job.status.value),
+        attempt=job.attempt,
+        worker_id=job.worker_id,
+        claimed_at=job.claimed_at,
+        heartbeat_at=job.heartbeat_at,
+        started_at=job.started_at,
+        ended_at=job.ended_at,
+        error=job.error,
+        passed=job.passed,
+        score=job.score,
+        scores=job.scores,
+        diff=job.diff,
         override=override_to_response(config.override),
         tool_policy=tool_policy_config_to_response(config.tool_policy),
         scoring_policy=scoring_policy_to_response(config.scoring_policy),
-        created=replay.created,
-        updated=replay.updated,
+        created=job.created,
+        updated=job.updated,
     )
 
 
-def replay_update_to_command(body: ReplayUpdateRequest) -> ReplayUpdate:
-    """Convert a replay update request to its command.
+def job_update_to_command(body: JobUpdateRequest) -> JobUpdate:
+    """Convert a job update request to its command.
 
     Args:
-        body: Replay update request.
+        body: Job update request.
 
     Returns:
-        Replay update command.
+        Job update command.
     """
-    return ReplayUpdate(
-        status=ReplayStatus(body.status.value),
+    return JobUpdate(
+        status=JobStatus(body.status.value),
         error=body.error,
         passed=body.passed,
         score=body.score,
@@ -357,23 +357,23 @@ def replay_update_to_command(body: ReplayUpdateRequest) -> ReplayUpdate:
     )
 
 
-def replay_spec_to_response(spec: ReplaySpec) -> ReplaySpecResponse:
-    """Convert a replay spec to its response DTO.
+def job_spec_to_response(spec: JobSpec) -> JobSpecResponse:
+    """Convert a job spec to its response DTO.
 
     Args:
-        spec: Resolved replay spec.
+        spec: Resolved job spec.
 
     Returns:
-        Replay spec response.
+        Job spec response.
     """
-    return ReplaySpecResponse(
-        replay_id=spec.replay_id,
+    return JobSpecResponse(
+        job_id=spec.job_id,
         inputs=spec.inputs,
         override=override_to_response(spec.override),
         tool_policy=tool_policy_config_to_response(spec.tool_policy),
         scoring_policy=scoring_policy_to_response(spec.scoring_policy),
         score_baselines=spec.score_baselines,
-        run=ReplaySpecRun(
+        run=JobSpecRun(
             command=spec.run_spec.command,
             working_dir=spec.run_spec.working_dir,
             env=spec.run_spec.env,

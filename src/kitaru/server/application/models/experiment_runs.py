@@ -19,7 +19,7 @@ from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.experiment_run import ExperimentRunStatus
-from kitaru.server.domain.replay import ReplayStatus
+from kitaru.server.domain.job import JobStatus
 
 
 class ExperimentRunFilter(FrozenModel):
@@ -32,9 +32,9 @@ class ExperimentRunFilter(FrozenModel):
     page_size: int = Field(default=20, ge=1, le=1000)
 
 
-class ExperimentRunReplaysFilter(FrozenModel):
-    """Experiment run replay list filter."""
+class ExperimentRunJobsFilter(FrozenModel):
+    """Experiment run job list filter."""
 
-    status: ReplayStatus | None = None
+    status: JobStatus | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)

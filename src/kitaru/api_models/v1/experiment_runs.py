@@ -38,14 +38,14 @@ class ExperimentRunStatus(StrEnum):
 class ExperimentRunProgress(ResponseModel):
     """Experiment run progress."""
 
-    pending: int = Field(description="Pending replay count.")
-    claimed: int = Field(description="Claimed replay count.")
-    running: int = Field(description="Running replay count.")
-    completed: int = Field(description="Completed replay count.")
-    failed: int = Field(description="Failed replay count.")
-    timed_out: int = Field(description="Timed out replay count.")
-    canceled: int = Field(description="Canceled replay count.")
-    total: int = Field(description="Total replay count.")
+    pending: int = Field(description="Pending job count.")
+    claimed: int = Field(description="Claimed job count.")
+    running: int = Field(description="Running job count.")
+    completed: int = Field(description="Completed job count.")
+    failed: int = Field(description="Failed job count.")
+    timed_out: int = Field(description="Timed out job count.")
+    canceled: int = Field(description="Canceled job count.")
+    total: int = Field(description="Total job count.")
 
 
 class ExperimentRunCreateRequest(RequestModel):
@@ -86,6 +86,6 @@ class ExperimentRunResponse(ResponseModel):
         description="Aggregate diff, written at completion."
     )
     error: str | None = Field(description="Error message.")
-    progress: ExperimentRunProgress = Field(description="Replay counts by status.")
+    progress: ExperimentRunProgress = Field(description="Job counts by status.")
     created: datetime = Field(description="Creation time.")
     updated: datetime = Field(description="Last modification time.")

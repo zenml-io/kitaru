@@ -50,7 +50,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunProgress,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay_config import (
     PassthroughPolicy,
     ReplayConfig,
@@ -336,7 +336,7 @@ class ExperimentService:
     ) -> tuple[ExperimentRun, ExperimentRunProgress]:
         """Start an experiment run.
 
-        Creates the run plus one pending replay per cohort session, stamped
+        Creates the run plus one pending job per cohort session, stamped
         with the experiment's replay config, the resolved agent version, and
         the resolved execution target.
 
@@ -379,8 +379,8 @@ class ExperimentService:
             score_baselines=score_baselines,
             execution_target=target,
         )
-        replays = [
-            Replay(
+        jobs = [
+            Job(
                 experiment_run_id=run.id,
                 replay_config_id=experiment.replay_config_id,
                 agent_version_id=version.id,
@@ -388,6 +388,6 @@ class ExperimentService:
             )
             for session in sessions
         ]
-        run = await self._run_repository.create(run, replays)
-        progress = ExperimentRunProgress(pending=len(replays), total=len(replays))
+        run = await self._run_repository.create(run, jobs)
+        progress = ExperimentRunProgress(pending=len(jobs), total=len(jobs))
         return run, progress

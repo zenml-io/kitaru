@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.replays import ScorerConfig, ScoringPolicy
+from kitaru.api_models.v1.jobs import ScorerConfig, ScoringPolicy
 from kitaru.api_models.v1.sessions import (
     SessionOrigin,
     SessionResponse,

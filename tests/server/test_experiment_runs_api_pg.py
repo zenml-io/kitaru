@@ -34,7 +34,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 
 async def test_run_flow_persists_across_requests(client: httpx.AsyncClient) -> None:
-    """Start runs, count the numbers, and read progress and replays."""
+    """Start runs, count the numbers, and read progress and jobs."""
     cohort_id = await seed_cohort(client)
     response = await client.post(
         "/v1/experiments",
@@ -69,7 +69,7 @@ async def test_run_flow_persists_across_requests(client: httpx.AsyncClient) -> N
     assert body["progress"]["pending"] == 2
     assert body["progress"]["total"] == 2
 
-    response = await client.get(f"/v1/experiment-runs/{first['id']}/replays")
+    response = await client.get(f"/v1/experiment-runs/{first['id']}/jobs")
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
@@ -164,16 +164,16 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
 
     response = await client.post(
         f"/v1/experiment-runs/{run_id}/claim",
-        json={"worker_id": "worker-1", "max_replays": 5},
+        json={"worker_id": "worker-1", "max_jobs": 5},
     )
     assert response.status_code == 200
-    replays = response.json()["replays"]
-    assert len(replays) == 1
-    replay_id = replays[0]["id"]
+    jobs = response.json()["jobs"]
+    assert len(jobs) == 1
+    job_id = jobs[0]["id"]
     response = await client.get(f"/v1/experiment-runs/{run_id}")
     assert response.json()["status"] == "running"
 
-    response = await client.get(f"/v1/replays/{replay_id}/spec")
+    response = await client.get(f"/v1/jobs/{job_id}/spec")
     assert response.status_code == 200
     spec = response.json()
     assert spec["inputs"] == {"prompt": "weather?"}
@@ -182,17 +182,15 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert spec["secret_env"] == {"OPENAI_API_KEY": "sk-1"}
     assert spec["tool_policy"]["default"]["type"] == "history"
 
-    response = await client.patch(
-        f"/v1/replays/{replay_id}", json={"status": "running"}
-    )
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
-    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
     assert response.status_code == 200
     assert response.json() == {"status": "running", "canceled": False}
 
     response = await client.post(
         "/v1/sessions",
-        json={"agent_id": agent_id, "origin": "recorded", "replay_id": replay_id},
+        json={"agent_id": agent_id, "origin": "recorded", "job_id": job_id},
     )
     assert response.status_code == 201
     result_session = response.json()
@@ -201,7 +199,7 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
 
     cache_key = tool_call_cache_key("get_weather", inputs)
     response = await client.post(
-        f"/v1/replays/{replay_id}/tool-lookup",
+        f"/v1/jobs/{job_id}/tool-lookup",
         json={"tool_name": "get_weather", "inputs": inputs, "cache_key": cache_key},
     )
     assert response.status_code == 200
@@ -232,7 +230,7 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
 
     response = await client.patch(
-        f"/v1/replays/{replay_id}",
+        f"/v1/jobs/{job_id}",
         json={
             "status": "completed",
             "passed": True,
@@ -259,7 +257,7 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert run["summary"]["pass_rate"] == 1.0
     assert run["progress"]["completed"] == 1
 
-    response = await client.get(f"/v1/replays/{replay_id}/diff")
+    response = await client.get(f"/v1/jobs/{job_id}/diff")
     assert response.status_code == 200
     diff = response.json()
     assert diff["original_session_id"] == session_id
@@ -295,16 +293,16 @@ async def test_cancel_run_end_to_end(client: httpx.AsyncClient) -> None:
 
     response = await client.post(
         f"/v1/experiment-runs/{run_id}/claim",
-        json={"worker_id": "worker-1", "max_replays": 5},
+        json={"worker_id": "worker-1", "max_jobs": 5},
     )
     assert response.status_code == 200
-    assert response.json()["replays"] == []
+    assert response.json()["jobs"] == []
 
     response = await client.delete(f"/v1/experiment-runs/{run_id}")
     assert response.status_code == 204
     response = await client.get(f"/v1/experiment-runs/{run_id}")
     assert response.status_code == 404
-    response = await client.get("/v1/replays", params={"experiment_run_id": run_id})
+    response = await client.get("/v1/jobs", params={"experiment_run_id": run_id})
     assert response.status_code == 200
     assert response.json()["total"] == 0
 

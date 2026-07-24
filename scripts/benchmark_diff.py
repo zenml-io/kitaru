@@ -53,7 +53,7 @@ class Measurement:
     scenario: str
     mode: str
     originals: int
-    replays: int
+    jobs: int
     unrelated: int
     artifact_bytes: int
     explicit_ids: bool
@@ -195,7 +195,7 @@ def _fake_fixture(
     artifacts: dict[str, str] = {}
     executions: dict[str, Execution] = {}
     candidates: list[Execution] = []
-    replay_ids: dict[str, list[str]] = {}
+    job_ids: dict[str, list[str]] = {}
     placeholder = SimpleNamespace()
 
     for original_index in range(originals):
@@ -210,21 +210,21 @@ def _fake_fixture(
             client=placeholder,
         )
         executions[original_id] = original
-        replay_ids[original_id] = []
+        job_ids[original_id] = []
         for replay_index in range(replays_per_original):
-            replay_id = f"replay-{original_index}-{replay_index}"
-            replay_artifact_id = f"artifact-{replay_id}"
+            job_id = f"job-{original_index}-{replay_index}"
+            replay_artifact_id = f"artifact-{job_id}"
             artifacts[replay_artifact_id] = "r" * artifact_bytes
-            replay = _execution(
-                replay_id,
+            job = _execution(
+                job_id,
                 original_exec_id=original_id,
                 artifact_id=replay_artifact_id,
                 original_call_id=f"call-{original_id}",
                 client=placeholder,
             )
-            executions[replay_id] = replay
-            candidates.append(replay)
-            replay_ids[original_id].append(replay_id)
+            executions[job_id] = job
+            candidates.append(job)
+            job_ids[original_id].append(job_id)
 
     for index in range(unrelated):
         exec_id = f"unrelated-{index}"
@@ -241,7 +241,7 @@ def _fake_fixture(
         candidates.append(unrelated_execution)
 
     client = _FakeClient(executions, candidates, artifacts, counters)
-    return client, list(replay_ids), replay_ids, counters
+    return client, list(job_ids), job_ids, counters
 
 
 def _measure(
@@ -249,7 +249,7 @@ def _measure(
     scenario: str,
     mode: str,
     originals: int,
-    replays: int,
+    jobs: int,
     unrelated: int,
     artifact_bytes: int,
     explicit_ids: bool,
@@ -268,7 +268,7 @@ def _measure(
         scenario=scenario,
         mode=mode,
         originals=originals,
-        replays=replays,
+        jobs=jobs,
         unrelated=unrelated,
         artifact_bytes=artifact_bytes,
         explicit_ids=explicit_ids,
@@ -288,7 +288,7 @@ def _run_fake_scenario(
     artifact_bytes: int = 32,
     explicit_ids: bool = False,
 ) -> Measurement:
-    client, original_ids, replay_ids, counters = _fake_fixture(
+    client, original_ids, job_ids, counters = _fake_fixture(
         originals=originals,
         replays_per_original=replays_per_original,
         unrelated=unrelated,
@@ -299,14 +299,14 @@ def _run_fake_scenario(
         with patch("kitaru.diff.KitaruClient", return_value=client):
             if explicit_ids:
                 original_id = original_ids[0]
-                return diff(original_id, *replay_ids[original_id])
+                return diff(original_id, *job_ids[original_id])
             return diff_cohort(original_ids)
 
     return _measure(
         scenario=scenario,
         mode="deterministic",
         originals=originals,
-        replays=originals * replays_per_original,
+        jobs=originals * replays_per_original,
         unrelated=unrelated,
         artifact_bytes=artifact_bytes,
         explicit_ids=explicit_ids,
@@ -323,10 +323,10 @@ def deterministic_benchmarks() -> list[Measurement]:
     _run_fake_scenario("warm-up", originals=1, replays_per_original=1)
     return [
         _run_fake_scenario(
-            "50 originals, one replay", originals=50, replays_per_original=1
+            "50 originals, one job", originals=50, replays_per_original=1
         ),
         _run_fake_scenario(
-            "60 originals, three replays", originals=60, replays_per_original=3
+            "60 originals, three jobs", originals=60, replays_per_original=3
         ),
         _run_fake_scenario(
             "50 originals plus unrelated executions",
@@ -335,7 +335,7 @@ def deterministic_benchmarks() -> list[Measurement]:
             unrelated=1_000,
         ),
         _run_fake_scenario(
-            "explicit replay IDs",
+            "explicit job IDs",
             originals=1,
             replays_per_original=3,
             explicit_ids=True,
@@ -372,7 +372,7 @@ def create_benchmark_payload(payload_bytes: int) -> str:
 
 @checkpoint
 def summarize_benchmark_payload(payload: str) -> int:
-    """Create a second checkpoint so replay can start after payload creation."""
+    """Create a second checkpoint so job can start after payload creation."""
     return len(payload)
 
 
@@ -387,13 +387,13 @@ def _create_local_pairs(
 ) -> tuple[list[str], dict[str, list[str]]]:
     client = KitaruClient()
     original_ids: list[str] = []
-    replay_ids: dict[str, list[str]] = {}
+    job_ids: dict[str, list[str]] = {}
     for _original_index in range(originals):
         handle = issue_525_benchmark_flow.run(artifact_bytes)
         handle.wait()
         original_id = str(handle.exec_id)
         original_ids.append(original_id)
-        replay_ids[original_id] = []
+        job_ids[original_id] = []
         for replay_index in range(replays_per_original):
             replacement = chr(97 + replay_index % 26) * artifact_bytes
             checkpoint_overrides = (
@@ -401,15 +401,15 @@ def _create_local_pairs(
                 if artifact_bytes < 100_000
                 else None
             )
-            submission = client.executions.replay(
+            submission = client.executions.job(
                 original_id,
                 at="summarize_benchmark_payload",
                 checkpoint_overrides=checkpoint_overrides,
                 tag=tag,
                 wait=True,
             )
-            replay_ids[original_id].append(submission.results[0].replay_exec_id)
-    return original_ids, replay_ids
+            job_ids[original_id].append(submission.results[0].replay_exec_id)
+    return original_ids, job_ids
 
 
 class _CountingArtifact:
@@ -493,7 +493,7 @@ def _measure_local(
     scenario: str,
     *,
     original_ids: list[str],
-    replay_ids: dict[str, list[str]],
+    job_ids: dict[str, list[str]],
     artifact_bytes: int,
     explicit_ids: bool = False,
 ) -> Measurement:
@@ -504,7 +504,7 @@ def _measure_local(
     relevant_exec_ids = set(original_ids)
     relevant_exec_ids.update(
         replay_exec_id
-        for original_replay_ids in replay_ids.values()
+        for original_replay_ids in job_ids.values()
         for replay_exec_id in original_replay_ids
     )
 
@@ -520,19 +520,19 @@ def _measure_local(
         ):
             if explicit_ids:
                 original_id = original_ids[0]
-                return diff(original_id, *replay_ids[original_id])
+                return diff(original_id, *job_ids[original_id])
             return diff_cohort(original_ids)
 
     measured_replays = (
-        len(replay_ids[original_ids[0]])
+        len(job_ids[original_ids[0]])
         if explicit_ids
-        else sum(len(ids) for ids in replay_ids.values())
+        else sum(len(ids) for ids in job_ids.values())
     )
     measurement = _measure(
         scenario=scenario,
         mode="local",
         originals=len(original_ids),
-        replays=measured_replays,
+        jobs=measured_replays,
         unrelated=0,
         artifact_bytes=artifact_bytes,
         explicit_ids=explicit_ids,
@@ -548,7 +548,7 @@ def local_benchmarks(*, scale: str) -> list[Measurement]:
     sizes = [(2, 1), (2, 3)] if scale == "smoke" else [(50, 1), (60, 3)]
     results: list[Measurement] = []
     for originals, replays_per_original in sizes:
-        original_ids, replay_ids = _create_local_pairs(
+        original_ids, job_ids = _create_local_pairs(
             originals=originals,
             replays_per_original=replays_per_original,
             artifact_bytes=32,
@@ -556,24 +556,24 @@ def local_benchmarks(*, scale: str) -> list[Measurement]:
         )
         results.append(
             _measure_local(
-                f"{originals} local originals, {replays_per_original} replay(s) each",
+                f"{originals} local originals, {replays_per_original} job(s) each",
                 original_ids=original_ids,
-                replay_ids=replay_ids,
+                job_ids=job_ids,
                 artifact_bytes=32,
             )
         )
         if originals == sizes[0][0]:
             results.append(
                 _measure_local(
-                    "local explicit replay IDs",
+                    "local explicit job IDs",
                     original_ids=original_ids[:1],
-                    replay_ids=replay_ids,
+                    job_ids=job_ids,
                     artifact_bytes=32,
                     explicit_ids=True,
                 )
             )
     for artifact_bytes in (32, 1_000_000):
-        original_ids, replay_ids = _create_local_pairs(
+        original_ids, job_ids = _create_local_pairs(
             originals=1,
             replays_per_original=1,
             artifact_bytes=artifact_bytes,
@@ -583,7 +583,7 @@ def local_benchmarks(*, scale: str) -> list[Measurement]:
             _measure_local(
                 f"local artifact size {artifact_bytes}",
                 original_ids=original_ids,
-                replay_ids=replay_ids,
+                job_ids=job_ids,
                 artifact_bytes=artifact_bytes,
             )
         )

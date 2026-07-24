@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for replay use cases and the replay state machine."""
+"""Tests for job use cases and the job state machine."""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -26,20 +26,20 @@ from conftest import (
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
+    FakeJobRepository,
     FakeReplayConfigRepository,
-    FakeReplayRepository,
     FakeSecretRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
 )
 from kitaru.hashing import tool_call_cache_key
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.replays import (
+from kitaru.server.application.models.jobs import (
+    JobFilter,
+    JobUpdate,
     ReplayCreate,
-    ReplayFilter,
-    ReplayUpdate,
 )
-from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.job_service import JobService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import (
@@ -54,19 +54,19 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunStatus,
 )
-from kitaru.server.domain.replay import (
+from kitaru.server.domain.job import (
     HEARTBEAT_TIMEOUT_ERROR,
-    InvalidReplay,
-    InvalidReplayTransition,
+    InvalidJob,
+    InvalidJobTransition,
     InvalidToolLookup,
-    Replay,
-    ReplayActive,
-    ReplayAlreadyLinked,
-    ReplayMissingResultSession,
-    ReplayNotActive,
-    ReplayNotFound,
-    ReplayNotStandalone,
-    ReplayStatus,
+    Job,
+    JobActive,
+    JobAlreadyLinked,
+    JobMissingResultSession,
+    JobNotActive,
+    JobNotFound,
+    JobNotStandalone,
+    JobStatus,
 )
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
@@ -142,11 +142,9 @@ def repository(
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
-) -> FakeReplayRepository:
-    """Provide a fake replay repository."""
-    return FakeReplayRepository(
-        session_repository, version_repository, config_repository
-    )
+) -> FakeJobRepository:
+    """Provide a fake job repository."""
+    return FakeJobRepository(session_repository, version_repository, config_repository)
 
 
 @pytest.fixture
@@ -178,7 +176,7 @@ def experiment_repository(
 @pytest.fixture
 def run_repository(
     experiment_repository: FakeExperimentRepository,
-    repository: FakeReplayRepository,
+    repository: FakeJobRepository,
 ) -> FakeExperimentRunRepository:
     """Provide a fake experiment run repository."""
     return FakeExperimentRunRepository(experiment_repository, repository)
@@ -192,7 +190,7 @@ def secret_repository() -> FakeSecretRepository:
 
 @pytest.fixture
 def service(
-    repository: FakeReplayRepository,
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
@@ -201,9 +199,9 @@ def service(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
-) -> ReplayService:
-    """Provide a replay service backed by the fake repositories."""
-    return ReplayService(
+) -> JobService:
+    """Provide a job service backed by the fake repositories."""
+    return JobService(
         repository=repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
@@ -246,7 +244,7 @@ async def create_session(
     agent_id: uuid.UUID,
     status: SessionStatus = SessionStatus.COMPLETED,
 ) -> Session:
-    """Store a recorded session for replay tests.
+    """Store a recorded session for job tests.
 
     Args:
         repository: Fake session repository.
@@ -285,30 +283,30 @@ def replay_create(session_id: uuid.UUID, **overrides: object) -> ReplayCreate:
 
 
 async def test_create_replay_defaults(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Create a standalone replay defaulting the tool policy and version."""
+    """Create a standalone job defaulting the tool policy and version."""
     session = await create_session(session_repository, agent.id)
-    replay, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    assert replay.experiment_run_id is None
-    assert replay.original_session_id == session.id
-    assert replay.result_session_id is None
-    assert replay.agent_version_id == version.id
-    assert replay.replay_config_id == config.id
-    assert replay.status is ReplayStatus.PENDING
-    assert replay.attempt == 1
-    assert replay.created is not None
-    assert replay.updated is not None
+    job, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    assert job.experiment_run_id is None
+    assert job.original_session_id == session.id
+    assert job.result_session_id is None
+    assert job.agent_version_id == version.id
+    assert job.replay_config_id == config.id
+    assert job.status is JobStatus.PENDING
+    assert job.attempt == 1
+    assert job.created is not None
+    assert job.updated is not None
     assert config.override is None
     assert config.tool_policy == ToolPolicyConfig(default=HistoryPolicy())
     assert config.scoring_policy == SCORING_POLICY
 
 
 async def test_create_replay_with_config(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     config_repository: FakeReplayConfigRepository,
     agent: Agent,
@@ -318,18 +316,18 @@ async def test_create_replay_with_config(
     session = await create_session(session_repository, agent.id)
     override = ReplayOverride(model="claude-sonnet-5")
     tool_policy = ToolPolicyConfig(default=HistoryPolicy(scope=HistoryScope.AGENT))
-    replay, config = await service.create_replay(
+    job, config = await service.create_replay(
         replay_create(session.id, override=override, tool_policy=tool_policy),
         actor=ACTOR,
     )
-    stored = await config_repository.get(replay.replay_config_id)
+    stored = await config_repository.get(job.replay_config_id)
     assert stored.override == override
     assert stored.tool_policy == tool_policy
     assert stored == config
 
 
 async def test_create_replay_rejects_cohort_scope(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
@@ -355,20 +353,20 @@ async def test_create_replay_rejects_cohort_scope(
 
 
 async def test_create_replay_in_progress_session(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject replaying an in-progress session."""
+    """Reject jobing an in-progress session."""
     session = await create_session(
         session_repository, agent.id, status=SessionStatus.IN_PROGRESS
     )
-    with pytest.raises(InvalidReplay, match=f"Session {session.id} is in progress"):
+    with pytest.raises(InvalidJob, match=f"Session {session.id} is in progress"):
         await service.create_replay(replay_create(session.id), actor=ACTOR)
 
 
-async def test_create_replay_unknown_session(service: ReplayService) -> None:
+async def test_create_replay_unknown_session(service: JobService) -> None:
     """Raise for an unknown session id."""
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
@@ -376,7 +374,7 @@ async def test_create_replay_unknown_session(service: ReplayService) -> None:
 
 
 async def test_create_replay_no_runnable_version(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
 ) -> None:
@@ -389,7 +387,7 @@ async def test_create_replay_no_runnable_version(
 
 
 async def test_create_replay_cross_agent_version(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     agent_repository: FakeAgentRepository,
@@ -409,7 +407,7 @@ async def test_create_replay_cross_agent_version(
         )
     )
     with pytest.raises(
-        InvalidReplay,
+        InvalidJob,
         match=f"Agent version {other_version.id} does not belong to agent {agent.id}",
     ):
         await service.create_replay(
@@ -418,7 +416,7 @@ async def test_create_replay_cross_agent_version(
 
 
 async def test_create_replay_version_without_run_spec(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     agent: Agent,
@@ -436,83 +434,77 @@ async def test_create_replay_version_without_run_spec(
         )
 
 
-async def test_get_replay(
-    service: ReplayService,
+async def test_get_job(
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Load a stored replay with its config."""
+    """Load a stored job with its config."""
     session = await create_session(session_repository, agent.id)
     created, created_config = await service.create_replay(
         replay_create(session.id), actor=ACTOR
     )
-    replay, config = await service.get_replay(created.id, actor=ACTOR)
-    assert replay == created
+    job, config = await service.get_job(created.id, actor=ACTOR)
+    assert job == created
     assert config == created_config
 
 
-async def test_get_replay_not_found(service: ReplayService) -> None:
-    """Raise for an unknown replay id."""
+async def test_get_job_not_found(service: JobService) -> None:
+    """Raise for an unknown job id."""
     missing_id = uuid.uuid4()
-    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
-        await service.get_replay(missing_id, actor=ACTOR)
+    with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
+        await service.get_job(missing_id, actor=ACTOR)
 
 
-async def test_list_replays_filters(
-    service: ReplayService,
+async def test_list_jobs_filters(
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """List replays filtered by session, status, and standalone."""
+    """List jobs filtered by session, status, and standalone."""
     first = await create_session(session_repository, agent.id)
     second = await create_session(session_repository, agent.id)
-    replay_one, _ = await service.create_replay(replay_create(first.id), actor=ACTOR)
+    job_one, _ = await service.create_replay(replay_create(first.id), actor=ACTOR)
     await service.create_replay(replay_create(second.id), actor=ACTOR)
 
-    replays, total = await service.list_replays(ReplayFilter(), actor=ACTOR)
+    jobs, total = await service.list_jobs(JobFilter(), actor=ACTOR)
     assert total == 2
 
-    replays, total = await service.list_replays(
-        ReplayFilter(original_session_id=first.id), actor=ACTOR
+    jobs, total = await service.list_jobs(
+        JobFilter(original_session_id=first.id), actor=ACTOR
     )
     assert total == 1
-    assert replays[0][0].id == replay_one.id
+    assert jobs[0][0].id == job_one.id
 
-    replays, total = await service.list_replays(
-        ReplayFilter(status=ReplayStatus.PENDING), actor=ACTOR
+    jobs, total = await service.list_jobs(
+        JobFilter(status=JobStatus.PENDING), actor=ACTOR
     )
     assert total == 2
-    replays, total = await service.list_replays(
-        ReplayFilter(status=ReplayStatus.RUNNING), actor=ACTOR
+    jobs, total = await service.list_jobs(
+        JobFilter(status=JobStatus.RUNNING), actor=ACTOR
     )
     assert total == 0
 
-    replays, total = await service.list_replays(
-        ReplayFilter(standalone=True), actor=ACTOR
-    )
+    jobs, total = await service.list_jobs(JobFilter(standalone=True), actor=ACTOR)
     assert total == 2
-    replays, total = await service.list_replays(
-        ReplayFilter(standalone=False), actor=ACTOR
-    )
+    jobs, total = await service.list_jobs(JobFilter(standalone=False), actor=ACTOR)
     assert total == 0
 
-    replays, total = await service.list_replays(
-        ReplayFilter(page=2, page_size=1), actor=ACTOR
-    )
+    jobs, total = await service.list_jobs(JobFilter(page=2, page_size=1), actor=ACTOR)
     assert total == 2
-    assert len(replays) == 1
+    assert len(jobs) == 1
 
 
-def run_replay(**overrides: object) -> Replay:
-    """Build a run-created replay entity.
+def run_job(**overrides: object) -> Job:
+    """Build a run-created job entity.
 
     Args:
         **overrides: Field overrides.
 
     Returns:
-        Replay entity.
+        Job entity.
     """
     values: dict[str, object] = {
         "experiment_run_id": uuid.uuid4(),
@@ -521,233 +513,231 @@ def run_replay(**overrides: object) -> Replay:
         "original_session_id": uuid.uuid4(),
         **overrides,
     }
-    return Replay.model_validate(values)
+    return Job.model_validate(values)
 
 
-def test_replay_claim_and_start() -> None:
-    """Walk a run-created replay from pending through running."""
-    replay = run_replay()
-    replay.claim("worker-1")
-    assert replay.status is ReplayStatus.CLAIMED
-    assert replay.worker_id == "worker-1"
-    assert replay.claimed_at is not None
-    assert replay.heartbeat_at is not None
-    replay.start()
-    assert replay.status is ReplayStatus.RUNNING
-    assert replay.started_at is not None
+def test_job_claim_and_start() -> None:
+    """Walk a run-created job from pending through running."""
+    job = run_job()
+    job.claim("worker-1")
+    assert job.status is JobStatus.CLAIMED
+    assert job.worker_id == "worker-1"
+    assert job.claimed_at is not None
+    assert job.heartbeat_at is not None
+    job.start()
+    assert job.status is JobStatus.RUNNING
+    assert job.started_at is not None
 
 
-def test_replay_claim_requires_pending() -> None:
-    """Reject claiming a replay that is not pending."""
-    replay = run_replay()
-    replay.claim("worker-1")
+def test_job_claim_requires_pending() -> None:
+    """Reject claiming a job that is not pending."""
+    job = run_job()
+    job.claim("worker-1")
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'claimed' to 'claimed'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'claimed' to 'claimed'",
     ):
-        replay.claim("worker-2")
+        job.claim("worker-2")
 
 
-def test_replay_standalone_claim_and_start() -> None:
-    """Walk a standalone replay from pending through running."""
-    replay = run_replay(experiment_run_id=None)
-    replay.claim("worker-1")
-    assert replay.status is ReplayStatus.CLAIMED
-    assert replay.worker_id == "worker-1"
-    replay.start()
-    assert replay.status is ReplayStatus.RUNNING
+def test_job_standalone_claim_and_start() -> None:
+    """Walk a standalone job from pending through running."""
+    job = run_job(experiment_run_id=None)
+    job.claim("worker-1")
+    assert job.status is JobStatus.CLAIMED
+    assert job.worker_id == "worker-1"
+    job.start()
+    assert job.status is JobStatus.RUNNING
 
 
-def test_replay_standalone_starts_from_pending() -> None:
-    """Skip the claim for standalone replays."""
-    replay = run_replay(experiment_run_id=None)
-    replay.start()
-    assert replay.status is ReplayStatus.RUNNING
-    assert replay.heartbeat_at is not None
+def test_job_standalone_starts_from_pending() -> None:
+    """Skip the claim for standalone jobs."""
+    job = run_job(experiment_run_id=None)
+    job.start()
+    assert job.status is JobStatus.RUNNING
+    assert job.heartbeat_at is not None
 
 
-def test_replay_run_created_start_requires_claim() -> None:
-    """Reject starting a run-created replay that was not claimed."""
-    replay = run_replay()
-    with pytest.raises(InvalidReplayTransition):
-        replay.start()
+def test_job_run_created_start_requires_claim() -> None:
+    """Reject starting a run-created job that was not claimed."""
+    job = run_job()
+    with pytest.raises(InvalidJobTransition):
+        job.start()
 
 
-def test_replay_requeue_increments_attempt() -> None:
-    """Requeue a claimed replay and clear the claim state."""
-    replay = run_replay()
-    replay.claim("worker-1")
-    replay.requeue()
-    assert replay.status is ReplayStatus.PENDING
-    assert replay.attempt == 2
-    assert replay.worker_id is None
-    assert replay.claimed_at is None
-    assert replay.heartbeat_at is None
-    assert replay.started_at is None
-    with pytest.raises(InvalidReplayTransition):
-        replay.requeue()
+def test_job_requeue_increments_attempt() -> None:
+    """Requeue a claimed job and clear the claim state."""
+    job = run_job()
+    job.claim("worker-1")
+    job.requeue()
+    assert job.status is JobStatus.PENDING
+    assert job.attempt == 2
+    assert job.worker_id is None
+    assert job.claimed_at is None
+    assert job.heartbeat_at is None
+    assert job.started_at is None
+    with pytest.raises(InvalidJobTransition):
+        job.requeue()
 
 
-def finished_replay(status: ReplayStatus) -> Replay:
-    """Build a standalone replay finished in a status.
+def finished_job(status: JobStatus) -> Job:
+    """Build a standalone job finished in a status.
 
     Args:
         status: Failed, timed out, or canceled.
 
     Returns:
-        Replay entity.
+        Job entity.
     """
-    replay = run_replay(experiment_run_id=None)
-    replay.claim("worker-1")
-    replay.start()
-    replay.link_result_session(uuid.uuid4())
-    if status is ReplayStatus.FAILED:
-        replay.fail("agent exited with code 1")
-    elif status is ReplayStatus.TIMED_OUT:
-        replay.time_out("wall clock limit exceeded")
+    job = run_job(experiment_run_id=None)
+    job.claim("worker-1")
+    job.start()
+    job.link_result_session(uuid.uuid4())
+    if status is JobStatus.FAILED:
+        job.fail("agent exited with code 1")
+    elif status is JobStatus.TIMED_OUT:
+        job.time_out("wall clock limit exceeded")
     else:
-        replay.cancel()
-    return replay
+        job.cancel()
+    return job
 
 
-def test_replay_retry_clears_attempt_state() -> None:
-    """Retry a finished replay and clear its attempt state."""
+def test_job_retry_clears_attempt_state() -> None:
+    """Retry a finished job and clear its attempt state."""
     for status in (
-        ReplayStatus.FAILED,
-        ReplayStatus.TIMED_OUT,
-        ReplayStatus.CANCELED,
+        JobStatus.FAILED,
+        JobStatus.TIMED_OUT,
+        JobStatus.CANCELED,
     ):
-        replay = finished_replay(status)
-        replay.retry()
-        assert replay.status is ReplayStatus.PENDING
-        assert replay.attempt == 2
-        assert replay.worker_id is None
-        assert replay.claimed_at is None
-        assert replay.heartbeat_at is None
-        assert replay.started_at is None
-        assert replay.ended_at is None
-        assert replay.error is None
-        assert replay.result_session_id is None
+        job = finished_job(status)
+        job.retry()
+        assert job.status is JobStatus.PENDING
+        assert job.attempt == 2
+        assert job.worker_id is None
+        assert job.claimed_at is None
+        assert job.heartbeat_at is None
+        assert job.started_at is None
+        assert job.ended_at is None
+        assert job.error is None
+        assert job.result_session_id is None
 
 
-def test_replay_retry_requires_finished() -> None:
-    """Reject retrying a replay that is not failed, timed out, or canceled."""
-    pending = run_replay(experiment_run_id=None)
+def test_job_retry_requires_finished() -> None:
+    """Reject retrying a job that is not failed, timed out, or canceled."""
+    pending = run_job(experiment_run_id=None)
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {pending.id} cannot transition from 'pending' to 'pending'",
+        InvalidJobTransition,
+        match=f"Job {pending.id} cannot transition from 'pending' to 'pending'",
     ):
         pending.retry()
 
-    completed = run_replay(experiment_run_id=None)
+    completed = run_job(experiment_run_id=None)
     completed.start()
     completed.link_result_session(uuid.uuid4())
     completed.complete(ScoringResult(passed=True, score=1.0, scores={}), diff=None)
-    with pytest.raises(InvalidReplayTransition):
+    with pytest.raises(InvalidJobTransition):
         completed.retry()
 
 
-def test_replay_complete_records_result() -> None:
-    """Complete a running replay with its scoring result."""
-    replay = run_replay()
-    replay.claim("worker-1")
-    replay.start()
-    replay.link_result_session(uuid.uuid4())
-    replay.complete(
+def test_job_complete_records_result() -> None:
+    """Complete a running job with its scoring result."""
+    job = run_job()
+    job.claim("worker-1")
+    job.start()
+    job.link_result_session(uuid.uuid4())
+    job.complete(
         ScoringResult(passed=True, score=0.8, scores={"conciseness": 0.8}),
         diff={"cost_delta": "-0.1"},
     )
-    assert replay.status is ReplayStatus.COMPLETED
-    assert replay.passed is True
-    assert replay.score == 0.8
-    assert replay.scores == {"conciseness": 0.8}
-    assert replay.diff == {"cost_delta": "-0.1"}
-    assert replay.ended_at is not None
+    assert job.status is JobStatus.COMPLETED
+    assert job.passed is True
+    assert job.score == 0.8
+    assert job.scores == {"conciseness": 0.8}
+    assert job.diff == {"cost_delta": "-0.1"}
+    assert job.ended_at is not None
 
 
-def test_replay_complete_requires_running() -> None:
-    """Reject completing a replay that is not running."""
-    replay = run_replay()
-    with pytest.raises(InvalidReplayTransition):
-        replay.complete(ScoringResult(passed=True, score=1.0, scores={}), diff=None)
+def test_job_complete_requires_running() -> None:
+    """Reject completing a job that is not running."""
+    job = run_job()
+    with pytest.raises(InvalidJobTransition):
+        job.complete(ScoringResult(passed=True, score=1.0, scores={}), diff=None)
 
 
-def test_replay_fail_and_time_out() -> None:
-    """Fail or time out a claimed or running replay."""
-    replay = run_replay()
-    replay.claim("worker-1")
-    replay.fail("agent exited with code 1")
-    assert replay.status is ReplayStatus.FAILED
-    assert replay.error == "agent exited with code 1"
+def test_job_fail_and_time_out() -> None:
+    """Fail or time out a claimed or running job."""
+    job = run_job()
+    job.claim("worker-1")
+    job.fail("agent exited with code 1")
+    assert job.status is JobStatus.FAILED
+    assert job.error == "agent exited with code 1"
 
-    other = run_replay()
+    other = run_job()
     other.claim("worker-1")
     other.start()
     other.time_out("wall clock limit exceeded")
-    assert other.status is ReplayStatus.TIMED_OUT
-    with pytest.raises(InvalidReplayTransition):
+    assert other.status is JobStatus.TIMED_OUT
+    with pytest.raises(InvalidJobTransition):
         other.fail("late failure")
 
 
-def test_replay_cancel() -> None:
-    """Cancel a replay in any non-terminal status."""
-    replay = run_replay()
-    replay.cancel()
-    assert replay.status is ReplayStatus.CANCELED
-    with pytest.raises(InvalidReplayTransition):
-        replay.cancel()
+def test_job_cancel() -> None:
+    """Cancel a job in any non-terminal status."""
+    job = run_job()
+    job.cancel()
+    assert job.status is JobStatus.CANCELED
+    with pytest.raises(InvalidJobTransition):
+        job.cancel()
 
 
-def test_replay_heartbeat_and_link() -> None:
+def test_job_heartbeat_and_link() -> None:
     """Record heartbeats and link the result session while active."""
-    replay = run_replay()
-    with pytest.raises(ReplayNotActive):
-        replay.heartbeat()
-    replay.claim("worker-1")
-    before = replay.heartbeat_at
-    replay.heartbeat()
-    assert replay.heartbeat_at is not None
+    job = run_job()
+    with pytest.raises(JobNotActive):
+        job.heartbeat()
+    job.claim("worker-1")
+    before = job.heartbeat_at
+    job.heartbeat()
+    assert job.heartbeat_at is not None
     assert before is not None
-    assert replay.heartbeat_at >= before
+    assert job.heartbeat_at >= before
 
     session_id = uuid.uuid4()
-    replay.link_result_session(session_id)
-    assert replay.result_session_id == session_id
+    job.link_result_session(session_id)
+    assert job.result_session_id == session_id
     with pytest.raises(
-        ReplayAlreadyLinked,
-        match=f"Replay {replay.id} already has a result session",
+        JobAlreadyLinked,
+        match=f"Job {job.id} already has a result session",
     ):
-        replay.link_result_session(uuid.uuid4())
+        job.link_result_session(uuid.uuid4())
 
-    idle = run_replay()
-    with pytest.raises(
-        ReplayNotActive, match=f"Replay {idle.id} is not claimed or running"
-    ):
+    idle = run_job()
+    with pytest.raises(JobNotActive, match=f"Job {idle.id} is not claimed or running"):
         idle.link_result_session(uuid.uuid4())
 
 
-def test_replay_with_staleness() -> None:
+def test_job_with_staleness() -> None:
     """Report stale claims as pending or timed out without mutating."""
-    replay = run_replay()
-    replay.claim("worker-1")
+    job = run_job()
+    job.claim("worker-1")
     fresh = datetime.now(UTC) - timedelta(seconds=60)
-    assert replay.with_staleness(fresh, 3) is replay
+    assert job.with_staleness(fresh, 3) is job
 
     stale = datetime.now(UTC) + timedelta(seconds=60)
-    reported = replay.with_staleness(stale, 3)
-    assert reported is not replay
-    assert reported.status is ReplayStatus.PENDING
+    reported = job.with_staleness(stale, 3)
+    assert reported is not job
+    assert reported.status is JobStatus.PENDING
     assert reported.attempt == 2
     assert reported.worker_id is None
-    assert replay.status is ReplayStatus.CLAIMED
+    assert job.status is JobStatus.CLAIMED
 
-    exhausted = run_replay(attempt=3)
+    exhausted = run_job(attempt=3)
     exhausted.claim("worker-1")
     reported = exhausted.with_staleness(stale, 3)
-    assert reported.status is ReplayStatus.TIMED_OUT
+    assert reported.status is JobStatus.TIMED_OUT
     assert reported.error == HEARTBEAT_TIMEOUT_ERROR
 
-    terminal = run_replay()
+    terminal = run_job()
     terminal.cancel()
     assert terminal.with_staleness(stale, 3) is terminal
 
@@ -758,15 +748,15 @@ async def seed_run(
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
     run_repository: FakeExperimentRunRepository,
-    replay_repository: FakeReplayRepository,
+    job_repository: FakeJobRepository,
     agent: Agent,
     version: AgentVersion,
     sessions: list[Session],
     tool_policy: ToolPolicyConfig | None = None,
     score_baselines: bool = False,
     name: str = "swap-model",
-) -> tuple[ExperimentRun, list[Replay]]:
-    """Store a run with one pending replay per session.
+) -> tuple[ExperimentRun, list[Job]]:
+    """Store a run with one pending job per session.
 
     Args:
         session_repository: Fake session repository.
@@ -774,7 +764,7 @@ async def seed_run(
         config_repository: Fake replay config repository.
         experiment_repository: Fake experiment repository.
         run_repository: Fake experiment run repository.
-        replay_repository: Fake replay repository.
+        job_repository: Fake job repository.
         agent: Agent of the sessions.
         version: Agent version to execute.
         sessions: Original sessions.
@@ -783,7 +773,7 @@ async def seed_run(
         name: Experiment and cohort name.
 
     Returns:
-        Stored run and its replays.
+        Stored run and its jobs.
     """
     cohort = await cohort_repository.create(
         Cohort(
@@ -815,8 +805,8 @@ async def seed_run(
         agent_version_id=version.id,
         score_baselines=score_baselines,
     )
-    replays = [
-        Replay(
+    jobs = [
+        Job(
             experiment_run_id=run.id,
             replay_config_id=config.id,
             agent_version_id=version.id,
@@ -824,13 +814,13 @@ async def seed_run(
         )
         for session in sessions
     ]
-    run = await run_repository.create(run, replays)
-    stored, _ = await replay_repository.query(ReplayFilter(experiment_run_id=run.id))
+    run = await run_repository.create(run, jobs)
+    stored, _ = await job_repository.query(JobFilter(experiment_run_id=run.id))
     return run, stored
 
 
 async def test_get_spec_standalone(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     secret_repository: FakeSecretRepository,
@@ -878,11 +868,11 @@ async def test_get_spec_standalone(
         )
     )
     override = ReplayOverride(model="claude-sonnet-5")
-    replay, config = await service.create_replay(
+    job, config = await service.create_replay(
         replay_create(session.id, override=override), actor=ACTOR
     )
-    spec = await service.get_spec(replay.id, actor=ACTOR)
-    assert spec.replay_id == replay.id
+    spec = await service.get_spec(job.id, actor=ACTOR)
+    assert spec.job_id == job.id
     assert spec.inputs == {"prompt": "hi"}
     assert spec.override == override
     assert spec.tool_policy == config.tool_policy
@@ -896,7 +886,7 @@ async def test_get_spec_standalone(
 
 
 async def test_get_spec_applies_prompt_override(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
@@ -912,17 +902,17 @@ async def test_get_spec_applies_prompt_override(
         )
     )
     override = ReplayOverride(prompt="rewritten task")
-    replay, _ = await service.create_replay(
+    job, _ = await service.create_replay(
         replay_create(session.id, override=override), actor=ACTOR
     )
-    spec = await service.get_spec(replay.id, actor=ACTOR)
+    spec = await service.get_spec(job.id, actor=ACTOR)
     assert spec.inputs == "rewritten task"
     assert spec.run_spec == version.run_spec
 
 
-async def test_get_spec_run_replay_carries_score_baselines(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_get_spec_run_job_carries_score_baselines(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -931,9 +921,9 @@ async def test_get_spec_run_replay_carries_score_baselines(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Resolve a run replay spec with the run's baseline scoring flag."""
+    """Resolve a run job spec with the run's baseline scoring flag."""
     session = await create_session(session_repository, agent.id)
-    _, replays = await seed_run(
+    _, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -945,12 +935,12 @@ async def test_get_spec_run_replay_carries_score_baselines(
         [session],
         score_baselines=False,
     )
-    spec = await service.get_spec(replays[0].id, actor=ACTOR)
+    spec = await service.get_spec(jobs[0].id, actor=ACTOR)
     assert spec.score_baselines is False
 
 
 async def test_get_spec_version_without_run_spec(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     agent: Agent,
@@ -958,16 +948,16 @@ async def test_get_spec_version_without_run_spec(
 ) -> None:
     """Raise when the stamped version lost its run spec."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     await version_repository.update(version.model_copy(update={"run_spec": None}))
     with pytest.raises(
         AgentVersionNotRunnable, match=f"Agent version {version.id} has no run spec"
     ):
-        await service.get_spec(replay.id, actor=ACTOR)
+        await service.get_spec(job.id, actor=ACTOR)
 
 
 async def test_get_spec_deleted_secret(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     agent: Agent,
@@ -987,23 +977,23 @@ async def test_get_spec_deleted_secret(
         )
     )
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     with pytest.raises(SecretNotFound, match=f"Secret {missing_id} was not found"):
-        await service.get_spec(replay.id, actor=ACTOR)
+        await service.get_spec(job.id, actor=ACTOR)
 
 
 async def link_result_session(
-    repository: FakeReplayRepository,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
-    replay_id: uuid.UUID,
+    job_id: uuid.UUID,
     agent_id: uuid.UUID,
 ) -> Session:
-    """Link a completed result session to a running replay.
+    """Link a completed result session to a running job.
 
     Args:
-        repository: Fake replay repository.
+        repository: Fake job repository.
         session_repository: Fake session repository.
-        replay_id: Id of the replay.
+        job_id: Id of the job.
         agent_id: Id of the agent.
 
     Returns:
@@ -1017,42 +1007,40 @@ async def link_result_session(
             status=SessionStatus.COMPLETED,
         )
     )
-    running = await repository.get(replay_id)
+    running = await repository.get(job_id)
     running.link_result_session(result.id)
     await repository.update(running)
     return result
 
 
-async def test_update_replay_standalone_lifecycle(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_update_job_standalone_lifecycle(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Run a standalone replay from pending to completed with a diff."""
+    """Run a standalone job from pending to completed with a diff."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    updated, _ = await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    updated, _ = await service.update_job(
+        job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR
     )
-    assert updated.status is ReplayStatus.RUNNING
+    assert updated.status is JobStatus.RUNNING
     assert updated.started_at is not None
 
-    result = await link_result_session(
-        repository, session_repository, replay.id, agent.id
-    )
-    completed, _ = await service.update_replay(
-        replay.id,
-        ReplayUpdate(
-            status=ReplayStatus.COMPLETED,
+    result = await link_result_session(repository, session_repository, job.id, agent.id)
+    completed, _ = await service.update_job(
+        job.id,
+        JobUpdate(
+            status=JobStatus.COMPLETED,
             passed=True,
             score=0.8,
             scores={"conciseness": 0.8},
         ),
         actor=ACTOR,
     )
-    assert completed.status is ReplayStatus.COMPLETED
+    assert completed.status is JobStatus.COMPLETED
     assert completed.result_session_id == result.id
     assert completed.passed is True
     assert completed.score == 0.8
@@ -1068,94 +1056,86 @@ async def test_update_replay_standalone_lifecycle(
     }
 
 
-async def test_update_replay_completed_requires_scoring_result(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_update_job_completed_requires_scoring_result(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Reject completing without the full scoring result."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
-    running = await repository.get(replay.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    running = await repository.get(job.id)
     running.link_result_session(session.id)
     await repository.update(running)
     with pytest.raises(
-        InvalidReplay, match="Completing a replay requires passed, score, and scores"
+        InvalidJob, match="Completing a job requires passed, score, and scores"
     ):
-        await service.update_replay(
-            replay.id,
-            ReplayUpdate(status=ReplayStatus.COMPLETED, passed=True),
+        await service.update_job(
+            job.id,
+            JobUpdate(status=JobStatus.COMPLETED, passed=True),
             actor=ACTOR,
         )
 
 
-async def test_update_replay_completed_requires_result_session(
-    service: ReplayService,
+async def test_update_job_completed_requires_result_session(
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject completing an unlinked replay."""
+    """Reject completing an unlinked job."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
     with pytest.raises(
-        ReplayMissingResultSession,
-        match=f"Replay {replay.id} has no result session",
+        JobMissingResultSession,
+        match=f"Job {job.id} has no result session",
     ):
-        await service.update_replay(
-            replay.id,
-            ReplayUpdate(
-                status=ReplayStatus.COMPLETED, passed=True, score=1.0, scores={}
-            ),
+        await service.update_job(
+            job.id,
+            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
             actor=ACTOR,
         )
 
 
-async def test_update_replay_illegal_transitions(
-    service: ReplayService,
+async def test_update_job_illegal_transitions(
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Reject illegal runner transitions."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'pending' to 'completed'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'pending' to 'completed'",
     ):
-        await service.update_replay(
-            replay.id,
-            ReplayUpdate(
-                status=ReplayStatus.COMPLETED, passed=True, score=1.0, scores={}
-            ),
+        await service.update_job(
+            job.id,
+            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
             actor=ACTOR,
         )
-    with pytest.raises(InvalidReplayTransition):
-        await service.update_replay(
-            replay.id, ReplayUpdate(status=ReplayStatus.PENDING), actor=ACTOR
+    with pytest.raises(InvalidJobTransition):
+        await service.update_job(
+            job.id, JobUpdate(status=JobStatus.PENDING), actor=ACTOR
         )
-    with pytest.raises(InvalidReplay, match="Failing a replay requires an error"):
-        await service.update_replay(
-            replay.id, ReplayUpdate(status=ReplayStatus.FAILED), actor=ACTOR
+    with pytest.raises(InvalidJob, match="Failing a job requires an error"):
+        await service.update_job(
+            job.id, JobUpdate(status=JobStatus.FAILED), actor=ACTOR
         )
-    with pytest.raises(InvalidReplay, match="Timing out a replay requires an error"):
-        await service.update_replay(
-            replay.id, ReplayUpdate(status=ReplayStatus.TIMED_OUT), actor=ACTOR
+    with pytest.raises(InvalidJob, match="Timing out a job requires an error"):
+        await service.update_job(
+            job.id, JobUpdate(status=JobStatus.TIMED_OUT), actor=ACTOR
         )
 
 
-async def test_update_replay_finalizes_run(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_update_job_finalizes_run(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1164,9 +1144,9 @@ async def test_update_replay_finalizes_run(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Finalize the run when its last replay goes terminal."""
+    """Finalize the run when its last job goes terminal."""
     sessions = [await create_session(session_repository, agent.id) for _ in range(2)]
-    run, replays = await seed_run(
+    run, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1177,19 +1157,19 @@ async def test_update_replay_finalizes_run(
         version,
         sessions,
     )
-    first, second = replays
+    first, second = jobs
     await repository.claim_pending(run.id, "worker-1", 2)
-    failed, _ = await service.update_replay(
+    failed, _ = await service.update_job(
         first.id,
-        ReplayUpdate(status=ReplayStatus.FAILED, error="agent exited with code 1"),
+        JobUpdate(status=JobStatus.FAILED, error="agent exited with code 1"),
         actor=ACTOR,
     )
-    assert failed.status is ReplayStatus.FAILED
-    # One terminal replay does not finalize the run.
+    assert failed.status is JobStatus.FAILED
+    # One terminal job does not finalize the run.
     assert (await run_repository.get(run.id)).status is ExperimentRunStatus.PENDING
 
-    await service.update_replay(
-        second.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
+    await service.update_job(
+        second.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR
     )
     result = await session_repository.create(
         Session(
@@ -1203,10 +1183,10 @@ async def test_update_replay_finalizes_run(
     running = await repository.get(second.id)
     running.link_result_session(result.id)
     await repository.update(running)
-    await service.update_replay(
+    await service.update_job(
         second.id,
-        ReplayUpdate(
-            status=ReplayStatus.COMPLETED,
+        JobUpdate(
+            status=JobStatus.COMPLETED,
             passed=True,
             score=0.9,
             scores={"conciseness": 0.9},
@@ -1215,7 +1195,7 @@ async def test_update_replay_finalizes_run(
     )
     finalized = await run_repository.get(run.id)
     assert finalized.status is ExperimentRunStatus.FAILED
-    assert finalized.error == "1 of 2 replays failed"
+    assert finalized.error == "1 of 2 jobs failed"
     assert finalized.ended_at is not None
     assert finalized.summary is not None
     assert finalized.summary["replay_counts_by_status"] == {
@@ -1226,9 +1206,9 @@ async def test_update_replay_finalizes_run(
     assert finalized.summary["total_cost"]["replay"] == pytest.approx(0.1)
 
 
-async def test_heartbeat_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_heartbeat_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1239,7 +1219,7 @@ async def test_heartbeat_replay(
 ) -> None:
     """Record heartbeats and report cancellation."""
     session = await create_session(session_repository, agent.id)
-    run, replays = await seed_run(
+    run, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1250,62 +1230,60 @@ async def test_heartbeat_replay(
         version,
         [session],
     )
-    replay = replays[0]
-    with pytest.raises(
-        ReplayNotActive, match=f"Replay {replay.id} is not claimed or running"
-    ):
-        await service.heartbeat_replay(replay.id, actor=ACTOR)
+    job = jobs[0]
+    with pytest.raises(JobNotActive, match=f"Job {job.id} is not claimed or running"):
+        await service.heartbeat_job(job.id, actor=ACTOR)
 
     await repository.claim_pending(run.id, "worker-1", 1)
-    assert await service.heartbeat_replay(replay.id, actor=ACTOR) == (
-        ReplayStatus.CLAIMED,
+    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
+        JobStatus.CLAIMED,
         False,
     )
-    heartbeat_at = (await repository.get(replay.id)).heartbeat_at
+    heartbeat_at = (await repository.get(job.id)).heartbeat_at
     assert heartbeat_at is not None
 
     canceling = await run_repository.get(run.id)
     canceling.cancel()
     await run_repository.update(canceling)
-    assert await service.heartbeat_replay(replay.id, actor=ACTOR) == (
-        ReplayStatus.CLAIMED,
+    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
+        JobStatus.CLAIMED,
         True,
     )
 
-    canceled = await repository.get(replay.id)
+    canceled = await repository.get(job.id)
     canceled.cancel()
     await repository.update(canceled)
-    assert await service.heartbeat_replay(replay.id, actor=ACTOR) == (
-        ReplayStatus.CANCELED,
+    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
+        JobStatus.CANCELED,
         True,
     )
 
 
-async def test_heartbeat_replay_stops_on_terminal_statuses(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_heartbeat_job_stops_on_terminal_statuses(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Report the stop flag for every terminal status without recording."""
     for status in (
-        ReplayStatus.COMPLETED,
-        ReplayStatus.FAILED,
-        ReplayStatus.TIMED_OUT,
-        ReplayStatus.CANCELED,
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.TIMED_OUT,
+        JobStatus.CANCELED,
     ):
         session = await create_session(session_repository, agent.id)
-        replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-        stored = await repository.get(replay.id)
+        job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+        stored = await repository.get(job.id)
         stored = stored.model_copy(update={"status": status})
         stored = await repository.update(stored)
-        assert await service.heartbeat_replay(replay.id, actor=ACTOR) == (status, True)
-        assert (await repository.get(replay.id)).heartbeat_at is None
+        assert await service.heartbeat_job(job.id, actor=ACTOR) == (status, True)
+        assert (await repository.get(job.id)).heartbeat_at is None
 
 
 def build_service(
-    repository: FakeReplayRepository,
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
@@ -1316,11 +1294,11 @@ def build_service(
     secret_repository: FakeSecretRepository,
     heartbeat_timeout_seconds: int = 60,
     max_attempts: int = 3,
-) -> ReplayService:
-    """Build a replay service with explicit staleness settings.
+) -> JobService:
+    """Build a job service with explicit staleness settings.
 
     Args:
-        repository: Fake replay repository.
+        repository: Fake job repository.
         config_repository: Fake replay config repository.
         session_repository: Fake session repository.
         version_repository: Fake agent version repository.
@@ -1331,12 +1309,12 @@ def build_service(
         secret_repository: Fake secret repository.
         heartbeat_timeout_seconds: Heartbeat timeout, negative values mark
             every claim stale immediately.
-        max_attempts: Attempt count at which a stale replay times out.
+        max_attempts: Attempt count at which a stale job times out.
 
     Returns:
-        Replay service.
+        Job service.
     """
-    return ReplayService(
+    return JobService(
         repository=repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
@@ -1351,43 +1329,43 @@ def build_service(
     )
 
 
-async def test_claim_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_claim_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Claim a pending standalone replay for a worker."""
+    """Claim a pending standalone job for a worker."""
     session = await create_session(session_repository, agent.id)
-    replay, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    claimed, claimed_config = await service.claim_replay(
-        replay.id, worker_id="worker-1", actor=ACTOR
+    job, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    claimed, claimed_config = await service.claim_job(
+        job.id, worker_id="worker-1", actor=ACTOR
     )
-    assert claimed.status is ReplayStatus.CLAIMED
+    assert claimed.status is JobStatus.CLAIMED
     assert claimed.worker_id == "worker-1"
     assert claimed.claimed_at is not None
     assert claimed.heartbeat_at is not None
     assert claimed_config.id == config.id
-    assert (await repository.get(replay.id)).status is ReplayStatus.CLAIMED
+    assert (await repository.get(job.id)).status is JobStatus.CLAIMED
 
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'claimed' to 'claimed'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'claimed' to 'claimed'",
     ):
-        await service.claim_replay(replay.id, worker_id="worker-2", actor=ACTOR)
+        await service.claim_job(job.id, worker_id="worker-2", actor=ACTOR)
 
 
-async def test_claim_replay_not_found(service: ReplayService) -> None:
-    """Raise for an unknown replay id."""
+async def test_claim_job_not_found(service: JobService) -> None:
+    """Raise for an unknown job id."""
     missing_id = uuid.uuid4()
-    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
-        await service.claim_replay(missing_id, worker_id="worker-1", actor=ACTOR)
+    with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
+        await service.claim_job(missing_id, worker_id="worker-1", actor=ACTOR)
 
 
-async def test_claim_replay_rejects_run_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_claim_job_rejects_run_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1396,9 +1374,9 @@ async def test_claim_replay_rejects_run_replay(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject claiming a run replay through the standalone endpoint."""
+    """Reject claiming a run job through the standalone endpoint."""
     session = await create_session(session_repository, agent.id)
-    _, replays = await seed_run(
+    _, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1409,16 +1387,16 @@ async def test_claim_replay_rejects_run_replay(
         version,
         [session],
     )
-    replay = replays[0]
+    job = jobs[0]
     with pytest.raises(
-        ReplayNotStandalone,
-        match=f"Replay {replay.id} belongs to an experiment run",
+        JobNotStandalone,
+        match=f"Job {job.id} belongs to an experiment run",
     ):
-        await service.claim_replay(replay.id, worker_id="worker-1", actor=ACTOR)
+        await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
 
 
-async def test_claim_replay_resolves_stale_claim(
-    repository: FakeReplayRepository,
+async def test_claim_job_resolves_stale_claim(
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
@@ -1430,7 +1408,7 @@ async def test_claim_replay_resolves_stale_claim(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reclaim a standalone replay whose worker lost its heartbeat."""
+    """Reclaim a standalone job whose worker lost its heartbeat."""
     stale_service = build_service(
         repository,
         config_repository,
@@ -1444,21 +1422,19 @@ async def test_claim_replay_resolves_stale_claim(
         heartbeat_timeout_seconds=-60,
     )
     session = await create_session(session_repository, agent.id)
-    replay, _ = await stale_service.create_replay(
-        replay_create(session.id), actor=ACTOR
-    )
-    await stale_service.claim_replay(replay.id, worker_id="worker-1", actor=ACTOR)
+    job, _ = await stale_service.create_replay(replay_create(session.id), actor=ACTOR)
+    await stale_service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
 
-    claimed, _ = await stale_service.claim_replay(
-        replay.id, worker_id="worker-2", actor=ACTOR
+    claimed, _ = await stale_service.claim_job(
+        job.id, worker_id="worker-2", actor=ACTOR
     )
-    assert claimed.status is ReplayStatus.CLAIMED
+    assert claimed.status is JobStatus.CLAIMED
     assert claimed.worker_id == "worker-2"
     assert claimed.attempt == 2
 
 
-async def test_claim_replay_times_out_exhausted_stale_claim(
-    repository: FakeReplayRepository,
+async def test_claim_job_times_out_exhausted_stale_claim(
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
@@ -1485,62 +1461,58 @@ async def test_claim_replay_times_out_exhausted_stale_claim(
         max_attempts=1,
     )
     session = await create_session(session_repository, agent.id)
-    replay, _ = await stale_service.create_replay(
-        replay_create(session.id), actor=ACTOR
-    )
-    await stale_service.claim_replay(replay.id, worker_id="worker-1", actor=ACTOR)
+    job, _ = await stale_service.create_replay(replay_create(session.id), actor=ACTOR)
+    await stale_service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
 
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'timed_out' to 'claimed'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'timed_out' to 'claimed'",
     ):
-        await stale_service.claim_replay(replay.id, worker_id="worker-2", actor=ACTOR)
-    stored = await repository.get(replay.id)
-    assert stored.status is ReplayStatus.TIMED_OUT
+        await stale_service.claim_job(job.id, worker_id="worker-2", actor=ACTOR)
+    stored = await repository.get(job.id)
+    assert stored.status is JobStatus.TIMED_OUT
     assert stored.error == HEARTBEAT_TIMEOUT_ERROR
 
 
-async def test_release_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_release_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Requeue a claimed or running replay and reject other statuses."""
+    """Requeue a claimed or running job and reject other statuses."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'pending' to 'pending'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'pending' to 'pending'",
     ):
-        await service.release_replay(replay.id, actor=ACTOR)
+        await service.release_job(job.id, actor=ACTOR)
 
-    await service.claim_replay(replay.id, worker_id="worker-1", actor=ACTOR)
-    released, _ = await service.release_replay(replay.id, actor=ACTOR)
-    assert released.status is ReplayStatus.PENDING
+    await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    released, _ = await service.release_job(job.id, actor=ACTOR)
+    assert released.status is JobStatus.PENDING
     assert released.attempt == 2
     assert released.worker_id is None
     assert released.claimed_at is None
     assert released.heartbeat_at is None
 
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
-    released, _ = await service.release_replay(replay.id, actor=ACTOR)
-    assert released.status is ReplayStatus.PENDING
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    released, _ = await service.release_job(job.id, actor=ACTOR)
+    assert released.status is JobStatus.PENDING
     assert released.attempt == 3
 
-    failed = await repository.get(replay.id)
-    failed = failed.model_copy(update={"status": ReplayStatus.FAILED})
+    failed = await repository.get(job.id)
+    failed = failed.model_copy(update={"status": JobStatus.FAILED})
     await repository.update(failed)
-    with pytest.raises(InvalidReplayTransition):
-        await service.release_replay(replay.id, actor=ACTOR)
+    with pytest.raises(InvalidJobTransition):
+        await service.release_job(job.id, actor=ACTOR)
 
 
-async def test_release_run_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_release_run_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1549,9 +1521,9 @@ async def test_release_run_replay(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Requeue a claimed run replay through release."""
+    """Requeue a claimed run job through release."""
     session = await create_session(session_repository, agent.id)
-    run, replays = await seed_run(
+    run, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1563,52 +1535,50 @@ async def test_release_run_replay(
         [session],
     )
     await repository.claim_pending(run.id, "worker-1", 1)
-    released, _ = await service.release_replay(replays[0].id, actor=ACTOR)
-    assert released.status is ReplayStatus.PENDING
+    released, _ = await service.release_job(jobs[0].id, actor=ACTOR)
+    assert released.status is JobStatus.PENDING
     assert released.attempt == 2
     assert released.worker_id is None
 
 
-async def test_retry_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_retry_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Requeue a failed standalone replay and clear its attempt state."""
+    """Requeue a failed standalone job and clear its attempt state."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
-    await link_result_session(repository, session_repository, replay.id, agent.id)
-    await service.update_replay(
-        replay.id,
-        ReplayUpdate(status=ReplayStatus.FAILED, error="agent exited with code 1"),
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    await link_result_session(repository, session_repository, job.id, agent.id)
+    await service.update_job(
+        job.id,
+        JobUpdate(status=JobStatus.FAILED, error="agent exited with code 1"),
         actor=ACTOR,
     )
 
-    retried, _ = await service.retry_replay(replay.id, actor=ACTOR)
-    assert retried.status is ReplayStatus.PENDING
+    retried, _ = await service.retry_job(job.id, actor=ACTOR)
+    assert retried.status is JobStatus.PENDING
     assert retried.attempt == 2
     assert retried.error is None
     assert retried.result_session_id is None
     assert retried.started_at is None
     assert retried.ended_at is None
-    stored = await repository.get(replay.id)
+    stored = await repository.get(job.id)
     assert stored.result_session_id is None
 
     with pytest.raises(
-        InvalidReplayTransition,
-        match=f"Replay {replay.id} cannot transition from 'pending' to 'pending'",
+        InvalidJobTransition,
+        match=f"Job {job.id} cannot transition from 'pending' to 'pending'",
     ):
-        await service.retry_replay(replay.id, actor=ACTOR)
+        await service.retry_job(job.id, actor=ACTOR)
 
 
-async def test_retry_replay_rejects_run_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_retry_job_rejects_run_job(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1617,9 +1587,9 @@ async def test_retry_replay_rejects_run_replay(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject retrying a run replay."""
+    """Reject retrying a run job."""
     session = await create_session(session_repository, agent.id)
-    run, replays = await seed_run(
+    run, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1631,37 +1601,37 @@ async def test_retry_replay_rejects_run_replay(
         [session],
     )
     await repository.claim_pending(run.id, "worker-1", 1)
-    failed = await repository.get(replays[0].id)
+    failed = await repository.get(jobs[0].id)
     failed.fail("agent exited with code 1")
     await repository.update(failed)
     with pytest.raises(
-        ReplayNotStandalone,
-        match=f"Replay {failed.id} belongs to an experiment run",
+        JobNotStandalone,
+        match=f"Job {failed.id} belongs to an experiment run",
     ):
-        await service.retry_replay(failed.id, actor=ACTOR)
+        await service.retry_job(failed.id, actor=ACTOR)
 
 
-async def test_delete_replay(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_delete_job(
+    service: JobService,
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Delete a pending standalone replay and its unreferenced config."""
+    """Delete a pending standalone job and its unreferenced config."""
     session = await create_session(session_repository, agent.id)
-    replay, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.delete_replay(replay.id, actor=ACTOR)
-    with pytest.raises(ReplayNotFound):
-        await repository.get(replay.id)
+    job, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await service.delete_job(job.id, actor=ACTOR)
+    with pytest.raises(JobNotFound):
+        await repository.get(job.id)
     with pytest.raises(ReplayConfigNotFound):
         await config_repository.get(config.id)
 
 
-async def test_delete_replay_conflicts(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+async def test_delete_job_conflicts(
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     cohort_repository: FakeCohortRepository,
     config_repository: FakeReplayConfigRepository,
@@ -1670,20 +1640,18 @@ async def test_delete_replay_conflicts(
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject deleting a claimed or running replay or a run replay."""
+    """Reject deleting a claimed or running job or a run job."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.claim_replay(replay.id, worker_id="worker-1", actor=ACTOR)
-    with pytest.raises(ReplayActive, match=f"Replay {replay.id} is claimed or running"):
-        await service.delete_replay(replay.id, actor=ACTOR)
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
-    with pytest.raises(ReplayActive):
-        await service.delete_replay(replay.id, actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    with pytest.raises(JobActive, match=f"Job {job.id} is claimed or running"):
+        await service.delete_job(job.id, actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    with pytest.raises(JobActive):
+        await service.delete_job(job.id, actor=ACTOR)
 
     other = await create_session(session_repository, agent.id)
-    _, replays = await seed_run(
+    _, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1695,10 +1663,10 @@ async def test_delete_replay_conflicts(
         [other],
     )
     with pytest.raises(
-        ReplayNotStandalone,
-        match=f"Replay {replays[0].id} belongs to an experiment run",
+        JobNotStandalone,
+        match=f"Job {jobs[0].id} belongs to an experiment run",
     ):
-        await service.delete_replay(replays[0].id, actor=ACTOR)
+        await service.delete_job(jobs[0].id, actor=ACTOR)
 
 
 async def store_tool_result(
@@ -1745,7 +1713,7 @@ async def store_tool_result(
 
 
 async def test_tool_lookup_original_session_scope(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     agent: Agent,
@@ -1761,16 +1729,16 @@ async def test_tool_lookup_original_session_scope(
     await store_tool_result(
         node_repository, other.id, inputs=inputs, outputs={"temp": 99}
     )
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     cache_key = tool_call_cache_key("get_weather", inputs)
     found = await service.tool_lookup(
-        replay.id, "get_weather", inputs, cache_key, actor=ACTOR
+        job.id, "get_weather", inputs, cache_key, actor=ACTOR
     )
     assert found is not None
     assert found.outputs == {"temp": 21}
 
     miss = await service.tool_lookup(
-        replay.id,
+        job.id,
         "get_weather",
         {"city": "Paris"},
         tool_call_cache_key("get_weather", {"city": "Paris"}),
@@ -1780,7 +1748,7 @@ async def test_tool_lookup_original_session_scope(
 
 
 async def test_tool_lookup_agent_scope(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     agent: Agent,
@@ -1793,7 +1761,7 @@ async def test_tool_lookup_agent_scope(
     await store_tool_result(
         node_repository, other.id, inputs=inputs, outputs={"temp": 21}
     )
-    replay, _ = await service.create_replay(
+    job, _ = await service.create_replay(
         replay_create(
             session.id,
             tool_policy=ToolPolicyConfig(
@@ -1803,7 +1771,7 @@ async def test_tool_lookup_agent_scope(
         actor=ACTOR,
     )
     found = await service.tool_lookup(
-        replay.id,
+        job.id,
         "get_weather",
         inputs,
         tool_call_cache_key("get_weather", inputs),
@@ -1814,8 +1782,8 @@ async def test_tool_lookup_agent_scope(
 
 
 async def test_tool_lookup_cohort_scope(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     cohort_repository: FakeCohortRepository,
@@ -1835,7 +1803,7 @@ async def test_tool_lookup_cohort_scope(
     await store_tool_result(
         node_repository, outside.id, inputs={"city": "Paris"}, outputs={"temp": 9}
     )
-    _, replays = await seed_run(
+    _, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -1847,11 +1815,9 @@ async def test_tool_lookup_cohort_scope(
         sessions,
         tool_policy=ToolPolicyConfig(default=HistoryPolicy(scope=HistoryScope.COHORT)),
     )
-    replay = next(
-        entry for entry in replays if entry.original_session_id == sessions[0].id
-    )
+    job = next(entry for entry in jobs if entry.original_session_id == sessions[0].id)
     found = await service.tool_lookup(
-        replay.id,
+        job.id,
         "get_weather",
         inputs,
         tool_call_cache_key("get_weather", inputs),
@@ -1862,7 +1828,7 @@ async def test_tool_lookup_cohort_scope(
 
     paris = {"city": "Paris"}
     miss = await service.tool_lookup(
-        replay.id,
+        job.id,
         "get_weather",
         paris,
         tool_call_cache_key("get_weather", paris),
@@ -1872,14 +1838,14 @@ async def test_tool_lookup_cohort_scope(
 
 
 async def test_tool_lookup_cohort_scope_standalone(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     config_repository: FakeReplayConfigRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject a cohort scope on a standalone replay."""
+    """Reject a cohort scope on a standalone job."""
     session = await create_session(session_repository, agent.id)
     config = await config_repository.create(
         ReplayConfig(
@@ -1890,8 +1856,8 @@ async def test_tool_lookup_cohort_scope_standalone(
             scoring_policy=SCORING_POLICY,
         )
     )
-    replay = await repository.create(
-        Replay(
+    job = await repository.create(
+        Job(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=session.id,
@@ -1903,7 +1869,7 @@ async def test_tool_lookup_cohort_scope_standalone(
         match="Standalone replays cannot use history scope 'cohort'",
     ):
         await service.tool_lookup(
-            replay.id,
+            job.id,
             "get_weather",
             inputs,
             tool_call_cache_key("get_weather", inputs),
@@ -1912,14 +1878,14 @@ async def test_tool_lookup_cohort_scope_standalone(
 
 
 async def test_tool_lookup_rejects_mismatch_and_non_history(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Reject cache key mismatches and tools without a history policy."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(
+    job, _ = await service.create_replay(
         replay_create(
             session.id,
             tool_policy=ToolPolicyConfig(
@@ -1933,14 +1899,14 @@ async def test_tool_lookup_rejects_mismatch_and_non_history(
         InvalidToolLookup, match="Cache key does not match the tool name and inputs"
     ):
         await service.tool_lookup(
-            replay.id, "get_weather", {"city": "Berlin"}, "a" * 64, actor=ACTOR
+            job.id, "get_weather", {"city": "Berlin"}, "a" * 64, actor=ACTOR
         )
     inputs = {"query": "kitaru"}
     with pytest.raises(
         InvalidToolLookup, match="Tool 'search' resolves to no history policy"
     ):
         await service.tool_lookup(
-            replay.id,
+            job.id,
             "search",
             inputs,
             tool_call_cache_key("search", inputs),
@@ -1949,23 +1915,23 @@ async def test_tool_lookup_rejects_mismatch_and_non_history(
 
 
 async def test_compute_diff_requires_result_session(
-    service: ReplayService,
+    service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Raise when the replay has no result session yet."""
+    """Raise when the job has no result session yet."""
     session = await create_session(session_repository, agent.id)
-    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     with pytest.raises(
-        ReplayMissingResultSession, match=f"Replay {replay.id} has no result session"
+        JobMissingResultSession, match=f"Job {job.id} has no result session"
     ):
-        await service.compute_diff(replay.id, actor=ACTOR)
+        await service.compute_diff(job.id, actor=ACTOR)
 
 
 async def test_compute_diff(
-    service: ReplayService,
-    repository: FakeReplayRepository,
+    service: JobService,
+    repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     agent: Agent,
@@ -1979,16 +1945,12 @@ async def test_compute_diff(
         inputs={"city": "Berlin"},
         outputs={"temp": 21},
     )
-    replay, _ = await service.create_replay(
+    job, _ = await service.create_replay(
         replay_create(session.id, override=ReplayOverride(model="claude-sonnet-5")),
         actor=ACTOR,
     )
-    await service.update_replay(
-        replay.id, ReplayUpdate(status=ReplayStatus.RUNNING), actor=ACTOR
-    )
-    result = await link_result_session(
-        repository, session_repository, replay.id, agent.id
-    )
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    result = await link_result_session(repository, session_repository, job.id, agent.id)
     await store_tool_result(
         node_repository,
         result.id,
@@ -1996,8 +1958,8 @@ async def test_compute_diff(
         outputs={"temp": 21},
         mocked=True,
     )
-    diff = await service.compute_diff(replay.id, actor=ACTOR)
-    assert diff.replay_id == replay.id
+    diff = await service.compute_diff(job.id, actor=ACTOR)
+    assert diff.replay_id == job.id
     assert diff.original_session_id == session.id
     assert diff.result_session_id == result.id
     assert len(diff.node_pairs) == 1
@@ -2011,8 +1973,8 @@ async def test_compute_diff(
     assert diff.input_diff.model.effective == []
 
 
-async def test_get_replay_reports_staleness(
-    repository: FakeReplayRepository,
+async def test_get_job_reports_staleness(
+    repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
@@ -2025,7 +1987,7 @@ async def test_get_replay_reports_staleness(
     version: AgentVersion,
 ) -> None:
     """Report stale claims as pending on reads without writing."""
-    stale_service = ReplayService(
+    stale_service = JobService(
         repository=repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
@@ -2039,7 +2001,7 @@ async def test_get_replay_reports_staleness(
         max_attempts=3,
     )
     session = await create_session(session_repository, agent.id)
-    _, replays = await seed_run(
+    _, jobs = await seed_run(
         session_repository,
         cohort_repository,
         config_repository,
@@ -2050,13 +2012,13 @@ async def test_get_replay_reports_staleness(
         version,
         [session],
     )
-    replay = replays[0]
-    assert replay.experiment_run_id is not None
-    await repository.claim_pending(replay.experiment_run_id, "worker-1", 1)
-    reported, _ = await stale_service.get_replay(replay.id, actor=ACTOR)
-    assert reported.status is ReplayStatus.PENDING
+    job = jobs[0]
+    assert job.experiment_run_id is not None
+    await repository.claim_pending(job.experiment_run_id, "worker-1", 1)
+    reported, _ = await stale_service.get_job(job.id, actor=ACTOR)
+    assert reported.status is JobStatus.PENDING
     assert reported.attempt == 2
     assert reported.worker_id is None
     # Reporting never writes.
-    stored = await repository.get(replay.id)
-    assert stored.status is ReplayStatus.CLAIMED
+    stored = await repository.get(job.id)
+    assert stored.status is JobStatus.CLAIMED
