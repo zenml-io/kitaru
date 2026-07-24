@@ -31,6 +31,7 @@ from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.replays import ReplaysResource
 from kitaru.client.resources.secrets import SecretsResource
 from kitaru.client.resources.session_nodes import SessionNodesResource
+from kitaru.client.resources.session_runs import SessionRunsResource
 from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.workers import WorkersResource
@@ -75,6 +76,7 @@ class KitaruAPIClient:
         self.replays = ReplaysResource(self)
         self.secrets = SecretsResource(self)
         self.session_nodes = SessionNodesResource(self)
+        self.session_runs = SessionRunsResource(self)
         self.sessions = SessionsResource(self)
         self.tags = TagsResource(self)
         self.workers = WorkersResource(self)

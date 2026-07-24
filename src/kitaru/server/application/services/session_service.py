@@ -36,6 +36,7 @@ from kitaru.server.application.models.sessions import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.domain.job import Replay
 from kitaru.server.domain.session import (
     InvalidSession,
     Session,
@@ -76,9 +77,10 @@ class SessionService:
     ) -> Session:
         """Create a session owned by the caller.
 
-        A set job id links the session to its job: the session is
-        stored with origin ``replay`` and becomes the job's result
-        session.
+        A set job id links the session to its job: the session becomes
+        the job's result session and is stored with origin ``replay``
+        for a replay job, keeping origin ``recorded`` for a session run
+        job.
 
         Args:
             command: Session create command.
@@ -105,7 +107,8 @@ class SessionService:
                     "Sessions linked to a job require origin 'recorded'"
                 )
             job = await self._job_repository.get(command.job_id)
-            origin = SessionOrigin.REPLAY
+            if isinstance(job, Replay):
+                origin = SessionOrigin.REPLAY
         elif command.origin is SessionOrigin.REPLAY:
             raise InvalidSession("Session origin 'replay' requires a job id")
         if command.origin is SessionOrigin.RECORDED and command.status not in (

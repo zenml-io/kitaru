@@ -14,6 +14,7 @@
 """Worker filter model."""
 
 import uuid
+from datetime import datetime
 
 from pydantic import Field, PositiveInt
 
@@ -25,5 +26,6 @@ class WorkerFilter(FrozenModel):
 
     name: str | None = None
     agent_id: uuid.UUID | None = None
+    seen_after: datetime | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)

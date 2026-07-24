@@ -216,11 +216,13 @@ def get_cohort_service(
 
 def get_experiment_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> ExperimentService:
     """Return an experiment service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Experiment service bound to the SQL repositories.
@@ -231,6 +233,8 @@ def get_experiment_service(
         cohort_repository=SQLCohortRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        worker_liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
     )
 
 
@@ -283,8 +287,10 @@ def get_job_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+        worker_repository=SQLWorkerRepository(session),
         heartbeat_timeout_seconds=settings.JOB_HEARTBEAT_TIMEOUT_SECONDS,
         max_attempts=settings.JOB_MAX_ATTEMPTS,
+        worker_liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
     )
 
 

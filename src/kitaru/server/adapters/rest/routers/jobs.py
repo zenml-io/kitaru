@@ -18,9 +18,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
+from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobClaimResponse,
     JobHeartbeatResponse,
+    JobKind,
     JobResponse,
     JobSpecResponse,
     JobStatus,
@@ -34,7 +38,11 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_job_service,
 )
+from kitaru.server.adapters.rest.mapping.experiment_runs import (
+    execution_target_to_domain,
+)
 from kitaru.server.adapters.rest.mapping.jobs import (
+    job_kind_to_domain,
     job_spec_to_response,
     job_status_to_domain,
     job_to_response,
@@ -55,9 +63,11 @@ async def list_jobs(
     actor: Annotated[AuthContext, Depends(authorize)],
     experiment_run_id: uuid.UUID | None = None,
     original_session_id: uuid.UUID | None = None,
+    kind: JobKind | None = None,
     job_status: Annotated[JobStatus | None, Query(alias="status")] = None,
     standalone: bool | None = None,
-    worker_id: str | None = None,
+    worker_id: uuid.UUID | None = None,
+    execution_target: ExecutionTarget | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
 ) -> Page[JobResponse]:
@@ -71,9 +81,11 @@ async def list_jobs(
         actor: Caller context.
         experiment_run_id: Filter on experiment run id.
         original_session_id: Filter on the replayed session id.
+        kind: Filter on job kind.
         job_status: Filter on job status.
         standalone: Filter on standalone jobs.
         worker_id: Filter on the claiming worker id.
+        execution_target: Filter on execution target.
         page: Page number.
         page_size: Page size.
 
@@ -83,9 +95,11 @@ async def list_jobs(
     job_filter = JobFilter(
         experiment_run_id=experiment_run_id,
         original_session_id=original_session_id,
+        kind=job_kind_to_domain(kind),
         status=job_status_to_domain(job_status),
         standalone=standalone,
         worker_id=worker_id,
+        execution_target=execution_target_to_domain(execution_target),
         page=page,
         page_size=page_size,
     )
@@ -96,6 +110,41 @@ async def list_jobs(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post("/claim")
+async def claim_jobs(
+    body: JobClaimRequest,
+    service: Annotated[JobService, Depends(get_job_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> JobClaimResponse:
+    """Atomically claim pending jobs within a scope for a worker.
+
+    Stale claimed or running jobs in scope are requeued or timed out
+    first, and the claim bumps the worker's last seen time. An unscoped
+    claim yields only pool-target work. With an experiment run id the
+    first claim moves a pending run to running, and canceling and
+    terminal runs yield no jobs.
+
+    Clients observe HTTP 200 on success, 404 when no worker or scoped
+    experiment run has the referenced id, and 422 on invalid input.
+
+    Args:
+        body: Job claim request.
+        service: Job service.
+        actor: Caller context.
+
+    Returns:
+        Claimed jobs.
+    """
+    jobs = await service.claim_jobs(
+        worker_id=body.worker_id,
+        max_jobs=body.max_jobs,
+        agent_ids=body.agent_ids,
+        experiment_run_id=body.experiment_run_id,
+        actor=actor,
+    )
+    return JobClaimResponse(jobs=[job_to_response(job, config) for job, config in jobs])
 
 
 @router.get("/{job_id}")

@@ -162,9 +162,12 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.status_code == 201
     run_id = response.json()["id"]
 
+    response = await client.post("/v1/workers", json={"name": "worker-1"})
+    assert response.status_code == 200
+    worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/experiment-runs/{run_id}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 5},
+        "/v1/jobs/claim",
+        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
     )
     assert response.status_code == 200
     jobs = response.json()["jobs"]
@@ -291,9 +294,12 @@ async def test_cancel_run_end_to_end(client: httpx.AsyncClient) -> None:
     assert body["status"] == "canceled"
     assert body["summary"]["replay_counts_by_status"] == {"canceled": 2}
 
+    response = await client.post("/v1/workers", json={"name": "worker-1"})
+    assert response.status_code == 200
+    worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/experiment-runs/{run_id}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 5},
+        "/v1/jobs/claim",
+        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
     )
     assert response.status_code == 200
     assert response.json()["jobs"] == []

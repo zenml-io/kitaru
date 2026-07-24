@@ -36,7 +36,14 @@ from kitaru.server.adapters.db.schemas.schema_utils import (
     index_name,
     unique_constraint_name,
 )
-from kitaru.server.domain.job import Job, JobStatus
+from kitaru.server.domain.execution import ExecutionTarget
+from kitaru.server.domain.job import (
+    Job,
+    JobKind,
+    JobStatus,
+    Replay,
+    SessionRun,
+)
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
 JOB_SESSION_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -47,10 +54,14 @@ JOB_REPLAY_CONFIG_ID_FOREIGN_KEY = foreign_key_name("job", ["replay_config_id"])
 JOB_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("job", ["agent_version_id"])
 JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY = foreign_key_name("job", ["original_session_id"])
 JOB_RESULT_SESSION_ID_FOREIGN_KEY = foreign_key_name("job", ["result_session_id"])
+JOB_WORKER_ID_FOREIGN_KEY = foreign_key_name("job", ["worker_id"])
 JOB_RUN_STATUS_INDEX = index_name("job", ["experiment_run_id", "status"])
 JOB_ORIGINAL_SESSION_ID_INDEX = index_name("job", ["original_session_id"])
 
+MAX_KIND_LENGTH = 16
 MAX_STATUS_LENGTH = 16
+MAX_EXECUTION_TARGET_LENGTH = 16
+MAX_EXECUTOR_HANDLE_LENGTH = 255
 
 
 class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
@@ -89,18 +100,33 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ["session.id"],
             name=JOB_RESULT_SESSION_ID_FOREIGN_KEY,
         ),
+        ForeignKeyConstraint(
+            ["worker_id"],
+            ["worker.id"],
+            name=JOB_WORKER_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
         Index(JOB_RUN_STATUS_INDEX, "experiment_run_id", "status"),
         Index(JOB_ORIGINAL_SESSION_ID_INDEX, "original_session_id"),
     )
 
+    kind: str = Field(max_length=MAX_KIND_LENGTH, nullable=False)
     experiment_run_id: uuid.UUID | None = Field(default=None)
-    replay_config_id: uuid.UUID = Field(nullable=False)
+    replay_config_id: uuid.UUID | None = Field(default=None)
     agent_version_id: uuid.UUID = Field(nullable=False)
-    original_session_id: uuid.UUID = Field(nullable=False)
+    original_session_id: uuid.UUID | None = Field(default=None)
     result_session_id: uuid.UUID | None = Field(default=None)
     status: str = Field(max_length=MAX_STATUS_LENGTH, nullable=False)
     attempt: int = Field(nullable=False)
-    worker_id: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
+    worker_id: uuid.UUID | None = Field(default=None)
+    execution_target: str | None = Field(
+        default=None, max_length=MAX_EXECUTION_TARGET_LENGTH
+    )
+    executor_handle: str | None = Field(
+        default=None, max_length=MAX_EXECUTOR_HANDLE_LENGTH
+    )
+    inputs: Any = Field(default=None, sa_type=JSONB)
+    name: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
     claimed_at: datetime | None = Field(
         default=None,
         sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
@@ -133,52 +159,73 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         Returns:
             Row without timestamps set.
         """
-        return cls(
+        row = cls(
             id=job.id,
-            experiment_run_id=job.experiment_run_id,
-            replay_config_id=job.replay_config_id,
+            kind=job.kind.value,
             agent_version_id=job.agent_version_id,
-            original_session_id=job.original_session_id,
             result_session_id=job.result_session_id,
             status=job.status.value,
             attempt=job.attempt,
             worker_id=job.worker_id,
+            execution_target=None
+            if job.execution_target is None
+            else job.execution_target.value,
+            executor_handle=job.executor_handle,
             claimed_at=job.claimed_at,
             heartbeat_at=job.heartbeat_at,
             started_at=job.started_at,
             ended_at=job.ended_at,
             error=job.error,
-            passed=job.passed,
-            score=job.score,
-            scores=job.scores,
-            diff=job.diff,
         )
+        if isinstance(job, Replay):
+            row.experiment_run_id = job.experiment_run_id
+            row.replay_config_id = job.replay_config_id
+            row.original_session_id = job.original_session_id
+            row.passed = job.passed
+            row.score = job.score
+            row.scores = job.scores
+            row.diff = job.diff
+        elif isinstance(job, SessionRun):
+            row.inputs = job.inputs
+            row.name = job.name
+        return row
 
     def to_domain(self) -> Job:
         """Build a domain job from this row.
 
         Returns:
-            Job with timestamps set.
+            Replay or session run by kind, with timestamps set.
         """
-        return Job(
-            id=self.id,
+        shared: dict[str, Any] = {
+            "id": self.id,
+            "agent_version_id": self.agent_version_id,
+            "result_session_id": self.result_session_id,
+            "status": JobStatus(self.status),
+            "attempt": self.attempt,
+            "worker_id": self.worker_id,
+            "execution_target": None
+            if self.execution_target is None
+            else ExecutionTarget(self.execution_target),
+            "executor_handle": self.executor_handle,
+            "claimed_at": self.claimed_at,
+            "heartbeat_at": self.heartbeat_at,
+            "started_at": self.started_at,
+            "ended_at": self.ended_at,
+            "error": self.error,
+            "created": self.created,
+            "updated": self.updated,
+        }
+        if JobKind(self.kind) is JobKind.SESSION_RUN:
+            return SessionRun(inputs=self.inputs, name=self.name, **shared)
+        assert self.replay_config_id is not None
+        assert self.original_session_id is not None
+        return Replay(
             experiment_run_id=self.experiment_run_id,
             replay_config_id=self.replay_config_id,
-            agent_version_id=self.agent_version_id,
             original_session_id=self.original_session_id,
-            result_session_id=self.result_session_id,
-            status=JobStatus(self.status),
-            attempt=self.attempt,
-            worker_id=self.worker_id,
-            claimed_at=self.claimed_at,
-            heartbeat_at=self.heartbeat_at,
-            started_at=self.started_at,
-            ended_at=self.ended_at,
-            error=self.error,
             passed=self.passed,
             score=self.score,
             scores=self.scores,
             diff=self.diff,
-            created=self.created,
-            updated=self.updated,
+            **shared,
         )

@@ -16,7 +16,7 @@
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Self
 
 from pydantic import Field, SecretStr
 
@@ -28,6 +28,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.replay_config import (
     ReplayOverride,
@@ -35,6 +36,13 @@ from kitaru.server.domain.replay_config import (
     ScoringResult,
     ToolPolicyConfig,
 )
+
+
+class JobKind(StrEnum):
+    """Job kind."""
+
+    REPLAY = "replay"
+    SESSION_RUN = "session_run"
 
 
 class JobStatus(StrEnum):
@@ -172,43 +180,62 @@ class InvalidToolLookup(ValidationError):
     """Raised when a tool lookup request violates its shape rules."""
 
 
+class JobKindMismatch(ConflictError):
+    """Raised when an operation requires a job of another kind."""
+
+    def __init__(self, job_id: uuid.UUID, kind: JobKind) -> None:
+        """Initialize the error.
+
+        Args:
+            job_id: Id of the job.
+            kind: Required kind.
+        """
+        super().__init__(f"Job {job_id} is not of kind '{kind}'")
+
+
 class JobSpec(FrozenModel):
     """Job spec."""
 
     job_id: uuid.UUID
+    kind: JobKind
     inputs: Any = None
     override: ReplayOverride | None = None
-    tool_policy: ToolPolicyConfig
-    scoring_policy: ScoringPolicy
-    score_baselines: bool
+    tool_policy: ToolPolicyConfig | None = None
+    scoring_policy: ScoringPolicy | None = None
+    score_baselines: bool | None = None
     run_spec: RunSpec
     secret_env: dict[str, SecretStr]
-    original_session_id: uuid.UUID
+    original_session_id: uuid.UUID | None = None
+    name: str | None = None
 
 
 class Job(DomainModel):
     """Job."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
-    experiment_run_id: uuid.UUID | None = None
-    replay_config_id: uuid.UUID
     agent_version_id: uuid.UUID
-    original_session_id: uuid.UUID
     result_session_id: uuid.UUID | None = None
     status: JobStatus = JobStatus.PENDING
     attempt: int = 1
-    worker_id: str | None = None
+    worker_id: uuid.UUID | None = None
+    execution_target: ExecutionTarget | None = None
+    executor_handle: str | None = None
     claimed_at: datetime | None = None
     heartbeat_at: datetime | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     error: str | None = None
-    passed: bool | None = None
-    score: float | None = None
-    scores: dict[str, float] | None = None
-    diff: dict[str, Any] | None = None
     created: datetime | None = None
     updated: datetime | None = None
+
+    @property
+    def kind(self) -> JobKind:
+        """Kind of the job.
+
+        Returns:
+            Kind of the job.
+        """
+        raise NotImplementedError
 
     @property
     def standalone(self) -> bool:
@@ -217,9 +244,9 @@ class Job(DomainModel):
         Returns:
             Whether the job belongs to no experiment run.
         """
-        return self.experiment_run_id is None
+        return True
 
-    def claim(self, worker_id: str) -> None:
+    def claim(self, worker_id: uuid.UUID) -> None:
         """Claim the job for a worker.
 
         Args:
@@ -295,28 +322,6 @@ class Job(DomainModel):
         self.ended_at = None
         self.error = None
         self.result_session_id = None
-
-    def complete(self, result: ScoringResult, diff: dict[str, Any] | None) -> None:
-        """Complete the job with its scoring result.
-
-        Args:
-            result: Scoring result reported by the runner.
-            diff: Diff summary.
-
-        Raises:
-            InvalidJobTransition: The job is not running.
-            JobMissingResultSession: The job has no result session.
-        """
-        if self.status is not JobStatus.RUNNING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
-        if self.result_session_id is None:
-            raise JobMissingResultSession(self.id)
-        self.status = JobStatus.COMPLETED
-        self.passed = result.passed
-        self.score = result.score
-        self.scores = result.scores
-        self.diff = diff
-        self.ended_at = datetime.now(UTC)
 
     def fail(self, error: str) -> None:
         """Fail the job.
@@ -401,7 +406,7 @@ class Job(DomainModel):
         last = self.heartbeat_at or self.claimed_at
         return last is not None and last < stale_before
 
-    def with_staleness(self, stale_before: datetime, max_attempts: int) -> "Job":
+    def with_staleness(self, stale_before: datetime, max_attempts: int) -> Self:
         """Return the job as the next claim would requeue or time it out.
 
         Args:
@@ -420,3 +425,85 @@ class Job(DomainModel):
         else:
             copy.requeue()
         return copy
+
+
+class Replay(Job):
+    """Replay job."""
+
+    experiment_run_id: uuid.UUID | None = None
+    replay_config_id: uuid.UUID
+    original_session_id: uuid.UUID
+    passed: bool | None = None
+    score: float | None = None
+    scores: dict[str, float] | None = None
+    diff: dict[str, Any] | None = None
+
+    @property
+    def kind(self) -> JobKind:
+        """Kind of the job.
+
+        Returns:
+            Kind of the job.
+        """
+        return JobKind.REPLAY
+
+    @property
+    def standalone(self) -> bool:
+        """Whether the job belongs to no experiment run.
+
+        Returns:
+            Whether the job belongs to no experiment run.
+        """
+        return self.experiment_run_id is None
+
+    def complete(self, result: ScoringResult, diff: dict[str, Any] | None) -> None:
+        """Complete the job with its scoring result.
+
+        Args:
+            result: Scoring result reported by the runner.
+            diff: Diff summary.
+
+        Raises:
+            InvalidJobTransition: The job is not running.
+            JobMissingResultSession: The job has no result session.
+        """
+        if self.status is not JobStatus.RUNNING:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
+        if self.result_session_id is None:
+            raise JobMissingResultSession(self.id)
+        self.status = JobStatus.COMPLETED
+        self.passed = result.passed
+        self.score = result.score
+        self.scores = result.scores
+        self.diff = diff
+        self.ended_at = datetime.now(UTC)
+
+
+class SessionRun(Job):
+    """Session run job."""
+
+    inputs: Any = None
+    name: str | None = None
+
+    @property
+    def kind(self) -> JobKind:
+        """Kind of the job.
+
+        Returns:
+            Kind of the job.
+        """
+        return JobKind.SESSION_RUN
+
+    def complete(self) -> None:
+        """Complete the job.
+
+        Raises:
+            InvalidJobTransition: The job is not running.
+            JobMissingResultSession: The job has no result session.
+        """
+        if self.status is not JobStatus.RUNNING:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
+        if self.result_session_id is None:
+            raise JobMissingResultSession(self.id)
+        self.status = JobStatus.COMPLETED
+        self.ended_at = datetime.now(UTC)

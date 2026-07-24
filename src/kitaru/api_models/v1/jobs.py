@@ -20,6 +20,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field
 
+from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.base import (
     FiniteFloat,
     JsonValue,
@@ -29,6 +30,13 @@ from kitaru.api_models.v1.base import (
 from kitaru.api_models.v1.session_nodes import NodeType
 
 SOURCE_REF_PATTERN = r"^[^:\s]+:[^:\s]+$"
+
+
+class JobKind(StrEnum):
+    """Job kind."""
+
+    REPLAY = "replay"
+    SESSION_RUN = "session_run"
 
 
 class JobStatus(StrEnum):
@@ -215,15 +223,24 @@ class JobResponse(ResponseModel):
     """Job response."""
 
     id: uuid.UUID = Field(description="Job id.")
+    kind: JobKind = Field(description="Job kind.")
     experiment_run_id: uuid.UUID | None = Field(
         description="Id of the experiment run, null for standalone jobs."
     )
     agent_version_id: uuid.UUID = Field(description="Id of the agent version.")
-    original_session_id: uuid.UUID = Field(description="Id of the replayed session.")
+    original_session_id: uuid.UUID | None = Field(
+        description="Id of the replayed session, null for session runs."
+    )
     result_session_id: uuid.UUID | None = Field(description="Id of the result session.")
     status: JobStatus = Field(description="Job status.")
     attempt: int = Field(description="Attempt counter.")
-    worker_id: str | None = Field(description="Id of the claiming worker.")
+    worker_id: uuid.UUID | None = Field(description="Id of the claiming worker.")
+    execution_target: ExecutionTarget | None = Field(
+        description="Execution target, null for run-created jobs."
+    )
+    executor_handle: str | None = Field(description="Executor handle.")
+    inputs: Any = Field(description="Session inputs, null for replay jobs.")
+    name: str | None = Field(description="Session run name.")
     claimed_at: datetime | None = Field(description="Claim time.")
     heartbeat_at: datetime | None = Field(description="Last heartbeat time.")
     started_at: datetime | None = Field(description="Execution start time.")
@@ -238,8 +255,12 @@ class JobResponse(ResponseModel):
         description="Diff summary, written at completion."
     )
     override: ReplayOverride | None = Field(description="Execution override.")
-    tool_policy: ToolPolicyConfig = Field(description="Tool policy.")
-    scoring_policy: ScoringPolicy = Field(description="Scoring policy.")
+    tool_policy: ToolPolicyConfig | None = Field(
+        description="Tool policy, null for session runs."
+    )
+    scoring_policy: ScoringPolicy | None = Field(
+        description="Scoring policy, null for session runs."
+    )
     created: datetime = Field(description="Creation time.")
     updated: datetime = Field(description="Last modification time.")
 
@@ -265,8 +286,17 @@ class JobUpdateRequest(RequestModel):
 class JobClaimRequest(RequestModel):
     """Job claim request."""
 
-    worker_id: str = Field(max_length=255, description="Id of the claiming worker.")
+    worker_id: uuid.UUID = Field(description="Id of the claiming worker.")
     max_jobs: int = Field(ge=1, le=100, description="Maximum jobs to claim.")
+    agent_ids: list[uuid.UUID] | None = Field(
+        default=None,
+        description="Ids of the agents to claim for, any agent when omitted.",
+    )
+    experiment_run_id: uuid.UUID | None = Field(
+        default=None,
+        description="Id of the experiment run to claim for, pool-target work "
+        "when omitted.",
+    )
 
 
 class JobClaimResponse(ResponseModel):
@@ -278,7 +308,7 @@ class JobClaimResponse(ResponseModel):
 class StandaloneJobClaimRequest(RequestModel):
     """Standalone job claim request."""
 
-    worker_id: str = Field(max_length=255, description="Id of the claiming worker.")
+    worker_id: uuid.UUID = Field(description="Id of the claiming worker.")
 
 
 class JobHeartbeatResponse(ResponseModel):
@@ -303,20 +333,29 @@ class JobSpecResponse(ResponseModel):
     """Job spec response."""
 
     job_id: uuid.UUID = Field(description="Job id.")
+    kind: JobKind = Field(description="Job kind.")
     inputs: Any = Field(
         description="Effective session inputs, with any prompt override applied."
     )
     override: ReplayOverride | None = Field(description="Execution override.")
-    tool_policy: ToolPolicyConfig = Field(description="Tool policy.")
-    scoring_policy: ScoringPolicy = Field(description="Scoring policy.")
-    score_baselines: bool = Field(
-        description="Whether the runner also scores originals missing scores."
+    tool_policy: ToolPolicyConfig | None = Field(
+        description="Tool policy, null for session runs."
+    )
+    scoring_policy: ScoringPolicy | None = Field(
+        description="Scoring policy, null for session runs."
+    )
+    score_baselines: bool | None = Field(
+        description="Whether the runner also scores originals missing scores, "
+        "null for session runs."
     )
     run: JobSpecRun = Field(description="Run command of the agent version.")
     secret_env: dict[str, str] = Field(
         description="Resolved secret environment variables."
     )
-    original_session_id: uuid.UUID = Field(description="Id of the replayed session.")
+    original_session_id: uuid.UUID | None = Field(
+        description="Id of the replayed session, null for session runs."
+    )
+    name: str | None = Field(description="Session run name.")
 
 
 class ToolLookupRequest(RequestModel):

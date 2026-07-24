@@ -16,9 +16,13 @@
 import uuid
 from typing import TYPE_CHECKING, Any
 
+from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.jobs import (
+    JobClaimRequest,
+    JobClaimResponse,
     JobHeartbeatResponse,
+    JobKind,
     JobResponse,
     JobSpecResponse,
     JobStatus,
@@ -48,9 +52,11 @@ class JobsResource:
         self,
         experiment_run_id: uuid.UUID | None = None,
         original_session_id: uuid.UUID | None = None,
+        kind: JobKind | None = None,
         status: JobStatus | None = None,
         standalone: bool | None = None,
-        worker_id: str | None = None,
+        worker_id: uuid.UUID | None = None,
+        execution_target: ExecutionTarget | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Page[JobResponse]:
@@ -59,9 +65,11 @@ class JobsResource:
         Args:
             experiment_run_id: Filter on experiment run id.
             original_session_id: Filter on the replayed session id.
+            kind: Filter on job kind.
             status: Filter on job status.
             standalone: Filter on standalone jobs.
             worker_id: Filter on the claiming worker id.
+            execution_target: Filter on execution target.
             page: Page number.
             page_size: Page size.
 
@@ -76,12 +84,16 @@ class JobsResource:
             params["experiment_run_id"] = str(experiment_run_id)
         if original_session_id is not None:
             params["original_session_id"] = str(original_session_id)
+        if kind is not None:
+            params["kind"] = kind.value
         if status is not None:
             params["status"] = status.value
         if standalone is not None:
             params["standalone"] = standalone
         if worker_id is not None:
-            params["worker_id"] = worker_id
+            params["worker_id"] = str(worker_id)
+        if execution_target is not None:
+            params["execution_target"] = execution_target.value
         response = await self._client.request("GET", "/v1/jobs", params=params)
         return Page[JobResponse].model_validate(response.json())
 
@@ -140,7 +152,27 @@ class JobsResource:
         )
         return JobResponse.model_validate(response.json())
 
-    async def claim(
+    async def claim(self, request: JobClaimRequest) -> JobClaimResponse:
+        """Atomically claim pending jobs within a scope for a worker.
+
+        Args:
+            request: Job claim request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                worker or scoped experiment run.
+
+        Returns:
+            Claimed jobs.
+        """
+        response = await self._client.request(
+            "POST",
+            "/v1/jobs/claim",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return JobClaimResponse.model_validate(response.json())
+
+    async def claim_standalone(
         self, job_id: uuid.UUID, request: StandaloneJobClaimRequest
     ) -> JobResponse:
         """Claim a standalone job for a worker.
@@ -151,8 +183,8 @@ class JobsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                job and 409 when the job belongs to an experiment
-                run or is not pending.
+                job or worker and 409 when the job belongs to an
+                experiment run or is not pending.
 
         Returns:
             Claimed job.

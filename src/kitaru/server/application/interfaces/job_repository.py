@@ -14,6 +14,7 @@
 """Job repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -103,34 +104,49 @@ class JobRepository(Protocol):
         ...
 
     async def requeue_stale(
-        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
+        self,
+        stale_before: datetime,
+        max_attempts: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
     ) -> None:
-        """Requeue or time out a run's jobs with lost heartbeats.
+        """Requeue or time out jobs with lost heartbeats within a scope.
 
         A claimed or running job whose last heartbeat, or claim when no
         heartbeat arrived yet, is older than the threshold goes back to
         pending with the attempt incremented, or to timed out once the
-        attempt count reached the maximum.
+        attempt count reached the maximum. With an experiment run id the
+        scope is that run's jobs, without it the scope is pool-target
+        work. An agent ids scope keeps only jobs of those agents'
+        versions.
 
         Args:
-            run_id: Id of the experiment run.
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
         """
         ...
 
     async def claim_pending(
-        self, run_id: uuid.UUID, worker_id: str, limit: int
+        self,
+        worker_id: uuid.UUID,
+        limit: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
     ) -> list[Job]:
-        """Atomically claim pending jobs of a run for a worker.
+        """Atomically claim pending jobs within a scope for a worker.
 
         Rows locked by a concurrent claim are skipped, so parallel workers
-        never double-claim.
+        never double-claim. With an experiment run id the scope is that
+        run's jobs, without it the scope is pool-target work. An agent
+        ids scope keeps only jobs of those agents' versions.
 
         Args:
-            run_id: Id of the experiment run.
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
 
         Returns:
             Claimed jobs.

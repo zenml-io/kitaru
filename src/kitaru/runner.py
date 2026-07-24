@@ -30,6 +30,7 @@ from kitaru.api_models.v1.experiment_runs import (
 )
 from kitaru.api_models.v1.jobs import (
     JobClaimRequest,
+    JobKind,
     JobResponse,
     JobSpecResponse,
     JobStatus,
@@ -42,6 +43,7 @@ from kitaru.api_models.v1.sessions import (
     SessionScoresRequest,
     SessionStatus,
 )
+from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
 from kitaru.scoring import (
@@ -73,6 +75,7 @@ _CONTRACT_ENV_VARS = (
     "KITARU_JOB_ID",
     "KITARU_INPUTS",
     "KITARU_OVERRIDE",
+    "KITARU_SESSION_NAME",
     "KITARU_SESSION_ID_FILE",
 )
 
@@ -243,13 +246,14 @@ class Runner:
         async with KitaruAPIClient(
             base_url=self._api_url, api_key=self._api_key
         ) as client:
+            worker_id = await self._register_worker(client)
             semaphore = asyncio.Semaphore(self._concurrency)
             while True:
-                claim = await client.experiment_runs.claim(
-                    run_id,
+                claim = await client.jobs.claim(
                     JobClaimRequest(
-                        worker_id=self._worker_id,
+                        worker_id=worker_id,
                         max_jobs=self._claim_batch_size,
+                        experiment_run_id=run_id,
                     ),
                 )
                 if claim.jobs:
@@ -282,8 +286,9 @@ class Runner:
         async with KitaruAPIClient(
             base_url=self._api_url, api_key=self._api_key
         ) as client:
-            await client.jobs.claim(
-                job_id, StandaloneJobClaimRequest(worker_id=self._worker_id)
+            worker_id = await self._register_worker(client)
+            await client.jobs.claim_standalone(
+                job_id, StandaloneJobClaimRequest(worker_id=worker_id)
             )
             return await self._execute_job(client, job_id)
 
@@ -374,6 +379,21 @@ class Runner:
                 raise RunnerError(_with_tail(error, tail))
             return await client.sessions.get(session_id)
 
+    async def _register_worker(self, client: KitaruAPIClient) -> uuid.UUID:
+        """Register this runner as a worker, upserting by name.
+
+        Args:
+            client: API client.
+
+        Raises:
+            APIError: The registration failed.
+
+        Returns:
+            Id of the registered worker.
+        """
+        worker = await client.workers.create(WorkerCreateRequest(name=self._worker_id))
+        return worker.id
+
     async def _execute_claimed(
         self,
         client: KitaruAPIClient,
@@ -432,6 +452,8 @@ class Runner:
             )
             if returncode is not None:
                 if returncode == 0:
+                    if spec.kind is JobKind.SESSION_RUN:
+                        return await self._complete_session_run(client, job_id)
                     return await self._score_and_complete(client, job_id, spec)
                 error = f"Agent process exited with code {returncode}."
                 return await self._fail(client, job_id, _with_tail(error, tail))
@@ -519,6 +541,40 @@ class Runner:
                 drain.cancel()
             await asyncio.gather(*drains, return_exceptions=True)
 
+    async def _complete_session_run(
+        self, client: KitaruAPIClient, job_id: uuid.UUID
+    ) -> JobResponse:
+        """Complete a session run job without scoring.
+
+        Args:
+            client: API client.
+            job_id: Id of the job.
+
+        Raises:
+            APIError: A read or status update failed.
+
+        Returns:
+            Terminal job.
+        """
+        job = await client.jobs.get(job_id)
+        if job.result_session_id is None:
+            return await self._fail(
+                client,
+                job_id,
+                "Agent process exited successfully without recording a result session.",
+            )
+        result_session = await client.sessions.get(job.result_session_id)
+        if result_session.status is not SessionStatus.COMPLETED:
+            return await self._fail(
+                client,
+                job_id,
+                f"Result session {result_session.id} is {result_session.status}, "
+                "not completed.",
+            )
+        return await client.jobs.update(
+            job_id, JobUpdateRequest(status=JobStatus.COMPLETED)
+        )
+
     async def _score_and_complete(
         self,
         client: KitaruAPIClient,
@@ -557,6 +613,7 @@ class Runner:
             job.result_session_id, include_payloads=True
         )
         view = SessionView(session=result_session, nodes=nodes)
+        assert spec.scoring_policy is not None
         try:
             result = evaluate_scoring_policy(spec.scoring_policy, view)
             if spec.score_baselines:
@@ -586,6 +643,8 @@ class Runner:
             ScoringError: A scorer failed to load, raised, or returned an
                 invalid score.
         """
+        assert spec.original_session_id is not None
+        assert spec.scoring_policy is not None
         original = await client.sessions.get(spec.original_session_id)
         missing = [
             config
@@ -686,6 +745,8 @@ class Runner:
         """
         env = self._agent_env(spec.run.env, spec.secret_env)
         env["KITARU_JOB_ID"] = str(job_id)
+        if spec.name is not None:
+            env["KITARU_SESSION_NAME"] = spec.name
         encoded_inputs, fits = _encode_inputs(spec.inputs)
         if fits:
             env["KITARU_INPUTS"] = encoded_inputs

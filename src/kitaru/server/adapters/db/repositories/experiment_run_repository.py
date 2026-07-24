@@ -37,7 +37,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunNotFound,
 )
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.job import Replay
 from kitaru.server.domain.tag import TagResourceType
 
 
@@ -52,7 +52,7 @@ class SQLExperimentRunRepository:
         """
         self._session = session
 
-    async def create(self, run: ExperimentRun, jobs: list[Job]) -> ExperimentRun:
+    async def create(self, run: ExperimentRun, jobs: list[Replay]) -> ExperimentRun:
         """Persist a new experiment run with its jobs as one batch.
 
         Locks the experiment row to serialize the per-experiment number

@@ -40,6 +40,7 @@ from kitaru.server.adapters.rest.routers import (
     jobs,
     replays,
     secrets,
+    session_runs,
     sessions,
     tags,
     workers,
@@ -183,6 +184,9 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(jobs.router, prefix="/v1/jobs", tags=["jobs"])
     app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(
+        session_runs.router, prefix="/v1/session-runs", tags=["session-runs"]
+    )
     app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
     app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
     app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])

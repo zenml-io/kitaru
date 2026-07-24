@@ -26,7 +26,7 @@ from kitaru.server.application.interfaces.session_repository import (
 )
 from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.experiment_run import TERMINAL_RUN_STATUSES
-from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Replay
 from kitaru.server.domain.replay_diff import compute_run_summary
 from kitaru.server.domain.session import Session
 
@@ -34,7 +34,9 @@ from kitaru.server.domain.session import Session
 _JOB_RESOLUTION_PAGE_SIZE = 1000
 
 
-async def load_run_jobs(job_repository: JobRepository, run_id: uuid.UUID) -> list[Job]:
+async def load_run_jobs(
+    job_repository: JobRepository, run_id: uuid.UUID
+) -> list[Replay]:
     """Load every job of an experiment run across all pages.
 
     Args:
@@ -44,7 +46,7 @@ async def load_run_jobs(job_repository: JobRepository, run_id: uuid.UUID) -> lis
     Returns:
         Jobs of the run.
     """
-    jobs: list[Job] = []
+    jobs: list[Replay] = []
     page = 1
     while True:
         batch, total = await job_repository.query(
@@ -54,7 +56,7 @@ async def load_run_jobs(job_repository: JobRepository, run_id: uuid.UUID) -> lis
                 page_size=_JOB_RESOLUTION_PAGE_SIZE,
             )
         )
-        jobs.extend(batch)
+        jobs.extend(job for job in batch if isinstance(job, Replay))
         if len(jobs) >= total or not batch:
             return jobs
         page += 1

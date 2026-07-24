@@ -25,6 +25,7 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.jobs import JobClaimRequest, JobStatus
+from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 
@@ -105,19 +106,20 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
     created = await api_client.experiments.create_run(
         experiment.id, ExperimentRunCreateRequest()
     )
-    claimed = await api_client.experiment_runs.claim(
-        created.id, JobClaimRequest(worker_id="worker-1", max_jobs=5)
+    worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
+    claimed = await api_client.jobs.claim(
+        JobClaimRequest(worker_id=worker.id, max_jobs=5, experiment_run_id=created.id)
     )
     assert len(claimed.jobs) == 1
     assert claimed.jobs[0].status is JobStatus.CLAIMED
-    assert claimed.jobs[0].worker_id == "worker-1"
+    assert claimed.jobs[0].worker_id == worker.id
 
     canceled = await api_client.experiment_runs.cancel(created.id)
     assert canceled.status is ExperimentRunStatus.CANCELED
     assert canceled.summary is not None
 
-    empty = await api_client.experiment_runs.claim(
-        created.id, JobClaimRequest(worker_id="worker-1", max_jobs=5)
+    empty = await api_client.jobs.claim(
+        JobClaimRequest(worker_id=worker.id, max_jobs=5, experiment_run_id=created.id)
     )
     assert empty.jobs == []
 

@@ -69,6 +69,33 @@ async def seed_run(client: httpx.AsyncClient, session_count: int = 2) -> dict:
     return await create_run(client, experiment["id"])
 
 
+async def claim_run_jobs(
+    client: httpx.AsyncClient, run_id: str, max_jobs: int, worker: str = "worker-1"
+) -> httpx.Response:
+    """Claim run jobs through the global claim endpoint.
+
+    Args:
+        client: HTTP client for the app.
+        run_id: Id of the experiment run.
+        max_jobs: Maximum jobs to claim.
+        worker: Worker name, registered on the fly.
+
+    Returns:
+        Claim response.
+    """
+    response = await client.post("/v1/workers", json={"name": worker})
+    assert response.status_code == 200
+    worker_id = response.json()["id"]
+    return await client.post(
+        "/v1/jobs/claim",
+        json={
+            "worker_id": worker_id,
+            "max_jobs": max_jobs,
+            "experiment_run_id": run_id,
+        },
+    )
+
+
 async def test_get_experiment_run(client: httpx.AsyncClient) -> None:
     """Get an experiment run with its computed progress."""
     created = await seed_run(client)
@@ -122,10 +149,7 @@ async def test_list_experiment_runs_filters(client: httpx.AsyncClient) -> None:
     other_experiment = await create_experiment(client, other_cohort_id, name="other")
     first = await create_run(client, experiment["id"])
     other = await create_run(client, other_experiment["id"])
-    response = await client.post(
-        f"/v1/experiment-runs/{first['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, first["id"], 1)
     assert response.status_code == 200
 
     response = await client.get(
@@ -235,10 +259,7 @@ async def test_list_experiment_run_jobs_by_status(
 ) -> None:
     """List the jobs of a run filtered by status."""
     created = await seed_run(client)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, created["id"], 1)
     assert response.status_code == 200
     claimed_id = response.json()["jobs"][0]["id"]
 
@@ -276,10 +297,7 @@ async def test_list_experiment_run_jobs_stale_claim_matches_pending() -> None:
     transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         created = await seed_run(client, session_count=1)
-        response = await client.post(
-            f"/v1/experiment-runs/{created['id']}/claim",
-            json={"worker_id": "worker-1", "max_jobs": 1},
-        )
+        response = await claim_run_jobs(client, created["id"], 1)
         assert response.status_code == 200
         job_id = response.json()["jobs"][0]["id"]
 
@@ -314,16 +332,13 @@ async def test_list_experiment_run_jobs_not_found(
 async def test_claim_jobs(client: httpx.AsyncClient) -> None:
     """Claim pending jobs and move the run to running."""
     created = await seed_run(client)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, created["id"], 1)
     assert response.status_code == 200
     body = response.json()
     assert len(body["jobs"]) == 1
     claimed = body["jobs"][0]
     assert claimed["status"] == "claimed"
-    assert claimed["worker_id"] == "worker-1"
+    assert claimed["worker_id"] is not None
     assert claimed["claimed_at"] is not None
     assert claimed["heartbeat_at"] is not None
     assert claimed["scoring_policy"] == SCORING_POLICY_RESPONSE
@@ -335,16 +350,10 @@ async def test_claim_jobs(client: httpx.AsyncClient) -> None:
     assert body["progress"]["pending"] == 1
     assert body["progress"]["claimed"] == 1
 
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-2", "max_jobs": 5},
-    )
+    response = await claim_run_jobs(client, created["id"], 5, worker="worker-2")
     assert response.status_code == 200
     assert len(response.json()["jobs"]) == 1
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-2", "max_jobs": 5},
-    )
+    response = await claim_run_jobs(client, created["id"], 5, worker="worker-2")
     assert response.status_code == 200
     assert response.json()["jobs"] == []
 
@@ -352,20 +361,14 @@ async def test_claim_jobs(client: httpx.AsyncClient) -> None:
 async def test_claim_unknown_run(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown experiment run id."""
     missing_id = uuid.uuid4()
-    response = await client.post(
-        f"/v1/experiment-runs/{missing_id}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, str(missing_id), 1)
     assert response.status_code == 404
 
 
 async def test_claim_invalid_body(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid claim request."""
     created = await seed_run(client)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 0},
-    )
+    response = await claim_run_jobs(client, created["id"], 0)
     assert response.status_code == 422
 
 
@@ -387,10 +390,7 @@ async def test_cancel_run(client: httpx.AsyncClient) -> None:
         f"'canceled' to 'canceling'"
     }
 
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, created["id"], 1)
     assert response.status_code == 200
     assert response.json()["jobs"] == []
 
@@ -400,10 +400,7 @@ async def test_cancel_run_drains_through_job_patch(
 ) -> None:
     """Leave running jobs to the heartbeat path and drain on patch."""
     created = await seed_run(client, session_count=1)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 1},
-    )
+    response = await claim_run_jobs(client, created["id"], 1)
     job_id = response.json()["jobs"][0]["id"]
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
@@ -430,10 +427,7 @@ async def test_cancel_run_drains_through_job_patch(
 async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
     """Complete every job of a run and observe the stored summary."""
     created = await seed_run(client, session_count=2)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 5},
-    )
+    response = await claim_run_jobs(client, created["id"], 5)
     jobs = response.json()["jobs"]
     assert len(jobs) == 2
     for index, job in enumerate(jobs):
@@ -481,10 +475,7 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
 async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> None:
     """Land a run with failed and timed out jobs on failed."""
     created = await seed_run(client, session_count=2)
-    response = await client.post(
-        f"/v1/experiment-runs/{created['id']}/claim",
-        json={"worker_id": "worker-1", "max_jobs": 5},
-    )
+    response = await claim_run_jobs(client, created["id"], 5)
     jobs = response.json()["jobs"]
     assert len(jobs) == 2
     response = await client.patch(

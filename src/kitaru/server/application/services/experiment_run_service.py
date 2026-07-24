@@ -46,9 +46,8 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunActive,
     ExperimentRunProgress,
-    ExperimentRunStatus,
 )
-from kitaru.server.domain.job import Job, JobStatus
+from kitaru.server.domain.job import JobStatus, Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 
 
@@ -149,7 +148,7 @@ class ExperimentRunService:
         run_id: uuid.UUID,
         jobs_filter: ExperimentRunJobsFilter,
         actor: AuthContext,
-    ) -> tuple[list[tuple[Job, ReplayConfig]], int]:
+    ) -> tuple[list[tuple[Replay, ReplayConfig]], int]:
         """List the jobs of an experiment run.
 
         Args:
@@ -177,65 +176,15 @@ class ExperimentRunService:
                 page_size=jobs_filter.page_size,
             )
         )
-        jobs = [job.with_staleness(stale_before, self._max_attempts) for job in jobs]
+        replays = [
+            job.with_staleness(stale_before, self._max_attempts)
+            for job in jobs
+            if isinstance(job, Replay)
+        ]
         configs = await self._replay_config_repository.get_many(
-            [job.replay_config_id for job in jobs]
+            [replay.replay_config_id for replay in replays]
         )
-        return [(job, configs[job.replay_config_id]) for job in jobs], total
-
-    async def claim_jobs(
-        self,
-        run_id: uuid.UUID,
-        worker_id: str,
-        max_jobs: int,
-        actor: AuthContext,
-    ) -> list[tuple[Job, ReplayConfig]]:
-        """Atomically claim pending jobs of a run for a worker.
-
-        Stale claimed or running jobs are requeued or timed out first.
-        The first claim moves a pending run to running. Canceling and
-        terminal runs yield no jobs. An empty claim finalizes the run
-        when every job is already terminal.
-
-        Args:
-            run_id: Id of the experiment run.
-            worker_id: Id of the claiming worker.
-            max_jobs: Maximum number of jobs to claim.
-            actor: Caller context.
-
-        Raises:
-            ExperimentRunNotFound: No experiment run has this id.
-
-        Returns:
-            Claimed jobs with their replay configs.
-        """
-        _ = actor
-        run = await self._repository.get(run_id)
-        if (
-            run.status is ExperimentRunStatus.CANCELING
-            or run.status in TERMINAL_RUN_STATUSES
-        ):
-            return []
-        await self._job_repository.requeue_stale(
-            run_id, self._stale_before(), self._max_attempts
-        )
-        jobs = await self._job_repository.claim_pending(run_id, worker_id, max_jobs)
-        if jobs and run.status is ExperimentRunStatus.PENDING:
-            run.start()
-            await self._repository.update(run)
-        if not jobs:
-            # The requeue may have timed out the run's last job, which
-            # leaves no transition that would finalize the run.
-            await finalize_run_if_drained(
-                self._repository,
-                self._job_repository,
-                self._session_repository,
-                run_id,
-            )
-        configs = await self._replay_config_repository.get_many(
-            [job.replay_config_id for job in jobs]
-        )
-        return [(job, configs[job.replay_config_id]) for job in jobs]
+        return [(replay, configs[replay.replay_config_id]) for replay in replays], total
 
     async def cancel_run(
         self, run_id: uuid.UUID, actor: AuthContext

@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import pytest
 
-from kitaru.server.domain.job import Job, JobStatus
+from kitaru.server.domain.job import JobStatus, Replay
 from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.replay_diff import (
     compute_diff_summary,
@@ -90,14 +90,14 @@ def node(session_id: uuid.UUID, key: str, **overrides: object) -> SessionNode:
     return SessionNode.model_validate(values)
 
 
-def replay(**overrides: object) -> Job:
+def replay(**overrides: object) -> Replay:
     """Build a replay entity with a linked result session.
 
     Args:
         **overrides: Field overrides.
 
     Returns:
-        Job entity.
+        Replay entity.
     """
     values: dict[str, object] = {
         "replay_config_id": uuid.uuid4(),
@@ -106,7 +106,7 @@ def replay(**overrides: object) -> Job:
         "result_session_id": uuid.uuid4(),
         **overrides,
     }
-    return Job.model_validate(values)
+    return Replay.model_validate(values)
 
 
 def test_diff_aligns_nodes_by_key_with_occurrences() -> None:

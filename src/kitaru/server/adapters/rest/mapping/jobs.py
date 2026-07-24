@@ -13,10 +13,14 @@
 #  permissions and limitations under the License.
 """Job DTO conversions."""
 
+from kitaru.api_models.v1.agent_versions import (
+    ExecutionTarget as ExecutionTargetModel,
+)
 from kitaru.api_models.v1.jobs import DiffNode as DiffNodeModel
 from kitaru.api_models.v1.jobs import DiffValue as DiffValueModel
 from kitaru.api_models.v1.jobs import HistoryPolicy as HistoryPolicyModel
 from kitaru.api_models.v1.jobs import HistoryScope as HistoryScopeModel
+from kitaru.api_models.v1.jobs import JobKind as JobKindModel
 from kitaru.api_models.v1.jobs import (
     JobResponse,
     JobSpecResponse,
@@ -52,7 +56,14 @@ from kitaru.api_models.v1.jobs import (
 )
 from kitaru.api_models.v1.session_nodes import NodeType as NodeTypeModel
 from kitaru.server.application.models.jobs import JobUpdate, ReplayCreate
-from kitaru.server.domain.job import Job, JobSpec, JobStatus
+from kitaru.server.domain.job import (
+    Job,
+    JobKind,
+    JobSpec,
+    JobStatus,
+    Replay,
+    SessionRun,
+)
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     HistoryScope,
@@ -301,39 +312,68 @@ def job_status_to_domain(status: JobStatusModel | None) -> JobStatus | None:
     return JobStatus(status.value)
 
 
-def job_to_response(job: Job, config: ReplayConfig) -> JobResponse:
+def job_kind_to_domain(kind: JobKindModel | None) -> JobKind | None:
+    """Convert an optional job kind DTO to its domain enum.
+
+    Args:
+        kind: Job kind DTO.
+
+    Returns:
+        Domain job kind, ``None`` for ``None``.
+    """
+    if kind is None:
+        return None
+    return JobKind(kind.value)
+
+
+def job_to_response(job: Job, config: ReplayConfig | None) -> JobResponse:
     """Convert a job entity to its response DTO.
 
     Args:
         job: Stored job.
-        config: Replay config of the job.
+        config: Replay config of the job, ``None`` for session runs.
 
     Returns:
         Job response.
     """
     assert job.created is not None
     assert job.updated is not None
+    replay = job if isinstance(job, Replay) else None
+    session_run = job if isinstance(job, SessionRun) else None
+    if replay is not None:
+        assert config is not None
     return JobResponse(
         id=job.id,
-        experiment_run_id=job.experiment_run_id,
+        kind=JobKindModel(job.kind.value),
+        experiment_run_id=None if replay is None else replay.experiment_run_id,
         agent_version_id=job.agent_version_id,
-        original_session_id=job.original_session_id,
+        original_session_id=None if replay is None else replay.original_session_id,
         result_session_id=job.result_session_id,
         status=JobStatusModel(job.status.value),
         attempt=job.attempt,
         worker_id=job.worker_id,
+        execution_target=None
+        if job.execution_target is None
+        else ExecutionTargetModel(job.execution_target.value),
+        executor_handle=job.executor_handle,
+        inputs=None if session_run is None else session_run.inputs,
+        name=None if session_run is None else session_run.name,
         claimed_at=job.claimed_at,
         heartbeat_at=job.heartbeat_at,
         started_at=job.started_at,
         ended_at=job.ended_at,
         error=job.error,
-        passed=job.passed,
-        score=job.score,
-        scores=job.scores,
-        diff=job.diff,
-        override=override_to_response(config.override),
-        tool_policy=tool_policy_config_to_response(config.tool_policy),
-        scoring_policy=scoring_policy_to_response(config.scoring_policy),
+        passed=None if replay is None else replay.passed,
+        score=None if replay is None else replay.score,
+        scores=None if replay is None else replay.scores,
+        diff=None if replay is None else replay.diff,
+        override=None if config is None else override_to_response(config.override),
+        tool_policy=None
+        if config is None
+        else tool_policy_config_to_response(config.tool_policy),
+        scoring_policy=None
+        if config is None
+        else scoring_policy_to_response(config.scoring_policy),
         created=job.created,
         updated=job.updated,
     )
@@ -368,10 +408,15 @@ def job_spec_to_response(spec: JobSpec) -> JobSpecResponse:
     """
     return JobSpecResponse(
         job_id=spec.job_id,
+        kind=JobKindModel(spec.kind.value),
         inputs=spec.inputs,
         override=override_to_response(spec.override),
-        tool_policy=tool_policy_config_to_response(spec.tool_policy),
-        scoring_policy=scoring_policy_to_response(spec.scoring_policy),
+        tool_policy=None
+        if spec.tool_policy is None
+        else tool_policy_config_to_response(spec.tool_policy),
+        scoring_policy=None
+        if spec.scoring_policy is None
+        else scoring_policy_to_response(spec.scoring_policy),
         score_baselines=spec.score_baselines,
         run=JobSpecRun(
             command=spec.run_spec.command,
@@ -383,6 +428,7 @@ def job_spec_to_response(spec: JobSpec) -> JobSpecResponse:
             name: value.get_secret_value() for name, value in spec.secret_env.items()
         },
         original_session_id=spec.original_session_id,
+        name=spec.name,
     )
 
 

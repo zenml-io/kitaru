@@ -15,7 +15,7 @@
 
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -44,6 +44,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_session_node_service,
     get_session_service,
     get_tag_service,
+    get_worker_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
@@ -80,6 +81,7 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,
@@ -112,6 +114,7 @@ from kitaru.server.domain.cohort import (
     CohortNotFound,
     DuplicateCohortName,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
@@ -127,6 +130,7 @@ from kitaru.server.domain.job import (
     Job,
     JobNotFound,
     JobStatus,
+    Replay,
 )
 from kitaru.server.domain.replay_config import (
     ReplayConfig,
@@ -1009,6 +1013,12 @@ class FakeWorkerRepository:
                 for worker in workers
                 if not worker.agent_ids or worker_filter.agent_id in worker.agent_ids
             ]
+        if worker_filter.seen_after is not None:
+            workers = [
+                worker
+                for worker in workers
+                if worker.last_seen_at >= worker_filter.seen_after
+            ]
         total = len(workers)
         start = (worker_filter.page - 1) * worker_filter.page_size
         page = workers[start : start + worker_filter.page_size]
@@ -1255,6 +1265,20 @@ class FakeAgentVersionRepository:
             ``True`` when a stored version belongs to the agent.
         """
         return any(version.agent_id == agent_id for version in self._versions.values())
+
+    def agent_id_of(self, version_id: uuid.UUID) -> uuid.UUID | None:
+        """Resolve the agent id of a stored version.
+
+        Args:
+            version_id: Id of the agent version.
+
+        Returns:
+            Agent id, ``None`` when no version has this id.
+        """
+        version = self._versions.get(version_id)
+        if version is None:
+            return None
+        return version.agent_id
 
     def references_secret(self, secret_id: uuid.UUID) -> bool:
         """Report whether a stored version references a secret.
@@ -2343,7 +2367,8 @@ class FakeJobRepository:
             ``True`` when a stored job references the session.
         """
         return any(
-            job.original_session_id == session_id or job.result_session_id == session_id
+            job.result_session_id == session_id
+            or (isinstance(job, Replay) and job.original_session_id == session_id)
             for job in self._jobs.values()
         )
 
@@ -2356,7 +2381,10 @@ class FakeJobRepository:
         Returns:
             ``True`` when a stored job references the config.
         """
-        return any(job.replay_config_id == config_id for job in self._jobs.values())
+        return any(
+            isinstance(job, Replay) and job.replay_config_id == config_id
+            for job in self._jobs.values()
+        )
 
     def remove_for_run(self, run_id: uuid.UUID) -> None:
         """Remove every job of an experiment run.
@@ -2367,15 +2395,16 @@ class FakeJobRepository:
         self._jobs = {
             job_id: job
             for job_id, job in self._jobs.items()
-            if job.experiment_run_id != run_id
+            if not (isinstance(job, Replay) and job.experiment_run_id == run_id)
         }
 
     def _check_duplicate_session(self, job: Job) -> None:
-        if job.experiment_run_id is None:
+        if not isinstance(job, Replay) or job.experiment_run_id is None:
             return
         for other in self._jobs.values():
             if (
                 other.id != job.id
+                and isinstance(other, Replay)
                 and other.experiment_run_id == job.experiment_run_id
                 and other.original_session_id == job.original_session_id
             ):
@@ -2404,11 +2433,12 @@ class FakeJobRepository:
         Returns:
             Stored job with timestamps set.
         """
-        if job.experiment_run_id is not None and self.run_repository is not None:
-            await self.run_repository.get(job.experiment_run_id)
-        await self._replay_config_repository.get(job.replay_config_id)
+        if isinstance(job, Replay):
+            if job.experiment_run_id is not None and self.run_repository is not None:
+                await self.run_repository.get(job.experiment_run_id)
+            await self._replay_config_repository.get(job.replay_config_id)
+            await self._session_repository.get(job.original_session_id)
         await self.agent_version_repository.get(job.agent_version_id)
-        await self._session_repository.get(job.original_session_id)
         self._check_duplicate_session(job)
         now = datetime.now(UTC)
         stored = job.model_copy(update={"created": now, "updated": now})
@@ -2466,13 +2496,23 @@ class FakeJobRepository:
             jobs = [
                 job
                 for job in jobs
-                if job.experiment_run_id == job_filter.experiment_run_id
+                if isinstance(job, Replay)
+                and job.experiment_run_id == job_filter.experiment_run_id
             ]
         if job_filter.original_session_id is not None:
             jobs = [
                 job
                 for job in jobs
-                if job.original_session_id == job_filter.original_session_id
+                if isinstance(job, Replay)
+                and job.original_session_id == job_filter.original_session_id
+            ]
+        if job_filter.kind is not None:
+            jobs = [job for job in jobs if job.kind == job_filter.kind]
+        if job_filter.execution_target is not None:
+            jobs = [
+                job
+                for job in jobs
+                if job.execution_target == job_filter.execution_target
             ]
         if job_filter.status is not None:
             jobs = [
@@ -2483,11 +2523,7 @@ class FakeJobRepository:
         if job_filter.worker_id is not None:
             jobs = [job for job in jobs if job.worker_id == job_filter.worker_id]
         if job_filter.standalone is not None:
-            jobs = [
-                job
-                for job in jobs
-                if (job.experiment_run_id is None) == job_filter.standalone
-            ]
+            jobs = [job for job in jobs if job.standalone == job_filter.standalone]
         total = len(jobs)
         start = (job_filter.page - 1) * job_filter.page_size
         page = jobs[start : start + job_filter.page_size]
@@ -2530,18 +2566,60 @@ class FakeJobRepository:
             raise JobNotFound(job_id)
         del self._jobs[job_id]
 
-    async def requeue_stale(
-        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
-    ) -> None:
-        """Requeue or time out a run's jobs with lost heartbeats.
+    def _in_scope(
+        self,
+        job: Job,
+        agent_ids: Sequence[uuid.UUID] | None,
+        experiment_run_id: uuid.UUID | None,
+    ) -> bool:
+        """Report whether a job is within the claim scope.
 
         Args:
-            run_id: Id of the experiment run.
+            job: Stored job.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
+
+        Returns:
+            ``True`` when the job is in scope.
+        """
+        if experiment_run_id is not None:
+            if not (
+                isinstance(job, Replay) and job.experiment_run_id == experiment_run_id
+            ):
+                return False
+        elif job.execution_target is not ExecutionTarget.POOL:
+            if not (
+                isinstance(job, Replay)
+                and job.experiment_run_id is not None
+                and self.run_repository is not None
+            ):
+                return False
+            target = self.run_repository.execution_target_of(job.experiment_run_id)
+            if target is not ExecutionTarget.POOL:
+                return False
+        if agent_ids is not None:
+            agent_id = self.agent_version_repository.agent_id_of(job.agent_version_id)
+            if agent_id not in agent_ids:
+                return False
+        return True
+
+    async def requeue_stale(
+        self,
+        stale_before: datetime,
+        max_attempts: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
+    ) -> None:
+        """Requeue or time out jobs with lost heartbeats within a scope.
+
+        Args:
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
         """
         for job_id, job in list(self._jobs.items()):
-            if job.experiment_run_id != run_id:
+            if not self._in_scope(job, agent_ids, experiment_run_id):
                 continue
             changed = job.with_staleness(stale_before, max_attempts)
             if changed is job:
@@ -2551,14 +2629,19 @@ class FakeJobRepository:
             )
 
     async def claim_pending(
-        self, run_id: uuid.UUID, worker_id: str, limit: int
+        self,
+        worker_id: uuid.UUID,
+        limit: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
     ) -> list[Job]:
-        """Atomically claim pending jobs of a run for a worker.
+        """Atomically claim pending jobs within a scope for a worker.
 
         Args:
-            run_id: Id of the experiment run.
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
 
         Returns:
             Claimed jobs.
@@ -2567,7 +2650,8 @@ class FakeJobRepository:
             (
                 job
                 for job in self._jobs.values()
-                if job.experiment_run_id == run_id and job.status is JobStatus.PENDING
+                if job.status is JobStatus.PENDING
+                and self._in_scope(job, agent_ids, experiment_run_id)
             ),
             key=lambda job: job.id.int,
         )
@@ -2601,7 +2685,7 @@ class FakeJobRepository:
         """
         counts: dict[uuid.UUID, dict[JobStatus, int]] = {}
         for job in self._jobs.values():
-            if job.experiment_run_id not in run_ids:
+            if not isinstance(job, Replay) or job.experiment_run_id not in run_ids:
                 continue
             status = job.with_staleness(stale_before, max_attempts).status
             run_counts = counts.setdefault(job.experiment_run_id, {})
@@ -2657,7 +2741,21 @@ class FakeExperimentRunRepository:
         """
         return any(run.agent_version_id == version_id for run in self._runs.values())
 
-    async def create(self, run: ExperimentRun, jobs: list[Job]) -> ExperimentRun:
+    def execution_target_of(self, run_id: uuid.UUID) -> ExecutionTarget | None:
+        """Resolve the execution target of a stored run.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Returns:
+            Execution target, ``None`` when no run has this id.
+        """
+        run = self._runs.get(run_id)
+        if run is None:
+            return None
+        return run.execution_target
+
+    async def create(self, run: ExperimentRun, jobs: list[Replay]) -> ExperimentRun:
         """Persist a new experiment run with its jobs as one batch.
 
         Args:
@@ -2828,6 +2926,7 @@ def experiment_app(
     run_repository = FakeExperimentRunRepository(
         experiment_repository, job_repository, tag_repository
     )
+    worker_repository = FakeWorkerRepository()
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
         repository=version_repository,
@@ -2853,6 +2952,8 @@ def experiment_app(
         cohort_repository=cohort_repository,
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
+        worker_repository=worker_repository,
+        worker_liveness_timeout_seconds=60,
     )
     run_service = ExperimentRunService(
         repository=run_repository,
@@ -2873,14 +2974,19 @@ def experiment_app(
         experiment_repository=experiment_repository,
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
+        worker_repository=worker_repository,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
         max_attempts=max_attempts,
+        worker_liveness_timeout_seconds=60,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
     )
     tag_service = TagService(repository=tag_repository)
+    worker_service = WorkerService(
+        repository=worker_repository, liveness_timeout_seconds=60
+    )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[get_session_service] = lambda: session_service
@@ -2890,6 +2996,7 @@ def experiment_app(
     app.dependency_overrides[get_experiment_run_service] = lambda: run_service
     app.dependency_overrides[get_job_service] = lambda: job_service
     app.dependency_overrides[get_tag_service] = lambda: tag_service
+    app.dependency_overrides[get_worker_service] = lambda: worker_service
     app.dependency_overrides[authorize] = lambda: AuthContext(
         account=Account(id=EXPERIMENT_APP_ACCOUNT_ID, name="ann")
     )

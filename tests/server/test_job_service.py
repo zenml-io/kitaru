@@ -31,6 +31,8 @@ from conftest import (
     FakeSecretRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
+    FakeWorkerRepository,
+    create_worker,
 )
 from kitaru.hashing import tool_call_cache_key
 from kitaru.server.application.models.auth import AuthContext
@@ -38,6 +40,7 @@ from kitaru.server.application.models.jobs import (
     JobFilter,
     JobUpdate,
     ReplayCreate,
+    SessionRunCreate,
 )
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.domain.account import Account
@@ -45,13 +48,16 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionNotRunnable,
+    MissingRunImage,
     NoRunnableAgentVersion,
     RunSpec,
 )
 from kitaru.server.domain.cohort import Cohort
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
+    ExperimentRunNotFound,
     ExperimentRunStatus,
 )
 from kitaru.server.domain.job import (
@@ -59,14 +65,16 @@ from kitaru.server.domain.job import (
     InvalidJob,
     InvalidJobTransition,
     InvalidToolLookup,
-    Job,
     JobActive,
     JobAlreadyLinked,
+    JobKind,
+    JobKindMismatch,
     JobMissingResultSession,
     JobNotActive,
     JobNotFound,
     JobNotStandalone,
     JobStatus,
+    Replay,
 )
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
@@ -94,8 +102,12 @@ from kitaru.server.domain.session_node import (
     NodeType,
     SessionNode,
 )
+from kitaru.server.domain.worker import Worker, WorkerNotFound
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+WORKER_ID = uuid.uuid4()
+OTHER_WORKER_ID = uuid.uuid4()
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
@@ -189,6 +201,24 @@ def secret_repository() -> FakeSecretRepository:
 
 
 @pytest.fixture
+def worker_repository() -> FakeWorkerRepository:
+    """Provide a fake worker repository."""
+    return FakeWorkerRepository()
+
+
+@pytest.fixture
+async def worker(worker_repository: FakeWorkerRepository) -> Worker:
+    """Provide a stored worker."""
+    return await create_worker(worker_repository, ACTOR.account.id)
+
+
+@pytest.fixture
+async def other_worker(worker_repository: FakeWorkerRepository) -> Worker:
+    """Provide a second stored worker."""
+    return await create_worker(worker_repository, ACTOR.account.id, name="runner-2")
+
+
+@pytest.fixture
 def service(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
@@ -199,6 +229,7 @@ def service(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
 ) -> JobService:
     """Provide a job service backed by the fake repositories."""
     return JobService(
@@ -211,8 +242,10 @@ def service(
         experiment_repository=experiment_repository,
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
+        worker_repository=worker_repository,
         heartbeat_timeout_seconds=60,
         max_attempts=3,
+        worker_liveness_timeout_seconds=60,
     )
 
 
@@ -497,14 +530,14 @@ async def test_list_jobs_filters(
     assert len(jobs) == 1
 
 
-def run_job(**overrides: object) -> Job:
+def run_job(**overrides: object) -> Replay:
     """Build a run-created job entity.
 
     Args:
         **overrides: Field overrides.
 
     Returns:
-        Job entity.
+        Replay entity.
     """
     values: dict[str, object] = {
         "experiment_run_id": uuid.uuid4(),
@@ -513,15 +546,15 @@ def run_job(**overrides: object) -> Job:
         "original_session_id": uuid.uuid4(),
         **overrides,
     }
-    return Job.model_validate(values)
+    return Replay.model_validate(values)
 
 
 def test_job_claim_and_start() -> None:
     """Walk a run-created job from pending through running."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     assert job.status is JobStatus.CLAIMED
-    assert job.worker_id == "worker-1"
+    assert job.worker_id == WORKER_ID
     assert job.claimed_at is not None
     assert job.heartbeat_at is not None
     job.start()
@@ -532,20 +565,20 @@ def test_job_claim_and_start() -> None:
 def test_job_claim_requires_pending() -> None:
     """Reject claiming a job that is not pending."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     with pytest.raises(
         InvalidJobTransition,
         match=f"Job {job.id} cannot transition from 'claimed' to 'claimed'",
     ):
-        job.claim("worker-2")
+        job.claim(OTHER_WORKER_ID)
 
 
 def test_job_standalone_claim_and_start() -> None:
     """Walk a standalone job from pending through running."""
     job = run_job(experiment_run_id=None)
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     assert job.status is JobStatus.CLAIMED
-    assert job.worker_id == "worker-1"
+    assert job.worker_id == WORKER_ID
     job.start()
     assert job.status is JobStatus.RUNNING
 
@@ -568,7 +601,7 @@ def test_job_run_created_start_requires_claim() -> None:
 def test_job_requeue_increments_attempt() -> None:
     """Requeue a claimed job and clear the claim state."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     job.requeue()
     assert job.status is JobStatus.PENDING
     assert job.attempt == 2
@@ -580,17 +613,17 @@ def test_job_requeue_increments_attempt() -> None:
         job.requeue()
 
 
-def finished_job(status: JobStatus) -> Job:
+def finished_job(status: JobStatus) -> Replay:
     """Build a standalone job finished in a status.
 
     Args:
         status: Failed, timed out, or canceled.
 
     Returns:
-        Job entity.
+        Replay entity.
     """
     job = run_job(experiment_run_id=None)
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     job.start()
     job.link_result_session(uuid.uuid4())
     if status is JobStatus.FAILED:
@@ -642,7 +675,7 @@ def test_job_retry_requires_finished() -> None:
 def test_job_complete_records_result() -> None:
     """Complete a running job with its scoring result."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     job.start()
     job.link_result_session(uuid.uuid4())
     job.complete(
@@ -667,13 +700,13 @@ def test_job_complete_requires_running() -> None:
 def test_job_fail_and_time_out() -> None:
     """Fail or time out a claimed or running job."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     job.fail("agent exited with code 1")
     assert job.status is JobStatus.FAILED
     assert job.error == "agent exited with code 1"
 
     other = run_job()
-    other.claim("worker-1")
+    other.claim(WORKER_ID)
     other.start()
     other.time_out("wall clock limit exceeded")
     assert other.status is JobStatus.TIMED_OUT
@@ -695,7 +728,7 @@ def test_job_heartbeat_and_link() -> None:
     job = run_job()
     with pytest.raises(JobNotActive):
         job.heartbeat()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     before = job.heartbeat_at
     job.heartbeat()
     assert job.heartbeat_at is not None
@@ -719,7 +752,7 @@ def test_job_heartbeat_and_link() -> None:
 def test_job_with_staleness() -> None:
     """Report stale claims as pending or timed out without mutating."""
     job = run_job()
-    job.claim("worker-1")
+    job.claim(WORKER_ID)
     fresh = datetime.now(UTC) - timedelta(seconds=60)
     assert job.with_staleness(fresh, 3) is job
 
@@ -732,7 +765,7 @@ def test_job_with_staleness() -> None:
     assert job.status is JobStatus.CLAIMED
 
     exhausted = run_job(attempt=3)
-    exhausted.claim("worker-1")
+    exhausted.claim(WORKER_ID)
     reported = exhausted.with_staleness(stale, 3)
     assert reported.status is JobStatus.TIMED_OUT
     assert reported.error == HEARTBEAT_TIMEOUT_ERROR
@@ -755,7 +788,7 @@ async def seed_run(
     tool_policy: ToolPolicyConfig | None = None,
     score_baselines: bool = False,
     name: str = "swap-model",
-) -> tuple[ExperimentRun, list[Job]]:
+) -> tuple[ExperimentRun, list[Replay]]:
     """Store a run with one pending job per session.
 
     Args:
@@ -806,7 +839,7 @@ async def seed_run(
         score_baselines=score_baselines,
     )
     jobs = [
-        Job(
+        Replay(
             experiment_run_id=run.id,
             replay_config_id=config.id,
             agent_version_id=version.id,
@@ -816,7 +849,7 @@ async def seed_run(
     ]
     run = await run_repository.create(run, jobs)
     stored, _ = await job_repository.query(JobFilter(experiment_run_id=run.id))
-    return run, stored
+    return run, [job for job in stored if isinstance(job, Replay)]
 
 
 async def test_get_spec_standalone(
@@ -1040,6 +1073,7 @@ async def test_update_job_standalone_lifecycle(
         ),
         actor=ACTOR,
     )
+    assert isinstance(completed, Replay)
     assert completed.status is JobStatus.COMPLETED
     assert completed.result_session_id == result.id
     assert completed.passed is True
@@ -1071,7 +1105,7 @@ async def test_update_job_completed_requires_scoring_result(
     running.link_result_session(session.id)
     await repository.update(running)
     with pytest.raises(
-        InvalidJob, match="Completing a job requires passed, score, and scores"
+        InvalidJob, match="Completing a replay requires passed, score, and scores"
     ):
         await service.update_job(
             job.id,
@@ -1158,7 +1192,7 @@ async def test_update_job_finalizes_run(
         sessions,
     )
     first, second = jobs
-    await repository.claim_pending(run.id, "worker-1", 2)
+    await repository.claim_pending(WORKER_ID, 2, experiment_run_id=run.id)
     failed, _ = await service.update_job(
         first.id,
         JobUpdate(status=JobStatus.FAILED, error="agent exited with code 1"),
@@ -1234,7 +1268,7 @@ async def test_heartbeat_job(
     with pytest.raises(JobNotActive, match=f"Job {job.id} is not claimed or running"):
         await service.heartbeat_job(job.id, actor=ACTOR)
 
-    await repository.claim_pending(run.id, "worker-1", 1)
+    await repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
     assert await service.heartbeat_job(job.id, actor=ACTOR) == (
         JobStatus.CLAIMED,
         False,
@@ -1292,6 +1326,7 @@ def build_service(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
     heartbeat_timeout_seconds: int = 60,
     max_attempts: int = 3,
 ) -> JobService:
@@ -1307,6 +1342,7 @@ def build_service(
         experiment_repository: Fake experiment repository.
         cohort_repository: Fake cohort repository.
         secret_repository: Fake secret repository.
+        worker_repository: Fake worker repository.
         heartbeat_timeout_seconds: Heartbeat timeout, negative values mark
             every claim stale immediately.
         max_attempts: Attempt count at which a stale job times out.
@@ -1324,8 +1360,10 @@ def build_service(
         experiment_repository=experiment_repository,
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
+        worker_repository=worker_repository,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
         max_attempts=max_attempts,
+        worker_liveness_timeout_seconds=60,
     )
 
 
@@ -1333,6 +1371,8 @@ async def test_claim_job(
     service: JobService,
     repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
+    worker: Worker,
+    other_worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -1340,12 +1380,13 @@ async def test_claim_job(
     session = await create_session(session_repository, agent.id)
     job, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
     claimed, claimed_config = await service.claim_job(
-        job.id, worker_id="worker-1", actor=ACTOR
+        job.id, worker_id=worker.id, actor=ACTOR
     )
     assert claimed.status is JobStatus.CLAIMED
-    assert claimed.worker_id == "worker-1"
+    assert claimed.worker_id == worker.id
     assert claimed.claimed_at is not None
     assert claimed.heartbeat_at is not None
+    assert claimed_config is not None
     assert claimed_config.id == config.id
     assert (await repository.get(job.id)).status is JobStatus.CLAIMED
 
@@ -1353,14 +1394,14 @@ async def test_claim_job(
         InvalidJobTransition,
         match=f"Job {job.id} cannot transition from 'claimed' to 'claimed'",
     ):
-        await service.claim_job(job.id, worker_id="worker-2", actor=ACTOR)
+        await service.claim_job(job.id, worker_id=other_worker.id, actor=ACTOR)
 
 
-async def test_claim_job_not_found(service: JobService) -> None:
+async def test_claim_job_not_found(service: JobService, worker: Worker) -> None:
     """Raise for an unknown job id."""
     missing_id = uuid.uuid4()
     with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
-        await service.claim_job(missing_id, worker_id="worker-1", actor=ACTOR)
+        await service.claim_job(missing_id, worker_id=worker.id, actor=ACTOR)
 
 
 async def test_claim_job_rejects_run_job(
@@ -1371,6 +1412,7 @@ async def test_claim_job_rejects_run_job(
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
     run_repository: FakeExperimentRunRepository,
+    worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -1392,7 +1434,7 @@ async def test_claim_job_rejects_run_job(
         JobNotStandalone,
         match=f"Job {job.id} belongs to an experiment run",
     ):
-        await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+        await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
 
 
 async def test_claim_job_resolves_stale_claim(
@@ -1405,6 +1447,9 @@ async def test_claim_job_resolves_stale_claim(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
+    worker: Worker,
+    other_worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -1419,17 +1464,18 @@ async def test_claim_job_resolves_stale_claim(
         experiment_repository,
         cohort_repository,
         secret_repository,
+        worker_repository,
         heartbeat_timeout_seconds=-60,
     )
     session = await create_session(session_repository, agent.id)
     job, _ = await stale_service.create_replay(replay_create(session.id), actor=ACTOR)
-    await stale_service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    await stale_service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
 
     claimed, _ = await stale_service.claim_job(
-        job.id, worker_id="worker-2", actor=ACTOR
+        job.id, worker_id=other_worker.id, actor=ACTOR
     )
     assert claimed.status is JobStatus.CLAIMED
-    assert claimed.worker_id == "worker-2"
+    assert claimed.worker_id == other_worker.id
     assert claimed.attempt == 2
 
 
@@ -1443,6 +1489,9 @@ async def test_claim_job_times_out_exhausted_stale_claim(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
+    worker: Worker,
+    other_worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -1457,18 +1506,19 @@ async def test_claim_job_times_out_exhausted_stale_claim(
         experiment_repository,
         cohort_repository,
         secret_repository,
+        worker_repository,
         heartbeat_timeout_seconds=-60,
         max_attempts=1,
     )
     session = await create_session(session_repository, agent.id)
     job, _ = await stale_service.create_replay(replay_create(session.id), actor=ACTOR)
-    await stale_service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    await stale_service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
 
     with pytest.raises(
         InvalidJobTransition,
         match=f"Job {job.id} cannot transition from 'timed_out' to 'claimed'",
     ):
-        await stale_service.claim_job(job.id, worker_id="worker-2", actor=ACTOR)
+        await stale_service.claim_job(job.id, worker_id=other_worker.id, actor=ACTOR)
     stored = await repository.get(job.id)
     assert stored.status is JobStatus.TIMED_OUT
     assert stored.error == HEARTBEAT_TIMEOUT_ERROR
@@ -1478,6 +1528,7 @@ async def test_release_job(
     service: JobService,
     repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
+    worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -1490,7 +1541,7 @@ async def test_release_job(
     ):
         await service.release_job(job.id, actor=ACTOR)
 
-    await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
     released, _ = await service.release_job(job.id, actor=ACTOR)
     assert released.status is JobStatus.PENDING
     assert released.attempt == 2
@@ -1534,7 +1585,7 @@ async def test_release_run_job(
         version,
         [session],
     )
-    await repository.claim_pending(run.id, "worker-1", 1)
+    await repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
     released, _ = await service.release_job(jobs[0].id, actor=ACTOR)
     assert released.status is JobStatus.PENDING
     assert released.attempt == 2
@@ -1600,7 +1651,7 @@ async def test_retry_job_rejects_run_job(
         version,
         [session],
     )
-    await repository.claim_pending(run.id, "worker-1", 1)
+    await repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
     failed = await repository.get(jobs[0].id)
     failed.fail("agent exited with code 1")
     await repository.update(failed)
@@ -1637,13 +1688,14 @@ async def test_delete_job_conflicts(
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
     run_repository: FakeExperimentRunRepository,
+    worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Reject deleting a claimed or running job or a run job."""
     session = await create_session(session_repository, agent.id)
     job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-    await service.claim_job(job.id, worker_id="worker-1", actor=ACTOR)
+    await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
     with pytest.raises(JobActive, match=f"Job {job.id} is claimed or running"):
         await service.delete_job(job.id, actor=ACTOR)
     await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
@@ -1857,7 +1909,7 @@ async def test_tool_lookup_cohort_scope_standalone(
         )
     )
     job = await repository.create(
-        Job(
+        Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=session.id,
@@ -1983,22 +2035,23 @@ async def test_get_job_reports_staleness(
     experiment_repository: FakeExperimentRepository,
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
     """Report stale claims as pending on reads without writing."""
-    stale_service = JobService(
-        repository=repository,
-        replay_config_repository=config_repository,
-        session_repository=session_repository,
-        agent_version_repository=version_repository,
-        session_node_repository=node_repository,
-        experiment_run_repository=run_repository,
-        experiment_repository=experiment_repository,
-        cohort_repository=cohort_repository,
-        secret_repository=secret_repository,
+    stale_service = build_service(
+        repository,
+        config_repository,
+        session_repository,
+        version_repository,
+        node_repository,
+        run_repository,
+        experiment_repository,
+        cohort_repository,
+        secret_repository,
+        worker_repository,
         heartbeat_timeout_seconds=-60,
-        max_attempts=3,
     )
     session = await create_session(session_repository, agent.id)
     _, jobs = await seed_run(
@@ -2014,7 +2067,9 @@ async def test_get_job_reports_staleness(
     )
     job = jobs[0]
     assert job.experiment_run_id is not None
-    await repository.claim_pending(job.experiment_run_id, "worker-1", 1)
+    await repository.claim_pending(
+        WORKER_ID, 1, experiment_run_id=job.experiment_run_id
+    )
     reported, _ = await stale_service.get_job(job.id, actor=ACTOR)
     assert reported.status is JobStatus.PENDING
     assert reported.attempt == 2
@@ -2022,3 +2077,655 @@ async def test_get_job_reports_staleness(
     # Reporting never writes.
     stored = await repository.get(job.id)
     assert stored.status is JobStatus.CLAIMED
+
+
+def session_run_create(**overrides: object) -> SessionRunCreate:
+    """Build a session run create command.
+
+    Args:
+        **overrides: Field overrides.
+
+    Returns:
+        Session run create command.
+    """
+    return SessionRunCreate.model_validate(dict(overrides))
+
+
+async def test_create_session_run_resolves_latest_runnable(
+    service: JobService,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve the latest runnable version of the agent."""
+    latest = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version="v2",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id, inputs={"prompt": "hi"}, name="smoke"),
+        actor=ACTOR,
+    )
+    assert job.agent_version_id == latest.id
+    assert job.kind is JobKind.SESSION_RUN
+    assert job.inputs == {"prompt": "hi"}
+    assert job.name == "smoke"
+    assert job.status is JobStatus.PENDING
+    assert job.execution_target is ExecutionTarget.POOL
+    assert job.result_session_id is None
+    assert job.created is not None
+
+
+async def test_create_session_run_explicit_version(
+    service: JobService,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve an explicit agent version without an agent id."""
+    job = await service.create_session_run(
+        session_run_create(agent_version_id=version.id), actor=ACTOR
+    )
+    assert job.agent_version_id == version.id
+    assert job.inputs is None
+    assert job.name is None
+
+
+async def test_create_session_run_cross_agent_version(
+    service: JobService,
+    agent_repository: FakeAgentRepository,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Reject a version that belongs to another agent."""
+    other = await agent_repository.create(
+        Agent(owner_id=ACTOR.account.id, name="triage-bot")
+    )
+    other_version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=other.id,
+            version="v1",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    with pytest.raises(
+        InvalidJob,
+        match=f"Agent version {other_version.id} does not belong to agent {agent.id}",
+    ):
+        await service.create_session_run(
+            session_run_create(agent_id=agent.id, agent_version_id=other_version.id),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_run_no_runnable_version(
+    service: JobService, agent: Agent
+) -> None:
+    """Raise when the agent has no runnable version."""
+    with pytest.raises(
+        NoRunnableAgentVersion, match=f"Agent {agent.id} has no runnable version"
+    ):
+        await service.create_session_run(
+            session_run_create(agent_id=agent.id), actor=ACTOR
+        )
+
+
+async def test_create_session_run_version_without_run_spec(
+    service: JobService,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Reject an explicit version without a run spec."""
+    bare = await version_repository.create(
+        AgentVersion(owner_id=ACTOR.account.id, agent_id=agent.id, version="v1")
+    )
+    with pytest.raises(
+        AgentVersionNotRunnable, match=f"Agent version {bare.id} has no run spec"
+    ):
+        await service.create_session_run(
+            session_run_create(agent_version_id=bare.id), actor=ACTOR
+        )
+
+
+async def test_create_session_run_on_demand_without_image(
+    service: JobService,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject an on demand target without a run image."""
+    with pytest.raises(
+        MissingRunImage, match=f"Agent version {version.id} has no run image"
+    ):
+        await service.create_session_run(
+            session_run_create(
+                agent_id=agent.id, execution_target=ExecutionTarget.ON_DEMAND
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_run_on_demand_with_image(
+    service: JobService,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Stamp an explicit on demand target on the job."""
+    version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version="v1",
+            run_spec=RunSpec(
+                command="python agent.py",
+                timeout_seconds=600,
+                image="agent:v1",
+            ),
+        )
+    )
+    job = await service.create_session_run(
+        session_run_create(
+            agent_version_id=version.id, execution_target=ExecutionTarget.ON_DEMAND
+        ),
+        actor=ACTOR,
+    )
+    assert job.execution_target is ExecutionTarget.ON_DEMAND
+
+
+async def test_create_session_run_warns_without_live_worker(
+    service: JobService,
+    worker_repository: FakeWorkerRepository,
+    agent: Agent,
+    version: AgentVersion,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Warn on a pool target when no live worker serves the agent."""
+    with caplog.at_level("WARNING"):
+        await service.create_session_run(
+            session_run_create(agent_id=agent.id), actor=ACTOR
+        )
+    assert f"No live worker serves agent {agent.id}" in caplog.text
+
+    caplog.clear()
+    await create_worker(worker_repository, ACTOR.account.id, name="catch-all")
+    with caplog.at_level("WARNING"):
+        await service.create_session_run(
+            session_run_create(agent_id=agent.id), actor=ACTOR
+        )
+    assert "No live worker" not in caplog.text
+
+
+async def test_get_spec_session_run(
+    service: JobService,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve a kind-aware spec for a session run."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id, inputs={"prompt": "hi"}, name="smoke"),
+        actor=ACTOR,
+    )
+    spec = await service.get_spec(job.id, actor=ACTOR)
+    assert spec.job_id == job.id
+    assert spec.kind is JobKind.SESSION_RUN
+    assert spec.inputs == {"prompt": "hi"}
+    assert spec.name == "smoke"
+    assert spec.override is None
+    assert spec.tool_policy is None
+    assert spec.scoring_policy is None
+    assert spec.score_baselines is None
+    assert spec.original_session_id is None
+    assert spec.run_spec == version.run_spec
+
+
+async def test_claim_session_run_standalone(
+    service: JobService,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim a session run through the standalone claim."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    claimed, config = await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
+    assert claimed.status is JobStatus.CLAIMED
+    assert claimed.worker_id == worker.id
+    assert config is None
+
+
+async def test_update_session_run_lifecycle(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Run a session run from pending to completed without scoring."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    updated, config = await service.update_job(
+        job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR
+    )
+    assert updated.status is JobStatus.RUNNING
+    assert config is None
+
+    with pytest.raises(
+        JobMissingResultSession, match=f"Job {job.id} has no result session"
+    ):
+        await service.update_job(
+            job.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
+        )
+
+    await link_result_session(repository, session_repository, job.id, agent.id)
+    with pytest.raises(
+        InvalidJob,
+        match="Completing a session run rejects passed, score, and scores",
+    ):
+        await service.update_job(
+            job.id,
+            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
+            actor=ACTOR,
+        )
+
+    completed, _ = await service.update_job(
+        job.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
+    )
+    assert completed.status is JobStatus.COMPLETED
+    assert completed.ended_at is not None
+
+
+async def test_tool_lookup_rejects_session_run(
+    service: JobService,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject a tool lookup on a session run."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    inputs = {"city": "Berlin"}
+    with pytest.raises(JobKindMismatch, match=f"Job {job.id} is not of kind 'replay'"):
+        await service.tool_lookup(
+            job.id,
+            "get_weather",
+            inputs,
+            tool_call_cache_key("get_weather", inputs),
+            actor=ACTOR,
+        )
+
+
+async def test_compute_diff_rejects_session_run(
+    service: JobService,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject a diff on a session run."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    with pytest.raises(JobKindMismatch, match=f"Job {job.id} is not of kind 'replay'"):
+        await service.compute_diff(job.id, actor=ACTOR)
+
+
+async def test_delete_session_run(
+    service: JobService,
+    repository: FakeJobRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Delete a pending session run."""
+    job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    await service.delete_job(job.id, actor=ACTOR)
+    with pytest.raises(JobNotFound):
+        await repository.get(job.id)
+
+
+async def test_claim_jobs_run_scope(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    worker_repository: FakeWorkerRepository,
+    worker: Worker,
+    other_worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim run jobs, move the run to running, and bump the worker."""
+    sessions = [await create_session(session_repository, agent.id) for _ in range(2)]
+    run, _ = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        sessions,
+    )
+    before = (await worker_repository.get(worker.id)).last_seen_at
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=1,
+        agent_ids=None,
+        experiment_run_id=run.id,
+        actor=ACTOR,
+    )
+    assert len(claimed) == 1
+    job, config = claimed[0]
+    assert job.status is JobStatus.CLAIMED
+    assert job.worker_id == worker.id
+    assert job.claimed_at is not None
+    assert config is not None
+    assert config.scoring_policy == SCORING_POLICY
+    started = await run_repository.get(run.id)
+    assert started.status is ExperimentRunStatus.RUNNING
+    assert started.started_at is not None
+    assert (await worker_repository.get(worker.id)).last_seen_at > before
+
+    remaining = await service.claim_jobs(
+        worker_id=other_worker.id,
+        max_jobs=5,
+        agent_ids=None,
+        experiment_run_id=run.id,
+        actor=ACTOR,
+    )
+    assert len(remaining) == 1
+    assert remaining[0][0].worker_id == other_worker.id
+
+    assert (
+        await service.claim_jobs(
+            worker_id=other_worker.id,
+            max_jobs=5,
+            agent_ids=None,
+            experiment_run_id=run.id,
+            actor=ACTOR,
+        )
+        == []
+    )
+
+
+async def test_claim_jobs_unknown_worker(service: JobService) -> None:
+    """Raise for an unknown worker id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(WorkerNotFound, match=f"Worker {missing_id} was not found"):
+        await service.claim_jobs(
+            worker_id=missing_id,
+            max_jobs=1,
+            agent_ids=None,
+            experiment_run_id=None,
+            actor=ACTOR,
+        )
+
+
+async def test_claim_jobs_unknown_run(service: JobService, worker: Worker) -> None:
+    """Raise for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
+    ):
+        await service.claim_jobs(
+            worker_id=worker.id,
+            max_jobs=1,
+            agent_ids=None,
+            experiment_run_id=missing_id,
+            actor=ACTOR,
+        )
+
+
+async def test_claim_jobs_canceling_run_returns_empty(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Yield no jobs from a canceling run."""
+    session = await create_session(session_repository, agent.id)
+    run, _ = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        [session],
+    )
+    canceling = await run_repository.get(run.id)
+    canceling.cancel()
+    await run_repository.update(canceling)
+    assert (
+        await service.claim_jobs(
+            worker_id=worker.id,
+            max_jobs=5,
+            agent_ids=None,
+            experiment_run_id=run.id,
+            actor=ACTOR,
+        )
+        == []
+    )
+
+
+async def test_claim_jobs_requeues_and_times_out_stale_jobs(
+    repository: FakeJobRepository,
+    config_repository: FakeReplayConfigRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    node_repository: FakeSessionNodeRepository,
+    run_repository: FakeExperimentRunRepository,
+    experiment_repository: FakeExperimentRepository,
+    cohort_repository: FakeCohortRepository,
+    secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
+    worker: Worker,
+    other_worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Requeue stale claims, then time them out and finalize the run."""
+    stale_service = build_service(
+        repository,
+        config_repository,
+        session_repository,
+        version_repository,
+        node_repository,
+        run_repository,
+        experiment_repository,
+        cohort_repository,
+        secret_repository,
+        worker_repository,
+        heartbeat_timeout_seconds=-60,
+        max_attempts=2,
+    )
+    sessions = [await create_session(session_repository, agent.id) for _ in range(2)]
+    run, _ = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        sessions,
+    )
+    first = await stale_service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=5,
+        agent_ids=None,
+        experiment_run_id=run.id,
+        actor=ACTOR,
+    )
+    assert len(first) == 2
+    second = await stale_service.claim_jobs(
+        worker_id=other_worker.id,
+        max_jobs=5,
+        agent_ids=None,
+        experiment_run_id=run.id,
+        actor=ACTOR,
+    )
+    assert len(second) == 2
+    for job, _ in second:
+        assert job.worker_id == other_worker.id
+        assert job.attempt == 2
+
+    assert (
+        await stale_service.claim_jobs(
+            worker_id=worker.id,
+            max_jobs=5,
+            agent_ids=None,
+            experiment_run_id=run.id,
+            actor=ACTOR,
+        )
+        == []
+    )
+    jobs, _ = await repository.query(JobFilter(experiment_run_id=run.id))
+    assert all(job.status is JobStatus.TIMED_OUT for job in jobs)
+    finalized = await run_repository.get(run.id)
+    assert finalized.status is ExperimentRunStatus.FAILED
+
+
+async def test_claim_jobs_unfiltered_yields_pool_work_only(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    version_repository: FakeAgentVersionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim pool-target jobs, including run-created ones, and nothing else."""
+    image_version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version="v2",
+            run_spec=RunSpec(
+                command="python agent.py",
+                timeout_seconds=600,
+                image="agent:v2",
+            ),
+        )
+    )
+    pool_job = await service.create_session_run(
+        session_run_create(agent_version_id=version.id), actor=ACTOR
+    )
+    on_demand_job = await service.create_session_run(
+        session_run_create(
+            agent_version_id=image_version.id,
+            execution_target=ExecutionTarget.ON_DEMAND,
+        ),
+        actor=ACTOR,
+    )
+    session = await create_session(session_repository, agent.id)
+    _, run_jobs = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        [session],
+    )
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=None,
+        actor=ACTOR,
+    )
+    claimed_ids = {job.id for job, _ in claimed}
+    assert claimed_ids == {pool_job.id, run_jobs[0].id}
+    assert on_demand_job.id not in claimed_ids
+
+
+async def test_claim_jobs_agent_scope(
+    service: JobService,
+    agent_repository: FakeAgentRepository,
+    version_repository: FakeAgentVersionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim only jobs whose agent version belongs to the scoped agents."""
+    other = await agent_repository.create(
+        Agent(owner_id=ACTOR.account.id, name="triage-bot")
+    )
+    other_version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=other.id,
+            version="v1",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    mine = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    await service.create_session_run(
+        session_run_create(agent_version_id=other_version.id), actor=ACTOR
+    )
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=[agent.id],
+        experiment_run_id=None,
+        actor=ACTOR,
+    )
+    assert {job.id for job, _ in claimed} == {mine.id}
+
+
+async def test_list_jobs_kind_and_target_filters(
+    service: JobService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """List jobs filtered by kind and execution target."""
+    session = await create_session(session_repository, agent.id)
+    replay_job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    session_run_job = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    jobs, total = await service.list_jobs(
+        JobFilter(kind=JobKind.SESSION_RUN), actor=ACTOR
+    )
+    assert total == 1
+    assert jobs[0][0].id == session_run_job.id
+
+    jobs, total = await service.list_jobs(JobFilter(kind=JobKind.REPLAY), actor=ACTOR)
+    assert total == 1
+    assert jobs[0][0].id == replay_job.id
+
+    _, total = await service.list_jobs(
+        JobFilter(execution_target=ExecutionTarget.POOL), actor=ACTOR
+    )
+    assert total == 2
+    _, total = await service.list_jobs(
+        JobFilter(execution_target=ExecutionTarget.ON_DEMAND), actor=ACTOR
+    )
+    assert total == 0

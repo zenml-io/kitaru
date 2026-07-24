@@ -43,11 +43,12 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.job import (
-    Job,
     JobAlreadyLinked,
     JobNotActive,
     JobNotFound,
     JobStatus,
+    Replay,
+    SessionRun,
 )
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
@@ -700,7 +701,7 @@ async def create_running_job(
     job_repository: FakeJobRepository,
     agent: Agent,
     status: JobStatus = JobStatus.RUNNING,
-) -> Job:
+) -> Replay:
     """Store a job of a completed session in a given status.
 
     Args:
@@ -747,14 +748,16 @@ async def create_running_job(
             ),
         )
     )
-    return await job_repository.create(
-        Job(
+    job = await job_repository.create(
+        Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=original.id,
             status=status,
         )
     )
+    assert isinstance(job, Replay)
+    return job
 
 
 async def test_create_session_links_job(
@@ -879,3 +882,30 @@ async def test_create_session_link_requires_recorded_origin(
         await service.create_session(
             imported_command(agent, job_id=job.id), actor=ACTOR
         )
+
+
+async def test_create_session_links_session_run_keeps_origin(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    job_repository: FakeJobRepository,
+    agent: Agent,
+) -> None:
+    """Link a created session to a session run and keep origin recorded."""
+    version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version="v1",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    job = await job_repository.create(
+        SessionRun(agent_version_id=version.id, status=JobStatus.RUNNING)
+    )
+    session = await service.create_session(
+        recorded_command(agent, job_id=job.id), actor=ACTOR
+    )
+    assert session.origin is SessionOrigin.RECORDED
+    linked = await job_repository.get(job.id)
+    assert linked.result_session_id == session.id

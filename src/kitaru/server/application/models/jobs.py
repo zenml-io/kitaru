@@ -15,11 +15,13 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
-from kitaru.server.domain.job import JobStatus
+from kitaru.server.domain.execution import ExecutionTarget
+from kitaru.server.domain.job import JobKind, JobStatus
 from kitaru.server.domain.replay_config import (
     ReplayOverride,
     ScoringPolicy,
@@ -32,9 +34,11 @@ class JobFilter(FrozenModel):
 
     experiment_run_id: uuid.UUID | None = None
     original_session_id: uuid.UUID | None = None
+    kind: JobKind | None = None
     status: JobStatus | None = None
     standalone: bool | None = None
-    worker_id: str | None = None
+    worker_id: uuid.UUID | None = None
+    execution_target: ExecutionTarget | None = None
     stale_before: datetime | None = None
     max_attempts: int | None = None
     page: PositiveInt = 1
@@ -49,6 +53,16 @@ class ReplayCreate(FrozenModel):
     override: ReplayOverride | None = None
     tool_policy: ToolPolicyConfig | None = None
     scoring_policy: ScoringPolicy
+
+
+class SessionRunCreate(FrozenModel):
+    """Session run create command."""
+
+    agent_id: uuid.UUID | None = None
+    agent_version_id: uuid.UUID | None = None
+    inputs: Any = None
+    name: str | None = None
+    execution_target: ExecutionTarget | None = None
 
 
 class JobUpdate(FrozenModel):

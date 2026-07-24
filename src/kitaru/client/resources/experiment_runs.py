@@ -22,8 +22,6 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.jobs import (
-    JobClaimRequest,
-    JobClaimResponse,
     JobResponse,
     JobStatus,
 )
@@ -126,29 +124,6 @@ class ExperimentRunsResource:
             params=params,
         )
         return Page[JobResponse].model_validate(response.json())
-
-    async def claim(
-        self, run_id: uuid.UUID, request: JobClaimRequest
-    ) -> JobClaimResponse:
-        """Atomically claim pending jobs of an experiment run.
-
-        Args:
-            run_id: Id of the experiment run.
-            request: Job claim request.
-
-        Raises:
-            APIError: The request failed, including 404 for a missing
-                experiment run.
-
-        Returns:
-            Claimed jobs.
-        """
-        response = await self._client.request(
-            "POST",
-            f"/v1/experiment-runs/{run_id}/claim",
-            json=request.model_dump(mode="json", exclude_unset=True),
-        )
-        return JobClaimResponse.model_validate(response.json())
 
     async def cancel(self, run_id: uuid.UUID) -> ExperimentRunResponse:
         """Cancel an experiment run.

@@ -107,13 +107,16 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert response.status_code == 201
     job_id = response.json()["id"]
 
+    response = await client.post("/v1/workers", json={"name": "worker-1"})
+    assert response.status_code == 200
+    worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": "worker-1"}
+        f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
     )
     assert response.status_code == 200
     claimed = response.json()
     assert claimed["status"] == "claimed"
-    assert claimed["worker_id"] == "worker-1"
+    assert claimed["worker_id"] == worker_id
 
     response = await client.post(f"/v1/jobs/{job_id}/release")
     assert response.status_code == 200
@@ -122,8 +125,10 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert released["attempt"] == 2
     assert released["worker_id"] is None
 
+    response = await client.post("/v1/workers", json={"name": "worker-2"})
+    assert response.status_code == 200
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": "worker-2"}
+        f"/v1/jobs/{job_id}/claim", json={"worker_id": response.json()["id"]}
     )
     assert response.status_code == 200
     response = await client.patch(
@@ -148,3 +153,68 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert response.status_code == 204
     response = await client.get(f"/v1/jobs/{job_id}")
     assert response.status_code == 404
+
+
+async def test_session_run_flow_end_to_end(client: httpx.AsyncClient) -> None:
+    """Create, claim, link, and complete a session run against PostgreSQL."""
+    response = await client.post("/v1/agents", json={"name": "runner-bot"})
+    assert response.status_code == 201
+    agent_id = response.json()["id"]
+    response = await client.post(
+        f"/v1/agents/{agent_id}/versions",
+        json={
+            "version": "v1",
+            "run_spec": {"command": "python agent.py", "timeout_seconds": 600},
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.post(
+        "/v1/session-runs",
+        json={"agent_id": agent_id, "inputs": {"prompt": "hi"}, "name": "smoke"},
+    )
+    assert response.status_code == 201
+    created = response.json()
+    assert created["kind"] == "session_run"
+    assert created["execution_target"] == "pool"
+    job_id = created["id"]
+
+    response = await client.post("/v1/workers", json={"name": "worker-1"})
+    assert response.status_code == 200
+    worker_id = response.json()["id"]
+    last_seen = response.json()["last_seen_at"]
+    response = await client.post(
+        "/v1/jobs/claim", json={"worker_id": worker_id, "max_jobs": 5}
+    )
+    assert response.status_code == 200
+    claimed = response.json()["jobs"]
+    assert [job["id"] for job in claimed] == [job_id]
+    assert claimed[0]["worker_id"] == worker_id
+    response = await client.get(f"/v1/workers/{worker_id}")
+    assert response.status_code == 200
+    assert response.json()["last_seen_at"] >= last_seen
+
+    response = await client.get(f"/v1/jobs/{job_id}/spec")
+    assert response.status_code == 200
+    spec = response.json()
+    assert spec["kind"] == "session_run"
+    assert spec["inputs"] == {"prompt": "hi"}
+    assert spec["name"] == "smoke"
+    assert spec["scoring_policy"] is None
+
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
+    assert response.status_code == 200
+    response = await client.post(
+        "/v1/sessions",
+        json={"agent_id": agent_id, "origin": "recorded", "job_id": job_id},
+    )
+    assert response.status_code == 201
+    assert response.json()["origin"] == "recorded"
+    result_session_id = response.json()["id"]
+
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["result_session_id"] == result_session_id
+    assert body["passed"] is None

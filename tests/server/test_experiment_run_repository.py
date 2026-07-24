@@ -36,6 +36,7 @@ from conftest import (
     FakeReplayConfigRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeWorkerRepository,
     db_settings,
     pg_session,
     postgres_available,
@@ -70,6 +71,9 @@ from kitaru.server.adapters.db.repositories.session_repository import (
 from kitaru.server.adapters.db.repositories.tag_repository import (
     SQLTagRepository,
 )
+from kitaru.server.adapters.db.repositories.worker_repository import (
+    SQLWorkerRepository,
+)
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -93,6 +97,9 @@ from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
 from kitaru.server.application.interfaces.tag_repository import TagRepository
+from kitaru.server.application.interfaces.worker_repository import (
+    WorkerRepository,
+)
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.database.service import DatabaseService
@@ -114,8 +121,8 @@ from kitaru.server.domain.experiment_run import (
 from kitaru.server.domain.job import (
     HEARTBEAT_TIMEOUT_ERROR,
     DuplicateReplaySession,
-    Job,
     JobStatus,
+    Replay,
 )
 from kitaru.server.domain.replay_config import (
     PassthroughPolicy,
@@ -127,6 +134,7 @@ from kitaru.server.domain.replay_config import (
 )
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
 from kitaru.server.domain.tag import Tag, TagLink, TagResourceType
+from kitaru.server.domain.worker import Worker
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
@@ -151,6 +159,7 @@ class Setup(NamedTuple):
     versions: AgentVersionRepository
     agents: AgentRepository
     tags: TagRepository
+    workers: WorkerRepository
     owner_id: uuid.UUID
 
 
@@ -186,6 +195,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             versions,
             agents,
             tags,
+            FakeWorkerRepository(),
             uuid.uuid4(),
         )
         return
@@ -206,6 +216,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             SQLAgentVersionRepository(session),
             SQLAgentRepository(session),
             SQLTagRepository(session),
+            SQLWorkerRepository(session),
             owner.id,
         )
 
@@ -292,7 +303,7 @@ def run_entity(setup: Setup, seed: Seed, **overrides: object) -> ExperimentRun:
     return ExperimentRun.model_validate(values)
 
 
-def job_entities(run: ExperimentRun, seed: Seed) -> list[Job]:
+def job_entities(run: ExperimentRun, seed: Seed) -> list[Replay]:
     """Build one job per seeded session for a run.
 
     Args:
@@ -300,10 +311,10 @@ def job_entities(run: ExperimentRun, seed: Seed) -> list[Job]:
         seed: Seeded rows.
 
     Returns:
-        Job entities.
+        Replay entities.
     """
     return [
-        Job(
+        Replay(
             experiment_run_id=run.id,
             replay_config_id=seed.config.id,
             agent_version_id=seed.version.id,
@@ -311,6 +322,21 @@ def job_entities(run: ExperimentRun, seed: Seed) -> list[Job]:
         )
         for session in seed.sessions
     ]
+
+
+async def seed_worker(setup: Setup, name: str = "runner-1") -> Worker:
+    """Store a worker for claim tests.
+
+    Args:
+        setup: Repository bundle.
+        name: Worker name.
+
+    Returns:
+        Stored worker.
+    """
+    return await setup.workers.create(
+        Worker(owner_id=setup.owner_id, name=name, last_seen_at=datetime.now(UTC))
+    )
 
 
 async def test_create_assigns_number_and_stores_jobs(setup: Setup) -> None:
@@ -333,12 +359,13 @@ async def test_create_assigns_number_and_stores_jobs(setup: Setup) -> None:
 
     jobs, total = await setup.jobs.query(JobFilter(experiment_run_id=run.id))
     assert total == 2
-    assert {job.original_session_id for job in jobs} == {
+    replays = [job for job in jobs if isinstance(job, Replay)]
+    assert {replay.original_session_id for replay in replays} == {
         session.id for session in seed.sessions
     }
-    for job in jobs:
-        assert job.status is JobStatus.PENDING
-        assert job.replay_config_id == seed.config.id
+    for replay in replays:
+        assert replay.status is JobStatus.PENDING
+        assert replay.replay_config_id == seed.config.id
 
 
 async def test_create_increments_number_per_experiment(setup: Setup) -> None:
@@ -514,7 +541,8 @@ async def test_count_by_status_reports_staleness(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, job_entities(run, seed))
-    claimed = await setup.jobs.claim_pending(created.id, "worker-1", 2)
+    worker = await seed_worker(setup)
+    claimed = await setup.jobs.claim_pending(worker.id, 2, experiment_run_id=created.id)
     fresh = datetime.now(UTC) - timedelta(seconds=60)
     counts = await setup.jobs.count_by_status([created.id], fresh, 3)
     assert counts == {created.id: {JobStatus.CLAIMED: 2}}
@@ -563,7 +591,7 @@ async def test_duplicate_replay_session_within_run(setup: Setup) -> None:
     seed = await seed_experiment(setup, session_count=1)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, job_entities(run, seed))
-    duplicate = Job(
+    duplicate = Replay(
         experiment_run_id=created.id,
         replay_config_id=seed.config.id,
         agent_version_id=seed.version.id,
@@ -600,19 +628,26 @@ async def test_claim_pending_claims_up_to_limit(setup: Setup) -> None:
     other_run = run_entity(setup, other_seed)
     await setup.runs.create(other_run, job_entities(other_run, other_seed))
 
-    first = await setup.jobs.claim_pending(created.id, "worker-1", 2)
+    worker = await seed_worker(setup)
+    other_worker = await seed_worker(setup, name="runner-2")
+    first = await setup.jobs.claim_pending(worker.id, 2, experiment_run_id=created.id)
     assert len(first) == 2
     for job in first:
         assert job.status is JobStatus.CLAIMED
-        assert job.worker_id == "worker-1"
+        assert job.worker_id == worker.id
         assert job.claimed_at is not None
         assert job.heartbeat_at is not None
 
-    second = await setup.jobs.claim_pending(created.id, "worker-2", 5)
+    second = await setup.jobs.claim_pending(
+        other_worker.id, 5, experiment_run_id=created.id
+    )
     assert len(second) == 1
-    assert second[0].worker_id == "worker-2"
+    assert second[0].worker_id == other_worker.id
     assert {job.id for job in first}.isdisjoint({job.id for job in second})
-    assert await setup.jobs.claim_pending(created.id, "worker-2", 5) == []
+    assert (
+        await setup.jobs.claim_pending(other_worker.id, 5, experiment_run_id=created.id)
+        == []
+    )
 
     # The other run's jobs stay untouched.
     others, _ = await setup.jobs.query(JobFilter(experiment_run_id=other_run.id))
@@ -624,17 +659,18 @@ async def test_requeue_stale_requeues_and_times_out(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, job_entities(run, seed))
-    claimed = await setup.jobs.claim_pending(created.id, "worker-1", 2)
+    worker = await seed_worker(setup)
+    claimed = await setup.jobs.claim_pending(worker.id, 2, experiment_run_id=created.id)
     exhausted = claimed[0].model_copy(update={"attempt": 3})
     await setup.jobs.update(exhausted)
 
     fresh = datetime.now(UTC) - timedelta(seconds=60)
-    await setup.jobs.requeue_stale(created.id, fresh, 3)
+    await setup.jobs.requeue_stale(fresh, 3, experiment_run_id=created.id)
     loaded = await setup.jobs.get(claimed[1].id)
     assert loaded.status is JobStatus.CLAIMED
 
     stale = datetime.now(UTC) + timedelta(seconds=60)
-    await setup.jobs.requeue_stale(created.id, stale, 3)
+    await setup.jobs.requeue_stale(stale, 3, experiment_run_id=created.id)
     requeued = await setup.jobs.get(claimed[1].id)
     assert requeued.status is JobStatus.PENDING
     assert requeued.attempt == 2
@@ -653,15 +689,17 @@ async def test_job_query_by_worker_id(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, job_entities(run, seed))
-    first = await setup.jobs.claim_pending(created.id, "worker-1", 1)
-    await setup.jobs.claim_pending(created.id, "worker-2", 1)
+    worker = await seed_worker(setup)
+    other_worker = await seed_worker(setup, name="runner-2")
+    first = await setup.jobs.claim_pending(worker.id, 1, experiment_run_id=created.id)
+    await setup.jobs.claim_pending(other_worker.id, 1, experiment_run_id=created.id)
 
-    jobs, total = await setup.jobs.query(JobFilter(worker_id="worker-1"))
+    jobs, total = await setup.jobs.query(JobFilter(worker_id=worker.id))
     assert total == 1
     assert jobs[0].id == first[0].id
 
     jobs, total = await setup.jobs.query(
-        JobFilter(experiment_run_id=created.id, worker_id="worker-3")
+        JobFilter(experiment_run_id=created.id, worker_id=uuid.uuid4())
     )
     assert total == 0
 
@@ -671,7 +709,8 @@ async def test_job_query_status_projects_staleness(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     run = run_entity(setup, seed)
     created = await setup.runs.create(run, job_entities(run, seed))
-    claimed = await setup.jobs.claim_pending(created.id, "worker-1", 2)
+    worker = await seed_worker(setup)
+    claimed = await setup.jobs.claim_pending(worker.id, 2, experiment_run_id=created.id)
     exhausted = claimed[0].model_copy(update={"attempt": 3})
     await setup.jobs.update(exhausted)
 
@@ -733,20 +772,23 @@ async def test_concurrent_claims_do_not_double_claim() -> None:
                 SQLAgentVersionRepository(session),
                 SQLAgentRepository(session),
                 SQLTagRepository(session),
+                SQLWorkerRepository(session),
                 owner.id,
             )
             seed = await seed_experiment(setup, session_count=4)
             run = run_entity(setup, seed)
             created = await setup.runs.create(run, job_entities(run, seed))
+            worker = await seed_worker(setup)
+            other_worker = await seed_worker(setup, name="runner-2")
             await session.commit()
         # Two open transactions claim concurrently. FOR UPDATE SKIP LOCKED
         # makes the second claim skip the rows the first one still locks.
         async with factory() as first_session, factory() as second_session:
             first_claimed = await SQLJobRepository(first_session).claim_pending(
-                created.id, "worker-1", 2
+                worker.id, 2, experiment_run_id=created.id
             )
             second_claimed = await SQLJobRepository(second_session).claim_pending(
-                created.id, "worker-2", 4
+                other_worker.id, 4, experiment_run_id=created.id
             )
             await first_session.commit()
             await second_session.commit()

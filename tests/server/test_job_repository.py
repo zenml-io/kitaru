@@ -68,7 +68,14 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
-from kitaru.server.domain.job import Job, JobNotFound, JobStatus
+from kitaru.server.domain.execution import ExecutionTarget
+from kitaru.server.domain.job import (
+    JobKind,
+    JobNotFound,
+    JobStatus,
+    Replay,
+    SessionRun,
+)
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
@@ -182,7 +189,7 @@ async def seed_rows(setup: Setup, name: str = "support-bot") -> Seed:
     return Seed(session, version, config)
 
 
-def job_entity(seed: Seed, **overrides: object) -> Job:
+def job_entity(seed: Seed, **overrides: object) -> Replay:
     """Build a standalone job entity.
 
     Args:
@@ -190,7 +197,7 @@ def job_entity(seed: Seed, **overrides: object) -> Job:
         **overrides: Field overrides.
 
     Returns:
-        Job entity.
+        Replay entity.
     """
     values: dict[str, object] = {
         "replay_config_id": seed.config.id,
@@ -198,7 +205,25 @@ def job_entity(seed: Seed, **overrides: object) -> Job:
         "original_session_id": seed.session.id,
         **overrides,
     }
-    return Job.model_validate(values)
+    return Replay.model_validate(values)
+
+
+def session_run_entity(seed: Seed, **overrides: object) -> SessionRun:
+    """Build a session run entity.
+
+    Args:
+        seed: Seeded rows.
+        **overrides: Field overrides.
+
+    Returns:
+        SessionRun entity.
+    """
+    values: dict[str, object] = {
+        "agent_version_id": seed.version.id,
+        "execution_target": ExecutionTarget.POOL,
+        **overrides,
+    }
+    return SessionRun.model_validate(values)
 
 
 async def test_create_round_trips_all_fields(setup: Setup) -> None:
@@ -209,6 +234,8 @@ async def test_create_round_trips_all_fields(setup: Setup) -> None:
     assert created.updated is not None
     loaded = await setup.jobs.get(created.id)
     assert loaded == created
+    assert isinstance(loaded, Replay)
+    assert loaded.kind is JobKind.REPLAY
     assert loaded.experiment_run_id is None
     assert loaded.replay_config_id == seed.config.id
     assert loaded.agent_version_id == seed.version.id
@@ -243,6 +270,8 @@ async def test_standalone_jobs_repeat_freely(setup: Setup) -> None:
     seed = await seed_rows(setup)
     first = await setup.jobs.create(job_entity(seed))
     second = await setup.jobs.create(job_entity(seed))
+    assert isinstance(first, Replay)
+    assert isinstance(second, Replay)
     assert first.original_session_id == second.original_session_id
     _, total = await setup.jobs.query(JobFilter(original_session_id=seed.session.id))
     assert total == 2
@@ -365,6 +394,7 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     """Persist runner-side field changes and renew the updated timestamp."""
     seed = await seed_rows(setup)
     created = await setup.jobs.create(job_entity(seed))
+    assert isinstance(created, Replay)
     result = await setup.sessions.create(
         Session(
             owner_id=setup.owner_id,
@@ -380,6 +410,7 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
         diff={"cost_delta": -0.1},
     )
     updated = await setup.jobs.update(created)
+    assert isinstance(updated, Replay)
     assert updated.status is JobStatus.COMPLETED
     assert updated.result_session_id == result.id
     assert updated.started_at is not None
@@ -414,3 +445,60 @@ async def test_update_unknown_result_session(setup: Setup) -> None:
     # The failed update leaves the repository usable.
     loaded = await setup.jobs.get(created.id)
     assert loaded.result_session_id is None
+
+
+async def test_session_run_round_trips_all_fields(setup: Setup) -> None:
+    """Store a session run and round-trip every field."""
+    seed = await seed_rows(setup)
+    created = await setup.jobs.create(
+        session_run_entity(seed, inputs={"prompt": "hi"}, name="smoke")
+    )
+    assert created.created is not None
+    assert created.updated is not None
+    loaded = await setup.jobs.get(created.id)
+    assert loaded == created
+    assert isinstance(loaded, SessionRun)
+    assert loaded.kind is JobKind.SESSION_RUN
+    assert loaded.agent_version_id == seed.version.id
+    assert loaded.inputs == {"prompt": "hi"}
+    assert loaded.name == "smoke"
+    assert loaded.execution_target is ExecutionTarget.POOL
+    assert loaded.executor_handle is None
+    assert loaded.result_session_id is None
+    assert loaded.status is JobStatus.PENDING
+    assert loaded.standalone is True
+
+
+async def test_session_run_create_unknown_version(setup: Setup) -> None:
+    """Raise for an unknown agent version id."""
+    seed = await seed_rows(setup)
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        AgentVersionNotFound, match=f"Agent version {missing_id} was not found"
+    ):
+        await setup.jobs.create(session_run_entity(seed, agent_version_id=missing_id))
+
+
+async def test_query_kind_and_execution_target_filters(setup: Setup) -> None:
+    """Query jobs by kind and execution target."""
+    seed = await seed_rows(setup)
+    replay_job = await setup.jobs.create(job_entity(seed))
+    session_run_job = await setup.jobs.create(session_run_entity(seed))
+
+    jobs, total = await setup.jobs.query(JobFilter(kind=JobKind.REPLAY))
+    assert total == 1
+    assert jobs[0].id == replay_job.id
+
+    jobs, total = await setup.jobs.query(JobFilter(kind=JobKind.SESSION_RUN))
+    assert total == 1
+    assert jobs[0].id == session_run_job.id
+
+    jobs, total = await setup.jobs.query(
+        JobFilter(execution_target=ExecutionTarget.POOL)
+    )
+    assert total == 1
+    assert jobs[0].id == session_run_job.id
+    _, total = await setup.jobs.query(
+        JobFilter(execution_target=ExecutionTarget.ON_DEMAND)
+    )
+    assert total == 0

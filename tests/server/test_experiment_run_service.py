@@ -27,6 +27,7 @@ from conftest import (
     FakeReplayConfigRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeWorkerRepository,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment_runs import (
@@ -53,7 +54,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
     InvalidExperimentRunTransition,
 )
-from kitaru.server.domain.job import HEARTBEAT_TIMEOUT_ERROR, JobStatus
+from kitaru.server.domain.job import JobStatus
 from kitaru.server.domain.replay_config import (
     ReplayConfigNotFound,
     ScorerConfig,
@@ -64,6 +65,8 @@ from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
 from kitaru.server.domain.tag import Tag, TagLink, TagResourceType
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+WORKER_ID = uuid.uuid4()
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
@@ -177,12 +180,19 @@ def service(
 
 
 @pytest.fixture
+def worker_repository() -> FakeWorkerRepository:
+    """Provide a fake worker repository."""
+    return FakeWorkerRepository()
+
+
+@pytest.fixture
 def experiment_service(
     experiment_repository: FakeExperimentRepository,
     repository: FakeExperimentRunRepository,
     cohort_repository: FakeCohortRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
+    worker_repository: FakeWorkerRepository,
 ) -> ExperimentService:
     """Provide an experiment service backed by the fake repositories."""
     return ExperimentService(
@@ -191,6 +201,8 @@ def experiment_service(
         cohort_repository=cohort_repository,
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
+        worker_repository=worker_repository,
+        worker_liveness_timeout_seconds=60,
     )
 
 
@@ -372,179 +384,6 @@ async def test_list_run_jobs_not_found(service: ExperimentRunService) -> None:
         await service.list_run_jobs(missing_id, ExperimentRunJobsFilter(), actor=ACTOR)
 
 
-def build_service(
-    repository: FakeExperimentRunRepository,
-    job_repository: FakeJobRepository,
-    config_repository: FakeReplayConfigRepository,
-    experiment_repository: FakeExperimentRepository,
-    session_repository: FakeSessionRepository,
-    heartbeat_timeout_seconds: int = 60,
-    max_attempts: int = 3,
-) -> ExperimentRunService:
-    """Build an experiment run service with explicit staleness settings.
-
-    Args:
-        repository: Fake experiment run repository.
-        job_repository: Fake job repository.
-        config_repository: Fake replay config repository.
-        experiment_repository: Fake experiment repository.
-        session_repository: Fake session repository.
-        heartbeat_timeout_seconds: Heartbeat timeout, negative values mark
-            every claim stale immediately.
-        max_attempts: Attempt count at which a stale job times out.
-
-    Returns:
-        Experiment run service.
-    """
-    return ExperimentRunService(
-        repository=repository,
-        job_repository=job_repository,
-        replay_config_repository=config_repository,
-        experiment_repository=experiment_repository,
-        session_repository=session_repository,
-        heartbeat_timeout_seconds=heartbeat_timeout_seconds,
-        max_attempts=max_attempts,
-    )
-
-
-async def test_claim_jobs(
-    service: ExperimentRunService,
-    experiment_service: ExperimentService,
-    experiment: Experiment,
-) -> None:
-    """Claim pending jobs and move the run to running."""
-    run, _ = await experiment_service.start_run(
-        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
-    )
-    claimed = await service.claim_jobs(
-        run.id, worker_id="worker-1", max_jobs=1, actor=ACTOR
-    )
-    assert len(claimed) == 1
-    job, config = claimed[0]
-    assert job.status is JobStatus.CLAIMED
-    assert job.worker_id == "worker-1"
-    assert job.claimed_at is not None
-    assert config.scoring_policy == SCORING_POLICY
-    started, _ = await service.get_run(run.id, actor=ACTOR)
-    assert started.status is ExperimentRunStatus.RUNNING
-    assert started.started_at is not None
-
-    remaining = await service.claim_jobs(
-        run.id, worker_id="worker-2", max_jobs=5, actor=ACTOR
-    )
-    assert len(remaining) == 1
-    assert remaining[0][0].worker_id == "worker-2"
-
-    assert (
-        await service.claim_jobs(run.id, worker_id="worker-2", max_jobs=5, actor=ACTOR)
-        == []
-    )
-
-
-async def test_claim_unknown_run(service: ExperimentRunService) -> None:
-    """Raise for an unknown experiment run id."""
-    missing_id = uuid.uuid4()
-    with pytest.raises(
-        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
-    ):
-        await service.claim_jobs(
-            missing_id, worker_id="worker-1", max_jobs=1, actor=ACTOR
-        )
-
-
-async def test_claim_canceling_run_returns_empty(
-    service: ExperimentRunService,
-    experiment_service: ExperimentService,
-    experiment: Experiment,
-) -> None:
-    """Yield no jobs from a canceling or terminal run."""
-    run, _ = await experiment_service.start_run(
-        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
-    )
-    canceled, _ = await service.cancel_run(run.id, actor=ACTOR)
-    assert canceled.status is ExperimentRunStatus.CANCELED
-    assert (
-        await service.claim_jobs(run.id, worker_id="worker-1", max_jobs=5, actor=ACTOR)
-        == []
-    )
-
-
-async def test_claim_requeues_stale_jobs(
-    repository: FakeExperimentRunRepository,
-    job_repository: FakeJobRepository,
-    config_repository: FakeReplayConfigRepository,
-    experiment_repository: FakeExperimentRepository,
-    session_repository: FakeSessionRepository,
-    experiment_service: ExperimentService,
-    experiment: Experiment,
-) -> None:
-    """Requeue stale claims for another worker and increment the attempt."""
-    stale_service = build_service(
-        repository,
-        job_repository,
-        config_repository,
-        experiment_repository,
-        session_repository,
-        heartbeat_timeout_seconds=-60,
-    )
-    run, _ = await experiment_service.start_run(
-        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
-    )
-    first = await stale_service.claim_jobs(
-        run.id, worker_id="worker-1", max_jobs=5, actor=ACTOR
-    )
-    assert len(first) == 2
-    second = await stale_service.claim_jobs(
-        run.id, worker_id="worker-2", max_jobs=5, actor=ACTOR
-    )
-    assert len(second) == 2
-    for job, _ in second:
-        assert job.worker_id == "worker-2"
-        assert job.attempt == 2
-
-
-async def test_claim_times_out_stale_jobs_at_max_attempts(
-    repository: FakeExperimentRunRepository,
-    job_repository: FakeJobRepository,
-    config_repository: FakeReplayConfigRepository,
-    experiment_repository: FakeExperimentRepository,
-    session_repository: FakeSessionRepository,
-    experiment_service: ExperimentService,
-    experiment: Experiment,
-) -> None:
-    """Time out stale claims at the attempt limit and finalize the run."""
-    stale_service = build_service(
-        repository,
-        job_repository,
-        config_repository,
-        experiment_repository,
-        session_repository,
-        heartbeat_timeout_seconds=-60,
-        max_attempts=1,
-    )
-    run, _ = await experiment_service.start_run(
-        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
-    )
-    claimed = await stale_service.claim_jobs(
-        run.id, worker_id="worker-1", max_jobs=5, actor=ACTOR
-    )
-    assert len(claimed) == 2
-    assert (
-        await stale_service.claim_jobs(
-            run.id, worker_id="worker-2", max_jobs=5, actor=ACTOR
-        )
-        == []
-    )
-    jobs, _ = await job_repository.query(JobFilter(experiment_run_id=run.id))
-    assert all(job.status is JobStatus.TIMED_OUT for job in jobs)
-    assert all(job.error == HEARTBEAT_TIMEOUT_ERROR for job in jobs)
-    finalized = await repository.get(run.id)
-    assert finalized.status is ExperimentRunStatus.FAILED
-    assert finalized.error == "2 of 2 jobs timed out"
-    assert finalized.summary is not None
-    assert finalized.summary["replay_counts_by_status"] == {"timed_out": 2}
-
-
 async def test_cancel_run_cancels_pending_and_claimed(
     service: ExperimentRunService,
     job_repository: FakeJobRepository,
@@ -556,7 +395,7 @@ async def test_cancel_run_cancels_pending_and_claimed(
     run, _ = await experiment_service.start_run(
         experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
     )
-    await service.claim_jobs(run.id, worker_id="worker-1", max_jobs=1, actor=ACTOR)
+    await job_repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
     canceled, progress = await service.cancel_run(run.id, actor=ACTOR)
     assert canceled.status is ExperimentRunStatus.CANCELED
     assert canceled.ended_at is not None
@@ -577,10 +416,8 @@ async def test_cancel_run_keeps_running_jobs(
     run, _ = await experiment_service.start_run(
         experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
     )
-    claimed = await service.claim_jobs(
-        run.id, worker_id="worker-1", max_jobs=1, actor=ACTOR
-    )
-    running = claimed[0][0]
+    claimed = await job_repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
+    running = claimed[0]
     running.start()
     await job_repository.update(running)
 

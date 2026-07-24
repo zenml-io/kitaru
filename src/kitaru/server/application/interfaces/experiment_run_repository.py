@@ -18,13 +18,13 @@ from typing import Protocol
 
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.domain.experiment_run import ExperimentRun
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.job import Replay
 
 
 class ExperimentRunRepository(Protocol):
     """Experiment run persistence operations."""
 
-    async def create(self, run: ExperimentRun, jobs: list[Job]) -> ExperimentRun:
+    async def create(self, run: ExperimentRun, jobs: list[Replay]) -> ExperimentRun:
         """Persist a new experiment run with its jobs as one batch.
 
         Assigns the next per-experiment run number.

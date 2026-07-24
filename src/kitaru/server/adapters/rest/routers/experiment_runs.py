@@ -24,8 +24,6 @@ from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.jobs import (
-    JobClaimRequest,
-    JobClaimResponse,
     JobResponse,
     JobStatus,
 )
@@ -176,40 +174,6 @@ async def list_experiment_run_jobs(
         page=page,
         page_size=page_size,
     )
-
-
-@router.post("/{run_id}/claim")
-async def claim_jobs(
-    run_id: uuid.UUID,
-    body: JobClaimRequest,
-    service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> JobClaimResponse:
-    """Atomically claim pending jobs of an experiment run for a worker.
-
-    Stale claimed or running jobs are requeued or timed out first. The
-    first claim moves a pending run to running. Canceling and terminal
-    runs yield no jobs.
-
-    Clients observe HTTP 200 on success, 404 when no experiment run has
-    this id, and 422 on invalid input.
-
-    Args:
-        run_id: Id of the experiment run.
-        body: Job claim request.
-        service: Experiment run service.
-        actor: Caller context.
-
-    Returns:
-        Claimed jobs.
-    """
-    jobs = await service.claim_jobs(
-        run_id,
-        worker_id=body.worker_id,
-        max_jobs=body.max_jobs,
-        actor=actor,
-    )
-    return JobClaimResponse(jobs=[job_to_response(job, config) for job, config in jobs])
 
 
 @router.post("/{run_id}/cancel")

@@ -1367,6 +1367,35 @@
         "additionalProperties": false,
         "description": "Job claim request.",
         "properties": {
+          "agent_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ids of the agents to claim for, any agent when omitted.",
+            "title": "Agent Ids"
+          },
+          "experiment_run_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the experiment run to claim for, pool-target work when omitted.",
+            "title": "Experiment Run Id"
+          },
           "max_jobs": {
             "description": "Maximum jobs to claim.",
             "maximum": 100.0,
@@ -1376,7 +1405,7 @@
           },
           "worker_id": {
             "description": "Id of the claiming worker.",
-            "maxLength": 255,
+            "format": "uuid",
             "title": "Worker Id",
             "type": "string"
           }
@@ -1424,6 +1453,15 @@
         ],
         "title": "JobHeartbeatResponse",
         "type": "object"
+      },
+      "JobKind": {
+        "description": "Job kind.",
+        "enum": [
+          "replay",
+          "session_run"
+        ],
+        "title": "JobKind",
+        "type": "string"
       },
       "JobResponse": {
         "description": "Job response.",
@@ -1496,6 +1534,29 @@
             "description": "Error message.",
             "title": "Error"
           },
+          "execution_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution target, null for run-created jobs."
+          },
+          "executor_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Executor handle.",
+            "title": "Executor Handle"
+          },
           "experiment_run_id": {
             "anyOf": [
               {
@@ -1528,11 +1589,37 @@
             "title": "Id",
             "type": "string"
           },
+          "inputs": {
+            "description": "Session inputs, null for replay jobs.",
+            "title": "Inputs"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session run name.",
+            "title": "Name"
+          },
           "original_session_id": {
-            "description": "Id of the replayed session.",
-            "format": "uuid",
-            "title": "Original Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the replayed session, null for session runs.",
+            "title": "Original Session Id"
           },
           "override": {
             "anyOf": [
@@ -1598,7 +1685,15 @@
             "title": "Scores"
           },
           "scoring_policy": {
-            "$ref": "#/components/schemas/ScoringPolicy"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoringPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring policy, null for session runs."
           },
           "started_at": {
             "anyOf": [
@@ -1617,8 +1712,15 @@
             "$ref": "#/components/schemas/JobStatus"
           },
           "tool_policy": {
-            "$ref": "#/components/schemas/ToolPolicyConfig",
-            "description": "Tool policy."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool policy, null for session runs."
           },
           "updated": {
             "description": "Last modification time.",
@@ -1629,6 +1731,7 @@
           "worker_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
@@ -1641,6 +1744,7 @@
         },
         "required": [
           "id",
+          "kind",
           "experiment_run_id",
           "agent_version_id",
           "original_session_id",
@@ -1648,6 +1752,10 @@
           "status",
           "attempt",
           "worker_id",
+          "execution_target",
+          "executor_handle",
+          "inputs",
+          "name",
           "claimed_at",
           "heartbeat_at",
           "started_at",
@@ -1679,11 +1787,33 @@
             "title": "Job Id",
             "type": "string"
           },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session run name.",
+            "title": "Name"
+          },
           "original_session_id": {
-            "description": "Id of the replayed session.",
-            "format": "uuid",
-            "title": "Original Session Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the replayed session, null for session runs.",
+            "title": "Original Session Id"
           },
           "override": {
             "anyOf": [
@@ -1701,12 +1831,27 @@
             "description": "Run command of the agent version."
           },
           "score_baselines": {
-            "description": "Whether the runner also scores originals missing scores.",
-            "title": "Score Baselines",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the runner also scores originals missing scores, null for session runs.",
+            "title": "Score Baselines"
           },
           "scoring_policy": {
-            "$ref": "#/components/schemas/ScoringPolicy"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScoringPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scoring policy, null for session runs."
           },
           "secret_env": {
             "additionalProperties": {
@@ -1717,12 +1862,20 @@
             "type": "object"
           },
           "tool_policy": {
-            "$ref": "#/components/schemas/ToolPolicyConfig",
-            "description": "Tool policy."
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolPolicyConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tool policy, null for session runs."
           }
         },
         "required": [
           "job_id",
+          "kind",
           "inputs",
           "override",
           "tool_policy",
@@ -1730,7 +1883,8 @@
           "score_baselines",
           "run",
           "secret_env",
-          "original_session_id"
+          "original_session_id",
+          "name"
         ],
         "title": "JobSpecResponse",
         "type": "object"
@@ -4029,6 +4183,68 @@
         "title": "SessionResponse",
         "type": "object"
       },
+      "SessionRunCreateRequest": {
+        "additionalProperties": false,
+        "description": "Session run create request.",
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent to execute.",
+            "title": "Agent Id"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version to execute, the latest runnable version of the agent when omitted.",
+            "title": "Agent Version Id"
+          },
+          "execution_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution target, the agent version's default when omitted."
+          },
+          "inputs": {
+            "description": "Session inputs.",
+            "title": "Inputs"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session run name.",
+            "title": "Name"
+          }
+        },
+        "title": "SessionRunCreateRequest",
+        "type": "object"
+      },
       "SessionScoresRequest": {
         "additionalProperties": false,
         "description": "Session scores request.",
@@ -4154,7 +4370,7 @@
         "properties": {
           "worker_id": {
             "description": "Id of the claiming worker.",
-            "maxLength": 255,
+            "format": "uuid",
             "title": "Worker Id",
             "type": "string"
           }
@@ -6381,60 +6597,6 @@
         ]
       }
     },
-    "/v1/experiment-runs/{run_id}/claim": {
-      "post": {
-        "description": "Atomically claim pending jobs of an experiment run for a worker.\n\nStale claimed or running jobs are requeued or timed out first. The\nfirst claim moves a pending run to running. Canceling and terminal\nruns yield no jobs.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid input.\n\nArgs:\n    run_id: Id of the experiment run.\n    body: Job claim request.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Claimed jobs.",
-        "operationId": "claim_jobs_v1_experiment_runs__run_id__claim_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "run_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Run Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/JobClaimRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobClaimResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Claim Jobs",
-        "tags": [
-          "experiment-runs"
-        ]
-      }
-    },
     "/v1/experiment-runs/{run_id}/jobs": {
       "get": {
         "description": "List the jobs of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid filter or pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    status: Filter on job status.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
@@ -6899,7 +7061,7 @@
     },
     "/v1/jobs": {
       "get": {
-        "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    job_status: Filter on job status.\n    standalone: Filter on standalone jobs.\n    worker_id: Filter on the claiming worker id.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
+        "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    kind: Filter on job kind.\n    job_status: Filter on job status.\n    standalone: Filter on standalone jobs.\n    worker_id: Filter on the claiming worker id.\n    execution_target: Filter on execution target.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
         "operationId": "list_jobs_v1_jobs_get",
         "parameters": [
           {
@@ -6934,6 +7096,22 @@
                 }
               ],
               "title": "Original Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobKind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
             }
           },
           {
@@ -6975,6 +7153,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -6982,6 +7161,22 @@
                 }
               ],
               "title": "Worker Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "execution_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ExecutionTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Execution Target"
             }
           },
           {
@@ -7031,6 +7226,48 @@
           }
         },
         "summary": "List Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/claim": {
+      "post": {
+        "description": "Atomically claim pending jobs within a scope for a worker.\n\nStale claimed or running jobs in scope are requeued or timed out\nfirst, and the claim bumps the worker's last seen time. An unscoped\nclaim yields only pool-target work. With an experiment run id the\nfirst claim moves a pending run to running, and canceling and\nterminal runs yield no jobs.\n\nClients observe HTTP 200 on success, 404 when no worker or scoped\nexperiment run has the referenced id, and 422 on invalid input.\n\nArgs:\n    body: Job claim request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Claimed jobs.",
+        "operationId": "claim_jobs_v1_jobs_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobClaimResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Jobs",
         "tags": [
           "jobs"
         ]
@@ -7852,6 +8089,48 @@
         "summary": "Update Secret",
         "tags": [
           "secrets"
+        ]
+      }
+    },
+    "/v1/session-runs": {
+      "post": {
+        "description": "Create a session run of one agent version.\n\nClients observe HTTP 201 on success, 404 when no agent version has\nthe referenced id, 409 when no runnable agent version resolves or an\non demand run resolves to a version without an image, and 422 when\nthe version belongs to another agent or the input is invalid.\n\nArgs:\n    body: Session run create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "operationId": "create_session_run_v1_session_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Session Run",
+        "tags": [
+          "session-runs"
         ]
       }
     },

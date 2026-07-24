@@ -14,15 +14,20 @@
 """SQL job repository."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, and_, case, exists, func, select
+from sqlalchemy import ColumnElement, and_, case, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.schemas.agent_version import AgentVersionSchema
+from kitaru.server.adapters.db.schemas.experiment_run import (
+    ExperimentRunSchema,
+)
 from kitaru.server.adapters.db.schemas.job import (
     JOB_AGENT_VERSION_ID_FOREIGN_KEY,
     JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY,
@@ -34,12 +39,15 @@ from kitaru.server.adapters.db.schemas.job import (
 )
 from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment_run import ExperimentRunNotFound
 from kitaru.server.domain.job import (
     DuplicateReplaySession,
     Job,
     JobNotFound,
     JobStatus,
+    Replay,
+    SessionRun,
 )
 from kitaru.server.domain.replay_config import ReplayConfigNotFound
 from kitaru.server.domain.session import SessionNotFound
@@ -64,20 +72,21 @@ def translate_job_integrity_error(exc: IntegrityError, job: Job) -> None:
         SessionNotFound: No session has the job's original session id.
     """
     constraint = violated_constraint(exc)
-    if constraint == JOB_SESSION_UNIQUE_CONSTRAINT:
-        assert job.experiment_run_id is not None
-        raise DuplicateReplaySession(
-            job.experiment_run_id, job.original_session_id
-        ) from exc
-    if constraint == JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY:
-        assert job.experiment_run_id is not None
-        raise ExperimentRunNotFound(job.experiment_run_id) from exc
-    if constraint == JOB_REPLAY_CONFIG_ID_FOREIGN_KEY:
-        raise ReplayConfigNotFound(job.replay_config_id) from exc
+    if isinstance(job, Replay):
+        if constraint == JOB_SESSION_UNIQUE_CONSTRAINT:
+            assert job.experiment_run_id is not None
+            raise DuplicateReplaySession(
+                job.experiment_run_id, job.original_session_id
+            ) from exc
+        if constraint == JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY:
+            assert job.experiment_run_id is not None
+            raise ExperimentRunNotFound(job.experiment_run_id) from exc
+        if constraint == JOB_REPLAY_CONFIG_ID_FOREIGN_KEY:
+            raise ReplayConfigNotFound(job.replay_config_id) from exc
+        if constraint == JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY:
+            raise SessionNotFound(job.original_session_id) from exc
     if constraint == JOB_AGENT_VERSION_ID_FOREIGN_KEY:
         raise AgentVersionNotFound(job.agent_version_id) from exc
-    if constraint == JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY:
-        raise SessionNotFound(job.original_session_id) from exc
 
 
 class SQLJobRepository:
@@ -161,6 +170,12 @@ class SQLJobRepository:
             statement = statement.where(
                 col(JobSchema.original_session_id) == job_filter.original_session_id
             )
+        if job_filter.kind is not None:
+            statement = statement.where(col(JobSchema.kind) == job_filter.kind.value)
+        if job_filter.execution_target is not None:
+            statement = statement.where(
+                col(JobSchema.execution_target) == job_filter.execution_target.value
+            )
         if job_filter.status is not None:
             if (
                 job_filter.stale_before is not None
@@ -199,23 +214,32 @@ class SQLJobRepository:
             row: Row to update.
             job: Job with modified fields.
         """
-        row.experiment_run_id = job.experiment_run_id
-        row.replay_config_id = job.replay_config_id
+        row.kind = job.kind.value
         row.agent_version_id = job.agent_version_id
-        row.original_session_id = job.original_session_id
         row.result_session_id = job.result_session_id
         row.status = job.status.value
         row.attempt = job.attempt
         row.worker_id = job.worker_id
+        row.execution_target = (
+            None if job.execution_target is None else job.execution_target.value
+        )
+        row.executor_handle = job.executor_handle
         row.claimed_at = job.claimed_at
         row.heartbeat_at = job.heartbeat_at
         row.started_at = job.started_at
         row.ended_at = job.ended_at
         row.error = job.error
-        row.passed = job.passed
-        row.score = job.score
-        row.scores = job.scores
-        row.diff = job.diff
+        if isinstance(job, Replay):
+            row.experiment_run_id = job.experiment_run_id
+            row.replay_config_id = job.replay_config_id
+            row.original_session_id = job.original_session_id
+            row.passed = job.passed
+            row.score = job.score
+            row.scores = job.scores
+            row.diff = job.diff
+        elif isinstance(job, SessionRun):
+            row.inputs = job.inputs
+            row.name = job.name
 
     async def update(self, job: Job) -> Job:
         """Persist changes to an existing job.
@@ -300,20 +324,61 @@ class SQLJobRepository:
             else_=col(JobSchema.status),
         )
 
-    async def requeue_stale(
-        self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
-    ) -> None:
-        """Requeue or time out a run's jobs with lost heartbeats.
+    def _scope_conditions(
+        self,
+        agent_ids: Sequence[uuid.UUID] | None,
+        experiment_run_id: uuid.UUID | None,
+    ) -> list[ColumnElement[bool]]:
+        """Build the claim scope conditions.
 
         Args:
-            run_id: Id of the experiment run.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
+
+        Returns:
+            SQL conditions.
+        """
+        if experiment_run_id is not None:
+            conditions = [col(JobSchema.experiment_run_id) == experiment_run_id]
+        else:
+            conditions = [
+                or_(
+                    col(JobSchema.execution_target) == ExecutionTarget.POOL.value,
+                    exists().where(
+                        col(ExperimentRunSchema.id) == col(JobSchema.experiment_run_id),
+                        col(ExperimentRunSchema.execution_target)
+                        == ExecutionTarget.POOL.value,
+                    ),
+                )
+            ]
+        if agent_ids is not None:
+            conditions.append(
+                exists().where(
+                    col(AgentVersionSchema.id) == col(JobSchema.agent_version_id),
+                    col(AgentVersionSchema.agent_id).in_(agent_ids),
+                )
+            )
+        return conditions
+
+    async def requeue_stale(
+        self,
+        stale_before: datetime,
+        max_attempts: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
+    ) -> None:
+        """Requeue or time out jobs with lost heartbeats within a scope.
+
+        Args:
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
         """
         statement = (
             select(JobSchema)
             .where(
-                col(JobSchema.experiment_run_id) == run_id,
+                *self._scope_conditions(agent_ids, experiment_run_id),
                 self._stale_condition(stale_before),
             )
             .with_for_update(skip_locked=True)
@@ -325,17 +390,22 @@ class SQLJobRepository:
         await self._session.flush()
 
     async def claim_pending(
-        self, run_id: uuid.UUID, worker_id: str, limit: int
+        self,
+        worker_id: uuid.UUID,
+        limit: int,
+        agent_ids: Sequence[uuid.UUID] | None = None,
+        experiment_run_id: uuid.UUID | None = None,
     ) -> list[Job]:
-        """Atomically claim pending jobs of a run for a worker.
+        """Atomically claim pending jobs within a scope for a worker.
 
         Rows locked by a concurrent claim are skipped via
         ``FOR UPDATE SKIP LOCKED``, so parallel workers never double-claim.
 
         Args:
-            run_id: Id of the experiment run.
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
+            agent_ids: Ids of the agents to scope to.
+            experiment_run_id: Id of the experiment run to scope to.
 
         Returns:
             Claimed jobs.
@@ -343,7 +413,7 @@ class SQLJobRepository:
         statement = (
             select(JobSchema)
             .where(
-                col(JobSchema.experiment_run_id) == run_id,
+                *self._scope_conditions(agent_ids, experiment_run_id),
                 col(JobSchema.status) == JobStatus.PENDING.value,
             )
             .order_by(col(JobSchema.id))

@@ -33,6 +33,7 @@ from kitaru.api_models.v1.jobs import (
     JobClaimRequest,
     JobClaimResponse,
     JobHeartbeatResponse,
+    JobKind,
     JobResponse,
     JobSpecResponse,
     JobSpecRun,
@@ -51,6 +52,7 @@ from kitaru.api_models.v1.sessions import (
     SessionScoresRequest,
     SessionStatus,
 )
+from kitaru.api_models.v1.workers import WorkerCreateRequest, WorkerResponse
 from kitaru.runner import Runner
 from kitaru.scoring import SessionView
 
@@ -88,10 +90,32 @@ def make_spec(
     score_baselines: bool = False,
     scoring_policy: ScoringPolicy = SCORING_POLICY,
     original_session_id: uuid.UUID | None = None,
+    kind: JobKind = JobKind.REPLAY,
+    name: str | None = None,
 ) -> JobSpecResponse:
     """Build a job spec."""
+    if kind is JobKind.SESSION_RUN:
+        return JobSpecResponse(
+            job_id=job_id,
+            kind=kind,
+            inputs=inputs,
+            override=None,
+            tool_policy=None,
+            scoring_policy=None,
+            score_baselines=None,
+            run=JobSpecRun(
+                command=command,
+                working_dir=None,
+                env=run_env or {},
+                timeout_seconds=timeout_seconds,
+            ),
+            secret_env=secret_env or {},
+            original_session_id=None,
+            name=name,
+        )
     return JobSpecResponse(
         job_id=job_id,
+        kind=kind,
         inputs=inputs,
         override=None,
         tool_policy=ToolPolicyConfig(default=PassthroughPolicy()),
@@ -105,6 +129,7 @@ def make_spec(
         ),
         secret_env=secret_env or {},
         original_session_id=original_session_id or uuid.uuid4(),
+        name=None,
     )
 
 
@@ -112,17 +137,23 @@ def make_job(
     job_id: uuid.UUID,
     status: JobStatus = JobStatus.RUNNING,
     result_session_id: uuid.UUID | None = None,
+    kind: JobKind = JobKind.REPLAY,
 ) -> JobResponse:
     """Build a job."""
     return JobResponse(
         id=job_id,
+        kind=kind,
         experiment_run_id=None,
         agent_version_id=uuid.uuid4(),
-        original_session_id=uuid.uuid4(),
+        original_session_id=uuid.uuid4() if kind is JobKind.REPLAY else None,
         result_session_id=result_session_id,
         status=status,
         attempt=1,
         worker_id=None,
+        execution_target=None,
+        executor_handle=None,
+        inputs=None,
+        name=None,
         claimed_at=None,
         heartbeat_at=None,
         started_at=None,
@@ -227,7 +258,13 @@ class FakeReplaysResource:
         self._client.updates.append(request)
         return self._client.job.model_copy(update={"status": request.status})
 
-    async def claim(
+    async def claim(self, request: JobClaimRequest) -> JobClaimResponse:
+        """Record the claim and pop the next configured batch."""
+        self._client.claim_requests.append(request)
+        batches = self._client.claim_batches
+        return JobClaimResponse(jobs=batches.pop(0) if batches else [])
+
+    async def claim_standalone(
         self, job_id: uuid.UUID, request: StandaloneJobClaimRequest
     ) -> JobResponse:
         """Record the claim and return the configured job."""
@@ -284,17 +321,32 @@ class FakeExperimentRunsResource:
         """Initialize the resource."""
         self._client = client
 
-    async def claim(
-        self, run_id: uuid.UUID, request: JobClaimRequest
-    ) -> JobClaimResponse:
-        """Record the claim and pop the next configured batch."""
-        self._client.claim_requests.append(request)
-        batches = self._client.claim_batches
-        return JobClaimResponse(jobs=batches.pop(0) if batches else [])
-
     async def get(self, run_id: uuid.UUID) -> ExperimentRunResponse:
         """Return the configured run."""
         return self._client.run
+
+
+class FakeWorkersResource:
+    """Fake workers resource."""
+
+    def __init__(self, client: "FakeClient") -> None:
+        """Initialize the resource."""
+        self._client = client
+
+    async def create(self, request: WorkerCreateRequest) -> WorkerResponse:
+        """Record the registration and return the configured worker."""
+        self._client.worker_registrations.append(request)
+        return WorkerResponse(
+            id=self._client.worker_id,
+            owner_id=uuid.uuid4(),
+            name=request.name,
+            agent_ids=request.agent_ids,
+            last_seen_at=NOW,
+            live=True,
+            metadata=request.metadata,
+            created=NOW,
+            updated=NOW,
+        )
 
 
 class FakeClient:
@@ -321,11 +373,14 @@ class FakeClient:
         self.node_requests: list[tuple[uuid.UUID, bool]] = []
         self.claim_requests: list[JobClaimRequest] = []
         self.standalone_claims: list[StandaloneJobClaimRequest] = []
+        self.worker_registrations: list[WorkerCreateRequest] = []
+        self.worker_id = uuid.uuid4()
         self.heartbeat_count = 0
         self.jobs = FakeReplaysResource(self)
         self.sessions = FakeSessionsResource(self)
         self.session_nodes = FakeSessionNodesResource(self)
         self.experiment_runs = FakeExperimentRunsResource(self)
+        self.workers = FakeWorkersResource(self)
 
     async def __aenter__(self) -> "FakeClient":
         """Enter the context manager."""
@@ -372,7 +427,8 @@ async def test_success_flow_completes_and_scores_baselines(
     final = await runner.run_job(job_id)
 
     assert len(fake.standalone_claims) == 1
-    assert fake.standalone_claims[0].worker_id == "worker-1"
+    assert fake.worker_registrations[0].name == "worker-1"
+    assert fake.standalone_claims[0].worker_id == fake.worker_id
     assert [update.status for update in fake.updates] == [
         JobStatus.RUNNING,
         JobStatus.COMPLETED,
@@ -602,9 +658,52 @@ async def test_run_experiment_run_claims_until_terminal(
 
     assert final.status is ExperimentRunStatus.COMPLETED
     assert len(fake.claim_requests) == 2
-    assert fake.claim_requests[0].worker_id == "worker-1"
+    assert fake.worker_registrations[0].name == "worker-1"
+    assert fake.claim_requests[0].worker_id == fake.worker_id
     assert fake.claim_requests[0].max_jobs == 5
+    assert fake.claim_requests[0].experiment_run_id == run_id
     assert [update.status for update in fake.updates] == [
         JobStatus.RUNNING,
         JobStatus.COMPLETED,
     ]
+
+
+async def test_session_run_completes_without_scoring(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Complete a session run without scoring and deliver the name env."""
+    monkeypatch.delenv("KITARU_SESSION_NAME", raising=False)
+    job_id = uuid.uuid4()
+    result_id = uuid.uuid4()
+    out_file = tmp_path / "env.txt"
+    fake = FakeClient(
+        spec=make_spec(
+            job_id,
+            command='env > "$KITARU_TEST_ENV_FILE"',
+            inputs={"question": "hi"},
+            run_env={"KITARU_TEST_ENV_FILE": str(out_file)},
+            kind=JobKind.SESSION_RUN,
+            name="smoke",
+        ),
+        job=make_job(job_id, result_session_id=result_id, kind=JobKind.SESSION_RUN),
+        sessions_by_id={result_id: make_session(result_id)},
+    )
+    runner = make_runner(monkeypatch, fake)
+    final = await runner.run_job(job_id)
+
+    assert [update.status for update in fake.updates] == [
+        JobStatus.RUNNING,
+        JobStatus.COMPLETED,
+    ]
+    completed = fake.updates[-1]
+    assert completed.passed is None
+    assert completed.score is None
+    assert completed.scores is None
+    assert final.status is JobStatus.COMPLETED
+    assert fake.merged_scores == []
+    assert fake.node_requests == []
+    env = dict(
+        line.split("=", 1) for line in out_file.read_text().splitlines() if "=" in line
+    )
+    assert env["KITARU_SESSION_NAME"] == "smoke"
+    assert json.loads(env["KITARU_INPUTS"]) == {"question": "hi"}

@@ -126,6 +126,10 @@ class SQLWorkerRepository:
                     func.jsonb_array_length(col(WorkerSchema.agent_ids)) == 0,
                 )
             )
+        if worker_filter.seen_after is not None:
+            statement = statement.where(
+                col(WorkerSchema.last_seen_at) >= worker_filter.seen_after
+            )
         rows, total = await paginate(
             self._session,
             statement,

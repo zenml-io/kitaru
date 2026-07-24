@@ -27,6 +27,8 @@ from conftest import (
     FakeReplayConfigRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeWorkerRepository,
+    create_worker,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiments import (
@@ -61,7 +63,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.job import JobStatus
+from kitaru.server.domain.job import JobStatus, Replay
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     PassthroughPolicy,
@@ -173,6 +175,7 @@ def service(
     cohort_repository: FakeCohortRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
+    worker_repository: FakeWorkerRepository,
 ) -> ExperimentService:
     """Provide an experiment service backed by the fake repositories."""
     return ExperimentService(
@@ -181,7 +184,15 @@ def service(
         cohort_repository=cohort_repository,
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
+        worker_repository=worker_repository,
+        worker_liveness_timeout_seconds=60,
     )
+
+
+@pytest.fixture
+def worker_repository() -> FakeWorkerRepository:
+    """Provide a fake worker repository."""
+    return FakeWorkerRepository()
 
 
 @pytest.fixture
@@ -725,14 +736,15 @@ async def test_start_run_fans_out_jobs(
 
     jobs, total = await job_repository.query(JobFilter(experiment_run_id=run.id))
     assert total == 3
-    assert {job.original_session_id for job in jobs} == {
+    replays = [job for job in jobs if isinstance(job, Replay)]
+    assert {replay.original_session_id for replay in replays} == {
         session.id for session in sessions
     }
-    for job in jobs:
-        assert job.status is JobStatus.PENDING
-        assert job.attempt == 1
-        assert job.replay_config_id == config.id
-        assert job.agent_version_id == version.id
+    for replay in replays:
+        assert replay.status is JobStatus.PENDING
+        assert replay.attempt == 1
+        assert replay.replay_config_id == config.id
+        assert replay.agent_version_id == version.id
 
 
 async def test_start_run_increments_number(
@@ -982,3 +994,33 @@ async def test_start_run_on_demand_without_image(
             actor=ACTOR,
             execution_target=ExecutionTarget.ON_DEMAND,
         )
+
+
+async def test_start_run_warns_without_live_worker(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    worker_repository: FakeWorkerRepository,
+    agent: Agent,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Warn on a pool target when no live worker serves the agent."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    await create_runnable_version(version_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    with caplog.at_level("WARNING"):
+        await service.start_run(
+            created.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+        )
+    assert f"No live worker serves agent {agent.id}" in caplog.text
+
+    caplog.clear()
+    await create_worker(worker_repository, ACTOR.account.id)
+    with caplog.at_level("WARNING"):
+        await service.start_run(
+            created.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+        )
+    assert "No live worker" not in caplog.text

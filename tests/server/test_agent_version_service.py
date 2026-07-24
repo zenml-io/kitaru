@@ -45,7 +45,7 @@ from kitaru.server.domain.agent_version import (
     InvalidAgentVersion,
     RunSpec,
 )
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.job import Replay
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
@@ -567,7 +567,7 @@ async def freeze_version(
         )
     )
     await job_repository.create(
-        Job(
+        Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
             original_session_id=session.id,

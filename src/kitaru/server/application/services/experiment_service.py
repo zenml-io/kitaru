@@ -30,12 +30,18 @@ from kitaru.server.application.interfaces.experiment_run_repository import (
 from kitaru.server.application.interfaces.replay_config_repository import (
     ReplayConfigRepository,
 )
+from kitaru.server.application.interfaces.worker_repository import (
+    WorkerRepository,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohorts import CohortSessionsFilter
 from kitaru.server.application.models.experiments import (
     ExperimentCreate,
     ExperimentFilter,
     ExperimentUpdate,
+)
+from kitaru.server.application.services.worker_liveness import (
+    warn_if_no_live_worker,
 )
 from kitaru.server.domain.agent_version import (
     AgentVersion,
@@ -50,7 +56,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunProgress,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.job import Replay
 from kitaru.server.domain.replay_config import (
     PassthroughPolicy,
     ReplayConfig,
@@ -72,6 +78,8 @@ class ExperimentService:
         cohort_repository: CohortRepository,
         agent_version_repository: AgentVersionRepository,
         replay_config_repository: ReplayConfigRepository,
+        worker_repository: WorkerRepository,
+        worker_liveness_timeout_seconds: int,
     ) -> None:
         """Initialize the service.
 
@@ -81,12 +89,17 @@ class ExperimentService:
             cohort_repository: Cohort repository.
             agent_version_repository: Agent version repository.
             replay_config_repository: Replay config repository.
+            worker_repository: Worker repository.
+            worker_liveness_timeout_seconds: Seconds after which a worker
+                counts as dead.
         """
         self._repository = repository
         self._run_repository = run_repository
         self._cohort_repository = cohort_repository
         self._agent_version_repository = agent_version_repository
         self._replay_config_repository = replay_config_repository
+        self._worker_repository = worker_repository
+        self._worker_liveness_timeout_seconds = worker_liveness_timeout_seconds
 
     async def create_experiment(
         self, command: ExperimentCreate, actor: AuthContext
@@ -338,7 +351,8 @@ class ExperimentService:
 
         Creates the run plus one pending job per cohort session, stamped
         with the experiment's replay config, the resolved agent version, and
-        the resolved execution target.
+        the resolved execution target. For a pool target a warning is
+        logged when no live worker serves the agent.
 
         Args:
             experiment_id: Id of the experiment.
@@ -371,6 +385,12 @@ class ExperimentService:
         target = execution_target or version.run_spec.default_execution_target
         if target is ExecutionTarget.ON_DEMAND and version.run_spec.image is None:
             raise MissingRunImage(version.id)
+        if target is ExecutionTarget.POOL:
+            await warn_if_no_live_worker(
+                self._worker_repository,
+                cohort.agent_id,
+                self._worker_liveness_timeout_seconds,
+            )
         sessions = await self._resolve_members(experiment.cohort_id)
         run = ExperimentRun(
             owner_id=actor.account.id,
@@ -380,7 +400,7 @@ class ExperimentService:
             execution_target=target,
         )
         jobs = [
-            Job(
+            Replay(
                 experiment_run_id=run.id,
                 replay_config_id=experiment.replay_config_id,
                 agent_version_id=version.id,

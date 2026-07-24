@@ -48,6 +48,7 @@ from kitaru.api_models.v1.sessions import (
     SessionStatus,
     SessionUpdateRequest,
 )
+from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.hashing import tool_call_cache_key
@@ -124,8 +125,9 @@ async def test_list_by_run_and_worker(api_client: KitaruAPIClient) -> None:
     created = await api_client.experiments.create_run(
         experiment.id, ExperimentRunCreateRequest()
     )
-    claimed = await api_client.experiment_runs.claim(
-        created.id, JobClaimRequest(worker_id="worker-1", max_jobs=1)
+    worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
+    claimed = await api_client.jobs.claim(
+        JobClaimRequest(worker_id=worker.id, max_jobs=1, experiment_run_id=created.id)
     )
     job_id = claimed.jobs[0].id
 
@@ -133,13 +135,11 @@ async def test_list_by_run_and_worker(api_client: KitaruAPIClient) -> None:
     assert page.total == 1
     assert page.items[0].id == job_id
 
-    page = await api_client.jobs.list(
-        experiment_run_id=created.id, worker_id="worker-1"
-    )
+    page = await api_client.jobs.list(experiment_run_id=created.id, worker_id=worker.id)
     assert page.total == 1
     assert page.items[0].id == job_id
 
-    page = await api_client.jobs.list(worker_id="worker-2")
+    page = await api_client.jobs.list(worker_id=uuid.uuid4())
     assert page.total == 0
 
 
@@ -214,19 +214,20 @@ async def test_worker_lifecycle_round_trip(api_client: KitaruAPIClient) -> None:
             original_session_id=session_id, scoring_policy=SCORING_POLICY
         )
     )
-    claimed = await api_client.jobs.claim(
-        created.id, StandaloneJobClaimRequest(worker_id="worker-1")
+    worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
+    claimed = await api_client.jobs.claim_standalone(
+        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
     )
     assert claimed.status is JobStatus.CLAIMED
-    assert claimed.worker_id == "worker-1"
+    assert claimed.worker_id == worker.id
 
     released = await api_client.jobs.release(created.id)
     assert released.status is JobStatus.PENDING
     assert released.attempt == 2
     assert released.worker_id is None
 
-    await api_client.jobs.claim(
-        created.id, StandaloneJobClaimRequest(worker_id="worker-1")
+    await api_client.jobs.claim_standalone(
+        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
     )
     failed = await api_client.jobs.update(
         created.id,
@@ -257,12 +258,14 @@ async def test_claim_conflict(api_client: KitaruAPIClient) -> None:
             original_session_id=session_id, scoring_policy=SCORING_POLICY
         )
     )
-    await api_client.jobs.claim(
-        created.id, StandaloneJobClaimRequest(worker_id="worker-1")
+    worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
+    other = await api_client.workers.create(WorkerCreateRequest(name="worker-2"))
+    await api_client.jobs.claim_standalone(
+        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
     )
     with pytest.raises(APIError) as exc_info:
-        await api_client.jobs.claim(
-            created.id, StandaloneJobClaimRequest(worker_id="worker-2")
+        await api_client.jobs.claim_standalone(
+            created.id, StandaloneJobClaimRequest(worker_id=other.id)
         )
     assert exc_info.value.status_code == 409
 
