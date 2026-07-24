@@ -18,13 +18,17 @@ import uuid
 import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.accounts import (
+    AccountFilter,
+    AccountUpdate,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
     DuplicateAccountName,
+    InvalidAccount,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
@@ -116,14 +120,14 @@ async def test_update_account_active(service: AccountService) -> None:
         name="alice", email=None, password=None, actor=ACTOR
     )
     updated = await service.update_account(
-        created.id, active=False, password=None, actor=ACTOR
+        created.id, AccountUpdate(active=False), actor=ACTOR
     )
     assert updated.active is False
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
     updated = await service.update_account(
-        created.id, active=True, password=None, actor=ACTOR
+        created.id, AccountUpdate(active=True), actor=ACTOR
     )
     assert updated.active is True
 
@@ -134,15 +138,47 @@ async def test_update_account_password(service: AccountService) -> None:
         name="alice", email=None, password="old", actor=ACTOR
     )
     updated = await service.update_account(
-        created.id, active=None, password="new", actor=ACTOR
+        created.id, AccountUpdate(password="new"), actor=ACTOR
     )
     assert updated.password_hash == "hashed:new"
     assert updated.active is True
+
+
+async def test_update_account_absent_fields_unchanged(service: AccountService) -> None:
+    """Keep every field on an update without set fields."""
+    created = await service.create_account(
+        name="alice", email=None, password="old", actor=ACTOR
+    )
+    updated = await service.update_account(created.id, AccountUpdate(), actor=ACTOR)
+    assert updated.active is True
+    assert updated.password_hash == "hashed:old"
+
+
+async def test_update_account_null_active_rejected(service: AccountService) -> None:
+    """Reject an explicit null for the active state."""
+    created = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    with pytest.raises(InvalidAccount, match="Account active state cannot be null"):
+        await service.update_account(
+            created.id, AccountUpdate(active=None), actor=ACTOR
+        )
+
+
+async def test_update_account_null_password_rejected(service: AccountService) -> None:
+    """Reject an explicit null for the password."""
+    created = await service.create_account(
+        name="alice", email=None, password="old", actor=ACTOR
+    )
+    with pytest.raises(InvalidAccount, match="Account password cannot be null"):
+        await service.update_account(
+            created.id, AccountUpdate(password=None), actor=ACTOR
+        )
 
 
 async def test_update_account_not_found(service: AccountService) -> None:
     """Raise for an unknown account id."""
     with pytest.raises(AccountNotFound):
         await service.update_account(
-            uuid.uuid4(), active=False, password=None, actor=ACTOR
+            uuid.uuid4(), AccountUpdate(active=False), actor=ACTOR
         )

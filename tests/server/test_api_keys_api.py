@@ -157,6 +157,15 @@ async def test_update_api_key(client: httpx.AsyncClient) -> None:
     assert "key" not in body
 
 
+async def test_update_api_key_null_active_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an explicit null active state."""
+    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.patch(
+        f"/v1/api-keys/{created['id']}", json={"active": None}
+    )
+    assert response.status_code == 422
+
+
 async def test_update_api_key_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown API key id."""
     response = await client.patch(

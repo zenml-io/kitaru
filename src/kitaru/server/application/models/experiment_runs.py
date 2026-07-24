@@ -18,12 +18,15 @@ import uuid
 from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
+from kitaru.server.domain.experiment_run import ExperimentRunStatus
+from kitaru.server.domain.replay import ReplayStatus
 
 
 class ExperimentRunFilter(FrozenModel):
     """Experiment run list filter."""
 
     experiment_id: uuid.UUID | None = None
+    status: ExperimentRunStatus | None = None
     tag: str | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
@@ -32,5 +35,6 @@ class ExperimentRunFilter(FrozenModel):
 class ExperimentRunReplaysFilter(FrozenModel):
     """Experiment run replay list filter."""
 
+    status: ReplayStatus | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)

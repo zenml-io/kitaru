@@ -44,6 +44,7 @@ from kitaru.server.application.services.run_finalization import (
 from kitaru.server.domain.experiment_run import (
     TERMINAL_RUN_STATUSES,
     ExperimentRun,
+    ExperimentRunActive,
     ExperimentRunProgress,
     ExperimentRunStatus,
 )
@@ -153,7 +154,7 @@ class ExperimentRunService:
 
         Args:
             run_id: Id of the experiment run.
-            replays_filter: Pagination parameters.
+            replays_filter: Filter and pagination parameters.
             actor: Caller context.
 
         Raises:
@@ -165,14 +166,17 @@ class ExperimentRunService:
         """
         _ = actor
         await self._repository.get(run_id)
+        stale_before = self._stale_before()
         replays, total = await self._replay_repository.query(
             ReplayFilter(
                 experiment_run_id=run_id,
+                status=replays_filter.status,
+                stale_before=stale_before,
+                max_attempts=self._max_attempts,
                 page=replays_filter.page,
                 page_size=replays_filter.page_size,
             )
         )
-        stale_before = self._stale_before()
         replays = [
             replay.with_staleness(stale_before, self._max_attempts)
             for replay in replays
@@ -274,3 +278,26 @@ class ExperimentRunService:
             run_id,
         )
         return await self.get_run(run_id, actor)
+
+    async def delete_run(self, run_id: uuid.UUID, actor: AuthContext) -> None:
+        """Delete a terminal experiment run, including its replays.
+
+        Deletes each replay's config when nothing else references it.
+
+        Args:
+            run_id: Id of the experiment run.
+            actor: Caller context.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+            ExperimentRunActive: The run is not terminal.
+        """
+        _ = actor
+        run = await self._repository.get(run_id)
+        if run.status not in TERMINAL_RUN_STATUSES:
+            raise ExperimentRunActive(run.id)
+        replays = await load_run_replays(self._replay_repository, run_id)
+        config_ids = {replay.replay_config_id for replay in replays}
+        await self._repository.delete(run_id)
+        for config_id in config_ids:
+            await self._replay_config_repository.delete_if_unreferenced(config_id)

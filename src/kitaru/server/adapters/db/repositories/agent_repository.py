@@ -29,6 +29,8 @@ from kitaru.server.adapters.db.schemas.agent import (
 from kitaru.server.adapters.db.schemas.agent_version import (
     AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
 )
+from kitaru.server.adapters.db.schemas.cohort import COHORT_AGENT_ID_FOREIGN_KEY
+from kitaru.server.adapters.db.schemas.session import SESSION_AGENT_ID_FOREIGN_KEY
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.domain.agent import (
     Agent,
@@ -150,7 +152,8 @@ class SQLAgentRepository:
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent still has versions.
+            AgentInUse: The agent is referenced by an agent version, a
+                session, or a cohort.
         """
         row = await self._session.get(AgentSchema, agent_id)
         if row is None:
@@ -160,6 +163,11 @@ class SQLAgentRepository:
                 await self._session.delete(row)
                 await self._session.flush()
         except IntegrityError as exc:
-            if violated_constraint(exc) == AGENT_VERSION_AGENT_ID_FOREIGN_KEY:
-                raise AgentInUse(agent_id) from exc
+            constraint = violated_constraint(exc)
+            if constraint == AGENT_VERSION_AGENT_ID_FOREIGN_KEY:
+                raise AgentInUse(agent_id, "agent versions") from exc
+            if constraint == SESSION_AGENT_ID_FOREIGN_KEY:
+                raise AgentInUse(agent_id, "sessions") from exc
+            if constraint == COHORT_AGENT_ID_FOREIGN_KEY:
+                raise AgentInUse(agent_id, "cohorts") from exc
             raise

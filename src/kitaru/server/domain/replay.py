@@ -122,6 +122,30 @@ class ReplayNotActive(ConflictError):
         super().__init__(f"Replay {replay_id} is not claimed or running")
 
 
+class ReplayActive(ConflictError):
+    """Raised when an operation requires a replay that is not claimed or running."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} is claimed or running")
+
+
+class ReplayNotStandalone(ConflictError):
+    """Raised when an operation requires a standalone replay."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} belongs to an experiment run")
+
+
 class ReplayAlreadyLinked(ConflictError):
     """Raised when a replay already has a result session."""
 
@@ -204,10 +228,9 @@ class Replay(DomainModel):
             worker_id: Id of the claiming worker.
 
         Raises:
-            InvalidReplayTransition: The replay is not pending or is
-                standalone.
+            InvalidReplayTransition: The replay is not pending.
         """
-        if self.status is not ReplayStatus.PENDING or self.standalone:
+        if self.status is not ReplayStatus.PENDING:
             raise InvalidReplayTransition(self.id, self.status, ReplayStatus.CLAIMED)
         now = datetime.now(UTC)
         self.status = ReplayStatus.CLAIMED
@@ -218,18 +241,24 @@ class Replay(DomainModel):
     def start(self) -> None:
         """Start executing the replay.
 
-        Run-created replays start from claimed, standalone replays skip the
-        claim and start from pending.
+        Run-created replays start from claimed, standalone replays start
+        from claimed or skip the claim and start from pending.
 
         Raises:
-            InvalidReplayTransition: The replay is not in the required
+            InvalidReplayTransition: The replay is not in a required
                 status.
         """
-        required = ReplayStatus.PENDING if self.standalone else ReplayStatus.CLAIMED
-        if self.status is not required:
+        allowed = (
+            (ReplayStatus.PENDING, ReplayStatus.CLAIMED)
+            if self.standalone
+            else (ReplayStatus.CLAIMED,)
+        )
+        if self.status not in allowed:
             raise InvalidReplayTransition(self.id, self.status, ReplayStatus.RUNNING)
+        now = datetime.now(UTC)
         self.status = ReplayStatus.RUNNING
-        self.started_at = datetime.now(UTC)
+        self.started_at = now
+        self.heartbeat_at = now
 
     def requeue(self) -> None:
         """Requeue the replay for another attempt.
@@ -245,6 +274,29 @@ class Replay(DomainModel):
         self.claimed_at = None
         self.heartbeat_at = None
         self.started_at = None
+
+    def retry(self) -> None:
+        """Requeue the replay for another attempt after it finished.
+
+        Raises:
+            InvalidReplayTransition: The replay is not failed, timed out,
+                or canceled.
+        """
+        if self.status not in (
+            ReplayStatus.FAILED,
+            ReplayStatus.TIMED_OUT,
+            ReplayStatus.CANCELED,
+        ):
+            raise InvalidReplayTransition(self.id, self.status, ReplayStatus.PENDING)
+        self.status = ReplayStatus.PENDING
+        self.attempt += 1
+        self.worker_id = None
+        self.claimed_at = None
+        self.heartbeat_at = None
+        self.started_at = None
+        self.ended_at = None
+        self.error = None
+        self.result_session_id = None
 
     def complete(self, result: ScoringResult, diff: dict[str, Any] | None) -> None:
         """Complete the replay with its scoring result.

@@ -21,6 +21,8 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeCohortRepository,
+    FakeSessionRepository,
     pg_session,
     postgres_available,
 )
@@ -33,9 +35,21 @@ from kitaru.server.adapters.db.repositories.agent_repository import (
 from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
+from kitaru.server.adapters.db.repositories.cohort_repository import (
+    SQLCohortRepository,
+)
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
+)
+from kitaru.server.application.interfaces.cohort_repository import (
+    CohortRepository,
+)
+from kitaru.server.application.interfaces.session_repository import (
+    SessionRepository,
 )
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.domain.account import Account
@@ -46,8 +60,15 @@ from kitaru.server.domain.agent import (
     DuplicateAgentName,
 )
 from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.cohort import Cohort
+from kitaru.server.domain.session import (
+    Session,
+    SessionOrigin,
+    SessionStatus,
+)
 
 Setup = tuple[AgentRepository, AgentVersionRepository, uuid.UUID, uuid.UUID]
+DeleteSetup = tuple[AgentRepository, SessionRepository, CohortRepository, uuid.UUID]
 
 
 @pytest.fixture(params=["fake", "postgres"])
@@ -71,6 +92,32 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             SQLAgentVersionRepository(session),
             owner.id,
             other_owner.id,
+        )
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def delete_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[DeleteSetup, None]:
+    """Provide each agent repository implementation plus referencing repositories."""
+    if request.param == "fake":
+        agents = FakeAgentRepository()
+        sessions = FakeSessionRepository(agents)
+        cohorts = FakeCohortRepository(sessions, agents)
+        yield agents, sessions, cohorts, uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        # The owner_id column has a foreign key to the account table, so
+        # store the owning account first.
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        yield (
+            SQLAgentRepository(session),
+            SQLSessionRepository(session),
+            SQLCohortRepository(session),
+            owner.id,
         )
 
 
@@ -218,6 +265,53 @@ async def test_delete_with_versions(setup: Setup) -> None:
         await repository.delete(created.id)
 
     await version_repository.delete(version.id)
+    await repository.delete(created.id)
+    with pytest.raises(AgentNotFound):
+        await repository.get(created.id)
+
+
+async def test_delete_with_sessions(delete_setup: DeleteSetup) -> None:
+    """Reject deleting an agent that still has sessions."""
+    repository, session_repository, _, owner_id = delete_setup
+    created = await repository.create(Agent(owner_id=owner_id, name="support-bot"))
+    session = await session_repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=created.id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    with pytest.raises(
+        AgentInUse, match=f"Agent {created.id} is referenced by sessions"
+    ):
+        await repository.delete(created.id)
+
+    await session_repository.delete(session.id)
+    await repository.delete(created.id)
+    with pytest.raises(AgentNotFound):
+        await repository.get(created.id)
+
+
+async def test_delete_with_cohorts(delete_setup: DeleteSetup) -> None:
+    """Reject deleting an agent that is still referenced by cohorts."""
+    repository, _, cohort_repository, owner_id = delete_setup
+    created = await repository.create(Agent(owner_id=owner_id, name="support-bot"))
+    cohort = await cohort_repository.create(
+        Cohort(
+            owner_id=owner_id,
+            agent_id=created.id,
+            name="baseline",
+            session_count=0,
+        ),
+        [],
+    )
+    with pytest.raises(
+        AgentInUse, match=f"Agent {created.id} is referenced by cohorts"
+    ):
+        await repository.delete(created.id)
+
+    await cohort_repository.delete(cohort.id)
     await repository.delete(created.id)
     with pytest.raises(AgentNotFound):
         await repository.get(created.id)

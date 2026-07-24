@@ -52,3 +52,11 @@ class AuthResource:
             data={"username": username, "password": password},
         )
         return TokenResponse.model_validate(response.json())
+
+    async def logout(self) -> None:
+        """Log out and clear the auth cookie.
+
+        Raises:
+            APIError: The request failed.
+        """
+        await self._client.request("POST", "/v1/logout")

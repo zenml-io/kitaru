@@ -18,6 +18,7 @@ from kitaru.api_models.v1.experiments import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.partial import set_fields
 from kitaru.server.adapters.rest.mapping.replays import (
     override_to_domain,
     override_to_response,
@@ -56,22 +57,27 @@ def experiment_create_to_command(body: ExperimentCreateRequest) -> ExperimentCre
 def experiment_update_to_command(body: ExperimentUpdateRequest) -> ExperimentUpdate:
     """Convert an experiment update request to its command.
 
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
     Args:
         body: Experiment update request.
 
     Returns:
         Experiment update command.
     """
-    return ExperimentUpdate(
-        name=body.name,
-        description=body.description,
-        cohort_id=body.cohort_id,
-        override=override_to_domain(body.override),
-        tool_policy=tool_policy_config_to_domain(body.tool_policy),
-        scoring_policy=scoring_policy_to_domain(body.scoring_policy)
-        if body.scoring_policy
-        else None,
-    )
+    fields = set_fields(body)
+    if "override" in fields:
+        fields["override"] = override_to_domain(body.override)
+    if "tool_policy" in fields:
+        fields["tool_policy"] = tool_policy_config_to_domain(body.tool_policy)
+    if "scoring_policy" in fields:
+        fields["scoring_policy"] = (
+            scoring_policy_to_domain(body.scoring_policy)
+            if body.scoring_policy
+            else None
+        )
+    return ExperimentUpdate(**fields)
 
 
 def experiment_to_response(

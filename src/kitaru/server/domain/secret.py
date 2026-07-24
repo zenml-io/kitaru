@@ -69,6 +69,10 @@ class SecretInUse(ConflictError):
         super().__init__(f"Secret {secret_id} is referenced by agent versions")
 
 
+class InvalidSecret(ValidationError):
+    """Raised when a secret violates its shape rules."""
+
+
 class InvalidSecretType(ValidationError):
     """Raised when a secret type exceeds the length limit."""
 
@@ -133,11 +137,11 @@ class Secret(DomainModel):
     created: datetime | None = None
     updated: datetime | None = None
 
-    def update_type(self, type: str) -> None:
+    def update_type(self, type: str | None) -> None:
         """Set a new secret type.
 
         Args:
-            type: New type.
+            type: New type, ``None`` clears it.
         """
         self.type = type
 

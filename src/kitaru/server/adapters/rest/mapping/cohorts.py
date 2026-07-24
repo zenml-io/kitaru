@@ -16,46 +16,11 @@
 from kitaru.api_models.v1.cohorts import (
     CohortCreateRequest,
     CohortResponse,
-    CohortSessionFilter,
+    CohortUpdateRequest,
 )
-from kitaru.server.adapters.rest.mapping.sessions import (
-    origin_to_domain,
-    provider_to_domain,
-    status_to_domain,
-)
-from kitaru.server.application.models.cohorts import CohortCreate
-from kitaru.server.application.models.sessions import SessionFilter
+from kitaru.server.adapters.rest.mapping.partial import set_fields
+from kitaru.server.application.models.cohorts import CohortCreate, CohortUpdate
 from kitaru.server.domain.cohort import Cohort
-
-
-def session_filter_to_domain(body: CohortSessionFilter) -> SessionFilter:
-    """Convert a cohort session filter DTO to the application filter.
-
-    Args:
-        body: Cohort session filter.
-
-    Returns:
-        Session filter with default pagination.
-    """
-    return SessionFilter(
-        agent_id=body.agent_id,
-        agent_version_id=body.agent_version_id,
-        origin=origin_to_domain(body.origin) if body.origin else None,
-        status=status_to_domain(body.status),
-        provider=provider_to_domain(body.provider),
-        external_id=body.external_id,
-        name=body.name,
-        tag=body.tag,
-        started_after=body.started_after,
-        started_before=body.started_before,
-        ended_after=body.ended_after,
-        ended_before=body.ended_before,
-        has_score=body.has_score,
-        min_cost=body.min_cost,
-        max_cost=body.max_cost,
-        min_total_tokens=body.min_total_tokens,
-        max_total_tokens=body.max_total_tokens,
-    )
 
 
 def cohort_create_to_command(body: CohortCreateRequest) -> CohortCreate:
@@ -72,8 +37,22 @@ def cohort_create_to_command(body: CohortCreateRequest) -> CohortCreate:
         description=body.description,
         agent_id=body.agent_id,
         session_ids=body.session_ids,
-        session_filter=session_filter_to_domain(body.filter) if body.filter else None,
     )
+
+
+def cohort_update_to_command(body: CohortUpdateRequest) -> CohortUpdate:
+    """Convert a cohort update request to its command.
+
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
+    Args:
+        body: Cohort update request.
+
+    Returns:
+        Cohort update command.
+    """
+    return CohortUpdate(**set_fields(body))
 
 
 def cohort_to_response(cohort: Cohort) -> CohortResponse:
@@ -94,7 +73,6 @@ def cohort_to_response(cohort: Cohort) -> CohortResponse:
         description=cohort.description,
         agent_id=cohort.agent_id,
         session_count=cohort.session_count,
-        filter_snapshot=cohort.filter_snapshot,
         created=cohort.created,
         updated=cohort.updated,
     )

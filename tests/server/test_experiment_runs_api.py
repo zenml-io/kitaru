@@ -112,6 +112,71 @@ async def test_list_experiment_runs(client: httpx.AsyncClient) -> None:
     assert [item["id"] for item in body["items"]] == [second["id"]]
 
 
+async def test_list_experiment_runs_filters(client: httpx.AsyncClient) -> None:
+    """List experiment runs filtered by experiment and status."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    cohort_id = await create_cohort(client, agent_id)
+    experiment = await create_experiment(client, cohort_id)
+    other_cohort_id = await create_cohort(client, agent_id, name="other-cohort")
+    other_experiment = await create_experiment(client, other_cohort_id, name="other")
+    first = await create_run(client, experiment["id"])
+    other = await create_run(client, other_experiment["id"])
+    response = await client.post(
+        f"/v1/experiment-runs/{first['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 200
+
+    response = await client.get(
+        "/v1/experiment-runs", params={"experiment_id": experiment["id"]}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == first["id"]
+
+    response = await client.get("/v1/experiment-runs", params={"status": "running"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == first["id"]
+
+    response = await client.get(
+        "/v1/experiment-runs",
+        params={"experiment_id": other_experiment["id"], "status": "pending"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == other["id"]
+
+    response = await client.get(
+        "/v1/experiment-runs",
+        params={"experiment_id": other_experiment["id"], "status": "running"},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_list_experiment_runs_unknown_experiment(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 404 for an unknown experiment id filter."""
+    missing_id = uuid.uuid4()
+    response = await client.get(
+        "/v1/experiment-runs", params={"experiment_id": str(missing_id)}
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Experiment {missing_id} was not found"}
+
+
+async def test_list_experiment_runs_invalid_status(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an unknown status filter value."""
+    response = await client.get("/v1/experiment-runs", params={"status": "bogus"})
+    assert response.status_code == 422
+
+
 async def test_list_experiment_runs_by_tag(client: httpx.AsyncClient) -> None:
     """List experiment runs attached to a tag name."""
     agent_id = await create_agent(client)
@@ -163,6 +228,77 @@ async def test_list_experiment_run_replays(client: httpx.AsyncClient) -> None:
     body = response.json()
     assert body["total"] == 2
     assert len(body["items"]) == 1
+
+
+async def test_list_experiment_run_replays_by_status(
+    client: httpx.AsyncClient,
+) -> None:
+    """List the replays of a run filtered by status."""
+    created = await seed_run(client)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 200
+    claimed_id = response.json()["replays"][0]["id"]
+
+    response = await client.get(
+        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "claimed"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == claimed_id
+
+    response = await client.get(
+        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "pending"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] != claimed_id
+
+    response = await client.get(
+        f"/v1/experiment-runs/{created['id']}/replays",
+        params={"status": "completed"},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+    response = await client.get(
+        f"/v1/experiment-runs/{created['id']}/replays", params={"status": "bogus"}
+    )
+    assert response.status_code == 422
+
+
+async def test_list_experiment_run_replays_stale_claim_matches_pending() -> None:
+    """Match a stale claim as pending in the run replays status filter."""
+    transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await seed_run(client, session_count=1)
+        response = await client.post(
+            f"/v1/experiment-runs/{created['id']}/claim",
+            json={"worker_id": "worker-1", "max_replays": 1},
+        )
+        assert response.status_code == 200
+        replay_id = response.json()["replays"][0]["id"]
+
+        response = await client.get(
+            f"/v1/experiment-runs/{created['id']}/replays",
+            params={"status": "pending"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        assert body["items"][0]["id"] == replay_id
+        assert body["items"][0]["status"] == "pending"
+
+        response = await client.get(
+            f"/v1/experiment-runs/{created['id']}/replays",
+            params={"status": "claimed"},
+        )
+        assert response.status_code == 200
+        assert response.json()["total"] == 0
 
 
 async def test_list_experiment_run_replays_not_found(
@@ -280,7 +416,7 @@ async def test_cancel_run_drains_through_replay_patch(
 
     response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
     assert response.status_code == 200
-    assert response.json() == {"canceled": True}
+    assert response.json() == {"status": "running", "canceled": True}
 
     response = await client.patch(
         f"/v1/replays/{replay_id}", json={"status": "canceled"}
@@ -346,3 +482,69 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
     assert summary["pass_rate"] == 0.5
     assert summary["scores"]["conciseness"]["replay"]["mean"] == pytest.approx(0.5)
     assert body["progress"]["completed"] == 2
+
+
+async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> None:
+    """Land a run with failed and timed out replays on failed."""
+    created = await seed_run(client, session_count=2)
+    response = await client.post(
+        f"/v1/experiment-runs/{created['id']}/claim",
+        json={"worker_id": "worker-1", "max_replays": 5},
+    )
+    replays = response.json()["replays"]
+    assert len(replays) == 2
+    response = await client.patch(
+        f"/v1/replays/{replays[0]['id']}",
+        json={"status": "failed", "error": "agent exited with code 1"},
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/replays/{replays[1]['id']}",
+        json={"status": "timed_out", "error": "wall clock limit exceeded"},
+    )
+    assert response.status_code == 200
+
+    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    body = response.json()
+    assert body["status"] == "failed"
+    assert body["error"] == "1 of 2 replays failed, 1 timed out"
+    assert body["ended_at"] is not None
+    assert body["summary"]["replay_counts_by_status"] == {
+        "failed": 1,
+        "timed_out": 1,
+    }
+    assert body["summary"]["pass_rate"] == 0.0
+
+
+async def test_delete_run(client: httpx.AsyncClient) -> None:
+    """Delete a terminal run with its replays."""
+    created = await seed_run(client, session_count=1)
+    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    assert response.status_code == 200
+
+    response = await client.delete(f"/v1/experiment-runs/{created['id']}")
+    assert response.status_code == 204
+    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    assert response.status_code == 404
+    response = await client.get(
+        "/v1/replays", params={"experiment_run_id": created["id"]}
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_delete_run_rejects_non_terminal(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 deleting a run that is not terminal."""
+    created = await seed_run(client, session_count=1)
+    response = await client.delete(f"/v1/experiment-runs/{created['id']}")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Experiment run {created['id']} is not terminal"
+    }
+
+
+async def test_delete_run_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    response = await client.delete(f"/v1/experiment-runs/{missing_id}")
+    assert response.status_code == 404

@@ -400,6 +400,78 @@ async def test_update_experiment_config(client: httpx.AsyncClient) -> None:
     assert body["scoring_policy"] == created["scoring_policy"]
 
 
+async def test_update_experiment_absent_fields_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Keep every field on an update with an empty body."""
+    agent_id = await create_agent(client)
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.patch(f"/v1/experiments/{created['id']}", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == created["name"]
+    assert body["description"] == created["description"]
+    assert body["cohort_id"] == created["cohort_id"]
+    assert body["override"] == created["override"]
+    assert body["tool_policy"] == created["tool_policy"]
+    assert body["scoring_policy"] == created["scoring_policy"]
+
+
+async def test_update_experiment_null_clears_nullable_fields(
+    client: httpx.AsyncClient,
+) -> None:
+    """Clear the description and override on explicit nulls."""
+    agent_id = await create_agent(client)
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}",
+        json={
+            "description": "First try",
+            "override": {"model": "claude-sonnet-5"},
+        },
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}",
+        json={"description": None, "override": None},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["description"] is None
+    assert body["override"] is None
+
+
+async def test_update_experiment_null_required_fields_rejected(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for explicit nulls on required fields."""
+    agent_id = await create_agent(client)
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}", json={"name": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Experiment name cannot be null"}
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}", json={"cohort_id": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Experiment cohort id cannot be null"}
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}", json={"tool_policy": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Experiment tool policy cannot be null"}
+    response = await client.patch(
+        f"/v1/experiments/{created['id']}", json={"scoring_policy": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Experiment scoring policy cannot be null"}
+
+
 async def test_update_experiment_frozen_after_run(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a config change once a run exists."""
     agent_id = await create_agent(client)

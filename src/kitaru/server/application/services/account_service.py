@@ -21,12 +21,16 @@ from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.accounts import (
+    AccountFilter,
+    AccountUpdate,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
     DuplicateAccountName,
+    InvalidAccount,
 )
 
 
@@ -135,31 +139,37 @@ class AccountService:
     async def update_account(
         self,
         account_id: uuid.UUID,
-        active: bool | None,
-        password: str | None,
+        command: AccountUpdate,
         actor: AuthContext,
     ) -> Account:
         """Partially update an account.
 
+        Fields absent from the command stay unchanged. An explicit null is
+        rejected for the active state and the password.
+
         Args:
             account_id: Id of the account.
-            active: New active state, unchanged when ``None``.
-            password: New login password, unchanged when ``None``.
+            command: Account update command.
             actor: Caller context.
 
         Raises:
             AccountNotFound: No account has this id.
+            InvalidAccount: The active state or the password is null.
 
         Returns:
             Updated account.
         """
         _ = actor
         account = await self._repository.get(account_id)
-        if active is not None:
-            account.update_active(active)
-        if password is not None:
+        if "active" in command.model_fields_set:
+            if command.active is None:
+                raise InvalidAccount("Account active state cannot be null")
+            account.update_active(command.active)
+        if "password" in command.model_fields_set:
+            if command.password is None:
+                raise InvalidAccount("Account password cannot be null")
             password_hash = await to_thread.run_sync(
-                self._password_hasher.hash, password
+                self._password_hasher.hash, command.password
             )
             account.update_password_hash(password_hash)
         return await self._repository.update(account)

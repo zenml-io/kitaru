@@ -352,6 +352,23 @@ async def test_config_delete_if_unreferenced_by_replay(setup: Setup) -> None:
     assert loaded.id == seed.config.id
 
 
+async def test_delete_removes_replay(setup: Setup) -> None:
+    """Delete a replay and free its config for deletion."""
+    seed = await seed_rows(setup)
+    created = await setup.replays.create(replay_entity(seed))
+    await setup.replays.delete(created.id)
+    with pytest.raises(ReplayNotFound, match=f"Replay {created.id} was not found"):
+        await setup.replays.get(created.id)
+    assert await setup.configs.delete_if_unreferenced(seed.config.id) is True
+
+
+async def test_delete_not_found(setup: Setup) -> None:
+    """Raise for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(ReplayNotFound, match=f"Replay {missing_id} was not found"):
+        await setup.replays.delete(missing_id)
+
+
 async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     """Persist runner-side field changes and renew the updated timestamp."""
     seed = await seed_rows(setup)

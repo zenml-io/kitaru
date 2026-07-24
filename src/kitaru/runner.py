@@ -35,6 +35,7 @@ from kitaru.api_models.v1.replays import (
     ReplaySpecResponse,
     ReplayStatus,
     ReplayUpdateRequest,
+    StandaloneReplayClaimRequest,
 )
 from kitaru.api_models.v1.sessions import (
     SessionResponse,
@@ -271,8 +272,9 @@ class Runner:
             replay_id: Id of the replay.
 
         Raises:
-            APIError: The replay does not exist, its spec does not resolve,
-                or a status update was rejected.
+            APIError: The replay does not exist, the claim was rejected,
+                its spec does not resolve, or a status update was
+                rejected.
 
         Returns:
             Terminal replay.
@@ -280,7 +282,9 @@ class Runner:
         async with KitaruAPIClient(
             base_url=self._api_url, api_key=self._api_key
         ) as client:
-            await client.replays.get(replay_id)
+            await client.replays.claim(
+                replay_id, StandaloneReplayClaimRequest(worker_id=self._worker_id)
+            )
             return await self._execute_replay(client, replay_id)
 
     async def run_session(

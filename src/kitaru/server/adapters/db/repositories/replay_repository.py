@@ -142,6 +142,10 @@ class SQLReplayRepository:
     async def query(self, replay_filter: ReplayFilter) -> tuple[list[Replay], int]:
         """Query replays matching a filter.
 
+        With the staleness context set, the status filter matches claimed
+        or running replays with lost heartbeats as pending, or as timed
+        out once the attempt count reached the maximum.
+
         Args:
             replay_filter: Filter and pagination parameters.
 
@@ -159,8 +163,19 @@ class SQLReplayRepository:
                 == replay_filter.original_session_id
             )
         if replay_filter.status is not None:
+            if (
+                replay_filter.stale_before is not None
+                and replay_filter.max_attempts is not None
+            ):
+                status = self._effective_status(
+                    replay_filter.stale_before, replay_filter.max_attempts
+                )
+            else:
+                status = col(ReplaySchema.status)
+            statement = statement.where(status == replay_filter.status.value)
+        if replay_filter.worker_id is not None:
             statement = statement.where(
-                col(ReplaySchema.status) == replay_filter.status.value
+                col(ReplaySchema.worker_id) == replay_filter.worker_id
             )
         if replay_filter.standalone is not None:
             if replay_filter.standalone:
@@ -234,6 +249,21 @@ class SQLReplayRepository:
             raise
         return row.to_domain()
 
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        row = await self._session.get(ReplaySchema, replay_id)
+        if row is None:
+            raise ReplayNotFound(replay_id)
+        await self._session.delete(row)
+        await self._session.flush()
+
     def _stale_condition(self, stale_before: datetime) -> ColumnElement[bool]:
         """Build the lost-heartbeat condition on claimed or running rows.
 
@@ -249,6 +279,28 @@ class SQLReplayRepository:
             ),
             func.coalesce(col(ReplaySchema.heartbeat_at), col(ReplaySchema.claimed_at))
             < stale_before,
+        )
+
+    def _effective_status(
+        self, stale_before: datetime, max_attempts: int
+    ) -> ColumnElement[str]:
+        """Build the status expression with the staleness rule applied.
+
+        Args:
+            stale_before: Heartbeats older than this time count as lost.
+            max_attempts: Attempt count at which a stale replay times out.
+
+        Returns:
+            SQL expression.
+        """
+        stale = self._stale_condition(stale_before)
+        return case(
+            (
+                and_(stale, col(ReplaySchema.attempt) >= max_attempts),
+                ReplayStatus.TIMED_OUT.value,
+            ),
+            (stale, ReplayStatus.PENDING.value),
+            else_=col(ReplaySchema.status),
         )
 
     async def requeue_stale(
@@ -328,15 +380,7 @@ class SQLReplayRepository:
         """
         if not run_ids:
             return {}
-        stale = self._stale_condition(stale_before)
-        effective_status = case(
-            (
-                and_(stale, col(ReplaySchema.attempt) >= max_attempts),
-                ReplayStatus.TIMED_OUT.value,
-            ),
-            (stale, ReplayStatus.PENDING.value),
-            else_=col(ReplaySchema.status),
-        )
+        effective_status = self._effective_status(stale_before, max_attempts)
         statement = (
             select(
                 col(ReplaySchema.experiment_run_id),

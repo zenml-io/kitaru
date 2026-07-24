@@ -52,6 +52,18 @@ async def test_get_and_list_round_trip(api_client: KitaruAPIClient) -> None:
     assert page.total == 1
     assert page.items[0].id == created.id
 
+    page = await api_client.experiment_runs.list(
+        experiment_id=experiment.id, status=ExperimentRunStatus.PENDING
+    )
+    assert page.total == 1
+    assert page.items[0].id == created.id
+
+    page = await api_client.experiment_runs.list(status=ExperimentRunStatus.RUNNING)
+    assert page.total == 0
+
+    with pytest.raises(NotFoundError):
+        await api_client.experiment_runs.list(experiment_id=uuid.uuid4())
+
 
 async def test_get_not_found(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 404 as a NotFoundError."""
@@ -73,6 +85,17 @@ async def test_list_replays(api_client: KitaruAPIClient) -> None:
     assert replay.agent_version_id == version_id
     assert replay.status is ReplayStatus.PENDING
     assert replay.scoring_policy == SCORING_POLICY
+
+    page = await api_client.experiment_runs.list_replays(
+        created.id, status=ReplayStatus.PENDING
+    )
+    assert page.total == 1
+    assert page.items[0].id == replay.id
+
+    page = await api_client.experiment_runs.list_replays(
+        created.id, status=ReplayStatus.CLAIMED
+    )
+    assert page.total == 0
 
 
 async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
@@ -101,3 +124,20 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
     with pytest.raises(APIError) as exc_info:
         await api_client.experiment_runs.cancel(created.id)
     assert exc_info.value.status_code == 409
+
+
+async def test_delete_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a run through cancel and delete."""
+    cohort_id, _ = await create_cohort(api_client)
+    experiment = await create_experiment(api_client, cohort_id)
+    created = await api_client.experiments.create_run(
+        experiment.id, ExperimentRunCreateRequest()
+    )
+    with pytest.raises(APIError) as exc_info:
+        await api_client.experiment_runs.delete(created.id)
+    assert exc_info.value.status_code == 409
+
+    await api_client.experiment_runs.cancel(created.id)
+    await api_client.experiment_runs.delete(created.id)
+    with pytest.raises(NotFoundError):
+        await api_client.experiment_runs.get(created.id)

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the session node routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -278,6 +279,20 @@ async def test_upsert_nodes_unknown_session(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 404
     assert response.json() == {"detail": f"Session {missing_id} was not found"}
+
+
+async def test_upsert_nodes_non_finite_payload(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a raw JSON body with non-finite floats in a node."""
+    session_id = await create_session(client)
+    for token in ["NaN", "Infinity", "-Infinity"]:
+        node = node_body(0, outputs={"value": "PLACEHOLDER"})
+        content = json.dumps({"nodes": [node]}).replace('"PLACEHOLDER"', token)
+        response = await client.post(
+            f"/v1/sessions/{session_id}/nodes",
+            content=content,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
 
 
 async def test_list_nodes_excludes_payloads(client: httpx.AsyncClient) -> None:

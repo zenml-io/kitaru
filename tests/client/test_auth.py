@@ -83,6 +83,11 @@ async def test_login(api_client: KitaruAPIClient) -> None:
     assert token.csrf_token is None
 
 
+async def test_logout(api_client: KitaruAPIClient) -> None:
+    """Log out through the SDK."""
+    assert await api_client.auth.logout() is None
+
+
 async def test_login_invalid_credentials(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 401 as a typed error."""
     with pytest.raises(AuthenticationError) as exc_info:

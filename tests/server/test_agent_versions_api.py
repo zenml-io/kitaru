@@ -320,6 +320,65 @@ async def test_update_version(
     assert response.json()["run_spec"] == run_spec
 
 
+async def test_update_version_absent_fields_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Keep every field on an update with an empty body."""
+    agent_id = await create_agent(client)
+    created = (
+        await client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json={"version": "v1", "description": "Initial version"},
+        )
+    ).json()
+    response = await client.patch(f"/v1/agent-versions/{created['id']}", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["description"] == "Initial version"
+    assert body["run_spec"] == created["run_spec"]
+    assert body["capabilities"] == created["capabilities"]
+
+
+async def test_update_version_null_clears_nullable_fields(
+    client: httpx.AsyncClient,
+) -> None:
+    """Clear the description and run spec on explicit nulls."""
+    agent_id = await create_agent(client)
+    created = (
+        await client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json={
+                "version": "v1",
+                "description": "Initial version",
+                "run_spec": {"command": "python agent.py", "timeout_seconds": 600},
+            },
+        )
+    ).json()
+    response = await client.patch(
+        f"/v1/agent-versions/{created['id']}",
+        json={"description": None, "run_spec": None},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["description"] is None
+    assert body["run_spec"] is None
+
+
+async def test_update_version_null_capabilities_rejected(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for explicit null capabilities."""
+    agent_id = await create_agent(client)
+    created = (
+        await client.post(f"/v1/agents/{agent_id}/versions", json={"version": "v1"})
+    ).json()
+    response = await client.patch(
+        f"/v1/agent-versions/{created['id']}", json={"capabilities": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Agent version capabilities cannot be null"}
+
+
 async def test_update_version_missing_secret(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a new run spec referencing an unknown secret."""
     agent_id = await create_agent(client)

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
-from test_experiments import SCORING_POLICY
+from test_experiments import SCORING_POLICY, create_cohort, create_experiment
 
 from conftest import asgi_api_client, experiment_app
 from kitaru.api_models.v1.agent_versions import (
@@ -25,13 +25,16 @@ from kitaru.api_models.v1.agent_versions import (
     RunSpec,
 )
 from kitaru.api_models.v1.agents import AgentCreateRequest
+from kitaru.api_models.v1.experiment_runs import ExperimentRunCreateRequest
 from kitaru.api_models.v1.replays import (
     HistoryPolicy,
     HistoryScope,
     PassthroughPolicy,
+    ReplayClaimRequest,
     ReplayCreateRequest,
     ReplayStatus,
     ReplayUpdateRequest,
+    StandaloneReplayClaimRequest,
     ToolLookupRequest,
     ToolPolicyConfig,
 )
@@ -116,6 +119,32 @@ async def test_create_get_list_round_trip(api_client: KitaruAPIClient) -> None:
     assert page.total == 0
 
 
+async def test_list_by_run_and_worker(api_client: KitaruAPIClient) -> None:
+    """List replays filtered by experiment run and claiming worker."""
+    cohort_id, _ = await create_cohort(api_client)
+    experiment = await create_experiment(api_client, cohort_id)
+    created = await api_client.experiments.create_run(
+        experiment.id, ExperimentRunCreateRequest()
+    )
+    claimed = await api_client.experiment_runs.claim(
+        created.id, ReplayClaimRequest(worker_id="worker-1", max_replays=1)
+    )
+    replay_id = claimed.replays[0].id
+
+    page = await api_client.replays.list(experiment_run_id=created.id)
+    assert page.total == 1
+    assert page.items[0].id == replay_id
+
+    page = await api_client.replays.list(
+        experiment_run_id=created.id, worker_id="worker-1"
+    )
+    assert page.total == 1
+    assert page.items[0].id == replay_id
+
+    page = await api_client.replays.list(worker_id="worker-2")
+    assert page.total == 0
+
+
 async def test_create_with_default_constructed_policy(
     api_client: KitaruAPIClient,
 ) -> None:
@@ -177,6 +206,7 @@ async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
     assert running.status is ReplayStatus.RUNNING
 
     heartbeat = await api_client.replays.heartbeat(created.id)
+    assert heartbeat.status is ReplayStatus.RUNNING
     assert heartbeat.canceled is False
 
     session = await api_client.sessions.get(session_id)
@@ -210,6 +240,69 @@ async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
     assert diff.original_session_id == session_id
     assert diff.result_session_id == result.id
     assert diff.node_pairs == []
+
+
+async def test_worker_lifecycle_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a replay through claim, release, retry, and delete."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session_id, scoring_policy=SCORING_POLICY
+        )
+    )
+    claimed = await api_client.replays.claim(
+        created.id, StandaloneReplayClaimRequest(worker_id="worker-1")
+    )
+    assert claimed.status is ReplayStatus.CLAIMED
+    assert claimed.worker_id == "worker-1"
+
+    released = await api_client.replays.release(created.id)
+    assert released.status is ReplayStatus.PENDING
+    assert released.attempt == 2
+    assert released.worker_id is None
+
+    await api_client.replays.claim(
+        created.id, StandaloneReplayClaimRequest(worker_id="worker-1")
+    )
+    failed = await api_client.replays.update(
+        created.id,
+        ReplayUpdateRequest(
+            status=ReplayStatus.FAILED, error="agent exited with code 1"
+        ),
+    )
+    assert failed.status is ReplayStatus.FAILED
+
+    heartbeat = await api_client.replays.heartbeat(created.id)
+    assert heartbeat.status is ReplayStatus.FAILED
+    assert heartbeat.canceled is True
+
+    retried = await api_client.replays.retry(created.id)
+    assert retried.status is ReplayStatus.PENDING
+    assert retried.attempt == 3
+    assert retried.error is None
+    assert retried.result_session_id is None
+
+    await api_client.replays.delete(created.id)
+    with pytest.raises(NotFoundError):
+        await api_client.replays.get(created.id)
+
+
+async def test_claim_conflict(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 409 for a claim on a non-pending replay."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            original_session_id=session_id, scoring_policy=SCORING_POLICY
+        )
+    )
+    await api_client.replays.claim(
+        created.id, StandaloneReplayClaimRequest(worker_id="worker-1")
+    )
+    with pytest.raises(APIError) as exc_info:
+        await api_client.replays.claim(
+            created.id, StandaloneReplayClaimRequest(worker_id="worker-2")
+        )
+    assert exc_info.value.status_code == 409
 
 
 async def test_tool_lookup_round_trip(api_client: KitaruAPIClient) -> None:

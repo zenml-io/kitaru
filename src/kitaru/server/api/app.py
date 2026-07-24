@@ -13,11 +13,15 @@
 #  permissions and limitations under the License.
 """FastAPI application factory."""
 
+import math
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from importlib.metadata import version
+from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
@@ -48,6 +52,43 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+
+
+def _sanitize_non_finite(value: Any) -> Any:
+    """Replace non-finite floats with their repr so the value serializes as JSON.
+
+    Args:
+        value: JSON-encodable value.
+
+    Returns:
+        Value with non-finite floats replaced.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
+    if isinstance(value, dict):
+        return {key: _sanitize_non_finite(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_non_finite(item) for item in value]
+    return value
+
+
+def _register_request_validation_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for request validation errors.
+
+    Clients receive HTTP 422 with the standard FastAPI error body. Non-finite
+    floats echoed from the request are replaced so the body serializes.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        _ = request
+        errors = _sanitize_non_finite(jsonable_encoder(exc.errors()))
+        return JSONResponse(status_code=422, content={"detail": errors})
 
 
 def _register_domain_exception_handlers(app: FastAPI) -> None:
@@ -118,6 +159,7 @@ def create_app(settings: APISettings) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    _register_request_validation_exception_handler(app)
     _register_domain_exception_handlers(app)
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])

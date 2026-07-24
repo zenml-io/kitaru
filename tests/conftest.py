@@ -923,6 +923,8 @@ class FakeAgentRepository:
         """Initialize the repository."""
         self._agents: dict[uuid.UUID, Agent] = {}
         self.version_repository: FakeAgentVersionRepository | None = None
+        self.session_repository: FakeSessionRepository | None = None
+        self.cohort_repository: FakeCohortRepository | None = None
 
     def _check_duplicate_name(self, agent: Agent) -> None:
         for other in self._agents.values():
@@ -1015,14 +1017,25 @@ class FakeAgentRepository:
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent still has versions.
+            AgentInUse: The agent is referenced by an agent version, a
+                session, or a cohort.
         """
         if agent_id not in self._agents:
             raise AgentNotFound(agent_id)
         if self.version_repository is not None and self.version_repository.has_versions(
             agent_id
         ):
-            raise AgentInUse(agent_id)
+            raise AgentInUse(agent_id, "agent versions")
+        if (
+            self.session_repository is not None
+            and self.session_repository.session_ids_for_agent(agent_id)
+        ):
+            raise AgentInUse(agent_id, "sessions")
+        if (
+            self.cohort_repository is not None
+            and self.cohort_repository.references_agent(agent_id)
+        ):
+            raise AgentInUse(agent_id, "cohorts")
         del self._agents[agent_id]
 
 
@@ -1240,6 +1253,7 @@ class FakeSessionRepository:
         self.node_repository: FakeSessionNodeRepository | None = None
         self.cohort_repository: FakeCohortRepository | None = None
         self.replay_repository: FakeReplayRepository | None = None
+        agent_repository.session_repository = self
         if agent_version_repository is not None:
             agent_version_repository.session_repository = self
 
@@ -1672,6 +1686,19 @@ class FakeCohortRepository:
         self._tag_repository = tag_repository
         self.experiment_repository: FakeExperimentRepository | None = None
         session_repository.cohort_repository = self
+        if agent_repository is not None:
+            agent_repository.cohort_repository = self
+
+    def references_agent(self, agent_id: uuid.UUID) -> bool:
+        """Report whether a stored cohort references an agent.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            ``True`` when a stored cohort references the agent.
+        """
+        return any(cohort.agent_id == agent_id for cohort in self._cohorts.values())
 
     def references_session(self, session_id: uuid.UUID) -> bool:
         """Report whether a stored cohort contains a session.
@@ -2153,6 +2180,18 @@ class FakeReplayRepository:
             replay.replay_config_id == config_id for replay in self._replays.values()
         )
 
+    def remove_for_run(self, run_id: uuid.UUID) -> None:
+        """Remove every replay of an experiment run.
+
+        Args:
+            run_id: Id of the experiment run.
+        """
+        self._replays = {
+            replay_id: replay
+            for replay_id, replay in self._replays.items()
+            if replay.experiment_run_id != run_id
+        }
+
     def _check_duplicate_session(self, replay: Replay) -> None:
         if replay.experiment_run_id is None:
             return
@@ -2215,8 +2254,30 @@ class FakeReplayRepository:
             raise ReplayNotFound(replay_id)
         return replay.model_copy()
 
+    def _effective_status(
+        self, replay: Replay, replay_filter: ReplayFilter
+    ) -> ReplayStatus:
+        """Compute a replay's status with the filter's staleness rule applied.
+
+        Args:
+            replay: Stored replay.
+            replay_filter: Filter carrying the staleness context.
+
+        Returns:
+            Replay status.
+        """
+        if replay_filter.stale_before is None or replay_filter.max_attempts is None:
+            return replay.status
+        return replay.with_staleness(
+            replay_filter.stale_before, replay_filter.max_attempts
+        ).status
+
     async def query(self, replay_filter: ReplayFilter) -> tuple[list[Replay], int]:
         """Query replays matching a filter.
+
+        With the staleness context set, the status filter matches claimed
+        or running replays with lost heartbeats as pending, or as timed
+        out once the attempt count reached the maximum.
 
         Args:
             replay_filter: Filter and pagination parameters.
@@ -2239,7 +2300,15 @@ class FakeReplayRepository:
             ]
         if replay_filter.status is not None:
             replays = [
-                replay for replay in replays if replay.status == replay_filter.status
+                replay
+                for replay in replays
+                if self._effective_status(replay, replay_filter) == replay_filter.status
+            ]
+        if replay_filter.worker_id is not None:
+            replays = [
+                replay
+                for replay in replays
+                if replay.worker_id == replay_filter.worker_id
             ]
         if replay_filter.standalone is not None:
             replays = [
@@ -2275,6 +2344,19 @@ class FakeReplayRepository:
         updated = replay.model_copy(update={"created": stored.created, "updated": now})
         self._replays[replay.id] = updated
         return updated.model_copy()
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        if replay_id not in self._replays:
+            raise ReplayNotFound(replay_id)
+        del self._replays[replay_id]
 
     async def requeue_stale(
         self, run_id: uuid.UUID, stale_before: datetime, max_attempts: int
@@ -2473,6 +2555,8 @@ class FakeExperimentRunRepository:
             runs = [
                 run for run in runs if run.experiment_id == run_filter.experiment_id
             ]
+        if run_filter.status is not None:
+            runs = [run for run in runs if run.status == run_filter.status]
         if run_filter.tag is not None:
             tagged_ids: set[uuid.UUID] = set()
             if self._tag_repository is not None:
@@ -2505,6 +2589,24 @@ class FakeExperimentRunRepository:
         self._runs[run.id] = updated
         return updated.model_copy()
 
+    async def delete(self, run_id: uuid.UUID) -> None:
+        """Delete an experiment run by id, including its replays and tag links.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+        """
+        if run_id not in self._runs:
+            raise ExperimentRunNotFound(run_id)
+        del self._runs[run_id]
+        self._replay_repository.remove_for_run(run_id)
+        if self._tag_repository is not None:
+            self._tag_repository.remove_links_for_resource(
+                TagResourceType.EXPERIMENT_RUN, run_id
+            )
+
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.
 
@@ -2520,8 +2622,15 @@ class FakeExperimentRunRepository:
 EXPERIMENT_APP_ACCOUNT_ID = uuid.uuid4()
 
 
-def experiment_app() -> FastAPI:
+def experiment_app(
+    heartbeat_timeout_seconds: int = 60, max_attempts: int = 3
+) -> FastAPI:
     """Build the app with every service bound to one set of shared fakes.
+
+    Args:
+        heartbeat_timeout_seconds: Seconds after which a heartbeat counts
+            as lost, a negative value marks every claim stale immediately.
+        max_attempts: Attempt count at which a stale replay times out.
 
     Returns:
         Application for experiment, run, and replay tests.
@@ -2582,8 +2691,8 @@ def experiment_app() -> FastAPI:
         replay_config_repository=config_repository,
         experiment_repository=experiment_repository,
         session_repository=session_repository,
-        heartbeat_timeout_seconds=60,
-        max_attempts=3,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+        max_attempts=max_attempts,
     )
     replay_service = ReplayService(
         repository=replay_repository,
@@ -2595,8 +2704,8 @@ def experiment_app() -> FastAPI:
         experiment_repository=experiment_repository,
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
-        heartbeat_timeout_seconds=60,
-        max_attempts=3,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds,
+        max_attempts=max_attempts,
     )
     node_service = SessionNodeService(
         repository=node_repository,

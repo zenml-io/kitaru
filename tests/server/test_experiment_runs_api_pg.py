@@ -188,7 +188,7 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
     assert response.status_code == 200
-    assert response.json() == {"canceled": False}
+    assert response.json() == {"status": "running", "canceled": False}
 
     response = await client.post(
         "/v1/sessions",
@@ -299,3 +299,39 @@ async def test_cancel_run_end_to_end(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
     assert response.json()["replays"] == []
+
+    response = await client.delete(f"/v1/experiment-runs/{run_id}")
+    assert response.status_code == 204
+    response = await client.get(f"/v1/experiment-runs/{run_id}")
+    assert response.status_code == 404
+    response = await client.get("/v1/replays", params={"experiment_run_id": run_id})
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_delete_run_end_to_end(client: httpx.AsyncClient) -> None:
+    """Reject deleting a run until it is terminal."""
+    cohort_id = await seed_cohort(client)
+    response = await client.post(
+        "/v1/experiments",
+        json={
+            "name": "delete-me",
+            "cohort_id": cohort_id,
+            "scoring_policy": SCORING_POLICY,
+        },
+    )
+    assert response.status_code == 201
+    response = await client.post(
+        f"/v1/experiments/{response.json()['id']}/runs", json={}
+    )
+    assert response.status_code == 201
+    run_id = response.json()["id"]
+
+    response = await client.delete(f"/v1/experiment-runs/{run_id}")
+    assert response.status_code == 409
+    assert response.json() == {"detail": f"Experiment run {run_id} is not terminal"}
+
+    response = await client.post(f"/v1/experiment-runs/{run_id}/cancel")
+    assert response.status_code == 200
+    response = await client.delete(f"/v1/experiment-runs/{run_id}")
+    assert response.status_code == 204

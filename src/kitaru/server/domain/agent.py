@@ -22,6 +22,7 @@ from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
     NotFoundError,
+    ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
@@ -54,13 +55,18 @@ class DuplicateAgentName(ConflictError):
 class AgentInUse(ConflictError):
     """Raised when an agent deletion is blocked by existing references."""
 
-    def __init__(self, agent_id: uuid.UUID) -> None:
+    def __init__(self, agent_id: uuid.UUID, referrer: str) -> None:
         """Initialize the error.
 
         Args:
             agent_id: Id of the referenced agent.
+            referrer: Kind of resource referencing the agent.
         """
-        super().__init__(f"Agent {agent_id} is referenced by agent versions")
+        super().__init__(f"Agent {agent_id} is referenced by {referrer}")
+
+
+class InvalidAgent(ValidationError):
+    """Raised when an agent violates its shape rules."""
 
 
 class Agent(DomainModel):
@@ -81,10 +87,10 @@ class Agent(DomainModel):
         """
         self.name = name
 
-    def update_description(self, description: str) -> None:
+    def update_description(self, description: str | None) -> None:
         """Set a new agent description.
 
         Args:
-            description: New description.
+            description: New description, ``None`` clears it.
         """
         self.description = description

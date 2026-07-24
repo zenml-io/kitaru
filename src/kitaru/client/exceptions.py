@@ -47,6 +47,10 @@ class NotFoundError(APIError):
     """Not found error."""
 
 
+class ConflictError(APIError):
+    """Conflict error."""
+
+
 class ValidationError(APIError):
     """Validation error."""
 
@@ -59,6 +63,7 @@ _STATUS_ERRORS: dict[int, type[APIError]] = {
     401: AuthenticationError,
     403: AuthorizationError,
     404: NotFoundError,
+    409: ConflictError,
     422: ValidationError,
 }
 

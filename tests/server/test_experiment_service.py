@@ -53,6 +53,7 @@ from kitaru.server.domain.experiment import (
     ExperimentFrozen,
     ExperimentInUse,
     ExperimentNotFound,
+    InvalidExperiment,
 )
 from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
@@ -455,6 +456,96 @@ async def test_update_experiment_name_and_description(
     assert updated.description == "Second try"
     assert updated.replay_config_id == created.replay_config_id
     assert config == created_config
+
+
+async def test_update_experiment_absent_fields_unchanged(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Keep every field on an update without set fields."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    created, created_config = await service.create_experiment(
+        experiment_create(cohort.id, description="First try"), actor=ACTOR
+    )
+    updated, config = await service.update_experiment(
+        created.id, ExperimentUpdate(), actor=ACTOR
+    )
+    assert updated.name == "swap-model"
+    assert updated.description == "First try"
+    assert updated.replay_config_id == created.replay_config_id
+    assert config == created_config
+
+
+async def test_update_experiment_null_clears_description(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Clear the description on an explicit null."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id, description="First try"), actor=ACTOR
+    )
+    updated, _ = await service.update_experiment(
+        created.id, ExperimentUpdate(description=None), actor=ACTOR
+    )
+    assert updated.description is None
+
+
+async def test_update_experiment_null_clears_override(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Clear the override on an explicit null via a new config row."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id, override=ReplayOverride(model="claude-sonnet-5")),
+        actor=ACTOR,
+    )
+    updated, config = await service.update_experiment(
+        created.id, ExperimentUpdate(override=None), actor=ACTOR
+    )
+    assert updated.replay_config_id != created.replay_config_id
+    assert config.override is None
+    assert config.scoring_policy == SCORING_POLICY
+
+
+async def test_update_experiment_null_required_fields_rejected(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Reject explicit nulls for name, cohort id, tool policy, and scoring policy."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    with pytest.raises(InvalidExperiment, match="Experiment name cannot be null"):
+        await service.update_experiment(
+            created.id, ExperimentUpdate(name=None), actor=ACTOR
+        )
+    with pytest.raises(InvalidExperiment, match="Experiment cohort id cannot be null"):
+        await service.update_experiment(
+            created.id, ExperimentUpdate(cohort_id=None), actor=ACTOR
+        )
+    with pytest.raises(
+        InvalidExperiment, match="Experiment tool policy cannot be null"
+    ):
+        await service.update_experiment(
+            created.id, ExperimentUpdate(tool_policy=None), actor=ACTOR
+        )
+    with pytest.raises(
+        InvalidExperiment, match="Experiment scoring policy cannot be null"
+    ):
+        await service.update_experiment(
+            created.id, ExperimentUpdate(scoring_policy=None), actor=ACTOR
+        )
 
 
 async def test_update_experiment_config_repoints_and_collects(

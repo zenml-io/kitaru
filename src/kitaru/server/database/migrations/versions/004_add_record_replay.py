@@ -118,9 +118,6 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("session_count", sa.Integer(), nullable=False),
-        sa.Column(
-            "filter_snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=True
-        ),
         sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_cohort_agent_id"),
         sa.ForeignKeyConstraint(
             ["owner_id"],

@@ -18,9 +18,9 @@ import uuid
 from kitaru.server.application.interfaces.agent_repository import (
     AgentRepository,
 )
-from kitaru.server.application.models.agents import AgentFilter
+from kitaru.server.application.models.agents import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent import Agent, InvalidAgent
 
 
 class AgentService:
@@ -91,20 +91,22 @@ class AgentService:
     async def update_agent(
         self,
         agent_id: uuid.UUID,
-        name: str | None,
-        description: str | None,
+        command: AgentUpdate,
         actor: AuthContext,
     ) -> Agent:
         """Partially update an agent.
 
+        Fields absent from the command stay unchanged. An explicit null
+        clears the description and is rejected for the name.
+
         Args:
             agent_id: Id of the agent.
-            name: New agent name, unchanged when ``None``.
-            description: New agent description, unchanged when ``None``.
+            command: Agent update command.
             actor: Caller context.
 
         Raises:
             AgentNotFound: No agent has this id.
+            InvalidAgent: The name is null.
             DuplicateAgentName: The agent name is already registered.
 
         Returns:
@@ -112,10 +114,12 @@ class AgentService:
         """
         _ = actor
         agent = await self._repository.get(agent_id)
-        if name is not None:
-            agent.update_name(name)
-        if description is not None:
-            agent.update_description(description)
+        if "name" in command.model_fields_set:
+            if command.name is None:
+                raise InvalidAgent("Agent name cannot be null")
+            agent.update_name(command.name)
+        if "description" in command.model_fields_set:
+            agent.update_description(command.description)
         return await self._repository.update(agent)
 
     async def delete_agent(self, agent_id: uuid.UUID, actor: AuthContext) -> None:
@@ -127,7 +131,8 @@ class AgentService:
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent still has versions.
+            AgentInUse: The agent is referenced by an agent version, a
+                session, or a cohort.
         """
         _ = actor
         await self._repository.delete(agent_id)

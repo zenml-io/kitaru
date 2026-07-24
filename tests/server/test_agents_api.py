@@ -19,7 +19,12 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAgentRepository, FakeAgentVersionRepository
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeCohortRepository,
+    FakeSessionRepository,
+)
 from kitaru.server.adapters.rest.dependencies import authorize, get_agent_service
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -27,6 +32,12 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.cohort import Cohort
+from kitaru.server.domain.session import (
+    Session,
+    SessionOrigin,
+    SessionStatus,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -158,6 +169,44 @@ async def test_update_agent(client: httpx.AsyncClient) -> None:
     assert response.json()["name"] == "triage-bot"
 
 
+async def test_update_agent_absent_fields_unchanged(client: httpx.AsyncClient) -> None:
+    """Keep every field on an update with an empty body."""
+    created = (
+        await client.post(
+            "/v1/agents",
+            json={"name": "support-bot", "description": "Answers tickets"},
+        )
+    ).json()
+    response = await client.patch(f"/v1/agents/{created['id']}", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "support-bot"
+    assert body["description"] == "Answers tickets"
+
+
+async def test_update_agent_null_clears_description(client: httpx.AsyncClient) -> None:
+    """Clear the description on an explicit null."""
+    created = (
+        await client.post(
+            "/v1/agents",
+            json={"name": "support-bot", "description": "Answers tickets"},
+        )
+    ).json()
+    response = await client.patch(
+        f"/v1/agents/{created['id']}", json={"description": None}
+    )
+    assert response.status_code == 200
+    assert response.json()["description"] is None
+
+
+async def test_update_agent_null_name_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an explicit null name."""
+    created = (await client.post("/v1/agents", json={"name": "support-bot"})).json()
+    response = await client.patch(f"/v1/agents/{created['id']}", json={"name": None})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Agent name cannot be null"}
+
+
 async def test_update_agent_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 when renaming to a registered name."""
     response = await client.post("/v1/agents", json={"name": "support-bot"})
@@ -210,5 +259,51 @@ async def test_delete_agent_with_versions(
     assert response.json() == {
         "detail": f"Agent {agent_id} is referenced by agent versions"
     }
+    response = await client.get(f"/v1/agents/{agent_id}")
+    assert response.status_code == 200
+
+
+async def test_delete_agent_with_sessions(
+    client: httpx.AsyncClient, repository: FakeAgentRepository
+) -> None:
+    """Observe HTTP 409 when deleting an agent that still has sessions."""
+    created = (await client.post("/v1/agents", json={"name": "support-bot"})).json()
+    agent_id = uuid.UUID(created["id"])
+    session_repository = FakeSessionRepository(repository)
+    await session_repository.create(
+        Session(
+            owner_id=ACCOUNT.id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    response = await client.delete(f"/v1/agents/{agent_id}")
+    assert response.status_code == 409
+    assert response.json() == {"detail": f"Agent {agent_id} is referenced by sessions"}
+    response = await client.get(f"/v1/agents/{agent_id}")
+    assert response.status_code == 200
+
+
+async def test_delete_agent_with_cohorts(
+    client: httpx.AsyncClient, repository: FakeAgentRepository
+) -> None:
+    """Observe HTTP 409 when deleting an agent that is referenced by cohorts."""
+    created = (await client.post("/v1/agents", json={"name": "support-bot"})).json()
+    agent_id = uuid.UUID(created["id"])
+    session_repository = FakeSessionRepository(repository)
+    cohort_repository = FakeCohortRepository(session_repository, repository)
+    await cohort_repository.create(
+        Cohort(
+            owner_id=ACCOUNT.id,
+            agent_id=agent_id,
+            name="baseline",
+            session_count=0,
+        ),
+        [],
+    )
+    response = await client.delete(f"/v1/agents/{agent_id}")
+    assert response.status_code == 409
+    assert response.json() == {"detail": f"Agent {agent_id} is referenced by cohorts"}
     response = await client.get(f"/v1/agents/{agent_id}")
     assert response.status_code == 200

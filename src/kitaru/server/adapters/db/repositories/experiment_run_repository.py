@@ -15,7 +15,7 @@
 
 import uuid
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -29,6 +29,7 @@ from kitaru.server.adapters.db.schemas.experiment_run import (
     ExperimentRunSchema,
 )
 from kitaru.server.adapters.db.schemas.replay import ReplaySchema
+from kitaru.server.adapters.db.schemas.tag import TagLinkSchema
 from kitaru.server.adapters.db.tag_filtering import tagged_resource_ids
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.domain.experiment import ExperimentNotFound
@@ -130,6 +131,10 @@ class SQLExperimentRunRepository:
             statement = statement.where(
                 col(ExperimentRunSchema.experiment_id) == run_filter.experiment_id
             )
+        if run_filter.status is not None:
+            statement = statement.where(
+                col(ExperimentRunSchema.status) == run_filter.status.value
+            )
         if run_filter.tag is not None:
             statement = statement.where(
                 col(ExperimentRunSchema.id).in_(
@@ -172,6 +177,31 @@ class SQLExperimentRunRepository:
         row.error = run.error
         await self._session.flush()
         return row.to_domain()
+
+    async def delete(self, run_id: uuid.UUID) -> None:
+        """Delete an experiment run by id, including its replays and tag links.
+
+        Replays cascade through their foreign key, tag links carry no
+        foreign key and are removed here.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+        """
+        row = await self._session.get(ExperimentRunSchema, run_id)
+        if row is None:
+            raise ExperimentRunNotFound(run_id)
+        await self._session.execute(
+            delete(TagLinkSchema).where(
+                col(TagLinkSchema.resource_type)
+                == TagResourceType.EXPERIMENT_RUN.value,
+                col(TagLinkSchema.resource_id) == run_id,
+            )
+        )
+        await self._session.delete(row)
+        await self._session.flush()
 
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.

@@ -14,6 +14,7 @@
 """Replay filter and command models."""
 
 import uuid
+from datetime import datetime
 
 from pydantic import Field, PositiveInt
 
@@ -33,6 +34,9 @@ class ReplayFilter(FrozenModel):
     original_session_id: uuid.UUID | None = None
     status: ReplayStatus | None = None
     standalone: bool | None = None
+    worker_id: str | None = None
+    stale_before: datetime | None = None
+    max_attempts: int | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
 

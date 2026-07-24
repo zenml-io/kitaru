@@ -28,7 +28,10 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
 )
-from kitaru.server.adapters.rest.mapping.accounts import account_to_response
+from kitaru.server.adapters.rest.mapping.accounts import (
+    account_to_response,
+    account_update_to_command,
+)
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -146,9 +149,6 @@ async def update_account(
         Updated account.
     """
     account = await service.update_account(
-        account_id,
-        active=body.active,
-        password=body.password,
-        actor=actor,
+        account_id, account_update_to_command(body), actor=actor
     )
     return account_to_response(account)

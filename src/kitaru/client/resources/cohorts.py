@@ -40,7 +40,7 @@ class CohortsResource:
         self._client = client
 
     async def create(self, request: CohortCreateRequest) -> CohortResponse:
-        """Create a cohort from explicit session ids or a session filter.
+        """Create a cohort from explicit session ids.
 
         Args:
             request: Cohort create request.

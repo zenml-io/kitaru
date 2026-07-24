@@ -16,14 +16,18 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.experiment_runs import ExperimentRunResponse
+from kitaru.api_models.v1.experiment_runs import (
+    ExperimentRunResponse,
+    ExperimentRunStatus,
+)
 from kitaru.api_models.v1.replays import (
     ReplayClaimRequest,
     ReplayClaimResponse,
     ReplayResponse,
+    ReplayStatus,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -31,8 +35,12 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_to_response,
+    run_status_to_domain,
 )
-from kitaru.server.adapters.rest.mapping.replays import replay_to_response
+from kitaru.server.adapters.rest.mapping.replays import (
+    replay_status_to_domain,
+    replay_to_response,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment_runs import (
     ExperimentRunFilter,
@@ -49,18 +57,23 @@ router = APIRouter()
 async def list_experiment_runs(
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    experiment_id: uuid.UUID | None = None,
+    status: ExperimentRunStatus | None = None,
     tag: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
 ) -> Page[ExperimentRunResponse]:
     """List experiment runs.
 
-    Clients observe HTTP 200 on success and 422 on invalid pagination
+    Clients observe HTTP 200 on success, 404 when no experiment has the
+    filtered experiment id, and 422 on invalid filter or pagination
     parameters.
 
     Args:
         service: Experiment run service.
         actor: Caller context.
+        experiment_id: Filter on experiment id.
+        status: Filter on run status.
         tag: Filter on attached tag name.
         page: Page number.
         page_size: Page size.
@@ -68,7 +81,13 @@ async def list_experiment_runs(
     Returns:
         Page of experiment runs.
     """
-    run_filter = ExperimentRunFilter(tag=tag, page=page, page_size=page_size)
+    run_filter = ExperimentRunFilter(
+        experiment_id=experiment_id,
+        status=run_status_to_domain(status),
+        tag=tag,
+        page=page,
+        page_size=page_size,
+    )
     runs, total = await service.list_runs(run_filter, actor=actor)
     return Page[ExperimentRunResponse](
         items=[experiment_run_to_response(run, progress) for run, progress in runs],
@@ -101,30 +120,55 @@ async def get_experiment_run(
     return experiment_run_to_response(run, progress)
 
 
+@router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_experiment_run(
+    run_id: uuid.UUID,
+    service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> None:
+    """Delete a terminal experiment run, including its replays.
+
+    Deletes each replay's config when nothing else references it.
+
+    Clients observe HTTP 204 on success, 404 when no experiment run has
+    this id, and 409 when the run is not terminal.
+
+    Args:
+        run_id: Id of the experiment run.
+        service: Experiment run service.
+        actor: Caller context.
+    """
+    await service.delete_run(run_id, actor=actor)
+
+
 @router.get("/{run_id}/replays")
 async def list_experiment_run_replays(
     run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    status: ReplayStatus | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
 ) -> Page[ReplayResponse]:
     """List the replays of an experiment run.
 
     Clients observe HTTP 200 on success, 404 when no experiment run has
-    this id, and 422 on invalid pagination parameters.
+    this id, and 422 on invalid filter or pagination parameters.
 
     Args:
         run_id: Id of the experiment run.
         service: Experiment run service.
         actor: Caller context.
+        status: Filter on replay status.
         page: Page number.
         page_size: Page size.
 
     Returns:
         Page of replays.
     """
-    replays_filter = ExperimentRunReplaysFilter(page=page, page_size=page_size)
+    replays_filter = ExperimentRunReplaysFilter(
+        status=replay_status_to_domain(status), page=page, page_size=page_size
+    )
     replays, total = await service.list_run_replays(run_id, replays_filter, actor=actor)
     return Page[ReplayResponse](
         items=[replay_to_response(replay, config) for replay, config in replays],

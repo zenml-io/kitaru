@@ -103,6 +103,10 @@ class NoRunnableAgentVersion(ConflictError):
         super().__init__(f"Agent {agent_id} has no runnable version")
 
 
+class InvalidAgentVersion(ValidationError):
+    """Raised when an agent version violates its shape rules."""
+
+
 class InvalidRunSpec(ValidationError):
     """Raised when a run spec violates its shape rules."""
 
@@ -158,19 +162,19 @@ class AgentVersion(DomainModel):
     created: datetime | None = None
     updated: datetime | None = None
 
-    def update_description(self, description: str) -> None:
+    def update_description(self, description: str | None) -> None:
         """Set a new version description.
 
         Args:
-            description: New description.
+            description: New description, ``None`` clears it.
         """
         self.description = description
 
-    def update_run_spec(self, run_spec: RunSpec, frozen: bool) -> None:
+    def update_run_spec(self, run_spec: RunSpec | None, frozen: bool) -> None:
         """Set a new run specification.
 
         Args:
-            run_spec: New run specification.
+            run_spec: New run specification, ``None`` clears it.
             frozen: Whether a replay references the version.
 
         Raises:

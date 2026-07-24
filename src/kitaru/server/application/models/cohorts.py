@@ -17,7 +17,6 @@ import uuid
 
 from pydantic import Field, PositiveInt
 
-from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.base import FrozenModel
 
 
@@ -42,6 +41,12 @@ class CohortCreate(FrozenModel):
 
     name: str
     description: str | None = None
-    agent_id: uuid.UUID | None = None
-    session_ids: list[uuid.UUID] | None = None
-    session_filter: SessionFilter | None = None
+    agent_id: uuid.UUID
+    session_ids: list[uuid.UUID]
+
+
+class CohortUpdate(FrozenModel):
+    """Cohort update command."""
+
+    name: str | None = None
+    description: str | None = None

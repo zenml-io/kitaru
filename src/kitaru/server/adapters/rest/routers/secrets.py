@@ -29,7 +29,10 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_secret_service,
 )
-from kitaru.server.adapters.rest.mapping.secrets import secret_to_response
+from kitaru.server.adapters.rest.mapping.secrets import (
+    secret_to_response,
+    secret_update_to_command,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
@@ -143,7 +146,7 @@ async def update_secret(
         Updated secret without values.
     """
     secret = await service.update_secret(
-        secret_id, type=body.type, values=body.values, actor=actor
+        secret_id, secret_update_to_command(body), actor=actor
     )
     return secret_to_response(secret)
 

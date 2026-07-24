@@ -13,8 +13,25 @@
 #  permissions and limitations under the License.
 """Agent DTO conversions."""
 
-from kitaru.api_models.v1.agents import AgentResponse
+from kitaru.api_models.v1.agents import AgentResponse, AgentUpdateRequest
+from kitaru.server.adapters.rest.mapping.partial import set_fields
+from kitaru.server.application.models.agents import AgentUpdate
 from kitaru.server.domain.agent import Agent
+
+
+def agent_update_to_command(body: AgentUpdateRequest) -> AgentUpdate:
+    """Convert an agent update request to its command.
+
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
+    Args:
+        body: Agent update request.
+
+    Returns:
+        Agent update command.
+    """
+    return AgentUpdate(**set_fields(body))
 
 
 def agent_to_response(agent: Agent) -> AgentResponse:

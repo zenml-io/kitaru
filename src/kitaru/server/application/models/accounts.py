@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Account filter model."""
+"""Account filter and command models."""
 
 from pydantic import Field, PositiveInt
 
@@ -25,3 +25,10 @@ class AccountFilter(FrozenModel):
     active: bool | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
+
+
+class AccountUpdate(FrozenModel):
+    """Account update command."""
+
+    active: bool | None = None
+    password: str | None = None

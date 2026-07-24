@@ -82,6 +82,17 @@ class ExperimentRunRepository(Protocol):
         """
         ...
 
+    async def delete(self, run_id: uuid.UUID) -> None:
+        """Delete an experiment run by id, including its replays and tag links.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has this id.
+        """
+        ...
+
     async def has_runs(self, experiment_id: uuid.UUID) -> bool:
         """Report whether an experiment has stored runs.
 

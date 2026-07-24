@@ -413,6 +413,38 @@ async def test_query_by_tag(setup: Setup) -> None:
     assert total == 0
 
 
+async def test_query_by_status(setup: Setup) -> None:
+    """Query runs by status."""
+    seed = await seed_experiment(setup)
+    pending = await setup.runs.create(run_entity(setup, seed), [])
+    started = await setup.runs.create(run_entity(setup, seed), [])
+    started.start()
+    await setup.runs.update(started)
+
+    runs, total = await setup.runs.query(
+        ExperimentRunFilter(status=ExperimentRunStatus.PENDING)
+    )
+    assert total == 1
+    assert runs[0].id == pending.id
+
+    runs, total = await setup.runs.query(
+        ExperimentRunFilter(status=ExperimentRunStatus.RUNNING)
+    )
+    assert total == 1
+    assert runs[0].id == started.id
+
+    runs, total = await setup.runs.query(
+        ExperimentRunFilter(
+            experiment_id=seed.experiment.id, status=ExperimentRunStatus.RUNNING
+        )
+    )
+    assert total == 1
+    runs, total = await setup.runs.query(
+        ExperimentRunFilter(status=ExperimentRunStatus.COMPLETED)
+    )
+    assert total == 0
+
+
 async def test_has_runs(setup: Setup) -> None:
     """Report run existence per experiment."""
     seed = await seed_experiment(setup)
@@ -420,6 +452,44 @@ async def test_has_runs(setup: Setup) -> None:
     await setup.runs.create(run_entity(setup, seed), [])
     assert await setup.runs.has_runs(seed.experiment.id) is True
     assert await setup.runs.has_runs(uuid.uuid4()) is False
+
+
+async def test_delete_removes_run_replays_and_tag_links(setup: Setup) -> None:
+    """Delete a run with its replays and tag links."""
+    seed = await seed_experiment(setup)
+    run = await setup.runs.create(run_entity(setup, seed), [])
+    replays = replay_entities(run, seed)
+    for replay in replays:
+        await setup.replays.create(replay)
+    tag = await setup.tags.create(Tag(owner_id=setup.owner_id, name="prod"))
+    await setup.tags.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.EXPERIMENT_RUN,
+            resource_id=run.id,
+        )
+    )
+
+    await setup.runs.delete(run.id)
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {run.id} was not found"
+    ):
+        await setup.runs.get(run.id)
+    _, total = await setup.replays.query(ReplayFilter(experiment_run_id=run.id))
+    assert total == 0
+    _, total = await setup.runs.query(ExperimentRunFilter(tag="prod"))
+    assert total == 0
+    # The experiment still references the config.
+    assert await setup.configs.delete_if_unreferenced(seed.config.id) is False
+
+
+async def test_delete_not_found(setup: Setup) -> None:
+    """Raise for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
+    ):
+        await setup.runs.delete(missing_id)
 
 
 async def test_count_by_status(setup: Setup) -> None:
@@ -569,6 +639,65 @@ async def test_requeue_stale_requeues_and_times_out(setup: Setup) -> None:
     assert timed_out.status is ReplayStatus.TIMED_OUT
     assert timed_out.error == HEARTBEAT_TIMEOUT_ERROR
     assert timed_out.ended_at is not None
+
+
+async def test_replay_query_by_worker_id(setup: Setup) -> None:
+    """Query replays by claiming worker id."""
+    seed = await seed_experiment(setup)
+    run = run_entity(setup, seed)
+    created = await setup.runs.create(run, replay_entities(run, seed))
+    first = await setup.replays.claim_pending(created.id, "worker-1", 1)
+    await setup.replays.claim_pending(created.id, "worker-2", 1)
+
+    replays, total = await setup.replays.query(ReplayFilter(worker_id="worker-1"))
+    assert total == 1
+    assert replays[0].id == first[0].id
+
+    replays, total = await setup.replays.query(
+        ReplayFilter(experiment_run_id=created.id, worker_id="worker-3")
+    )
+    assert total == 0
+
+
+async def test_replay_query_status_projects_staleness(setup: Setup) -> None:
+    """Match a status filter with the staleness context on the projected status."""
+    seed = await seed_experiment(setup)
+    run = run_entity(setup, seed)
+    created = await setup.runs.create(run, replay_entities(run, seed))
+    claimed = await setup.replays.claim_pending(created.id, "worker-1", 2)
+    exhausted = claimed[0].model_copy(update={"attempt": 3})
+    await setup.replays.update(exhausted)
+
+    fresh = datetime.now(UTC) - timedelta(seconds=60)
+    _, total = await setup.replays.query(
+        ReplayFilter(status=ReplayStatus.CLAIMED, stale_before=fresh, max_attempts=3)
+    )
+    assert total == 2
+
+    # A threshold in the future marks both claims stale: one matches
+    # pending, one at the attempt limit matches timed out.
+    stale = datetime.now(UTC) + timedelta(seconds=60)
+    replays, total = await setup.replays.query(
+        ReplayFilter(status=ReplayStatus.PENDING, stale_before=stale, max_attempts=3)
+    )
+    assert total == 1
+    assert replays[0].id == claimed[1].id
+    replays, total = await setup.replays.query(
+        ReplayFilter(status=ReplayStatus.TIMED_OUT, stale_before=stale, max_attempts=3)
+    )
+    assert total == 1
+    assert replays[0].id == exhausted.id
+    _, total = await setup.replays.query(
+        ReplayFilter(status=ReplayStatus.CLAIMED, stale_before=stale, max_attempts=3)
+    )
+    assert total == 0
+
+    # Without the staleness context the stored status matches.
+    _, total = await setup.replays.query(ReplayFilter(status=ReplayStatus.CLAIMED))
+    assert total == 2
+    # Filtering never writes.
+    stored = await setup.replays.get(claimed[1].id)
+    assert stored.status is ReplayStatus.CLAIMED
 
 
 async def test_concurrent_claims_do_not_double_claim() -> None:

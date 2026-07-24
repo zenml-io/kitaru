@@ -103,32 +103,6 @@ async def test_cohort_flow_persists_across_requests(
     assert response.status_code == 204
 
 
-async def test_create_from_filter_snapshots_filter(
-    client: httpx.AsyncClient,
-) -> None:
-    """Create a cohort from a filter and store the snapshot."""
-    agent_id = await create_agent(client)
-    matching = await create_completed_session(client, agent_id, name="run")
-    await create_completed_session(client, agent_id, name="other")
-    response = await client.post(
-        "/v1/cohorts",
-        json={"name": "baseline", "filter": {"agent_id": agent_id, "name": "run"}},
-    )
-    assert response.status_code == 201
-    cohort_id = response.json()["id"]
-
-    response = await client.get(f"/v1/cohorts/{cohort_id}")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["agent_id"] == agent_id
-    assert body["session_count"] == 1
-    assert body["filter_snapshot"] == {"agent_id": agent_id, "name": "run"}
-
-    response = await client.get(f"/v1/cohorts/{cohort_id}/sessions")
-    assert response.status_code == 200
-    assert [item["id"] for item in response.json()["items"]] == [matching]
-
-
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
     agent_id = await create_agent(client)

@@ -453,3 +453,80 @@ within each group.
   replay completion.
 - Node `inputs`/`outputs` are unbounded JSONB with no size cap or
   truncation, one large session degrades ingest and diff computation.
+
+## Manual API testing fixes
+
+A manual pass over the whole client surface against a live server produced
+these fixes, applied after the sections above were written.
+
+- Client: optional query params in `sessions.list` serialize with
+  `is not None` instead of truthiness. 409 responses raise a typed
+  `ConflictError`. `auth.logout` covers `POST /v1/logout`.
+- Login with empty credentials returns 401 instead of 422. The form
+  fields default to empty strings so credential validation owns the
+  failure.
+- Agent deletion with referencing sessions or cohorts returned an
+  unhandled 500. All inbound FKs of `agent` now map to `AgentInUse`,
+  and every other delete path was audited for the same gap.
+- Non-finite floats (NaN, Infinity) in request bodies reached JSONB and
+  killed the connection with a 500. Request models now use shared
+  `FiniteFloat` and `JsonValue` types that reject them with 422, and the
+  validation-error handler serializes non-finite echoes safely.
+- Update endpoints distinguish absent fields from explicit nulls via
+  command models built from `model_fields_set` (`mapping/partial.py`).
+  Explicit null clears nullable fields and 422s on non-nullable ones.
+  Previously null was silently ignored.
+- Cohort creation requires `agent_id` and a non-empty `session_ids`
+  list. The filter path and the `filter_snapshot` column were removed,
+  filter-based creation moved to design doc future improvements.
+- Replay status filters match the heartbeat-staleness projection the
+  responses show. `ReplayFilter` carries `stale_before` and
+  `max_attempts`, and the SQL query reuses the `count_by_status` case
+  expression.
+- Worker discovery: run lists filter by `experiment_id` and `status`,
+  run replay lists by `status`, replay lists by `experiment_run_id` and
+  `worker_id`.
+- Heartbeat returns 200 with the replay status for every terminal
+  status, `canceled` now means the worker should stop. Previously
+  completed, failed, and timed out returned 409.
+- Standalone replay lifecycle: `POST /v1/replays/{id}/claim` records the
+  worker and persists the staleness resolution (a stale started replay
+  previously wedged, displayed pending but rejected every transition),
+  `POST /v1/replays/{id}/release` requeues a claimed or running replay,
+  `POST /v1/replays/{id}/retry` re-runs a failed, timed out, or
+  canceled standalone replay. `start()` records a heartbeat baseline so
+  never-heartbeated replays age out. The runner claims standalone
+  replays instead of racing `PATCH status=running`.
+- Run finalization produces `failed` with a replay count error when
+  replays failed or timed out, `ExperimentRunStatus.FAILED` was
+  previously unreachable. `pass_rate` divides by completed, failed, and
+  timed out replays instead of scored ones only.
+- The documented `get_spec` 404 for deleted run spec secrets was
+  unreachable (secret deletion is blocked with 409 while referenced) and
+  was removed from the docs.
+- Deletion: standalone replays (pending or terminal) and terminal
+  experiment runs with their replays, replay configs are cleaned up when
+  unreferenced. An experiment with runs was previously undeletable.
+
+## Known issue: read-your-writes race (not addressed)
+
+`get_session` commits in the dependency teardown, and FastAPI sends the
+response before the exit stack unwinds, so a fast follow-up request can
+miss a row the previous response already confirmed. Observed twice under
+concurrent load (create 201, immediate PATCH on the same id 404). A
+commit-time failure today also rolls back silently after a 2xx was sent.
+Options, none applied yet:
+
+1. Custom `APIRoute` subclass that commits after the handler returns and
+   before the response is serialized. The session moves onto
+   `request.state`, the yield dependency keeps rollback-on-error duty.
+   Smallest change with guaranteed ordering, commit failures become
+   proper error responses.
+2. Raw ASGI middleware that commits before forwarding
+   `http.response.start`. Also covers streaming endpoints, but the
+   middleware owns the session lifecycle and mapping a commit failure to
+   a 500 before headers are sent is more involved. Must be raw ASGI,
+   not `BaseHTTPMiddleware`.
+3. Explicit commit at the end of each route or service call, demoting
+   the dependency to rollback-only. Visible transaction boundary, but
+   every route must remember it, so it needs a lint or test guard.

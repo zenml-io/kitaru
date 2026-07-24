@@ -18,7 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeAgentRepository, FakeAgentVersionRepository
-from kitaru.server.application.models.agents import AgentFilter
+from kitaru.server.application.models.agents import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.domain.account import Account
@@ -26,6 +26,7 @@ from kitaru.server.domain.agent import (
     AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
+    InvalidAgent,
 )
 from kitaru.server.domain.agent_version import AgentVersion
 
@@ -112,7 +113,7 @@ async def test_update_agent(service: AgentService) -> None:
         name="support-bot", description=None, actor=ACTOR
     )
     updated = await service.update_agent(
-        created.id, name="triage-bot", description=None, actor=ACTOR
+        created.id, AgentUpdate(name="triage-bot"), actor=ACTOR
     )
     assert updated.name == "triage-bot"
     assert updated.description is None
@@ -120,10 +121,40 @@ async def test_update_agent(service: AgentService) -> None:
     assert created.updated is not None
     assert updated.updated > created.updated
     updated = await service.update_agent(
-        created.id, name=None, description="Sorts tickets", actor=ACTOR
+        created.id, AgentUpdate(description="Sorts tickets"), actor=ACTOR
     )
     assert updated.name == "triage-bot"
     assert updated.description == "Sorts tickets"
+
+
+async def test_update_agent_absent_fields_unchanged(service: AgentService) -> None:
+    """Keep every field on an update without set fields."""
+    created = await service.create_agent(
+        name="support-bot", description="Answers tickets", actor=ACTOR
+    )
+    updated = await service.update_agent(created.id, AgentUpdate(), actor=ACTOR)
+    assert updated.name == "support-bot"
+    assert updated.description == "Answers tickets"
+
+
+async def test_update_agent_null_clears_description(service: AgentService) -> None:
+    """Clear the description on an explicit null."""
+    created = await service.create_agent(
+        name="support-bot", description="Answers tickets", actor=ACTOR
+    )
+    updated = await service.update_agent(
+        created.id, AgentUpdate(description=None), actor=ACTOR
+    )
+    assert updated.description is None
+
+
+async def test_update_agent_null_name_rejected(service: AgentService) -> None:
+    """Reject an explicit null for the name."""
+    created = await service.create_agent(
+        name="support-bot", description=None, actor=ACTOR
+    )
+    with pytest.raises(InvalidAgent, match="Agent name cannot be null"):
+        await service.update_agent(created.id, AgentUpdate(name=None), actor=ACTOR)
 
 
 async def test_update_agent_duplicate_name(service: AgentService) -> None:
@@ -134,7 +165,7 @@ async def test_update_agent_duplicate_name(service: AgentService) -> None:
         DuplicateAgentName, match="Agent name 'support-bot' is already registered"
     ):
         await service.update_agent(
-            other.id, name="support-bot", description=None, actor=ACTOR
+            other.id, AgentUpdate(name="support-bot"), actor=ACTOR
         )
 
 
@@ -142,7 +173,7 @@ async def test_update_agent_not_found(service: AgentService) -> None:
     """Raise for an unknown agent id."""
     with pytest.raises(AgentNotFound):
         await service.update_agent(
-            uuid.uuid4(), name="triage-bot", description=None, actor=ACTOR
+            uuid.uuid4(), AgentUpdate(name="triage-bot"), actor=ACTOR
         )
 
 

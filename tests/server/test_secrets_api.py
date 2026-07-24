@@ -264,6 +264,46 @@ async def test_update_secret(client: httpx.AsyncClient) -> None:
     assert response.json()["values"] == {"password": "hunter3"}
 
 
+async def test_update_secret_absent_fields_unchanged(client: httpx.AsyncClient) -> None:
+    """Keep every field on an update with an empty body."""
+    created = (
+        await client.post(
+            "/v1/secrets", json={"name": "db", "type": "database", "values": VALUES}
+        )
+    ).json()
+    response = await client.patch(f"/v1/secrets/{created['id']}", json={})
+    assert response.status_code == 200
+    assert response.json()["type"] == "database"
+
+    response = await client.get(
+        f"/v1/secrets/{created['id']}", params={"include_values": "true"}
+    )
+    assert response.status_code == 200
+    assert response.json()["values"] == VALUES
+
+
+async def test_update_secret_null_clears_type(client: httpx.AsyncClient) -> None:
+    """Clear the type on an explicit null."""
+    created = (
+        await client.post(
+            "/v1/secrets", json={"name": "db", "type": "database", "values": VALUES}
+        )
+    ).json()
+    response = await client.patch(f"/v1/secrets/{created['id']}", json={"type": None})
+    assert response.status_code == 200
+    assert response.json()["type"] is None
+
+
+async def test_update_secret_null_values_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for explicit null values."""
+    created = (
+        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    ).json()
+    response = await client.patch(f"/v1/secrets/{created['id']}", json={"values": None})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Secret values cannot be null"}
+
+
 async def test_update_secret_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown secret id."""
     response = await client.patch(

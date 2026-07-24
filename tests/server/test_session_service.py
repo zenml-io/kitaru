@@ -444,6 +444,60 @@ async def test_update_session_fields(service: SessionService, agent: Agent) -> N
     assert updated.updated > created.updated
 
 
+async def test_update_session_absent_fields_unchanged(
+    service: SessionService, agent: Agent
+) -> None:
+    """Keep every field on an update without set fields."""
+    created = await service.create_session(
+        recorded_command(
+            agent,
+            name="run-1",
+            expected={"answer": "42"},
+            metadata={"env": "prod"},
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_session(created.id, SessionUpdate(), actor=ACTOR)
+    assert updated.name == "run-1"
+    assert updated.expected == {"answer": "42"}
+    assert updated.metadata == {"env": "prod"}
+    assert updated.status is SessionStatus.IN_PROGRESS
+
+
+async def test_update_session_null_clears_fields(
+    service: SessionService, agent: Agent
+) -> None:
+    """Clear name and expected and reset metadata on explicit nulls."""
+    created = await service.create_session(
+        recorded_command(
+            agent,
+            name="run-1",
+            expected={"answer": "42"},
+            metadata={"env": "prod"},
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_session(
+        created.id,
+        SessionUpdate(name=None, expected=None, metadata=None),
+        actor=ACTOR,
+    )
+    assert updated.name is None
+    assert updated.expected is None
+    assert updated.metadata == {}
+
+
+async def test_update_session_null_status_rejected(
+    service: SessionService, agent: Agent
+) -> None:
+    """Reject an explicit null for the status."""
+    created = await service.create_session(recorded_command(agent), actor=ACTOR)
+    with pytest.raises(InvalidSession, match="Session status cannot be null"):
+        await service.update_session(
+            created.id, SessionUpdate(status=None), actor=ACTOR
+        )
+
+
 async def test_update_fields_on_terminal_session(
     service: SessionService, agent: Agent
 ) -> None:

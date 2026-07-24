@@ -32,6 +32,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.adapters.rest.mapping.cohorts import (
     cohort_create_to_command,
     cohort_to_response,
+    cohort_update_to_command,
 )
 from kitaru.server.adapters.rest.mapping.sessions import session_to_response
 from kitaru.server.application.models.auth import AuthContext
@@ -50,17 +51,15 @@ async def create_cohort(
     service: Annotated[CohortService, Depends(get_cohort_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> CohortResponse:
-    """Create a cohort from explicit session ids or a session filter.
+    """Create a cohort from explicit session ids.
 
-    Explicit session ids require an agent id and keep their order as the
-    member positions. A filter must pin an agent, resolves every matching
-    session, and is stored as the cohort's provenance snapshot. Membership
+    The session ids keep their order as the member positions. Membership
     is immutable after creation.
 
     Clients observe HTTP 201 on success, 404 when no agent or session has a
     referenced id, 409 when the name is already registered, and 422 when
-    the membership is empty, a member belongs to another agent or is in
-    progress, or the input is invalid.
+    the membership is empty, a session id repeats, a member belongs to
+    another agent or is in progress, or the input is invalid.
 
     Args:
         body: Cohort create request.
@@ -189,7 +188,7 @@ async def update_cohort(
         Updated cohort.
     """
     cohort = await service.update_cohort(
-        cohort_id, name=body.name, description=body.description, actor=actor
+        cohort_id, cohort_update_to_command(body), actor=actor
     )
     return cohort_to_response(cohort)
 

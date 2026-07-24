@@ -15,8 +15,29 @@
 
 from typing import Literal, overload
 
-from kitaru.api_models.v1.secrets import SecretResponse, SecretWithValuesResponse
+from kitaru.api_models.v1.secrets import (
+    SecretResponse,
+    SecretUpdateRequest,
+    SecretWithValuesResponse,
+)
+from kitaru.server.adapters.rest.mapping.partial import set_fields
+from kitaru.server.application.models.secrets import SecretUpdate
 from kitaru.server.domain.secret import Secret
+
+
+def secret_update_to_command(body: SecretUpdateRequest) -> SecretUpdate:
+    """Convert a secret update request to its command.
+
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
+    Args:
+        body: Secret update request.
+
+    Returns:
+        Secret update command.
+    """
+    return SecretUpdate(**set_fields(body))
 
 
 @overload

@@ -42,7 +42,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotRunnable,
     NoRunnableAgentVersion,
 )
-from kitaru.server.domain.experiment import Experiment
+from kitaru.server.domain.experiment import Experiment, InvalidExperiment
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunProgress,
@@ -176,7 +176,10 @@ class ExperimentService:
         Name and description update on any experiment. Cohort and config
         changes are rejected once a run exists. A config change inserts a
         new replay config row, repoints the experiment, and deletes the old
-        row when nothing else references it.
+        row when nothing else references it. Fields absent from the command
+        stay unchanged. An explicit null clears the description and override
+        and is rejected for the name, cohort id, tool policy, and scoring
+        policy.
 
         Args:
             experiment_id: Id of the experiment.
@@ -185,6 +188,8 @@ class ExperimentService:
 
         Raises:
             ExperimentNotFound: No experiment has this id.
+            InvalidExperiment: The name, cohort id, tool policy, or scoring
+                policy is null.
             ExperimentFrozen: A cohort or config change hits an experiment
                 with runs.
             CohortNotFound: No cohort has the referenced cohort id.
@@ -195,29 +200,38 @@ class ExperimentService:
             Updated experiment and its replay config.
         """
         experiment = await self._repository.get(experiment_id)
-        if command.name is not None:
+        fields = command.model_fields_set
+        if "name" in fields:
+            if command.name is None:
+                raise InvalidExperiment("Experiment name cannot be null")
             experiment.update_name(command.name)
-        if command.description is not None:
+        if "description" in fields:
             experiment.update_description(command.description)
         old_config_id = experiment.replay_config_id
         config_changed = (
-            command.override is not None
-            or command.tool_policy is not None
-            or command.scoring_policy is not None
+            "override" in fields
+            or "tool_policy" in fields
+            or "scoring_policy" in fields
         )
         config = None
-        if command.cohort_id is not None or config_changed:
+        if "cohort_id" in fields or config_changed:
             frozen = await self._run_repository.has_runs(experiment_id)
-            if command.cohort_id is not None:
+            if "cohort_id" in fields:
+                if command.cohort_id is None:
+                    raise InvalidExperiment("Experiment cohort id cannot be null")
                 await self._cohort_repository.get(command.cohort_id)
                 experiment.update_cohort_id(command.cohort_id, frozen=frozen)
             if config_changed:
+                if "tool_policy" in fields and command.tool_policy is None:
+                    raise InvalidExperiment("Experiment tool policy cannot be null")
+                if "scoring_policy" in fields and command.scoring_policy is None:
+                    raise InvalidExperiment("Experiment scoring policy cannot be null")
                 old_config = await self._replay_config_repository.get(old_config_id)
                 config = await self._replay_config_repository.create(
                     ReplayConfig(
                         owner_id=actor.account.id,
                         override=command.override
-                        if command.override is not None
+                        if "override" in fields
                         else old_config.override,
                         tool_policy=command.tool_policy or old_config.tool_policy,
                         scoring_policy=command.scoring_policy

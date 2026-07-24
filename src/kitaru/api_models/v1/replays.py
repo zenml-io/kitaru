@@ -20,7 +20,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import ConfigDict, Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
+from kitaru.api_models.v1.base import (
+    FiniteFloat,
+    JsonValue,
+    RequestModel,
+    ResponseModel,
+)
 from kitaru.api_models.v1.session_nodes import NodeType
 
 SOURCE_REF_PATTERN = r"^[^:\s]+:[^:\s]+$"
@@ -74,7 +79,7 @@ class ReplayOverride(RequestModel):
         default=None, description="Replacement system prompt."
     )
     prompt: str | None = Field(default=None, description="Replacement session inputs.")
-    model_params: dict[str, Any] | None = Field(
+    model_params: dict[str, JsonValue] | None = Field(
         default=None, description="Replacement model parameters."
     )
 
@@ -87,11 +92,11 @@ class ScorerConfig(RequestModel):
         pattern=SOURCE_REF_PATTERN,
         description="Scoring function reference as 'module:attribute'.",
     )
-    params: dict[str, Any] = Field(
+    params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Keyword arguments for the function."
     )
-    weight: float = Field(default=1.0, ge=0, description="Weight in the average.")
-    fail_below: float | None = Field(
+    weight: FiniteFloat = Field(default=1.0, ge=0, description="Weight in the average.")
+    fail_below: FiniteFloat | None = Field(
         default=None,
         description="Score at or below which the replay fails outright.",
     )
@@ -101,7 +106,7 @@ class ScoringPolicy(RequestModel):
     """Scoring policy."""
 
     scorers: list[ScorerConfig] = Field(min_length=1, description="Scorers to run.")
-    pass_threshold: float = Field(
+    pass_threshold: FiniteFloat = Field(
         ge=0, le=1, description="Weighted average required to pass."
     )
 
@@ -109,13 +114,13 @@ class ScoringPolicy(RequestModel):
 class StaticCase(RequestModel):
     """Static tool result case."""
 
-    match: dict[str, Any] | None = Field(
+    match: dict[str, JsonValue] | None = Field(
         default=None, description="Inputs to match, any inputs when omitted."
     )
     match_mode: StaticMatchMode = Field(
         default=StaticMatchMode.EXACT, description="Match mode."
     )
-    result: Any = Field(default=None, description="Tool result to return.")
+    result: JsonValue = Field(default=None, description="Tool result to return.")
 
 
 class ToolPolicyBase(RequestModel):
@@ -249,10 +254,10 @@ class ReplayUpdateRequest(RequestModel):
     passed: bool | None = Field(
         default=None, description="Scoring outcome, required for completed."
     )
-    score: float | None = Field(
+    score: FiniteFloat | None = Field(
         default=None, description="Weighted average, required for completed."
     )
-    scores: dict[str, float] | None = Field(
+    scores: dict[str, FiniteFloat] | None = Field(
         default=None, description="Scores by scorer name, required for completed."
     )
 
@@ -270,11 +275,18 @@ class ReplayClaimResponse(ResponseModel):
     replays: list[ReplayResponse] = Field(description="Claimed replays.")
 
 
+class StandaloneReplayClaimRequest(RequestModel):
+    """Standalone replay claim request."""
+
+    worker_id: str = Field(max_length=255, description="Id of the claiming worker.")
+
+
 class ReplayHeartbeatResponse(ResponseModel):
     """Replay heartbeat response."""
 
+    status: ReplayStatus = Field(description="Replay status.")
     canceled: bool = Field(
-        description="Whether the replay was canceled or its run is canceling."
+        description="Whether the worker should stop working on the replay."
     )
 
 
@@ -311,7 +323,7 @@ class ToolLookupRequest(RequestModel):
     """Tool lookup request."""
 
     tool_name: str = Field(max_length=255, description="Name of the called tool.")
-    inputs: Any = Field(default=None, description="Tool call inputs.")
+    inputs: JsonValue = Field(default=None, description="Tool call inputs.")
     cache_key: str = Field(
         min_length=64, max_length=64, description="Cache key of the tool call."
     )

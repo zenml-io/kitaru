@@ -72,3 +72,13 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
     body = response.json()
     assert body["active"] is False
     assert body["updated"] > created["updated"]
+
+
+async def test_update_null_fields_rejected(client: httpx.AsyncClient) -> None:
+    """Translate explicit nulls on required fields into HTTP 422."""
+    created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
+    response = await client.patch(
+        f"/v1/accounts/{created['id']}", json={"active": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Account active state cannot be null"}

@@ -17,11 +17,15 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.experiment_runs import ExperimentRunResponse
+from kitaru.api_models.v1.experiment_runs import (
+    ExperimentRunResponse,
+    ExperimentRunStatus,
+)
 from kitaru.api_models.v1.replays import (
     ReplayClaimRequest,
     ReplayClaimResponse,
     ReplayResponse,
+    ReplayStatus,
 )
 
 if TYPE_CHECKING:
@@ -41,6 +45,8 @@ class ExperimentRunsResource:
 
     async def list(
         self,
+        experiment_id: uuid.UUID | None = None,
+        status: ExperimentRunStatus | None = None,
         tag: str | None = None,
         page: int = 1,
         page_size: int = 20,
@@ -48,17 +54,24 @@ class ExperimentRunsResource:
         """List experiment runs.
 
         Args:
+            experiment_id: Filter on experiment id.
+            status: Filter on run status.
             tag: Filter on attached tag name.
             page: Page number.
             page_size: Page size.
 
         Raises:
-            APIError: The request failed.
+            APIError: The request failed, including 404 for a missing
+                experiment.
 
         Returns:
             Page of experiment runs.
         """
         params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if experiment_id is not None:
+            params["experiment_id"] = str(experiment_id)
+        if status is not None:
+            params["status"] = status.value
         if tag is not None:
             params["tag"] = tag
         response = await self._client.request(
@@ -85,6 +98,7 @@ class ExperimentRunsResource:
     async def list_replays(
         self,
         run_id: uuid.UUID,
+        status: ReplayStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Page[ReplayResponse]:
@@ -92,6 +106,7 @@ class ExperimentRunsResource:
 
         Args:
             run_id: Id of the experiment run.
+            status: Filter on replay status.
             page: Page number.
             page_size: Page size.
 
@@ -102,10 +117,13 @@ class ExperimentRunsResource:
         Returns:
             Page of replays.
         """
+        params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if status is not None:
+            params["status"] = status.value
         response = await self._client.request(
             "GET",
             f"/v1/experiment-runs/{run_id}/replays",
-            params={"page": page, "page_size": page_size},
+            params=params,
         )
         return Page[ReplayResponse].model_validate(response.json())
 
@@ -149,3 +167,15 @@ class ExperimentRunsResource:
             "POST", f"/v1/experiment-runs/{run_id}/cancel"
         )
         return ExperimentRunResponse.model_validate(response.json())
+
+    async def delete(self, run_id: uuid.UUID) -> None:
+        """Delete a terminal experiment run, including its replays.
+
+        Args:
+            run_id: Id of the experiment run.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                experiment run and 409 when the run is not terminal.
+        """
+        await self._client.request("DELETE", f"/v1/experiment-runs/{run_id}")

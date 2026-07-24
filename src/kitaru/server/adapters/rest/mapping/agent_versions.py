@@ -16,8 +16,13 @@
 from kitaru.api_models.v1.agent_versions import (
     AgentCapabilities as AgentCapabilitiesModel,
 )
-from kitaru.api_models.v1.agent_versions import AgentVersionResponse
+from kitaru.api_models.v1.agent_versions import (
+    AgentVersionResponse,
+    AgentVersionUpdateRequest,
+)
 from kitaru.api_models.v1.agent_versions import RunSpec as RunSpecModel
+from kitaru.server.adapters.rest.mapping.partial import set_fields
+from kitaru.server.application.models.agent_versions import AgentVersionUpdate
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
@@ -101,6 +106,28 @@ def capabilities_to_response(
         mcp_servers=capabilities.mcp_servers,
         skills=capabilities.skills,
     )
+
+
+def agent_version_update_to_command(
+    body: AgentVersionUpdateRequest,
+) -> AgentVersionUpdate:
+    """Convert an agent version update request to its command.
+
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
+    Args:
+        body: Agent version update request.
+
+    Returns:
+        Agent version update command.
+    """
+    fields = set_fields(body)
+    if "run_spec" in fields:
+        fields["run_spec"] = run_spec_to_domain(body.run_spec)
+    if "capabilities" in fields:
+        fields["capabilities"] = capabilities_to_domain(body.capabilities)
+    return AgentVersionUpdate(**fields)
 
 
 def agent_version_to_response(version: AgentVersion) -> AgentVersionResponse:

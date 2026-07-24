@@ -22,7 +22,9 @@ from test_experiments_api import (
     SCORING_POLICY,
     SCORING_POLICY_RESPONSE,
     create_agent,
+    create_cohort,
     create_completed_session,
+    create_experiment,
     create_runnable_version,
 )
 
@@ -263,6 +265,76 @@ async def test_list_replays_filters(client: httpx.AsyncClient) -> None:
     assert len(body["items"]) == 1
 
 
+async def test_list_replays_by_run_and_worker(client: httpx.AsyncClient) -> None:
+    """List replays filtered by experiment run and claiming worker."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    cohort_id = await create_cohort(client, agent_id, session_count=2)
+    experiment = await create_experiment(client, cohort_id)
+    response = await client.post(f"/v1/experiments/{experiment['id']}/runs", json={})
+    assert response.status_code == 201
+    run_id = response.json()["id"]
+    standalone_session = await create_completed_session(client, agent_id)
+    await create_replay(client, standalone_session)
+    response = await client.post(
+        f"/v1/experiment-runs/{run_id}/claim",
+        json={"worker_id": "worker-1", "max_replays": 1},
+    )
+    assert response.status_code == 200
+    claimed_id = response.json()["replays"][0]["id"]
+
+    response = await client.get("/v1/replays", params={"experiment_run_id": run_id})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert all(item["experiment_run_id"] == run_id for item in body["items"])
+
+    response = await client.get("/v1/replays", params={"worker_id": "worker-1"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == claimed_id
+
+    response = await client.get(
+        "/v1/replays",
+        params={"experiment_run_id": run_id, "worker_id": "worker-2"},
+    )
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_list_replays_stale_claim_matches_pending() -> None:
+    """Match a stale claim as pending in the status filter and the body."""
+    transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        agent_id = await create_agent(client)
+        await create_runnable_version(client, agent_id)
+        cohort_id = await create_cohort(client, agent_id)
+        experiment = await create_experiment(client, cohort_id)
+        response = await client.post(
+            f"/v1/experiments/{experiment['id']}/runs", json={}
+        )
+        assert response.status_code == 201
+        run_id = response.json()["id"]
+        response = await client.post(
+            f"/v1/experiment-runs/{run_id}/claim",
+            json={"worker_id": "worker-1", "max_replays": 1},
+        )
+        assert response.status_code == 200
+        replay_id = response.json()["replays"][0]["id"]
+
+        response = await client.get("/v1/replays", params={"status": "pending"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total"] == 1
+        assert body["items"][0]["id"] == replay_id
+        assert body["items"][0]["status"] == "pending"
+
+        response = await client.get("/v1/replays", params={"status": "claimed"})
+        assert response.status_code == 200
+        assert response.json()["total"] == 0
+
+
 async def test_list_replays_invalid_status(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an unknown status filter value."""
     response = await client.get("/v1/replays", params={"status": "bogus"})
@@ -384,7 +456,7 @@ async def test_runner_flow_completes_replay(client: httpx.AsyncClient) -> None:
 
     response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
     assert response.status_code == 200
-    assert response.json() == {"canceled": False}
+    assert response.json() == {"status": "running", "canceled": False}
 
     response = await client.patch(
         f"/v1/sessions/{result_session_id}", json={"status": "completed"}
@@ -423,6 +495,10 @@ async def test_runner_flow_completes_replay(client: httpx.AsyncClient) -> None:
     assert diff["node_pairs"] == []
     assert diff["added_nodes"] == []
     assert diff["removed_nodes"] == []
+
+    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    assert response.status_code == 200
+    assert response.json() == {"status": "completed", "canceled": True}
 
 
 async def test_patch_replay_illegal_transition(client: httpx.AsyncClient) -> None:
@@ -501,7 +577,278 @@ async def test_heartbeat_canceled_replay(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     response = await client.post(f"/v1/replays/{created['id']}/heartbeat")
     assert response.status_code == 200
-    assert response.json() == {"canceled": True}
+    assert response.json() == {"status": "canceled", "canceled": True}
+
+
+async def test_heartbeat_stops_on_terminal_replays(client: httpx.AsyncClient) -> None:
+    """Report the stop flag for failed and timed out replays."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    for status, body in (
+        ("failed", {"status": "failed", "error": "agent exited with code 1"}),
+        ("timed_out", {"status": "timed_out", "error": "wall clock limit exceeded"}),
+    ):
+        session_id = await create_completed_session(client, agent_id)
+        created = await create_replay(client, session_id)
+        await start_replay(client, created["id"])
+        response = await client.patch(f"/v1/replays/{created['id']}", json=body)
+        assert response.status_code == 200
+        response = await client.post(f"/v1/replays/{created['id']}/heartbeat")
+        assert response.status_code == 200
+        assert response.json() == {"status": status, "canceled": True}
+
+
+async def create_run_replay(client: httpx.AsyncClient) -> str:
+    """Store an experiment run with one pending replay through the API.
+
+    Args:
+        client: HTTP client for the app.
+
+    Returns:
+        Id of the run's replay.
+    """
+    agent_id = await create_agent(client, name="run-bot")
+    await create_runnable_version(client, agent_id)
+    cohort_id = await create_cohort(client, agent_id, name="run-cohort")
+    experiment = await create_experiment(client, cohort_id, name="run-experiment")
+    response = await client.post(f"/v1/experiments/{experiment['id']}/runs", json={})
+    assert response.status_code == 201
+    run_id = response.json()["id"]
+    response = await client.get(f"/v1/experiment-runs/{run_id}/replays")
+    assert response.status_code == 200
+    return response.json()["items"][0]["id"]
+
+
+async def test_claim_replay(client: httpx.AsyncClient) -> None:
+    """Claim a standalone replay for a worker."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    replay_id = created["id"]
+
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-1"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "claimed"
+    assert body["worker_id"] == "worker-1"
+    assert body["claimed_at"] is not None
+    assert body["heartbeat_at"] is not None
+
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-2"}
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {replay_id} cannot transition from 'claimed' to 'claimed'"
+    }
+
+
+async def test_claim_replay_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    response = await client.post(
+        f"/v1/replays/{missing_id}/claim", json={"worker_id": "worker-1"}
+    )
+    assert response.status_code == 404
+
+
+async def test_claim_run_replay(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 when claiming a run replay directly."""
+    replay_id = await create_run_replay(client)
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-1"}
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {replay_id} belongs to an experiment run"
+    }
+
+
+async def test_claim_resolves_stale_started_replay() -> None:
+    """Claim a started standalone replay whose worker lost its heartbeat."""
+    transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        agent_id = await create_agent(client)
+        await create_runnable_version(client, agent_id)
+        session_id = await create_completed_session(client, agent_id)
+        created = await create_replay(client, session_id)
+        replay_id = created["id"]
+        await start_replay(client, replay_id)
+
+        response = await client.get(f"/v1/replays/{replay_id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending"
+
+        response = await client.post(
+            f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-2"}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "claimed"
+        assert body["worker_id"] == "worker-2"
+        assert body["attempt"] == 2
+
+        response = await client.patch(
+            f"/v1/replays/{replay_id}", json={"status": "running"}
+        )
+        assert response.status_code == 200
+
+
+async def test_claim_times_out_exhausted_stale_replay() -> None:
+    """Observe HTTP 409 claiming a stale replay out of attempts."""
+    transport = httpx.ASGITransport(
+        app=experiment_app(heartbeat_timeout_seconds=-60, max_attempts=1)
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        agent_id = await create_agent(client)
+        await create_runnable_version(client, agent_id)
+        session_id = await create_completed_session(client, agent_id)
+        created = await create_replay(client, session_id)
+        replay_id = created["id"]
+        await start_replay(client, replay_id)
+
+        response = await client.post(
+            f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-2"}
+        )
+        assert response.status_code == 409
+        assert response.json() == {
+            "detail": f"Replay {replay_id} cannot transition from 'timed_out' "
+            f"to 'claimed'"
+        }
+        response = await client.get(f"/v1/replays/{replay_id}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "timed_out"
+
+
+async def test_release_replay(client: httpx.AsyncClient) -> None:
+    """Requeue a claimed or running replay through release."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    replay_id = created["id"]
+
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-1"}
+    )
+    assert response.status_code == 200
+    response = await client.post(f"/v1/replays/{replay_id}/release")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["attempt"] == 2
+    assert body["worker_id"] is None
+
+    await start_replay(client, replay_id)
+    response = await client.post(f"/v1/replays/{replay_id}/release")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["attempt"] == 3
+
+    response = await client.post(f"/v1/replays/{replay_id}/release")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {replay_id} cannot transition from 'pending' to 'pending'"
+    }
+
+
+async def test_release_replay_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    response = await client.post(f"/v1/replays/{missing_id}/release")
+    assert response.status_code == 404
+
+
+async def test_retry_replay(client: httpx.AsyncClient) -> None:
+    """Requeue a failed standalone replay through retry."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    replay_id = created["id"]
+    await start_replay(client, replay_id)
+    await link_result_session(client, replay_id)
+    response = await client.patch(
+        f"/v1/replays/{replay_id}",
+        json={"status": "failed", "error": "agent exited with code 1"},
+    )
+    assert response.status_code == 200
+
+    response = await client.post(f"/v1/replays/{replay_id}/retry")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "pending"
+    assert body["attempt"] == 2
+    assert body["error"] is None
+    assert body["result_session_id"] is None
+    assert body["started_at"] is None
+    assert body["ended_at"] is None
+
+
+async def test_retry_replay_conflicts(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 retrying a pending or run replay."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    response = await client.post(f"/v1/replays/{created['id']}/retry")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} cannot transition from 'pending' "
+        f"to 'pending'"
+    }
+
+    run_replay_id = await create_run_replay(client)
+    response = await client.post(f"/v1/replays/{run_replay_id}/retry")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {run_replay_id} belongs to an experiment run"
+    }
+
+
+async def test_delete_replay(client: httpx.AsyncClient) -> None:
+    """Delete a standalone replay."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+
+    response = await client.delete(f"/v1/replays/{created['id']}")
+    assert response.status_code == 204
+    response = await client.get(f"/v1/replays/{created['id']}")
+    assert response.status_code == 404
+
+
+async def test_delete_replay_conflicts(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 deleting a running or run replay."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    await start_replay(client, created["id"])
+    response = await client.delete(f"/v1/replays/{created['id']}")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {created['id']} is claimed or running"
+    }
+
+    run_replay_id = await create_run_replay(client)
+    response = await client.delete(f"/v1/replays/{run_replay_id}")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Replay {run_replay_id} belongs to an experiment run"
+    }
+
+
+async def test_delete_replay_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    response = await client.delete(f"/v1/replays/{missing_id}")
+    assert response.status_code == 404
 
 
 async def test_tool_lookup(client: httpx.AsyncClient) -> None:

@@ -191,7 +191,10 @@ class SessionService:
 
         A set status finishes the session with the command's outputs, error,
         ended_at, and log_uri, and computes the rollups from its nodes. Name,
-        expected, and metadata apply to any session when set.
+        expected, and metadata apply to any session when set. Fields absent
+        from the command stay unchanged. An explicit null clears the name and
+        expected, resets the metadata to an empty map, and is rejected for
+        the status.
 
         Args:
             session_id: Id of the session.
@@ -201,14 +204,16 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id.
             SessionNotInProgress: The session is not in progress.
-            InvalidSession: The new status is not terminal.
+            InvalidSession: The new status is null or not terminal.
 
         Returns:
             Updated session.
         """
         _ = actor
         session = await self._repository.get(session_id)
-        if command.status is not None:
+        if "status" in command.model_fields_set:
+            if command.status is None:
+                raise InvalidSession("Session status cannot be null")
             nodes = await self._node_repository.list_for_session(
                 session_id, include_payloads=False
             )
@@ -220,12 +225,12 @@ class SessionService:
                 log_uri=command.log_uri,
                 rollups=compute_rollups(nodes),
             )
-        if command.name is not None:
+        if "name" in command.model_fields_set:
             session.update_name(command.name)
-        if command.expected is not None:
+        if "expected" in command.model_fields_set:
             session.update_expected(command.expected)
-        if command.metadata is not None:
-            session.update_metadata(command.metadata)
+        if "metadata" in command.model_fields_set:
+            session.update_metadata(command.metadata or {})
         return await self._repository.update(session)
 
     async def merge_scores(

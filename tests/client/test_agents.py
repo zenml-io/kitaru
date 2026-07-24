@@ -115,6 +115,39 @@ async def test_update(api_client: KitaruAPIClient) -> None:
     assert updated.description == "Answers tickets"
 
 
+async def test_update_null_clears_description(api_client: KitaruAPIClient) -> None:
+    """Clear the description through an explicit None on the request."""
+    created = await api_client.agents.create(
+        AgentCreateRequest(name="support-bot", description="Answers tickets")
+    )
+    updated = await api_client.agents.update(
+        created.id, AgentUpdateRequest(description=None)
+    )
+    assert updated.name == "support-bot"
+    assert updated.description is None
+    loaded = await api_client.agents.get(created.id)
+    assert loaded.description is None
+
+
+async def test_update_unset_fields_unchanged(api_client: KitaruAPIClient) -> None:
+    """Keep every field on an update request without set fields."""
+    created = await api_client.agents.create(
+        AgentCreateRequest(name="support-bot", description="Answers tickets")
+    )
+    updated = await api_client.agents.update(created.id, AgentUpdateRequest())
+    assert updated.name == "support-bot"
+    assert updated.description == "Answers tickets"
+
+
+async def test_update_null_name_rejected(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 422 for an explicit None name."""
+    created = await api_client.agents.create(AgentCreateRequest(name="support-bot"))
+    with pytest.raises(APIError) as exc_info:
+        await api_client.agents.update(created.id, AgentUpdateRequest(name=None))
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Agent name cannot be null"
+
+
 async def test_delete(api_client: KitaruAPIClient) -> None:
     """Delete an agent through the SDK."""
     created = await api_client.agents.create(AgentCreateRequest(name="support-bot"))

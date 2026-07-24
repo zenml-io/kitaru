@@ -27,6 +27,7 @@ from kitaru.api_models.v1.replays import (
     ReplaySpecResponse,
     ReplayStatus,
     ReplayUpdateRequest,
+    StandaloneReplayClaimRequest,
     ToolLookupRequest,
     ToolLookupResponse,
 )
@@ -85,9 +86,11 @@ async def create_replay(
 async def list_replays(
     service: Annotated[ReplayService, Depends(get_replay_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    experiment_run_id: uuid.UUID | None = None,
     original_session_id: uuid.UUID | None = None,
     replay_status: Annotated[ReplayStatus | None, Query(alias="status")] = None,
     standalone: bool | None = None,
+    worker_id: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
 ) -> Page[ReplayResponse]:
@@ -99,9 +102,11 @@ async def list_replays(
     Args:
         service: Replay service.
         actor: Caller context.
+        experiment_run_id: Filter on experiment run id.
         original_session_id: Filter on the replayed session id.
         replay_status: Filter on replay status.
         standalone: Filter on standalone replays.
+        worker_id: Filter on the claiming worker id.
         page: Page number.
         page_size: Page size.
 
@@ -109,9 +114,11 @@ async def list_replays(
         Page of replays.
     """
     replay_filter = ReplayFilter(
+        experiment_run_id=experiment_run_id,
         original_session_id=original_session_id,
         status=replay_status_to_domain(replay_status),
         standalone=standalone,
+        worker_id=worker_id,
         page=page,
         page_size=page_size,
     )
@@ -158,9 +165,8 @@ async def get_replay_spec(
     The spec includes the resolved secret environment of the run spec's
     secrets.
 
-    Clients observe HTTP 200 on success, 404 when no replay has this id or
-    a run spec secret was deleted, and 409 when the stamped agent version
-    has no run spec.
+    Clients observe HTTP 200 on success, 404 when no replay has this id,
+    and 409 when the stamped agent version has no run spec.
 
     Args:
         replay_id: Id of the replay.
@@ -207,6 +213,106 @@ async def update_replay(
     return replay_to_response(replay, config)
 
 
+@router.delete("/{replay_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_replay(
+    replay_id: uuid.UUID,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> None:
+    """Delete a standalone replay.
+
+    Deletes the replay's config when nothing else references it.
+
+    Clients observe HTTP 204 on success, 404 when no replay has this id,
+    and 409 when the replay belongs to an experiment run or is claimed or
+    running.
+
+    Args:
+        replay_id: Id of the replay.
+        service: Replay service.
+        actor: Caller context.
+    """
+    await service.delete_replay(replay_id, actor=actor)
+
+
+@router.post("/{replay_id}/claim")
+async def claim_replay(
+    replay_id: uuid.UUID,
+    body: StandaloneReplayClaimRequest,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ReplayResponse:
+    """Claim a standalone replay for a worker.
+
+    A stale claim or start is requeued or timed out first, so a replay
+    whose worker died is claimable again.
+
+    Clients observe HTTP 200 on success, 404 when no replay has this id,
+    409 when the replay belongs to an experiment run or is not pending
+    after the staleness resolution, and 422 on invalid input.
+
+    Args:
+        replay_id: Id of the replay.
+        body: Standalone replay claim request.
+        service: Replay service.
+        actor: Caller context.
+
+    Returns:
+        Claimed replay.
+    """
+    replay, config = await service.claim_replay(
+        replay_id, worker_id=body.worker_id, actor=actor
+    )
+    return replay_to_response(replay, config)
+
+
+@router.post("/{replay_id}/release")
+async def release_replay(
+    replay_id: uuid.UUID,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ReplayResponse:
+    """Requeue a claimed or running replay for another attempt.
+
+    Clients observe HTTP 200 on success, 404 when no replay has this id,
+    and 409 when the replay is not claimed or running.
+
+    Args:
+        replay_id: Id of the replay.
+        service: Replay service.
+        actor: Caller context.
+
+    Returns:
+        Requeued replay.
+    """
+    replay, config = await service.release_replay(replay_id, actor=actor)
+    return replay_to_response(replay, config)
+
+
+@router.post("/{replay_id}/retry")
+async def retry_replay(
+    replay_id: uuid.UUID,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ReplayResponse:
+    """Requeue a finished standalone replay for another attempt.
+
+    Clients observe HTTP 200 on success, 404 when no replay has this id,
+    and 409 when the replay belongs to an experiment run or is not
+    failed, timed out, or canceled.
+
+    Args:
+        replay_id: Id of the replay.
+        service: Replay service.
+        actor: Caller context.
+
+    Returns:
+        Requeued replay.
+    """
+    replay, config = await service.retry_replay(replay_id, actor=actor)
+    return replay_to_response(replay, config)
+
+
 @router.post("/{replay_id}/heartbeat")
 async def heartbeat_replay(
     replay_id: uuid.UUID,
@@ -215,8 +321,11 @@ async def heartbeat_replay(
 ) -> ReplayHeartbeatResponse:
     """Record a worker heartbeat on a replay.
 
-    Clients observe HTTP 200 on success, 404 when no replay has this id,
-    and 409 when the replay is neither claimed, running, nor canceled.
+    Terminal replays record nothing and report the stop flag, so the
+    worker abandons the replay.
+
+    Clients observe HTTP 200 on success, including terminal replays, 404
+    when no replay has this id, and 409 when the replay is pending.
 
     Args:
         replay_id: Id of the replay.
@@ -224,10 +333,12 @@ async def heartbeat_replay(
         actor: Caller context.
 
     Returns:
-        Heartbeat response with the cancellation flag.
+        Heartbeat response with the status and stop flag.
     """
-    canceled = await service.heartbeat_replay(replay_id, actor=actor)
-    return ReplayHeartbeatResponse(canceled=canceled)
+    replay_status, canceled = await service.heartbeat_replay(replay_id, actor=actor)
+    return ReplayHeartbeatResponse(
+        status=ReplayStatus(replay_status.value), canceled=canceled
+    )
 
 
 @router.post("/{replay_id}/tool-lookup")

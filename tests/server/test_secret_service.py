@@ -20,10 +20,14 @@ from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, create_secret
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secrets import SecretFilter, SecretUpdate
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.secret import DuplicateSecretName, SecretNotFound
+from kitaru.server.domain.secret import (
+    DuplicateSecretName,
+    InvalidSecret,
+    SecretNotFound,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
@@ -160,7 +164,7 @@ async def test_update_secret(service: SecretService) -> None:
         name="db", type=None, values=VALUES, actor=ACTOR
     )
     updated = await service.update_secret(
-        created.id, type="database", values=None, actor=ACTOR
+        created.id, SecretUpdate(type="database"), actor=ACTOR
     )
     assert updated.type == "database"
     assert updated.values == VALUES
@@ -168,17 +172,50 @@ async def test_update_secret(service: SecretService) -> None:
     assert created.updated is not None
     assert updated.updated > created.updated
     updated = await service.update_secret(
-        created.id, type=None, values={"password": SecretStr("hunter3")}, actor=ACTOR
+        created.id,
+        SecretUpdate(values={"password": SecretStr("hunter3")}),
+        actor=ACTOR,
     )
     assert updated.type == "database"
     assert updated.values == {"password": SecretStr("hunter3")}
+
+
+async def test_update_secret_absent_fields_unchanged(service: SecretService) -> None:
+    """Keep every field on an update without set fields."""
+    created = await service.create_secret(
+        name="db", type="database", values=VALUES, actor=ACTOR
+    )
+    updated = await service.update_secret(created.id, SecretUpdate(), actor=ACTOR)
+    assert updated.type == "database"
+    assert updated.values == VALUES
+
+
+async def test_update_secret_null_clears_type(service: SecretService) -> None:
+    """Clear the type on an explicit null."""
+    created = await service.create_secret(
+        name="db", type="database", values=VALUES, actor=ACTOR
+    )
+    updated = await service.update_secret(
+        created.id, SecretUpdate(type=None), actor=ACTOR
+    )
+    assert updated.type is None
+    assert updated.values == VALUES
+
+
+async def test_update_secret_null_values_rejected(service: SecretService) -> None:
+    """Reject an explicit null for the values."""
+    created = await service.create_secret(
+        name="db", type=None, values=VALUES, actor=ACTOR
+    )
+    with pytest.raises(InvalidSecret, match="Secret values cannot be null"):
+        await service.update_secret(created.id, SecretUpdate(values=None), actor=ACTOR)
 
 
 async def test_update_secret_not_found(service: SecretService) -> None:
     """Raise for an unknown secret id."""
     with pytest.raises(SecretNotFound):
         await service.update_secret(
-            uuid.uuid4(), type="database", values=None, actor=ACTOR
+            uuid.uuid4(), SecretUpdate(type="database"), actor=ACTOR
         )
 
 
@@ -188,7 +225,7 @@ async def test_update_secret_foreign_owner(service: SecretService) -> None:
         name="db", type=None, values=VALUES, actor=ACTOR
     )
     await service.update_secret(
-        created.id, type="database", values=None, actor=FOREIGN_ACTOR
+        created.id, SecretUpdate(type="database"), actor=FOREIGN_ACTOR
     )
     loaded = await service.get_secret(created.id, actor=ACTOR)
     assert loaded.type == "database"
@@ -201,7 +238,7 @@ async def test_update_secret_internal(
     created = await create_secret(repository, ACTOR.account.id, internal=True)
     with pytest.raises(SecretNotFound, match=f"Secret {created.id} was not found"):
         await service.update_secret(
-            created.id, type="database", values=None, actor=ACTOR
+            created.id, SecretUpdate(type="database"), actor=ACTOR
         )
     loaded = await repository.get(created.id)
     assert loaded == created

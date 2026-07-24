@@ -26,6 +26,13 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, TypeVar
 
+from adapter_example.agent import (  # ty: ignore[unresolved-import]
+    AgentHooks,
+    LLMCall,
+    MockAgent,
+    ToolCall,
+    ToolExecutor,
+)
 from kitaru.api_models.v1.replays import (
     HistoryPolicy,
     PassthroughPolicy,
@@ -52,13 +59,6 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client import KitaruAPIClient
 from kitaru.hashing import tool_call_cache_key
-from adapter_example.agent import (  # ty: ignore[unresolved-import]
-    AgentHooks,
-    LLMCall,
-    MockAgent,
-    ToolCall,
-    ToolExecutor,
-)
 
 ADAPTER_VERSION = "0.1.0"
 FRAMEWORK = "mock"

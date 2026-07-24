@@ -195,7 +195,6 @@ class SQLCohortRepository:
         row.description = cohort.description
         row.agent_id = cohort.agent_id
         row.session_count = cohort.session_count
-        row.filter_snapshot = cohort.filter_snapshot
         try:
             async with self._session.begin_nested():
                 await self._session.flush()

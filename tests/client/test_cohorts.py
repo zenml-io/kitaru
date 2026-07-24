@@ -32,7 +32,6 @@ from conftest import (
 from kitaru.api_models.v1.agents import AgentCreateRequest, AgentResponse
 from kitaru.api_models.v1.cohorts import (
     CohortCreateRequest,
-    CohortSessionFilter,
     CohortUpdateRequest,
 )
 from kitaru.api_models.v1.sessions import (
@@ -150,26 +149,6 @@ async def test_create_from_session_ids(api_client: KitaruAPIClient) -> None:
     assert cohort.name == "baseline"
     assert cohort.agent_id == agent.id
     assert cohort.session_count == 2
-    assert cohort.filter_snapshot is None
-
-
-async def test_create_from_filter(api_client: KitaruAPIClient) -> None:
-    """Create a cohort from a filter through the SDK."""
-    agent = await create_agent(api_client)
-    matching = await create_completed_session(api_client, agent.id, name="run")
-    await create_completed_session(api_client, agent.id, name="other")
-    cohort = await api_client.cohorts.create(
-        CohortCreateRequest(
-            name="baseline",
-            filter=CohortSessionFilter(agent_id=agent.id, name="run"),
-        )
-    )
-    assert cohort.session_count == 1
-    assert cohort.filter_snapshot == {"agent_id": str(agent.id), "name": "run"}
-
-    page = await api_client.cohorts.list_sessions(cohort.id)
-    assert page.total == 1
-    assert page.items[0].id == matching.id
 
 
 async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:

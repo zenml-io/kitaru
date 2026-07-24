@@ -69,7 +69,9 @@ from kitaru.server.domain.replay import (
     InvalidReplayTransition,
     InvalidToolLookup,
     Replay,
+    ReplayActive,
     ReplayMissingResultSession,
+    ReplayNotStandalone,
     ReplaySpec,
     ReplayStatus,
 )
@@ -262,8 +264,11 @@ class ReplayService:
             total match count.
         """
         _ = actor
-        replays, total = await self._repository.query(replay_filter)
         stale_before = self._stale_before()
+        replay_filter = replay_filter.model_copy(
+            update={"stale_before": stale_before, "max_attempts": self._max_attempts}
+        )
+        replays, total = await self._repository.query(replay_filter)
         replays = [
             replay.with_staleness(stale_before, self._max_attempts)
             for replay in replays
@@ -284,7 +289,6 @@ class ReplayService:
             ReplayNotFound: No replay has this id.
             AgentVersionNotRunnable: The stamped agent version has no run
                 spec.
-            SecretNotFound: A run spec secret was deleted.
 
         Returns:
             Resolved replay spec.
@@ -420,8 +424,13 @@ class ReplayService:
             )
         return replay, config
 
-    async def heartbeat_replay(self, replay_id: uuid.UUID, actor: AuthContext) -> bool:
+    async def heartbeat_replay(
+        self, replay_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[ReplayStatus, bool]:
         """Record a worker heartbeat on a replay.
+
+        Terminal replays record nothing and report the stop flag, so the
+        worker abandons the replay.
 
         Args:
             replay_id: Id of the replay.
@@ -429,22 +438,133 @@ class ReplayService:
 
         Raises:
             ReplayNotFound: No replay has this id.
-            ReplayNotActive: The replay is not claimed, running, or
-                canceled.
+            ReplayNotActive: The replay is pending.
 
         Returns:
-            ``True`` when the replay was canceled or its run is canceling.
+            Replay status and whether the worker should stop working on
+            the replay.
         """
         _ = actor
         replay = await self._repository.get(replay_id)
-        if replay.status is ReplayStatus.CANCELED:
-            return True
+        if replay.status in TERMINAL_REPLAY_STATUSES:
+            return replay.status, True
         replay.heartbeat()
         await self._repository.update(replay)
         if replay.experiment_run_id is None:
-            return False
+            return replay.status, False
         run = await self._experiment_run_repository.get(replay.experiment_run_id)
-        return run.status is ExperimentRunStatus.CANCELING
+        return replay.status, run.status is ExperimentRunStatus.CANCELING
+
+    async def claim_replay(
+        self, replay_id: uuid.UUID, worker_id: str, actor: AuthContext
+    ) -> tuple[Replay, ReplayConfig]:
+        """Claim a standalone replay for a worker.
+
+        A stale claim or start is requeued or timed out first, so a replay
+        whose worker died is claimable again.
+
+        Args:
+            replay_id: Id of the replay.
+            worker_id: Id of the claiming worker.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            ReplayNotStandalone: The replay belongs to an experiment run.
+            InvalidReplayTransition: The replay is not pending after the
+                staleness resolution.
+
+        Returns:
+            Claimed replay and its replay config.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        if not replay.standalone:
+            raise ReplayNotStandalone(replay.id)
+        resolved = replay.with_staleness(self._stale_before(), self._max_attempts)
+        if resolved is not replay:
+            resolved = await self._repository.update(resolved)
+        resolved.claim(worker_id)
+        replay = await self._repository.update(resolved)
+        config = await self._replay_config_repository.get(replay.replay_config_id)
+        return replay, config
+
+    async def release_replay(
+        self, replay_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Replay, ReplayConfig]:
+        """Requeue a claimed or running replay for another attempt.
+
+        Args:
+            replay_id: Id of the replay.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            InvalidReplayTransition: The replay is not claimed or running.
+
+        Returns:
+            Requeued replay and its replay config.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        replay.requeue()
+        replay = await self._repository.update(replay)
+        config = await self._replay_config_repository.get(replay.replay_config_id)
+        return replay, config
+
+    async def retry_replay(
+        self, replay_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Replay, ReplayConfig]:
+        """Requeue a finished standalone replay for another attempt.
+
+        Args:
+            replay_id: Id of the replay.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            ReplayNotStandalone: The replay belongs to an experiment run.
+            InvalidReplayTransition: The replay is not failed, timed out,
+                or canceled.
+
+        Returns:
+            Requeued replay and its replay config.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        if not replay.standalone:
+            raise ReplayNotStandalone(replay.id)
+        replay = replay.with_staleness(self._stale_before(), self._max_attempts)
+        replay.retry()
+        replay = await self._repository.update(replay)
+        config = await self._replay_config_repository.get(replay.replay_config_id)
+        return replay, config
+
+    async def delete_replay(self, replay_id: uuid.UUID, actor: AuthContext) -> None:
+        """Delete a standalone replay.
+
+        Deletes the replay's config when nothing else references it.
+
+        Args:
+            replay_id: Id of the replay.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            ReplayNotStandalone: The replay belongs to an experiment run.
+            ReplayActive: The replay is claimed or running.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        if not replay.standalone:
+            raise ReplayNotStandalone(replay.id)
+        resolved = replay.with_staleness(self._stale_before(), self._max_attempts)
+        if resolved.status in (ReplayStatus.CLAIMED, ReplayStatus.RUNNING):
+            raise ReplayActive(replay.id)
+        await self._repository.delete(replay.id)
+        await self._replay_config_repository.delete_if_unreferenced(
+            replay.replay_config_id
+        )
 
     async def _resolve_cohort_session_ids(
         self, cohort_id: uuid.UUID

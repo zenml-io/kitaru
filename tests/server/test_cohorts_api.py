@@ -179,60 +179,28 @@ async def test_create_cohort_from_session_ids(client: httpx.AsyncClient) -> None
     assert body["owner_id"] == str(ACCOUNT.id)
     assert body["agent_id"] == agent_id
     assert body["session_count"] == 2
-    assert body["filter_snapshot"] is None
     assert body["created"] is not None
     assert body["updated"] is not None
     assert uuid.UUID(body["id"])
 
 
-async def test_create_cohort_from_filter(client: httpx.AsyncClient) -> None:
-    """Create a cohort from a filter with a stored snapshot."""
-    agent_id = await create_agent(client)
-    matching = await create_completed_session(client, agent_id, name="run")
-    await create_completed_session(client, agent_id, name="other")
-    response = await client.post(
-        "/v1/cohorts",
-        json={"name": "baseline", "filter": {"agent_id": agent_id, "name": "run"}},
-    )
-    assert response.status_code == 201
-    body = response.json()
-    assert body["agent_id"] == agent_id
-    assert body["session_count"] == 1
-    assert body["filter_snapshot"] == {"agent_id": agent_id, "name": "run"}
-
-    response = await client.get(f"/v1/cohorts/{body['id']}/sessions")
-    assert response.status_code == 200
-    assert [item["id"] for item in response.json()["items"]] == [matching]
-
-
-async def test_create_cohort_ids_and_filter(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 when both session ids and a filter are set."""
+async def test_create_cohort_missing_agent_id(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a body without an agent id."""
     agent_id = await create_agent(client)
     session_id = await create_completed_session(client, agent_id)
     response = await client.post(
-        "/v1/cohorts",
-        json={
-            "name": "baseline",
-            "agent_id": agent_id,
-            "session_ids": [session_id],
-            "filter": {"agent_id": agent_id},
-        },
+        "/v1/cohorts", json={"name": "baseline", "session_ids": [session_id]}
     )
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Cohort creation requires either session ids or a filter"
-    }
 
 
-async def test_create_cohort_filter_without_agent(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 for a filter that does not pin an agent."""
+async def test_create_cohort_missing_session_ids(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a body without session ids."""
     agent_id = await create_agent(client)
-    await create_completed_session(client, agent_id)
-    response = await client.post("/v1/cohorts", json={"name": "baseline", "filter": {}})
+    response = await client.post(
+        "/v1/cohorts", json={"name": "baseline", "agent_id": agent_id}
+    )
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Cohort creation from a filter requires an agent id in the filter"
-    }
 
 
 async def test_create_cohort_agent_mismatch(client: httpx.AsyncClient) -> None:
@@ -272,12 +240,6 @@ async def test_create_empty_cohort(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/v1/cohorts",
         json={"name": "baseline", "agent_id": agent_id, "session_ids": []},
-    )
-    assert response.status_code == 422
-    assert response.json() == {"detail": "Cohort requires at least one session"}
-
-    response = await client.post(
-        "/v1/cohorts", json={"name": "baseline", "filter": {"agent_id": agent_id}}
     )
     assert response.status_code == 422
     assert response.json() == {"detail": "Cohort requires at least one session"}
@@ -437,6 +399,46 @@ async def test_update_cohort(client: httpx.AsyncClient) -> None:
     assert body["name"] == "july"
     assert body["description"] == "July sessions"
     assert body["session_count"] == 1
+
+
+async def test_update_cohort_absent_fields_unchanged(client: httpx.AsyncClient) -> None:
+    """Keep every field on an update with an empty body."""
+    agent_id = await create_agent(client)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_cohort(client, agent_id, [session_id])
+    response = await client.patch(f"/v1/cohorts/{created['id']}", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == created["name"]
+    assert body["description"] == created["description"]
+
+
+async def test_update_cohort_null_clears_description(
+    client: httpx.AsyncClient,
+) -> None:
+    """Clear the description on an explicit null."""
+    agent_id = await create_agent(client)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_cohort(client, agent_id, [session_id])
+    response = await client.patch(
+        f"/v1/cohorts/{created['id']}", json={"description": "July sessions"}
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/cohorts/{created['id']}", json={"description": None}
+    )
+    assert response.status_code == 200
+    assert response.json()["description"] is None
+
+
+async def test_update_cohort_null_name_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an explicit null name."""
+    agent_id = await create_agent(client)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_cohort(client, agent_id, [session_id])
+    response = await client.patch(f"/v1/cohorts/{created['id']}", json={"name": None})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Cohort name cannot be null"}
 
 
 async def test_update_cohort_duplicate_name(client: httpx.AsyncClient) -> None:

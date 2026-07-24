@@ -38,7 +38,10 @@ from kitaru.server.adapters.rest.mapping.agent_versions import (
     capabilities_to_domain,
     run_spec_to_domain,
 )
-from kitaru.server.adapters.rest.mapping.agents import agent_to_response
+from kitaru.server.adapters.rest.mapping.agents import (
+    agent_to_response,
+    agent_update_to_command,
+)
 from kitaru.server.application.models.agent_versions import AgentVersionFilter
 from kitaru.server.application.models.agents import AgentFilter
 from kitaru.server.application.models.auth import AuthContext
@@ -152,7 +155,7 @@ async def update_agent(
         Updated agent.
     """
     agent = await service.update_agent(
-        agent_id, name=body.name, description=body.description, actor=actor
+        agent_id, agent_update_to_command(body), actor=actor
     )
     return agent_to_response(agent)
 
@@ -166,7 +169,8 @@ async def delete_agent(
     """Delete an agent.
 
     Clients observe HTTP 204 on success, 404 when no agent has this id,
-    and 409 while the agent still has versions.
+    and 409 while the agent is referenced by an agent version, a session,
+    or a cohort.
 
     Args:
         agent_id: Id of the agent.

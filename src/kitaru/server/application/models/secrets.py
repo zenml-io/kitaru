@@ -11,11 +11,11 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Secret filter model."""
+"""Secret filter and command models."""
 
 import uuid
 
-from pydantic import Field, PositiveInt
+from pydantic import Field, PositiveInt, SecretStr
 
 from kitaru.server.base import FrozenModel
 
@@ -28,3 +28,10 @@ class SecretFilter(FrozenModel):
     internal: bool | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
+
+
+class SecretUpdate(FrozenModel):
+    """Secret update command."""
+
+    type: str | None = None
+    values: dict[str, SecretStr] | None = None

@@ -17,7 +17,6 @@ import uuid
 
 import pytest
 
-import kitaru.server.application.services.cohort_service as cohort_service_module
 from conftest import (
     FakeAgentRepository,
     FakeCohortRepository,
@@ -29,8 +28,8 @@ from kitaru.server.application.models.cohorts import (
     CohortCreate,
     CohortFilter,
     CohortSessionsFilter,
+    CohortUpdate,
 )
-from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
@@ -153,7 +152,6 @@ async def test_create_cohort_from_session_ids(
     assert cohort.description == "July sessions"
     assert cohort.agent_id == agent.id
     assert cohort.session_count == 2
-    assert cohort.filter_snapshot is None
     assert cohort.created is not None
     assert cohort.updated is not None
 
@@ -177,38 +175,6 @@ async def test_create_cohort_preserves_member_order(
     )
     assert total == 2
     assert [session.id for session in sessions] == [second.id, first.id]
-
-
-async def test_create_cohort_requires_ids_or_filter(
-    service: CohortService, agent: Agent
-) -> None:
-    """Reject a create command with neither or both membership sources."""
-    with pytest.raises(InvalidCohort, match="requires either session ids or a filter"):
-        await service.create_cohort(
-            CohortCreate(name="baseline", agent_id=agent.id), actor=ACTOR
-        )
-    with pytest.raises(InvalidCohort, match="requires either session ids or a filter"):
-        await service.create_cohort(
-            CohortCreate(
-                name="baseline",
-                session_ids=[uuid.uuid4()],
-                session_filter=SessionFilter(agent_id=agent.id),
-            ),
-            actor=ACTOR,
-        )
-
-
-async def test_create_cohort_from_ids_requires_agent_id(
-    service: CohortService,
-    session_repository: FakeSessionRepository,
-    agent: Agent,
-) -> None:
-    """Reject explicit session ids without an agent id."""
-    session = await create_session(session_repository, agent.id)
-    with pytest.raises(InvalidCohort, match="from session ids requires an agent id"):
-        await service.create_cohort(
-            CohortCreate(name="baseline", session_ids=[session.id]), actor=ACTOR
-        )
 
 
 async def test_create_cohort_duplicate_session_ids(
@@ -297,117 +263,6 @@ async def test_create_cohort_empty_session_ids(
     with pytest.raises(InvalidCohort, match="Cohort requires at least one session"):
         await service.create_cohort(
             CohortCreate(name="baseline", agent_id=agent.id, session_ids=[]),
-            actor=ACTOR,
-        )
-
-
-async def test_create_cohort_from_filter(
-    service: CohortService,
-    session_repository: FakeSessionRepository,
-    agent_repository: FakeAgentRepository,
-    agent: Agent,
-) -> None:
-    """Create a cohort from a filter and snapshot the filter."""
-    matching = await create_session(session_repository, agent.id, name="run")
-    await create_session(session_repository, agent.id, name="other")
-    other_agent = await agent_repository.create(
-        Agent(owner_id=ACTOR.account.id, name="triage-bot")
-    )
-    await create_session(session_repository, other_agent.id, name="run")
-    cohort = await service.create_cohort(
-        CohortCreate(
-            name="baseline",
-            session_filter=SessionFilter(agent_id=agent.id, name="run"),
-        ),
-        actor=ACTOR,
-    )
-    assert cohort.agent_id == agent.id
-    assert cohort.session_count == 1
-    assert cohort.filter_snapshot == {"agent_id": str(agent.id), "name": "run"}
-    sessions, total = await service.list_cohort_sessions(
-        cohort.id, CohortSessionsFilter(), actor=ACTOR
-    )
-    assert total == 1
-    assert sessions[0].id == matching.id
-
-
-async def test_create_cohort_from_filter_resolves_all_pages(
-    service: CohortService,
-    session_repository: FakeSessionRepository,
-    agent: Agent,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Resolve every matching session across multiple pages."""
-    monkeypatch.setattr(cohort_service_module, "_FILTER_RESOLUTION_PAGE_SIZE", 2)
-    sessions = [await create_session(session_repository, agent.id) for _ in range(5)]
-    cohort = await service.create_cohort(
-        CohortCreate(name="baseline", session_filter=SessionFilter(agent_id=agent.id)),
-        actor=ACTOR,
-    )
-    assert cohort.session_count == 5
-    members, total = await service.list_cohort_sessions(
-        cohort.id, CohortSessionsFilter(), actor=ACTOR
-    )
-    assert total == 5
-    assert [member.id for member in members] == [session.id for session in sessions]
-
-
-async def test_create_cohort_from_filter_requires_agent(
-    service: CohortService,
-    session_repository: FakeSessionRepository,
-    agent: Agent,
-) -> None:
-    """Reject a filter that does not pin an agent."""
-    await create_session(session_repository, agent.id)
-    with pytest.raises(InvalidCohort, match="requires an agent id in the filter"):
-        await service.create_cohort(
-            CohortCreate(name="baseline", session_filter=SessionFilter()),
-            actor=ACTOR,
-        )
-
-
-async def test_create_cohort_from_filter_with_explicit_agent(
-    service: CohortService, agent: Agent
-) -> None:
-    """Reject an explicit agent id next to a filter."""
-    with pytest.raises(InvalidCohort, match="takes the agent id from the filter"):
-        await service.create_cohort(
-            CohortCreate(
-                name="baseline",
-                agent_id=agent.id,
-                session_filter=SessionFilter(agent_id=agent.id),
-            ),
-            actor=ACTOR,
-        )
-
-
-async def test_create_cohort_from_filter_empty_resolution(
-    service: CohortService, agent: Agent
-) -> None:
-    """Reject a filter that resolves no sessions."""
-    with pytest.raises(InvalidCohort, match="Cohort requires at least one session"):
-        await service.create_cohort(
-            CohortCreate(
-                name="baseline", session_filter=SessionFilter(agent_id=agent.id)
-            ),
-            actor=ACTOR,
-        )
-
-
-async def test_create_cohort_from_filter_in_progress_member(
-    service: CohortService,
-    session_repository: FakeSessionRepository,
-    agent: Agent,
-) -> None:
-    """Reject a filter that resolves an in-progress session."""
-    session = await create_session(
-        session_repository, agent.id, status=SessionStatus.IN_PROGRESS
-    )
-    with pytest.raises(InvalidCohort, match=f"Session {session.id} is in progress"):
-        await service.create_cohort(
-            CohortCreate(
-                name="baseline", session_filter=SessionFilter(agent_id=agent.id)
-            ),
             actor=ACTOR,
         )
 
@@ -554,7 +409,9 @@ async def test_update_cohort(
         actor=ACTOR,
     )
     updated = await service.update_cohort(
-        created.id, name="july", description="July sessions", actor=ACTOR
+        created.id,
+        CohortUpdate(name="july", description="July sessions"),
+        actor=ACTOR,
     )
     assert updated.name == "july"
     assert updated.description == "July sessions"
@@ -562,6 +419,64 @@ async def test_update_cohort(
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
+
+
+async def test_update_cohort_absent_fields_unchanged(
+    service: CohortService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Keep every field on an update without set fields."""
+    session = await create_session(session_repository, agent.id)
+    created = await service.create_cohort(
+        CohortCreate(
+            name="baseline",
+            description="July sessions",
+            agent_id=agent.id,
+            session_ids=[session.id],
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_cohort(created.id, CohortUpdate(), actor=ACTOR)
+    assert updated.name == "baseline"
+    assert updated.description == "July sessions"
+
+
+async def test_update_cohort_null_clears_description(
+    service: CohortService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Clear the description on an explicit null."""
+    session = await create_session(session_repository, agent.id)
+    created = await service.create_cohort(
+        CohortCreate(
+            name="baseline",
+            description="July sessions",
+            agent_id=agent.id,
+            session_ids=[session.id],
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_cohort(
+        created.id, CohortUpdate(description=None), actor=ACTOR
+    )
+    assert updated.description is None
+
+
+async def test_update_cohort_null_name_rejected(
+    service: CohortService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+) -> None:
+    """Reject an explicit null for the name."""
+    session = await create_session(session_repository, agent.id)
+    created = await service.create_cohort(
+        CohortCreate(name="baseline", agent_id=agent.id, session_ids=[session.id]),
+        actor=ACTOR,
+    )
+    with pytest.raises(InvalidCohort, match="Cohort name cannot be null"):
+        await service.update_cohort(created.id, CohortUpdate(name=None), actor=ACTOR)
 
 
 async def test_update_cohort_duplicate_name(
@@ -583,16 +498,14 @@ async def test_update_cohort_duplicate_name(
         DuplicateCohortName, match="Cohort name 'baseline' is already registered"
     ):
         await service.update_cohort(
-            other.id, name="baseline", description=None, actor=ACTOR
+            other.id, CohortUpdate(name="baseline"), actor=ACTOR
         )
 
 
 async def test_update_cohort_not_found(service: CohortService) -> None:
     """Raise for an unknown cohort id."""
     with pytest.raises(CohortNotFound):
-        await service.update_cohort(
-            uuid.uuid4(), name="x", description=None, actor=ACTOR
-        )
+        await service.update_cohort(uuid.uuid4(), CohortUpdate(name="x"), actor=ACTOR)
 
 
 async def test_delete_cohort(

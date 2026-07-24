@@ -40,6 +40,7 @@ from kitaru.api_models.v1.replays import (
     ReplayUpdateRequest,
     ScorerConfig,
     ScoringPolicy,
+    StandaloneReplayClaimRequest,
     ToolPolicyConfig,
 )
 from kitaru.api_models.v1.session_nodes import SessionNodeResponse
@@ -225,10 +226,20 @@ class FakeReplaysResource:
         self._client.updates.append(request)
         return self._client.replay.model_copy(update={"status": request.status})
 
+    async def claim(
+        self, replay_id: uuid.UUID, request: StandaloneReplayClaimRequest
+    ) -> ReplayResponse:
+        """Record the claim and return the configured replay."""
+        self._client.standalone_claims.append(request)
+        return self._client.replay.model_copy(update={"status": ReplayStatus.CLAIMED})
+
     async def heartbeat(self, replay_id: uuid.UUID) -> ReplayHeartbeatResponse:
         """Count the heartbeat and report the configured cancellation."""
         self._client.heartbeat_count += 1
-        return ReplayHeartbeatResponse(canceled=self._client.cancel_on_heartbeat)
+        return ReplayHeartbeatResponse(
+            status=self._client.replay.status,
+            canceled=self._client.cancel_on_heartbeat,
+        )
 
 
 class FakeSessionsResource:
@@ -308,6 +319,7 @@ class FakeClient:
         self.merged_scores: list[tuple[uuid.UUID, dict[str, float]]] = []
         self.node_requests: list[tuple[uuid.UUID, bool]] = []
         self.claim_requests: list[ReplayClaimRequest] = []
+        self.standalone_claims: list[StandaloneReplayClaimRequest] = []
         self.heartbeat_count = 0
         self.replays = FakeReplaysResource(self)
         self.sessions = FakeSessionsResource(self)
@@ -355,9 +367,11 @@ async def test_success_flow_completes_and_scores_baselines(
             original_id: make_session(original_id),
         },
     )
-    runner = make_runner(monkeypatch, fake)
+    runner = make_runner(monkeypatch, fake, worker_id="worker-1")
     final = await runner.run_replay(replay_id)
 
+    assert len(fake.standalone_claims) == 1
+    assert fake.standalone_claims[0].worker_id == "worker-1"
     assert [update.status for update in fake.updates] == [
         ReplayStatus.RUNNING,
         ReplayStatus.COMPLETED,

@@ -64,6 +64,10 @@ class ReplayRepository(Protocol):
     async def query(self, replay_filter: ReplayFilter) -> tuple[list[Replay], int]:
         """Query replays matching a filter.
 
+        With the staleness context set, the status filter matches claimed
+        or running replays with lost heartbeats as pending, or as timed
+        out once the attempt count reached the maximum.
+
         Args:
             replay_filter: Filter and pagination parameters.
 
@@ -84,6 +88,17 @@ class ReplayRepository(Protocol):
 
         Returns:
             Stored replay with the updated timestamp renewed.
+        """
+        ...
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
         """
         ...
 

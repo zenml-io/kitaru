@@ -620,18 +620,16 @@
       "Body_login_v1_login_post": {
         "properties": {
           "password": {
+            "default": "",
             "title": "Password",
             "type": "string"
           },
           "username": {
+            "default": "",
             "title": "Username",
             "type": "string"
           }
         },
-        "required": [
-          "username",
-          "password"
-        ],
         "title": "Body_login_v1_login_post",
         "type": "object"
       },
@@ -640,17 +638,10 @@
         "description": "Cohort create request.",
         "properties": {
           "agent_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the agent, required with session ids.",
-            "title": "Agent Id"
+            "description": "Id of the agent.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
           },
           "description": {
             "anyOf": [
@@ -664,41 +655,25 @@
             "description": "Cohort description.",
             "title": "Description"
           },
-          "filter": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CohortSessionFilter"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Session filter resolving the members, mutually exclusive with session ids."
-          },
           "name": {
             "description": "Cohort name.",
             "title": "Name",
             "type": "string"
           },
           "session_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Ids of the member sessions in position order, mutually exclusive with the filter.",
-            "title": "Session Ids"
+            "description": "Ids of the member sessions in position order.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Session Ids",
+            "type": "array"
           }
         },
         "required": [
-          "name"
+          "name",
+          "agent_id",
+          "session_ids"
         ],
         "title": "CohortCreateRequest",
         "type": "object"
@@ -729,19 +704,6 @@
             ],
             "description": "Cohort description.",
             "title": "Description"
-          },
-          "filter_snapshot": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter the members were resolved from.",
-            "title": "Filter Snapshot"
           },
           "id": {
             "description": "Cohort id.",
@@ -779,234 +741,10 @@
           "description",
           "agent_id",
           "session_count",
-          "filter_snapshot",
           "created",
           "updated"
         ],
         "title": "CohortResponse",
-        "type": "object"
-      },
-      "CohortSessionFilter": {
-        "additionalProperties": false,
-        "description": "Cohort session filter.",
-        "properties": {
-          "agent_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on agent id, sets the cohort's agent.",
-            "title": "Agent Id"
-          },
-          "agent_version_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on agent version id.",
-            "title": "Agent Version Id"
-          },
-          "ended_after": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Earliest end time.",
-            "title": "Ended After"
-          },
-          "ended_before": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Latest end time.",
-            "title": "Ended Before"
-          },
-          "external_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on external id.",
-            "title": "External Id"
-          },
-          "has_score": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on the presence of scores.",
-            "title": "Has Score"
-          },
-          "max_cost": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Highest cost.",
-            "title": "Max Cost"
-          },
-          "max_total_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Highest total token count.",
-            "title": "Max Total Tokens"
-          },
-          "min_cost": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Lowest cost.",
-            "title": "Min Cost"
-          },
-          "min_total_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Lowest total token count.",
-            "title": "Min Total Tokens"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on session name.",
-            "title": "Name"
-          },
-          "origin": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SessionOrigin"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on session origin."
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SessionProvider"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on session provider."
-          },
-          "started_after": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Earliest start time.",
-            "title": "Started After"
-          },
-          "started_before": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Latest start time.",
-            "title": "Started Before"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SessionStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on session status."
-          },
-          "tag": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter on attached tag name.",
-            "title": "Tag"
-          }
-        },
-        "title": "CohortSessionFilter",
         "type": "object"
       },
       "CohortUpdateRequest": {
@@ -2261,12 +1999,16 @@
         "description": "Replay heartbeat response.",
         "properties": {
           "canceled": {
-            "description": "Whether the replay was canceled or its run is canceling.",
+            "description": "Whether the worker should stop working on the replay.",
             "title": "Canceled",
             "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReplayStatus"
           }
         },
         "required": [
+          "status",
           "canceled"
         ],
         "title": "ReplayHeartbeatResponse",
@@ -4321,6 +4063,23 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
+      "StandaloneReplayClaimRequest": {
+        "additionalProperties": false,
+        "description": "Standalone replay claim request.",
+        "properties": {
+          "worker_id": {
+            "description": "Id of the claiming worker.",
+            "maxLength": 255,
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id"
+        ],
+        "title": "StandaloneReplayClaimRequest",
+        "type": "object"
+      },
       "StaticCase": {
         "additionalProperties": false,
         "description": "Static tool result case.",
@@ -5385,7 +5144,7 @@
     },
     "/v1/agents/{agent_id}": {
       "delete": {
-        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id,\nand 409 while the agent still has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id,\nand 409 while the agent is referenced by an agent version, a session,\nor a cohort.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
         "operationId": "delete_agent_v1_agents__agent_id__delete",
         "parameters": [
           {
@@ -5966,7 +5725,7 @@
         ]
       },
       "post": {
-        "description": "Create a cohort from explicit session ids or a session filter.\n\nExplicit session ids require an agent id and keep their order as the\nmember positions. A filter must pin an agent, resolves every matching\nsession, and is stored as the cohort's provenance snapshot. Membership\nis immutable after creation.\n\nClients observe HTTP 201 on success, 404 when no agent or session has a\nreferenced id, 409 when the name is already registered, and 422 when\nthe membership is empty, a member belongs to another agent or is in\nprogress, or the input is invalid.\n\nArgs:\n    body: Cohort create request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Created cohort.",
+        "description": "Create a cohort from explicit session ids.\n\nThe session ids keep their order as the member positions. Membership\nis immutable after creation.\n\nClients observe HTTP 201 on success, 404 when no agent or session has a\nreferenced id, 409 when the name is already registered, and 422 when\nthe membership is empty, a session id repeats, a member belongs to\nanother agent or is in progress, or the input is invalid.\n\nArgs:\n    body: Cohort create request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Created cohort.",
         "operationId": "create_cohort_v1_cohorts_post",
         "requestBody": {
           "content": {
@@ -6206,9 +5965,42 @@
     },
     "/v1/experiment-runs": {
       "get": {
-        "description": "List experiment runs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Experiment run service.\n    actor: Caller context.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of experiment runs.",
+        "description": "List experiment runs.\n\nClients observe HTTP 200 on success, 404 when no experiment has the\nfiltered experiment id, and 422 on invalid filter or pagination\nparameters.\n\nArgs:\n    service: Experiment run service.\n    actor: Caller context.\n    experiment_id: Filter on experiment id.\n    status: Filter on run status.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of experiment runs.",
         "operationId": "list_experiment_runs_v1_experiment_runs_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "experiment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experiment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ExperimentRunStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
           {
             "in": "query",
             "name": "tag",
@@ -6278,6 +6070,41 @@
       }
     },
     "/v1/experiment-runs/{run_id}": {
+      "delete": {
+        "description": "Delete a terminal experiment run, including its replays.\n\nDeletes each replay's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no experiment run has\nthis id, and 409 when the run is not terminal.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.",
+        "operationId": "delete_experiment_run_v1_experiment_runs__run_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Experiment Run",
+        "tags": [
+          "experiment-runs"
+        ]
+      },
       "get": {
         "description": "Get an experiment run by id.\n\nClients observe HTTP 200 on success and 404 when no experiment run\nhas this id.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Stored experiment run.",
         "operationId": "get_experiment_run_v1_experiment_runs__run_id__get",
@@ -6421,7 +6248,7 @@
     },
     "/v1/experiment-runs/{run_id}/replays": {
       "get": {
-        "description": "List the replays of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
+        "description": "List the replays of an experiment run.\n\nClients observe HTTP 200 on success, 404 when no experiment run has\nthis id, and 422 on invalid filter or pagination parameters.\n\nArgs:\n    run_id: Id of the experiment run.\n    service: Experiment run service.\n    actor: Caller context.\n    status: Filter on replay status.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
         "operationId": "list_experiment_run_replays_v1_experiment_runs__run_id__replays_get",
         "parameters": [
           {
@@ -6432,6 +6259,22 @@
               "format": "uuid",
               "title": "Run Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReplayStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
             }
           },
           {
@@ -6876,8 +6719,7 @@
                 "$ref": "#/components/schemas/Body_login_v1_login_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -6924,9 +6766,26 @@
     },
     "/v1/replays": {
       "get": {
-        "description": "List replays.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Replay service.\n    actor: Caller context.\n    original_session_id: Filter on the replayed session id.\n    replay_status: Filter on replay status.\n    standalone: Filter on standalone replays.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
+        "description": "List replays.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Replay service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    replay_status: Filter on replay status.\n    standalone: Filter on standalone replays.\n    worker_id: Filter on the claiming worker id.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of replays.",
         "operationId": "list_replays_v1_replays_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "experiment_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Experiment Run Id"
+            }
+          },
           {
             "in": "query",
             "name": "original_session_id",
@@ -6974,6 +6833,22 @@
                 }
               ],
               "title": "Standalone"
+            }
+          },
+          {
+            "in": "query",
+            "name": "worker_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Worker Id"
             }
           },
           {
@@ -7069,6 +6944,41 @@
       }
     },
     "/v1/replays/{replay_id}": {
+      "delete": {
+        "description": "Delete a standalone replay.\n\nDeletes the replay's config when nothing else references it.\n\nClients observe HTTP 204 on success, 404 when no replay has this id,\nand 409 when the replay belongs to an experiment run or is claimed or\nrunning.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.",
+        "operationId": "delete_replay_v1_replays__replay_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Replay",
+        "tags": [
+          "replays"
+        ]
+      },
       "get": {
         "description": "Get a replay by id.\n\nClients observe HTTP 200 on success and 404 when no replay has this\nid.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
         "operationId": "get_replay_v1_replays__replay_id__get",
@@ -7164,6 +7074,60 @@
         ]
       }
     },
+    "/v1/replays/{replay_id}/claim": {
+      "post": {
+        "description": "Claim a standalone replay for a worker.\n\nA stale claim or start is requeued or timed out first, so a replay\nwhose worker died is claimable again.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\n409 when the replay belongs to an experiment run or is not pending\nafter the staleness resolution, and 422 on invalid input.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Standalone replay claim request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Claimed replay.",
+        "operationId": "claim_replay_v1_replays__replay_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StandaloneReplayClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
     "/v1/replays/{replay_id}/diff": {
       "get": {
         "description": "Compute the full diff between a replay's sessions.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay has no result session yet.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Computed replay diff.",
@@ -7210,7 +7174,7 @@
     },
     "/v1/replays/{replay_id}/heartbeat": {
       "post": {
-        "description": "Record a worker heartbeat on a replay.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay is neither claimed, running, nor canceled.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the cancellation flag.",
+        "description": "Record a worker heartbeat on a replay.\n\nTerminal replays record nothing and report the stop flag, so the\nworker abandons the replay.\n\nClients observe HTTP 200 on success, including terminal replays, 404\nwhen no replay has this id, and 409 when the replay is pending.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the status and stop flag.",
         "operationId": "heartbeat_replay_v1_replays__replay_id__heartbeat_post",
         "parameters": [
           {
@@ -7252,9 +7216,97 @@
         ]
       }
     },
+    "/v1/replays/{replay_id}/release": {
+      "post": {
+        "description": "Requeue a claimed or running replay for another attempt.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay is not claimed or running.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Requeued replay.",
+        "operationId": "release_replay_v1_replays__replay_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
+    "/v1/replays/{replay_id}/retry": {
+      "post": {
+        "description": "Requeue a finished standalone replay for another attempt.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the replay belongs to an experiment run or is not\nfailed, timed out, or canceled.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Requeued replay.",
+        "operationId": "retry_replay_v1_replays__replay_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Replay",
+        "tags": [
+          "replays"
+        ]
+      }
+    },
     "/v1/replays/{replay_id}/spec": {
       "get": {
-        "description": "Resolve the spec a runner executes a replay with.\n\nThe spec includes the resolved secret environment of the run spec's\nsecrets.\n\nClients observe HTTP 200 on success, 404 when no replay has this id or\na run spec secret was deleted, and 409 when the stamped agent version\nhas no run spec.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Resolved replay spec.",
+        "description": "Resolve the spec a runner executes a replay with.\n\nThe spec includes the resolved secret environment of the run spec's\nsecrets.\n\nClients observe HTTP 200 on success, 404 when no replay has this id,\nand 409 when the stamped agent version has no run spec.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Resolved replay spec.",
         "operationId": "get_replay_spec_v1_replays__replay_id__spec_get",
         "parameters": [
           {

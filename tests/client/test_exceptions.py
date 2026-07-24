@@ -11,27 +11,18 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Agent version filter and command models."""
+"""Tests for the typed client exceptions."""
 
-import uuid
+import httpx
+import pytest
 
-from pydantic import Field, PositiveInt
-
-from kitaru.server.base import FrozenModel
-from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
+from kitaru.client.exceptions import ConflictError, raise_for_response
 
 
-class AgentVersionFilter(FrozenModel):
-    """Agent version list filter."""
-
-    agent_id: uuid.UUID | None = None
-    page: PositiveInt = 1
-    page_size: int = Field(default=20, ge=1, le=1000)
-
-
-class AgentVersionUpdate(FrozenModel):
-    """Agent version update command."""
-
-    description: str | None = None
-    run_spec: RunSpec | None = None
-    capabilities: AgentCapabilities | None = None
+def test_conflict_mapping() -> None:
+    """Map HTTP 409 to ConflictError."""
+    response = httpx.Response(409, json={"detail": "duplicate"})
+    with pytest.raises(ConflictError) as exc_info:
+        raise_for_response(response)
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "duplicate"

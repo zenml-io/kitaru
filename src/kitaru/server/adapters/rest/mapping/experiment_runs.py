@@ -25,7 +25,24 @@ from kitaru.api_models.v1.experiment_runs import (
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunProgress,
+    ExperimentRunStatus,
 )
+
+
+def run_status_to_domain(
+    status: ExperimentRunStatusModel | None,
+) -> ExperimentRunStatus | None:
+    """Convert an optional run status DTO to its domain enum.
+
+    Args:
+        status: Run status DTO.
+
+    Returns:
+        Domain run status, ``None`` for ``None``.
+    """
+    if status is None:
+        return None
+    return ExperimentRunStatus(status.value)
 
 
 def progress_to_response(

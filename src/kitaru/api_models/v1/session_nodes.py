@@ -21,7 +21,7 @@ from typing import Any
 
 from pydantic import AwareDatetime, ConfigDict, Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
+from kitaru.api_models.v1.base import JsonValue, RequestModel, ResponseModel
 from kitaru.api_models.v1.sessions import TokenUsage
 
 
@@ -69,8 +69,8 @@ class SessionNodeCreateRequest(RequestModel):
     error: str | None = Field(default=None, description="Error message.")
     started_at: AwareDatetime | None = Field(default=None, description="Start time.")
     ended_at: AwareDatetime | None = Field(default=None, description="End time.")
-    inputs: Any = Field(default=None, description="Node inputs.")
-    outputs: Any = Field(default=None, description="Node outputs.")
+    inputs: JsonValue = Field(default=None, description="Node inputs.")
+    outputs: JsonValue = Field(default=None, description="Node outputs.")
     requested_model: str | None = Field(
         default=None, max_length=255, description="Model asked for."
     )
@@ -82,7 +82,7 @@ class SessionNodeCreateRequest(RequestModel):
     )
     tokens: TokenUsage | None = Field(default=None, description="Token usage.")
     cost: Decimal | None = Field(default=None, description="Call cost.")
-    model_params: dict[str, Any] | None = Field(
+    model_params: dict[str, JsonValue] | None = Field(
         default=None, description="Model parameters."
     )
     tool_name: str | None = Field(
@@ -91,10 +91,12 @@ class SessionNodeCreateRequest(RequestModel):
     subagent_id: str | None = Field(
         default=None, max_length=255, description="Harness id of the subagent."
     )
-    attributes: dict[str, Any] = Field(
+    attributes: dict[str, JsonValue] = Field(
         default_factory=dict, description="Provider or adapter attributes."
     )
-    metadata: dict[str, Any] = Field(default_factory=dict, description="User metadata.")
+    metadata: dict[str, JsonValue] = Field(
+        default_factory=dict, description="User metadata."
+    )
 
 
 class SessionNodeBatchRequest(RequestModel):

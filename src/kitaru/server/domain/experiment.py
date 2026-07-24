@@ -22,6 +22,7 @@ from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
     NotFoundError,
+    ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
@@ -75,6 +76,10 @@ class ExperimentFrozen(ConflictError):
         super().__init__(f"Experiment {experiment_id} is frozen by existing runs")
 
 
+class InvalidExperiment(ValidationError):
+    """Raised when an experiment violates its shape rules."""
+
+
 class Experiment(DomainModel):
     """Experiment."""
 
@@ -95,11 +100,11 @@ class Experiment(DomainModel):
         """
         self.name = name
 
-    def update_description(self, description: str) -> None:
+    def update_description(self, description: str | None) -> None:
         """Set a new experiment description.
 
         Args:
-            description: New description.
+            description: New description, ``None`` clears it.
         """
         self.description = description
 

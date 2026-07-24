@@ -26,7 +26,10 @@ from conftest import (
     FakeSessionRepository,
     create_secret,
 )
-from kitaru.server.application.models.agent_versions import AgentVersionFilter
+from kitaru.server.application.models.agent_versions import (
+    AgentVersionFilter,
+    AgentVersionUpdate,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
@@ -39,6 +42,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionInUse,
     AgentVersionNotFound,
     DuplicateAgentVersion,
+    InvalidAgentVersion,
     RunSpec,
 )
 from kitaru.server.domain.replay import Replay
@@ -372,9 +376,7 @@ async def test_update_version(
     )
     updated = await service.update_version(
         created.id,
-        description="Tuned prompt",
-        run_spec=None,
-        capabilities=None,
+        AgentVersionUpdate(description="Tuned prompt"),
         actor=ACTOR,
     )
     assert updated.description == "Tuned prompt"
@@ -389,12 +391,72 @@ async def test_update_version(
     )
     updated = await service.update_version(
         created.id,
+        AgentVersionUpdate(run_spec=run_spec, capabilities=CAPABILITIES),
+        actor=ACTOR,
+    )
+    assert updated.description == "Tuned prompt"
+    assert updated.run_spec == run_spec
+    assert updated.capabilities == CAPABILITIES
+
+
+async def test_update_version_null_clears_nullable_fields(
+    service: AgentVersionService, agent: Agent
+) -> None:
+    """Clear the description and run spec on explicit nulls."""
+    created = await service.create_version(
+        agent.id,
+        version="v1",
+        description="Initial version",
+        run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        capabilities=None,
+        actor=ACTOR,
+    )
+    updated = await service.update_version(
+        created.id,
+        AgentVersionUpdate(description=None, run_spec=None),
+        actor=ACTOR,
+    )
+    assert updated.description is None
+    assert updated.run_spec is None
+
+
+async def test_update_version_null_capabilities_rejected(
+    service: AgentVersionService, agent: Agent
+) -> None:
+    """Reject an explicit null for the capabilities."""
+    created = await service.create_version(
+        agent.id,
+        version="v1",
         description=None,
+        run_spec=None,
+        capabilities=None,
+        actor=ACTOR,
+    )
+    with pytest.raises(
+        InvalidAgentVersion, match="Agent version capabilities cannot be null"
+    ):
+        await service.update_version(
+            created.id, AgentVersionUpdate(capabilities=None), actor=ACTOR
+        )
+
+
+async def test_update_version_absent_fields_unchanged(
+    service: AgentVersionService, agent: Agent
+) -> None:
+    """Keep every field on an update without set fields."""
+    run_spec = RunSpec(command="python agent.py", timeout_seconds=600)
+    created = await service.create_version(
+        agent.id,
+        version="v1",
+        description="Initial version",
         run_spec=run_spec,
         capabilities=CAPABILITIES,
         actor=ACTOR,
     )
-    assert updated.description == "Tuned prompt"
+    updated = await service.update_version(
+        created.id, AgentVersionUpdate(), actor=ACTOR
+    )
+    assert updated.description == "Initial version"
     assert updated.run_spec == run_spec
     assert updated.capabilities == CAPABILITIES
 
@@ -417,11 +479,7 @@ async def test_update_version_missing_secret(
     )
     with pytest.raises(SecretNotFound, match=f"Secret {missing_id} was not found"):
         await service.update_version(
-            created.id,
-            description=None,
-            run_spec=run_spec,
-            capabilities=None,
-            actor=ACTOR,
+            created.id, AgentVersionUpdate(run_spec=run_spec), actor=ACTOR
         )
     loaded = await service.get_version(created.id, actor=ACTOR)
     assert loaded.run_spec is None
@@ -431,11 +489,7 @@ async def test_update_version_not_found(service: AgentVersionService) -> None:
     """Raise for an unknown agent version id."""
     with pytest.raises(AgentVersionNotFound):
         await service.update_version(
-            uuid.uuid4(),
-            description="Tuned prompt",
-            run_spec=None,
-            capabilities=None,
-            actor=ACTOR,
+            uuid.uuid4(), AgentVersionUpdate(description="Tuned prompt"), actor=ACTOR
         )
 
 
@@ -537,26 +591,23 @@ async def test_update_version_frozen_by_replay(
     with pytest.raises(AgentVersionFrozen, match=frozen_message):
         await service.update_version(
             version_id,
-            description=None,
-            run_spec=RunSpec(command="python agent2.py", timeout_seconds=60),
-            capabilities=None,
+            AgentVersionUpdate(
+                run_spec=RunSpec(command="python agent2.py", timeout_seconds=60)
+            ),
             actor=ACTOR,
         )
     with pytest.raises(AgentVersionFrozen, match=frozen_message):
         await service.update_version(
-            version_id,
-            description=None,
-            run_spec=None,
-            capabilities=CAPABILITIES,
-            actor=ACTOR,
+            version_id, AgentVersionUpdate(capabilities=CAPABILITIES), actor=ACTOR
+        )
+    # Clearing the run spec is also a run spec change.
+    with pytest.raises(AgentVersionFrozen, match=frozen_message):
+        await service.update_version(
+            version_id, AgentVersionUpdate(run_spec=None), actor=ACTOR
         )
     # The description stays mutable.
     updated = await service.update_version(
-        version_id,
-        description="Still editable",
-        run_spec=None,
-        capabilities=None,
-        actor=ACTOR,
+        version_id, AgentVersionUpdate(description="Still editable"), actor=ACTOR
     )
     assert updated.description == "Still editable"
 

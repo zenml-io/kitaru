@@ -21,7 +21,12 @@ from typing import Any
 
 from pydantic import AwareDatetime, Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
+from kitaru.api_models.v1.base import (
+    FiniteFloat,
+    JsonValue,
+    RequestModel,
+    ResponseModel,
+)
 
 
 class SessionOrigin(StrEnum):
@@ -73,9 +78,9 @@ class SessionCreateRequest(RequestModel):
         default=None, description="Initial status, in progress when omitted."
     )
     name: str | None = Field(default=None, max_length=255, description="Display label.")
-    inputs: Any = Field(default=None, description="Initial task inputs.")
-    outputs: Any = Field(default=None, description="Final agent outputs.")
-    expected: Any = Field(
+    inputs: JsonValue = Field(default=None, description="Initial task inputs.")
+    outputs: JsonValue = Field(default=None, description="Final agent outputs.")
+    expected: JsonValue = Field(
         default=None, description="Ground truth for reference-based scorers."
     )
     error: str | None = Field(default=None, description="Error message.")
@@ -90,7 +95,9 @@ class SessionCreateRequest(RequestModel):
         max_length=255,
         description="External session or conversation id.",
     )
-    metadata: dict[str, Any] = Field(default_factory=dict, description="User metadata.")
+    metadata: dict[str, JsonValue] = Field(
+        default_factory=dict, description="User metadata."
+    )
     provider: SessionProvider | None = Field(
         default=None, description="Source provider, imported sessions only."
     )
@@ -113,7 +120,7 @@ class SessionUpdateRequest(RequestModel):
     status: SessionStatus | None = Field(
         default=None, description="Terminal status finishing the session."
     )
-    outputs: Any = Field(
+    outputs: JsonValue = Field(
         default=None, description="Final agent outputs, applied on finish."
     )
     error: str | None = Field(
@@ -128,8 +135,8 @@ class SessionUpdateRequest(RequestModel):
     name: str | None = Field(
         default=None, max_length=255, description="New display label."
     )
-    expected: Any = Field(default=None, description="New expected outputs.")
-    metadata: dict[str, Any] | None = Field(
+    expected: JsonValue = Field(default=None, description="New expected outputs.")
+    metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New user metadata."
     )
 
@@ -137,7 +144,7 @@ class SessionUpdateRequest(RequestModel):
 class SessionScoresRequest(RequestModel):
     """Session scores request."""
 
-    scores: dict[str, float] = Field(
+    scores: dict[str, FiniteFloat] = Field(
         description="Score values by scorer name, latest wins."
     )
 

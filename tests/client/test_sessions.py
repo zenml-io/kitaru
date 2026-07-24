@@ -38,7 +38,7 @@ from kitaru.api_models.v1.sessions import (
     SessionUpdateRequest,
 )
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.client.exceptions import ConflictError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
@@ -133,7 +133,7 @@ async def test_create_duplicate_import(api_client: KitaruAPIClient) -> None:
         external_id="lf-1",
     )
     await api_client.sessions.create(request)
-    with pytest.raises(APIError) as exc_info:
+    with pytest.raises(ConflictError) as exc_info:
         await api_client.sessions.create(request)
     assert exc_info.value.status_code == 409
     assert exc_info.value.detail == (
@@ -206,6 +206,20 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.items[0].origin is SessionOrigin.IMPORTED
 
 
+async def test_list_falsy_filters(api_client: KitaruAPIClient) -> None:
+    """Send a zero uuid and an empty string filter as query params."""
+    agent = await create_agent(api_client)
+    await api_client.sessions.create(
+        SessionCreateRequest(agent_id=agent.id, origin=SessionOrigin.RECORDED)
+    )
+
+    with pytest.raises(NotFoundError):
+        await api_client.sessions.list(agent_id=uuid.UUID(int=0))
+
+    page = await api_client.sessions.list(name="")
+    assert page.total == 0
+
+
 async def test_update_finish(api_client: KitaruAPIClient) -> None:
     """Finish a session through the SDK."""
     agent = await create_agent(api_client)
@@ -224,11 +238,32 @@ async def test_update_finish(api_client: KitaruAPIClient) -> None:
     assert finished.outputs == {"answer": "42"}
     assert finished.ended_at == ENDED_AT
 
-    with pytest.raises(APIError) as exc_info:
+    with pytest.raises(ConflictError) as exc_info:
         await api_client.sessions.update(
             created.id, SessionUpdateRequest(status=SessionStatus.FAILED)
         )
     assert exc_info.value.status_code == 409
+
+
+async def test_update_null_clears_fields(api_client: KitaruAPIClient) -> None:
+    """Clear name and expected through explicit None on the request."""
+    agent = await create_agent(api_client)
+    created = await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent.id,
+            origin=SessionOrigin.RECORDED,
+            name="run-1",
+            expected={"answer": "42"},
+        )
+    )
+    updated = await api_client.sessions.update(
+        created.id, SessionUpdateRequest(name=None, expected=None)
+    )
+    assert updated.name is None
+    assert updated.expected is None
+    loaded = await api_client.sessions.get(created.id)
+    assert loaded.name is None
+    assert loaded.expected is None
 
 
 async def test_merge_scores(api_client: KitaruAPIClient) -> None:

@@ -25,6 +25,7 @@ from kitaru.api_models.v1.replays import (
     ReplaySpecResponse,
     ReplayStatus,
     ReplayUpdateRequest,
+    StandaloneReplayClaimRequest,
     ToolLookupRequest,
     ToolLookupResponse,
 )
@@ -68,18 +69,22 @@ class ReplaysResource:
 
     async def list(
         self,
+        experiment_run_id: uuid.UUID | None = None,
         original_session_id: uuid.UUID | None = None,
         status: ReplayStatus | None = None,
         standalone: bool | None = None,
+        worker_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Page[ReplayResponse]:
         """List replays.
 
         Args:
+            experiment_run_id: Filter on experiment run id.
             original_session_id: Filter on the replayed session id.
             status: Filter on replay status.
             standalone: Filter on standalone replays.
+            worker_id: Filter on the claiming worker id.
             page: Page number.
             page_size: Page size.
 
@@ -90,12 +95,16 @@ class ReplaysResource:
             Page of replays.
         """
         params: dict[str, Any] = {"page": page, "page_size": page_size}
+        if experiment_run_id is not None:
+            params["experiment_run_id"] = str(experiment_run_id)
         if original_session_id is not None:
             params["original_session_id"] = str(original_session_id)
         if status is not None:
             params["status"] = status.value
         if standalone is not None:
             params["standalone"] = standalone
+        if worker_id is not None:
+            params["worker_id"] = worker_id
         response = await self._client.request("GET", "/v1/replays", params=params)
         return Page[ReplayResponse].model_validate(response.json())
 
@@ -123,8 +132,8 @@ class ReplaysResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                replay or a deleted run spec secret and 409 when the
-                stamped agent version has no run spec.
+                replay and 409 when the stamped agent version has no run
+                spec.
 
         Returns:
             Resolved replay spec.
@@ -156,19 +165,92 @@ class ReplaysResource:
         )
         return ReplayResponse.model_validate(response.json())
 
-    async def heartbeat(self, replay_id: uuid.UUID) -> ReplayHeartbeatResponse:
-        """Record a worker heartbeat on a replay.
+    async def claim(
+        self, replay_id: uuid.UUID, request: StandaloneReplayClaimRequest
+    ) -> ReplayResponse:
+        """Claim a standalone replay for a worker.
+
+        Args:
+            replay_id: Id of the replay.
+            request: Standalone replay claim request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay belongs to an experiment
+                run or is not pending.
+
+        Returns:
+            Claimed replay.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/replays/{replay_id}/claim",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ReplayResponse.model_validate(response.json())
+
+    async def release(self, replay_id: uuid.UUID) -> ReplayResponse:
+        """Requeue a claimed or running replay for another attempt.
 
         Args:
             replay_id: Id of the replay.
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                replay and 409 when the replay is neither claimed,
-                running, nor canceled.
+                replay and 409 when the replay is not claimed or running.
 
         Returns:
-            Heartbeat response with the cancellation flag.
+            Requeued replay.
+        """
+        response = await self._client.request(
+            "POST", f"/v1/replays/{replay_id}/release"
+        )
+        return ReplayResponse.model_validate(response.json())
+
+    async def retry(self, replay_id: uuid.UUID) -> ReplayResponse:
+        """Requeue a finished standalone replay for another attempt.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay belongs to an experiment
+                run or is not failed, timed out, or canceled.
+
+        Returns:
+            Requeued replay.
+        """
+        response = await self._client.request("POST", f"/v1/replays/{replay_id}/retry")
+        return ReplayResponse.model_validate(response.json())
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a standalone replay, including its unreferenced config.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay belongs to an experiment
+                run or is claimed or running.
+        """
+        await self._client.request("DELETE", f"/v1/replays/{replay_id}")
+
+    async def heartbeat(self, replay_id: uuid.UUID) -> ReplayHeartbeatResponse:
+        """Record a worker heartbeat on a replay.
+
+        Terminal replays report the stop flag instead of recording.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                replay and 409 when the replay is pending.
+
+        Returns:
+            Heartbeat response with the status and stop flag.
         """
         response = await self._client.request(
             "POST", f"/v1/replays/{replay_id}/heartbeat"

@@ -27,11 +27,15 @@ from kitaru.server.application.interfaces.replay_repository import (
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
 )
-from kitaru.server.application.models.agent_versions import AgentVersionFilter
+from kitaru.server.application.models.agent_versions import (
+    AgentVersionFilter,
+    AgentVersionUpdate,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
+    InvalidAgentVersion,
     RunSpec,
 )
 from kitaru.server.domain.secret import SecretNotFound
@@ -159,25 +163,24 @@ class AgentVersionService:
     async def update_version(
         self,
         version_id: uuid.UUID,
-        description: str | None,
-        run_spec: RunSpec | None,
-        capabilities: AgentCapabilities | None,
+        command: AgentVersionUpdate,
         actor: AuthContext,
     ) -> AgentVersion:
         """Partially update an agent version.
 
         The description updates on any version. Run spec and capability
-        changes are rejected once a replay references the version.
+        changes are rejected once a replay references the version. Fields
+        absent from the command stay unchanged. An explicit null clears the
+        description and run spec and is rejected for the capabilities.
 
         Args:
             version_id: Id of the agent version.
-            description: New version description, unchanged when ``None``.
-            run_spec: New run specification, unchanged when ``None``.
-            capabilities: New agent capabilities, unchanged when ``None``.
+            command: Agent version update command.
             actor: Caller context.
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            InvalidAgentVersion: The capabilities are null.
             AgentVersionFrozen: A replay references the version.
             SecretNotFound: A referenced secret does not exist or is
                 internal.
@@ -187,15 +190,23 @@ class AgentVersionService:
         """
         _ = actor
         agent_version = await self._repository.get(version_id)
-        if description is not None:
-            agent_version.update_description(description)
-        if run_spec is not None or capabilities is not None:
+        if "description" in command.model_fields_set:
+            agent_version.update_description(command.description)
+        if (
+            "run_spec" in command.model_fields_set
+            or "capabilities" in command.model_fields_set
+        ):
             frozen = await self._replay_repository.references_agent_version(version_id)
-            if run_spec is not None:
-                await self._check_secrets_exist(run_spec)
-                agent_version.update_run_spec(run_spec, frozen=frozen)
-            if capabilities is not None:
-                agent_version.update_capabilities(capabilities, frozen=frozen)
+            if "run_spec" in command.model_fields_set:
+                if command.run_spec is not None:
+                    await self._check_secrets_exist(command.run_spec)
+                agent_version.update_run_spec(command.run_spec, frozen=frozen)
+            if "capabilities" in command.model_fields_set:
+                if command.capabilities is None:
+                    raise InvalidAgentVersion(
+                        "Agent version capabilities cannot be null"
+                    )
+                agent_version.update_capabilities(command.capabilities, frozen=frozen)
         return await self._repository.update(agent_version)
 
     async def delete_version(self, version_id: uuid.UUID, actor: AuthContext) -> None:

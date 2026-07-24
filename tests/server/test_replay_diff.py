@@ -374,11 +374,27 @@ def test_run_summary_aggregates() -> None:
             result_session_id=None,
             status=ReplayStatus.FAILED,
         ),
+        replay(
+            experiment_run_id=run_id,
+            result_session_id=None,
+            status=ReplayStatus.TIMED_OUT,
+        ),
+        replay(
+            experiment_run_id=run_id,
+            result_session_id=None,
+            status=ReplayStatus.CANCELED,
+        ),
     ]
     sessions = {entity.id: entity for entity in originals + results}
     summary = compute_run_summary(replays, sessions)
-    assert summary["replay_counts_by_status"] == {"completed": 2, "failed": 1}
-    assert summary["pass_rate"] == 0.5
+    assert summary["replay_counts_by_status"] == {
+        "completed": 2,
+        "failed": 1,
+        "timed_out": 1,
+        "canceled": 1,
+    }
+    # One passed of the four finished replays, the canceled one excluded.
+    assert summary["pass_rate"] == 0.25
     replay_stats = summary["scores"]["conciseness"]["replay"]
     assert replay_stats["mean"] == pytest.approx(0.5)
     assert replay_stats["median"] == pytest.approx(0.5)

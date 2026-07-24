@@ -21,7 +21,7 @@ from statistics import fmean, median
 from typing import Any
 
 from kitaru.server.base import FrozenModel
-from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.replay import Replay, ReplayStatus
 from kitaru.server.domain.replay_config import ReplayOverride, effective_inputs
 from kitaru.server.domain.session import Session, TokenUsage
 from kitaru.server.domain.session_node import NodeType, SessionNode
@@ -436,10 +436,15 @@ def compute_run_summary(
     counts: dict[str, int] = {}
     for replay in replays:
         counts[replay.status.value] = counts.get(replay.status.value, 0) + 1
-    scored = [replay for replay in replays if replay.passed is not None]
+    finished = [
+        replay
+        for replay in replays
+        if replay.status
+        in (ReplayStatus.COMPLETED, ReplayStatus.FAILED, ReplayStatus.TIMED_OUT)
+    ]
     pass_rate = None
-    if scored:
-        pass_rate = sum(1 for replay in scored if replay.passed) / len(scored)
+    if finished:
+        pass_rate = sum(1 for replay in finished if replay.passed) / len(finished)
     originals = [
         session
         for replay in replays

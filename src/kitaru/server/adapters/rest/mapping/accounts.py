@@ -13,8 +13,25 @@
 #  permissions and limitations under the License.
 """Account DTO conversions."""
 
-from kitaru.api_models.v1.accounts import AccountResponse
+from kitaru.api_models.v1.accounts import AccountResponse, AccountUpdateRequest
+from kitaru.server.adapters.rest.mapping.partial import set_fields
+from kitaru.server.application.models.accounts import AccountUpdate
 from kitaru.server.domain.account import Account
+
+
+def account_update_to_command(body: AccountUpdateRequest) -> AccountUpdate:
+    """Convert an account update request to its command.
+
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
+    Args:
+        body: Account update request.
+
+    Returns:
+        Account update command.
+    """
+    return AccountUpdate(**set_fields(body))
 
 
 def account_to_response(account: Account) -> AccountResponse:

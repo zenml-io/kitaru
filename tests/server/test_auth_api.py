@@ -155,12 +155,39 @@ async def test_login_unknown_user(client: httpx.AsyncClient) -> None:
 
 
 async def test_login_missing_fields(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 when the login form is incomplete."""
+    """Observe HTTP 401 when the login form is incomplete."""
     response = await client.post("/v1/login", data={})
-    assert response.status_code == 422
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password."}
 
     response = await client.post("/v1/login", data={"username": "alice"})
-    assert response.status_code == 422
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password."}
+
+
+async def test_login_empty_password(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 401 for an empty password."""
+    response = await client.post(
+        "/v1/login", data={"username": "alice", "password": ""}
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password."}
+
+
+async def test_login_empty_username(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 401 for an empty username."""
+    response = await client.post(
+        "/v1/login", data={"username": "", "password": "secret"}
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password."}
+
+
+async def test_login_empty_credentials(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 401 for empty username and password."""
+    response = await client.post("/v1/login", data={"username": "", "password": ""})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid username or password."}
 
 
 async def test_login_unavailable_under_none_scheme(

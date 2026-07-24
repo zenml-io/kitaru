@@ -15,7 +15,6 @@
 
 import uuid
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -79,7 +78,6 @@ class Cohort(DomainModel):
     description: str | None = None
     agent_id: uuid.UUID
     session_count: int = 0
-    filter_snapshot: dict[str, Any] | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -109,10 +107,10 @@ class Cohort(DomainModel):
         """
         self.name = name
 
-    def update_description(self, description: str) -> None:
+    def update_description(self, description: str | None) -> None:
         """Set a new cohort description.
 
         Args:
-            description: New description.
+            description: New description, ``None`` clears it.
         """
         self.description = description

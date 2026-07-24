@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Agent filter model."""
+"""Agent filter and command models."""
 
 import uuid
 
@@ -27,3 +27,10 @@ class AgentFilter(FrozenModel):
     owner_id: uuid.UUID | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
+
+
+class AgentUpdate(FrozenModel):
+    """Agent update command."""
+
+    name: str | None = None
+    description: str | None = None

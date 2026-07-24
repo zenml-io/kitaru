@@ -214,11 +214,11 @@ class Session(DomainModel):
             raise InvalidSession("Only imported sessions carry a provider")
         return self
 
-    def update_name(self, name: str) -> None:
+    def update_name(self, name: str | None) -> None:
         """Set a new session name.
 
         Args:
-            name: New name.
+            name: New name, ``None`` clears it.
         """
         self.name = name
 

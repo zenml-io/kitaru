@@ -11,27 +11,20 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Agent version filter and command models."""
+"""Partial update request helpers."""
 
-import uuid
+from typing import Any
 
-from pydantic import Field, PositiveInt
-
-from kitaru.server.base import FrozenModel
-from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
+from pydantic import BaseModel
 
 
-class AgentVersionFilter(FrozenModel):
-    """Agent version list filter."""
+def set_fields(body: BaseModel) -> dict[str, Any]:
+    """Collect a request's explicitly set fields by name.
 
-    agent_id: uuid.UUID | None = None
-    page: PositiveInt = 1
-    page_size: int = Field(default=20, ge=1, le=1000)
+    Args:
+        body: Parsed request model.
 
-
-class AgentVersionUpdate(FrozenModel):
-    """Agent version update command."""
-
-    description: str | None = None
-    run_spec: RunSpec | None = None
-    capabilities: AgentCapabilities | None = None
+    Returns:
+        Set field values by name, explicit nulls included.
+    """
+    return {field: getattr(body, field) for field in body.model_fields_set}

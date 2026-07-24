@@ -119,18 +119,26 @@ class SessionsResource:
         """
         params: dict[str, Any] = {"page": page, "page_size": page_size}
         optional: dict[str, Any] = {
-            "agent_id": str(agent_id) if agent_id else None,
-            "agent_version_id": str(agent_version_id) if agent_version_id else None,
-            "origin": origin.value if origin else None,
-            "status": status.value if status else None,
-            "provider": provider.value if provider else None,
+            "agent_id": str(agent_id) if agent_id is not None else None,
+            "agent_version_id": str(agent_version_id)
+            if agent_version_id is not None
+            else None,
+            "origin": origin.value if origin is not None else None,
+            "status": status.value if status is not None else None,
+            "provider": provider.value if provider is not None else None,
             "external_id": external_id,
             "name": name,
             "tag": tag,
-            "started_after": started_after.isoformat() if started_after else None,
-            "started_before": started_before.isoformat() if started_before else None,
-            "ended_after": ended_after.isoformat() if ended_after else None,
-            "ended_before": ended_before.isoformat() if ended_before else None,
+            "started_after": started_after.isoformat()
+            if started_after is not None
+            else None,
+            "started_before": started_before.isoformat()
+            if started_before is not None
+            else None,
+            "ended_after": ended_after.isoformat() if ended_after is not None else None,
+            "ended_before": ended_before.isoformat()
+            if ended_before is not None
+            else None,
             "has_score": has_score,
             "min_cost": str(min_cost) if min_cost is not None else None,
             "max_cost": str(max_cost) if max_cost is not None else None,

@@ -167,6 +167,31 @@ async def test_update_account(client: httpx.AsyncClient) -> None:
     assert response.json()["active"] is False
 
 
+async def test_update_account_absent_fields_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Keep every field on an update with an empty body."""
+    created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
+    response = await client.patch(f"/v1/accounts/{created['id']}", json={})
+    assert response.status_code == 200
+    assert response.json()["active"] is True
+
+
+async def test_update_account_null_fields_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for explicit nulls on the active state and password."""
+    created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
+    response = await client.patch(
+        f"/v1/accounts/{created['id']}", json={"active": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Account active state cannot be null"}
+    response = await client.patch(
+        f"/v1/accounts/{created['id']}", json={"password": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Account password cannot be null"}
+
+
 async def test_update_account_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown account id."""
     response = await client.patch(

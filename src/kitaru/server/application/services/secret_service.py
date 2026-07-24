@@ -21,8 +21,8 @@ from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
 )
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secrets import SecretFilter
-from kitaru.server.domain.secret import Secret, SecretNotFound
+from kitaru.server.application.models.secrets import SecretFilter, SecretUpdate
+from kitaru.server.domain.secret import InvalidSecret, Secret, SecretNotFound
 
 
 class SecretService:
@@ -100,30 +100,34 @@ class SecretService:
     async def update_secret(
         self,
         secret_id: uuid.UUID,
-        type: str | None,
-        values: dict[str, SecretStr] | None,
+        command: SecretUpdate,
         actor: AuthContext,
     ) -> Secret:
         """Partially update a secret.
 
+        Fields absent from the command stay unchanged. An explicit null
+        clears the type and is rejected for the values.
+
         Args:
             secret_id: Id of the secret.
-            type: New secret type, unchanged when ``None``.
-            values: New secret values, unchanged when ``None``.
+            command: Secret update command.
             actor: Caller context.
 
         Raises:
             SecretNotFound: No secret has this id, or the secret is
                 internal.
+            InvalidSecret: The values are null.
 
         Returns:
             Updated secret.
         """
         secret = await self.get_secret(secret_id, actor=actor)
-        if type is not None:
-            secret.update_type(type)
-        if values is not None:
-            secret.update_values(values)
+        if "type" in command.model_fields_set:
+            secret.update_type(command.type)
+        if "values" in command.model_fields_set:
+            if command.values is None:
+                raise InvalidSecret("Secret values cannot be null")
+            secret.update_values(command.values)
         return await self._repository.update(secret)
 
     async def delete_secret(self, secret_id: uuid.UUID, actor: AuthContext) -> None:

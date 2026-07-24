@@ -46,8 +46,8 @@ async def login(
     response: Response,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     service: Annotated[AuthService, Depends(get_auth_service)],
-    username: Annotated[str, Form()],
-    password: Annotated[str, Form()],
+    username: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
 ) -> TokenResponse:
     """Log in with a username and password and receive a bearer token.
 

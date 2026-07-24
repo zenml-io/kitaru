@@ -387,6 +387,60 @@ async def test_update_session_fields(client: httpx.AsyncClient) -> None:
     assert body["status"] == "in_progress"
 
 
+async def test_update_session_absent_fields_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Keep every field on an update with an empty body."""
+    agent_id = await create_agent(client)
+    created = await create_session(client, agent_id)
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}",
+        json={"name": "run-1", "expected": {"answer": "42"}},
+    )
+    assert response.status_code == 200
+    response = await client.patch(f"/v1/sessions/{created['id']}", json={})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "run-1"
+    assert body["expected"] == {"answer": "42"}
+    assert body["status"] == "in_progress"
+
+
+async def test_update_session_null_clears_fields(client: httpx.AsyncClient) -> None:
+    """Clear name and expected and reset metadata on explicit nulls."""
+    agent_id = await create_agent(client)
+    created = await create_session(client, agent_id)
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}",
+        json={
+            "name": "run-1",
+            "expected": {"answer": "42"},
+            "metadata": {"env": "prod"},
+        },
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}",
+        json={"name": None, "expected": None, "metadata": None},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] is None
+    assert body["expected"] is None
+    assert body["metadata"] == {}
+
+
+async def test_update_session_null_status_rejected(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an explicit null status."""
+    agent_id = await create_agent(client)
+    created = await create_session(client, agent_id)
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}", json={"status": None}
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Session status cannot be null"}
+
+
 async def test_update_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown session id."""
     response = await client.patch(f"/v1/sessions/{uuid.uuid4()}", json={"name": "x"})
@@ -422,6 +476,34 @@ async def test_merge_scores_not_found(client: httpx.AsyncClient) -> None:
         f"/v1/sessions/{uuid.uuid4()}/scores", json={"scores": {"a": 1.0}}
     )
     assert response.status_code == 404
+
+
+async def test_merge_scores_non_finite(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a raw JSON body with non-finite score values."""
+    agent_id = await create_agent(client)
+    created = await create_session(client, agent_id)
+    for token in ["NaN", "Infinity", "-Infinity"]:
+        response = await client.post(
+            f"/v1/sessions/{created['id']}/scores",
+            content=f'{{"scores": {{"accuracy": {token}}}}}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
+
+
+async def test_create_session_non_finite_inputs(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a raw JSON body with non-finite floats in inputs."""
+    agent_id = await create_agent(client)
+    for token in ["NaN", "Infinity", "-Infinity"]:
+        response = await client.post(
+            "/v1/sessions",
+            content=(
+                f'{{"agent_id": "{agent_id}", "origin": "recorded", '
+                f'"inputs": {{"values": [1, {token}]}}}}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
 
 
 async def test_delete_session(client: httpx.AsyncClient) -> None:

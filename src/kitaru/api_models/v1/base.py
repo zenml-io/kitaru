@@ -13,9 +13,37 @@
 #  permissions and limitations under the License.
 """Shared DTO bases, pagination envelope, and error body."""
 
-from typing import Generic, TypeVar
+import math
+from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+
+
+def _check_finite(value: Any) -> Any:
+    """Reject non-finite floats nested in a JSON value.
+
+    Args:
+        value: JSON value to check.
+
+    Raises:
+        ValueError: The value contains a non-finite number.
+
+    Returns:
+        Unchanged value.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Value contains a non-finite number")
+    if isinstance(value, dict):
+        for item in value.values():
+            _check_finite(item)
+    elif isinstance(value, list):
+        for item in value:
+            _check_finite(item)
+    return value
+
+
+FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+JsonValue = Annotated[Any, AfterValidator(_check_finite)]
 
 
 class RequestModel(BaseModel):

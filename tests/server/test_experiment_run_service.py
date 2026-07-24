@@ -47,12 +47,15 @@ from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.experiment import Experiment, ExperimentNotFound
 from kitaru.server.domain.experiment_run import (
+    ExperimentRun,
+    ExperimentRunActive,
     ExperimentRunNotFound,
     ExperimentRunStatus,
     InvalidExperimentRunTransition,
 )
 from kitaru.server.domain.replay import HEARTBEAT_TIMEOUT_ERROR, ReplayStatus
 from kitaru.server.domain.replay_config import (
+    ReplayConfigNotFound,
     ScorerConfig,
     ScoringPolicy,
     SourceRef,
@@ -544,7 +547,8 @@ async def test_claim_times_out_stale_replays_at_max_attempts(
     assert all(replay.status is ReplayStatus.TIMED_OUT for replay in replays)
     assert all(replay.error == HEARTBEAT_TIMEOUT_ERROR for replay in replays)
     finalized = await repository.get(run.id)
-    assert finalized.status is ExperimentRunStatus.COMPLETED
+    assert finalized.status is ExperimentRunStatus.FAILED
+    assert finalized.error == "2 of 2 replays timed out"
     assert finalized.summary is not None
     assert finalized.summary["replay_counts_by_status"] == {"timed_out": 2}
 
@@ -623,3 +627,103 @@ async def test_cancel_terminal_run(
         f"to 'canceling'",
     ):
         await service.cancel_run(run.id, actor=ACTOR)
+
+
+def running_run() -> ExperimentRun:
+    """Build a running experiment run entity."""
+    return ExperimentRun(
+        owner_id=uuid.uuid4(),
+        experiment_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+        status=ExperimentRunStatus.RUNNING,
+    )
+
+
+def test_run_finalize_decides_status() -> None:
+    """Land finalize on canceled, failed, or completed with the counts."""
+    completed = running_run()
+    completed.finalize({}, [ReplayStatus.COMPLETED, ReplayStatus.CANCELED])
+    assert completed.status is ExperimentRunStatus.COMPLETED
+    assert completed.error is None
+    assert completed.ended_at is not None
+
+    failed = running_run()
+    failed.finalize({}, [ReplayStatus.COMPLETED] * 7 + [ReplayStatus.FAILED] * 3)
+    assert failed.status is ExperimentRunStatus.FAILED
+    assert failed.error == "3 of 10 replays failed"
+
+    timed_out = running_run()
+    timed_out.finalize({}, [ReplayStatus.COMPLETED] * 8 + [ReplayStatus.TIMED_OUT] * 2)
+    assert timed_out.status is ExperimentRunStatus.FAILED
+    assert timed_out.error == "2 of 10 replays timed out"
+
+    mixed = running_run()
+    mixed.finalize(
+        {},
+        [ReplayStatus.COMPLETED] * 5
+        + [ReplayStatus.FAILED] * 3
+        + [ReplayStatus.TIMED_OUT] * 2,
+    )
+    assert mixed.status is ExperimentRunStatus.FAILED
+    assert mixed.error == "3 of 10 replays failed, 2 timed out"
+
+    canceling = running_run()
+    canceling.cancel()
+    canceling.finalize({}, [ReplayStatus.FAILED, ReplayStatus.CANCELED])
+    assert canceling.status is ExperimentRunStatus.CANCELED
+    assert canceling.error is None
+
+    with pytest.raises(InvalidExperimentRunTransition):
+        canceling.finalize({}, [ReplayStatus.CANCELED])
+
+
+async def test_delete_run(
+    service: ExperimentRunService,
+    repository: FakeExperimentRunRepository,
+    replay_repository: FakeReplayRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Delete a terminal run with its replays, keeping the referenced config."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    canceled, _ = await service.cancel_run(run.id, actor=ACTOR)
+    assert canceled.status is ExperimentRunStatus.CANCELED
+
+    await service.delete_run(run.id, actor=ACTOR)
+    with pytest.raises(ExperimentRunNotFound):
+        await repository.get(run.id)
+    _, total = await replay_repository.query(ReplayFilter(experiment_run_id=run.id))
+    assert total == 0
+    # The experiment still references the config.
+    await config_repository.get(experiment.replay_config_id)
+
+    await experiment_service.delete_experiment(experiment.id, actor=ACTOR)
+    with pytest.raises(ReplayConfigNotFound):
+        await config_repository.get(experiment.replay_config_id)
+
+
+async def test_delete_run_rejects_non_terminal(
+    service: ExperimentRunService,
+    experiment_service: ExperimentService,
+    experiment: Experiment,
+) -> None:
+    """Reject deleting a run that is not terminal."""
+    run, _ = await experiment_service.start_run(
+        experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    with pytest.raises(
+        ExperimentRunActive, match=f"Experiment run {run.id} is not terminal"
+    ):
+        await service.delete_run(run.id, actor=ACTOR)
+
+
+async def test_delete_run_not_found(service: ExperimentRunService) -> None:
+    """Raise for an unknown experiment run id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
+    ):
+        await service.delete_run(missing_id, actor=ACTOR)

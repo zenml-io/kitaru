@@ -28,8 +28,7 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.mapping.agent_versions import (
     agent_version_to_response,
-    capabilities_to_domain,
-    run_spec_to_domain,
+    agent_version_update_to_command,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_version_service import (
@@ -86,11 +85,7 @@ async def update_agent_version(
         Updated agent version.
     """
     version = await service.update_version(
-        version_id,
-        description=body.description,
-        run_spec=run_spec_to_domain(body.run_spec),
-        capabilities=capabilities_to_domain(body.capabilities),
-        actor=actor,
+        version_id, agent_version_update_to_command(body), actor=actor
     )
     return agent_version_to_response(version)
 

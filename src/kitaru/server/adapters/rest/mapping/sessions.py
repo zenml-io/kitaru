@@ -19,6 +19,7 @@ from kitaru.api_models.v1.sessions import (
     SessionResponse,
     SessionUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.partial import set_fields
 from kitaru.server.application.models.sessions import (
     SessionCreate,
     SessionUpdate,
@@ -152,22 +153,19 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
 def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     """Convert a session update request to its command.
 
+    Only fields set on the request are set on the command, so an absent
+    field stays distinguishable from an explicit null.
+
     Args:
         body: Session update request.
 
     Returns:
         Session update command.
     """
-    return SessionUpdate(
-        status=status_to_domain(body.status),
-        outputs=body.outputs,
-        error=body.error,
-        ended_at=body.ended_at,
-        log_uri=body.log_uri,
-        name=body.name,
-        expected=body.expected,
-        metadata=body.metadata,
-    )
+    fields = set_fields(body)
+    if "status" in fields:
+        fields["status"] = status_to_domain(body.status)
+    return SessionUpdate(**fields)
 
 
 def session_to_response(session: Session) -> SessionResponse:

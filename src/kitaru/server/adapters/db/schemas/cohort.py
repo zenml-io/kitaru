@@ -14,10 +14,8 @@
 """Cohort ORM tables."""
 
 import uuid
-from typing import Any
 
 from sqlalchemy import ForeignKeyConstraint, Index, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
 
 from kitaru.server.adapters.db.schemas.base import (
@@ -66,7 +64,6 @@ class CohortSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     description: str | None = Field(default=None, sa_type=Text)
     agent_id: uuid.UUID = Field(nullable=False)
     session_count: int = Field(nullable=False)
-    filter_snapshot: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
 
     @classmethod
     def from_domain(cls, cohort: Cohort) -> "CohortSchema":
@@ -85,7 +82,6 @@ class CohortSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             description=cohort.description,
             agent_id=cohort.agent_id,
             session_count=cohort.session_count,
-            filter_snapshot=cohort.filter_snapshot,
         )
 
     def to_domain(self) -> Cohort:
@@ -101,7 +97,6 @@ class CohortSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             description=self.description,
             agent_id=self.agent_id,
             session_count=self.session_count,
-            filter_snapshot=self.filter_snapshot,
             created=self.created,
             updated=self.updated,
         )

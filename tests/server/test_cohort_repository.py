@@ -187,18 +187,12 @@ async def test_create_round_trips_all_fields(setup: Setup) -> None:
     repository, sessions, agents, _, owner_id = setup
     agent = await create_agent(agents, owner_id)
     session = await create_session(sessions, owner_id, agent.id)
-    cohort = cohort_entity(
-        owner_id,
-        agent.id,
-        description="July sessions",
-        filter_snapshot={"agent_id": str(agent.id), "name": "run"},
-    )
+    cohort = cohort_entity(owner_id, agent.id, description="July sessions")
     created = await repository.create(cohort, [session.id])
     loaded = await repository.get(created.id)
     assert loaded == created
     assert loaded.description == "July sessions"
     assert loaded.session_count == 1
-    assert loaded.filter_snapshot == {"agent_id": str(agent.id), "name": "run"}
 
 
 async def test_create_duplicate_name(setup: Setup) -> None:

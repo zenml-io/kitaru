@@ -29,13 +29,10 @@ from kitaru.server.application.models.cohorts import (
     CohortCreate,
     CohortFilter,
     CohortSessionsFilter,
+    CohortUpdate,
 )
-from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.domain.cohort import Cohort, InvalidCohort
 from kitaru.server.domain.session import Session
-
-# Page size for resolving every session matching a cohort filter.
-_FILTER_RESOLUTION_PAGE_SIZE = 1000
 
 
 class CohortService:
@@ -58,34 +55,11 @@ class CohortService:
         self._session_repository = session_repository
         self._agent_repository = agent_repository
 
-    async def _resolve_filter(self, session_filter: SessionFilter) -> list[Session]:
-        """Resolve every session matching a filter across all pages.
-
-        Args:
-            session_filter: Filter selecting the member sessions.
-
-        Returns:
-            Matching sessions.
-        """
-        sessions: list[Session] = []
-        page = 1
-        while True:
-            batch, total = await self._session_repository.query(
-                session_filter.model_copy(
-                    update={"page": page, "page_size": _FILTER_RESOLUTION_PAGE_SIZE}
-                )
-            )
-            sessions.extend(batch)
-            if len(sessions) >= total or not batch:
-                return sessions
-            page += 1
-
     async def create_cohort(self, command: CohortCreate, actor: AuthContext) -> Cohort:
         """Create a cohort owned by the caller.
 
-        Membership comes from explicit session ids with an agent id, or from
-        a session filter that pins an agent. A filter-created cohort stores
-        the filter as its provenance snapshot.
+        The given session ids keep their order as the member positions.
+        Membership is immutable after creation.
 
         Args:
             command: Cohort create command.
@@ -100,49 +74,21 @@ class CohortService:
         Returns:
             Created cohort.
         """
-        if (command.session_ids is None) == (command.session_filter is None):
-            raise InvalidCohort(
-                "Cohort creation requires either session ids or a filter"
-            )
-        filter_snapshot = None
-        if command.session_ids is not None:
-            if command.agent_id is None:
-                raise InvalidCohort(
-                    "Cohort creation from session ids requires an agent id"
-                )
-            if len(set(command.session_ids)) != len(command.session_ids):
-                raise InvalidCohort("Session ids contain duplicates")
-            agent_id = command.agent_id
-            await self._agent_repository.get(agent_id)
-            sessions = [
-                await self._session_repository.get(session_id)
-                for session_id in command.session_ids
-            ]
-        else:
-            assert command.session_filter is not None
-            if command.agent_id is not None:
-                raise InvalidCohort(
-                    "Cohort creation from a filter takes the agent id from the filter"
-                )
-            if command.session_filter.agent_id is None:
-                raise InvalidCohort(
-                    "Cohort creation from a filter requires an agent id in the filter"
-                )
-            agent_id = command.session_filter.agent_id
-            await self._agent_repository.get(agent_id)
-            sessions = await self._resolve_filter(command.session_filter)
-            filter_snapshot = command.session_filter.model_dump(
-                mode="json", exclude={"page", "page_size"}, exclude_none=True
-            )
+        if len(set(command.session_ids)) != len(command.session_ids):
+            raise InvalidCohort("Session ids contain duplicates")
+        await self._agent_repository.get(command.agent_id)
+        sessions = [
+            await self._session_repository.get(session_id)
+            for session_id in command.session_ids
+        ]
         if not sessions:
             raise InvalidCohort("Cohort requires at least one session")
         cohort = Cohort(
             owner_id=actor.account.id,
             name=command.name,
             description=command.description,
-            agent_id=agent_id,
+            agent_id=command.agent_id,
             session_count=len(sessions),
-            filter_snapshot=filter_snapshot,
         )
         cohort.check_members(sessions)
         return await self._repository.create(
@@ -205,20 +151,22 @@ class CohortService:
     async def update_cohort(
         self,
         cohort_id: uuid.UUID,
-        name: str | None,
-        description: str | None,
+        command: CohortUpdate,
         actor: AuthContext,
     ) -> Cohort:
         """Partially update a cohort.
 
+        Fields absent from the command stay unchanged. An explicit null
+        clears the description and is rejected for the name.
+
         Args:
             cohort_id: Id of the cohort.
-            name: New cohort name, unchanged when ``None``.
-            description: New cohort description, unchanged when ``None``.
+            command: Cohort update command.
             actor: Caller context.
 
         Raises:
             CohortNotFound: No cohort has this id.
+            InvalidCohort: The name is null.
             DuplicateCohortName: The cohort name is already registered.
 
         Returns:
@@ -226,10 +174,12 @@ class CohortService:
         """
         _ = actor
         cohort = await self._repository.get(cohort_id)
-        if name is not None:
-            cohort.update_name(name)
-        if description is not None:
-            cohort.update_description(description)
+        if "name" in command.model_fields_set:
+            if command.name is None:
+                raise InvalidCohort("Cohort name cannot be null")
+            cohort.update_name(command.name)
+        if "description" in command.model_fields_set:
+            cohort.update_description(command.description)
         return await self._repository.update(cohort)
 
     async def delete_cohort(self, cohort_id: uuid.UUID, actor: AuthContext) -> None:

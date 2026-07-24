@@ -70,9 +70,10 @@ async def finalize_run_if_drained(
 ) -> None:
     """Finalize an experiment run once its last replay went terminal.
 
-    A canceling run lands on canceled, any other run on completed, with the
-    aggregate summary computed from the replays and their sessions. Runs
-    with non-terminal replays stay untouched.
+    A canceling run lands on canceled, a run with failed or timed out
+    replays on failed, any other run on completed, with the aggregate
+    summary computed from the replays and their sessions. Runs with
+    non-terminal replays stay untouched.
 
     Args:
         run_repository: Experiment run repository.
@@ -91,5 +92,8 @@ async def finalize_run_if_drained(
         for session_id in (replay.original_session_id, replay.result_session_id):
             if session_id is not None and session_id not in sessions:
                 sessions[session_id] = await session_repository.get(session_id)
-    run.finalize(compute_run_summary(replays, sessions))
+    run.finalize(
+        compute_run_summary(replays, sessions),
+        [replay.status for replay in replays],
+    )
     await run_repository.update(run)

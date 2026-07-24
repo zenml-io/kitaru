@@ -85,6 +85,7 @@ class AgentRepository(Protocol):
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent still has versions.
+            AgentInUse: The agent is referenced by an agent version, a
+                session, or a cohort.
         """
         ...

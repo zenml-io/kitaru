@@ -97,3 +97,56 @@ async def test_standalone_replay_flow_persists_across_requests(
     assert response.json() == {
         "detail": f"Session {session_id} is referenced by replays"
     }
+
+
+async def test_standalone_worker_lifecycle_end_to_end(
+    client: httpx.AsyncClient,
+) -> None:
+    """Walk a standalone replay through claim, release, retry, and delete."""
+    session_id = await seed_session(client)
+    body = {"original_session_id": session_id, "scoring_policy": SCORING_POLICY}
+    response = await client.post("/v1/replays", json=body)
+    assert response.status_code == 201
+    replay_id = response.json()["id"]
+
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-1"}
+    )
+    assert response.status_code == 200
+    claimed = response.json()
+    assert claimed["status"] == "claimed"
+    assert claimed["worker_id"] == "worker-1"
+
+    response = await client.post(f"/v1/replays/{replay_id}/release")
+    assert response.status_code == 200
+    released = response.json()
+    assert released["status"] == "pending"
+    assert released["attempt"] == 2
+    assert released["worker_id"] is None
+
+    response = await client.post(
+        f"/v1/replays/{replay_id}/claim", json={"worker_id": "worker-2"}
+    )
+    assert response.status_code == 200
+    response = await client.patch(
+        f"/v1/replays/{replay_id}",
+        json={"status": "failed", "error": "agent exited with code 1"},
+    )
+    assert response.status_code == 200
+
+    response = await client.post(f"/v1/replays/{replay_id}/heartbeat")
+    assert response.status_code == 200
+    assert response.json() == {"status": "failed", "canceled": True}
+
+    response = await client.post(f"/v1/replays/{replay_id}/retry")
+    assert response.status_code == 200
+    retried = response.json()
+    assert retried["status"] == "pending"
+    assert retried["attempt"] == 3
+    assert retried["error"] is None
+    assert retried["result_session_id"] is None
+
+    response = await client.delete(f"/v1/replays/{replay_id}")
+    assert response.status_code == 204
+    response = await client.get(f"/v1/replays/{replay_id}")
+    assert response.status_code == 404

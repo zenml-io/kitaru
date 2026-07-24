@@ -18,7 +18,12 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
+from kitaru.server.domain.base import (
+    ConflictError,
+    DomainModel,
+    NotFoundError,
+    ValidationError,
+)
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -45,6 +50,10 @@ class DuplicateAccountName(ConflictError):
             name: Name that is already registered.
         """
         super().__init__(f"Account name '{name}' is already registered")
+
+
+class InvalidAccount(ValidationError):
+    """Raised when an account violates its shape rules."""
 
 
 class Account(DomainModel):
