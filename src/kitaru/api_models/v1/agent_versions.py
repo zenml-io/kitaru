@@ -15,10 +15,18 @@
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import Field, PositiveInt
 
 from kitaru.api_models.v1.base import RequestModel, ResponseModel
+
+
+class ExecutionTarget(StrEnum):
+    """Execution target."""
+
+    POOL = "pool"
+    ON_DEMAND = "on_demand"
 
 
 class RunSpec(RequestModel):
@@ -36,6 +44,13 @@ class RunSpec(RequestModel):
         description="Ids of secrets whose entries become environment variables.",
     )
     timeout_seconds: PositiveInt = Field(description="Wall clock limit.")
+    image: str | None = Field(
+        default=None, description="Container image running the agent."
+    )
+    default_execution_target: ExecutionTarget = Field(
+        default=ExecutionTarget.POOL,
+        description="Execution target for runs that omit one.",
+    )
 
 
 class AgentCapabilities(RequestModel):

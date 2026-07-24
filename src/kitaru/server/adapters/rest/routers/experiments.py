@@ -34,6 +34,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_experiment_service,
 )
 from kitaru.server.adapters.rest.mapping.experiment_runs import (
+    execution_target_to_domain,
     experiment_run_to_response,
 )
 from kitaru.server.adapters.rest.mapping.experiments import (
@@ -209,7 +210,8 @@ async def create_experiment_run(
 
     Clients observe HTTP 201 on success, 404 when no experiment or agent
     version has the referenced id, 409 when no runnable agent version
-    resolves, and 422 when the version belongs to another agent.
+    resolves or an on demand run resolves to a version without an image,
+    and 422 when the version belongs to another agent.
 
     Args:
         experiment_id: Id of the experiment.
@@ -225,6 +227,7 @@ async def create_experiment_run(
         agent_version_id=body.agent_version_id,
         score_baselines=body.score_baselines,
         actor=actor,
+        execution_target=execution_target_to_domain(body.execution_target),
     )
     return experiment_run_to_response(run, progress)
 

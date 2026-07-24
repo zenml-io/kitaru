@@ -36,6 +36,7 @@ from kitaru.server.adapters.db.schemas.schema_utils import (
     index_name,
     unique_constraint_name,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunStatus,
@@ -53,6 +54,8 @@ EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name(
 EXPERIMENT_RUN_OWNER_ID_INDEX = index_name("experiment_run", ["owner_id"])
 
 MAX_STATUS_LENGTH = 16
+MAX_EXECUTION_TARGET_LENGTH = 16
+MAX_EXECUTOR_HANDLE_LENGTH = 255
 
 
 class ExperimentRunSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
@@ -82,6 +85,14 @@ class ExperimentRunSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     status: str = Field(max_length=MAX_STATUS_LENGTH, nullable=False)
     agent_version_id: uuid.UUID = Field(nullable=False)
     score_baselines: bool = Field(nullable=False)
+    execution_target: str = Field(
+        max_length=MAX_EXECUTION_TARGET_LENGTH,
+        nullable=False,
+        sa_column_kwargs={"server_default": ExecutionTarget.POOL.value},
+    )
+    executor_handle: str | None = Field(
+        default=None, max_length=MAX_EXECUTOR_HANDLE_LENGTH
+    )
     started_at: datetime | None = Field(
         default=None,
         sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
@@ -111,6 +122,8 @@ class ExperimentRunSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             status=run.status.value,
             agent_version_id=run.agent_version_id,
             score_baselines=run.score_baselines,
+            execution_target=run.execution_target.value,
+            executor_handle=run.executor_handle,
             started_at=run.started_at,
             ended_at=run.ended_at,
             summary=run.summary,
@@ -131,6 +144,8 @@ class ExperimentRunSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             status=ExperimentRunStatus(self.status),
             agent_version_id=self.agent_version_id,
             score_baselines=self.score_baselines,
+            execution_target=ExecutionTarget(self.execution_target),
+            executor_handle=self.executor_handle,
             started_at=self.started_at,
             ended_at=self.ended_at,
             summary=self.summary,

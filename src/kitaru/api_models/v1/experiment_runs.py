@@ -20,6 +20,7 @@ from typing import Any
 
 from pydantic import Field
 
+from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.base import RequestModel, ResponseModel
 
 
@@ -59,6 +60,10 @@ class ExperimentRunCreateRequest(RequestModel):
         default=False,
         description="Whether the runner also scores originals missing scores.",
     )
+    execution_target: ExecutionTarget | None = Field(
+        default=None,
+        description="Execution target, the agent version's default when omitted.",
+    )
 
 
 class ExperimentRunResponse(ResponseModel):
@@ -73,6 +78,8 @@ class ExperimentRunResponse(ResponseModel):
     score_baselines: bool = Field(
         description="Whether the runner also scores originals missing scores."
     )
+    execution_target: ExecutionTarget = Field(description="Execution target.")
+    executor_handle: str | None = Field(description="Executor handle.")
     started_at: datetime | None = Field(description="Execution start time.")
     ended_at: datetime | None = Field(description="Execution end time.")
     summary: dict[str, Any] | None = Field(

@@ -23,6 +23,7 @@ from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunProgress,
     ExperimentRunResponse,
@@ -185,6 +186,8 @@ def make_run(status: ExperimentRunStatus) -> ExperimentRunResponse:
         status=status,
         agent_version_id=uuid.uuid4(),
         score_baselines=False,
+        execution_target=ExecutionTarget.POOL,
+        executor_handle=None,
         started_at=None,
         ended_at=None,
         summary=None,

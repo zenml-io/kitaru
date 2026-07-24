@@ -64,7 +64,10 @@ async def create_agent(client: httpx.AsyncClient, name: str = "support-bot") -> 
 
 
 async def create_runnable_version(
-    client: httpx.AsyncClient, agent_id: str, version: str = "v1"
+    client: httpx.AsyncClient,
+    agent_id: str,
+    version: str = "v1",
+    **run_spec_overrides: object,
 ) -> str:
     """Store a runnable agent version through the API.
 
@@ -72,6 +75,7 @@ async def create_runnable_version(
         client: HTTP client for the app.
         agent_id: Id of the agent.
         version: Version label.
+        **run_spec_overrides: Run spec overrides.
 
     Returns:
         Id of the created agent version.
@@ -80,7 +84,11 @@ async def create_runnable_version(
         f"/v1/agents/{agent_id}/versions",
         json={
             "version": version,
-            "run_spec": {"command": "python agent.py", "timeout_seconds": 600},
+            "run_spec": {
+                "command": "python agent.py",
+                "timeout_seconds": 600,
+                **run_spec_overrides,
+            },
         },
     )
     assert response.status_code == 201
@@ -560,6 +568,8 @@ async def test_create_run_fans_out(client: httpx.AsyncClient) -> None:
     assert body["status"] == "pending"
     assert body["agent_version_id"] == version_id
     assert body["score_baselines"] is True
+    assert body["execution_target"] == "pool"
+    assert body["executor_handle"] is None
     assert body["summary"] is None
     assert body["progress"] == {
         "pending": 3,
@@ -575,6 +585,56 @@ async def test_create_run_fans_out(client: httpx.AsyncClient) -> None:
     response = await client.post(f"/v1/experiments/{created['id']}/runs", json={})
     assert response.status_code == 201
     assert response.json()["number"] == 2
+
+
+async def test_create_run_explicit_execution_target(
+    client: httpx.AsyncClient,
+) -> None:
+    """Start an on demand run with an explicit execution target."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id, image="ghcr.io/acme/agent:v1")
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.post(
+        f"/v1/experiments/{created['id']}/runs",
+        json={"execution_target": "on_demand"},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["execution_target"] == "on_demand"
+    assert body["executor_handle"] is None
+
+
+async def test_create_run_default_execution_target_from_run_spec(
+    client: httpx.AsyncClient,
+) -> None:
+    """Default the execution target to the run spec default."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(
+        client,
+        agent_id,
+        image="ghcr.io/acme/agent:v1",
+        default_execution_target="on_demand",
+    )
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.post(f"/v1/experiments/{created['id']}/runs", json={})
+    assert response.status_code == 201
+    assert response.json()["execution_target"] == "on_demand"
+
+
+async def test_create_run_on_demand_without_image(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 409 for an on demand run without an image."""
+    agent_id = await create_agent(client)
+    version_id = await create_runnable_version(client, agent_id)
+    cohort_id = await create_cohort(client, agent_id)
+    created = await create_experiment(client, cohort_id)
+    response = await client.post(
+        f"/v1/experiments/{created['id']}/runs",
+        json={"execution_target": "on_demand"},
+    )
+    assert response.status_code == 409
+    assert response.json() == {"detail": f"Agent version {version_id} has no run image"}
 
 
 async def test_create_run_no_runnable_version(client: httpx.AsyncClient) -> None:

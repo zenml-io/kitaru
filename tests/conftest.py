@@ -181,7 +181,7 @@ def db_settings(**overrides: Any) -> APISettings:
     return APISettings(
         DB_HOST=os.environ.get("KITARU_TEST_DB_HOST", "localhost"),
         DB_PORT=int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
-        DB_NAME="kitaru_test",
+        DB_NAME=os.environ.get("KITARU_TEST_DB_NAME", "kitaru_test"),
         SECRET_ENCRYPTION_KEY="test-encryption-key",
         **overrides,
     )

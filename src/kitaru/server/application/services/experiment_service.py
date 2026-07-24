@@ -40,8 +40,10 @@ from kitaru.server.application.models.experiments import (
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionNotRunnable,
+    MissingRunImage,
     NoRunnableAgentVersion,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import Experiment, InvalidExperiment
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
@@ -330,11 +332,13 @@ class ExperimentService:
         agent_version_id: uuid.UUID | None,
         score_baselines: bool,
         actor: AuthContext,
+        execution_target: ExecutionTarget | None = None,
     ) -> tuple[ExperimentRun, ExperimentRunProgress]:
         """Start an experiment run.
 
         Creates the run plus one pending replay per cohort session, stamped
-        with the experiment's replay config and the resolved agent version.
+        with the experiment's replay config, the resolved agent version, and
+        the resolved execution target.
 
         Args:
             experiment_id: Id of the experiment.
@@ -343,6 +347,8 @@ class ExperimentService:
             score_baselines: Whether the runner also scores originals
                 missing scores.
             actor: Caller context.
+            execution_target: Explicit execution target, ``None`` resolves
+                the run spec default.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
@@ -352,6 +358,8 @@ class ExperimentService:
             InvalidExperimentRun: The explicit version belongs to another
                 agent.
             AgentVersionNotRunnable: The explicit version has no run spec.
+            MissingRunImage: An on demand run resolves to a version without
+                an image.
 
         Returns:
             Created experiment run and its progress.
@@ -359,12 +367,17 @@ class ExperimentService:
         experiment = await self._repository.get(experiment_id)
         cohort = await self._cohort_repository.get(experiment.cohort_id)
         version = await self._resolve_agent_version(cohort.agent_id, agent_version_id)
+        assert version.run_spec is not None
+        target = execution_target or version.run_spec.default_execution_target
+        if target is ExecutionTarget.ON_DEMAND and version.run_spec.image is None:
+            raise MissingRunImage(version.id)
         sessions = await self._resolve_members(experiment.cohort_id)
         run = ExperimentRun(
             owner_id=actor.account.id,
             experiment_id=experiment.id,
             agent_version_id=version.id,
             score_baselines=score_baselines,
+            execution_target=target,
         )
         replays = [
             Replay(

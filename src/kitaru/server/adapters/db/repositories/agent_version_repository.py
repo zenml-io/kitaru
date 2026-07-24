@@ -224,6 +224,10 @@ class SQLAgentVersionRepository:
         row.run_working_dir = run_spec.working_dir if run_spec else None
         row.run_env = run_spec.env if run_spec else None
         row.run_timeout_seconds = run_spec.timeout_seconds if run_spec else None
+        row.run_image = run_spec.image if run_spec else None
+        row.run_default_execution_target = (
+            run_spec.default_execution_target.value if run_spec else None
+        )
         row.capabilities = version.capabilities.model_dump()
         secret_ids = self._secret_ids(version)
         try:

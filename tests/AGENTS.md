@@ -30,6 +30,7 @@ renewal on update.
 
 ## PostgreSQL
 
-Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and
-`KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test
-recreates its database with `force_drop`, so tests stay independent.
+Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST`,
+`KITARU_TEST_DB_PORT`, and `KITARU_TEST_DB_NAME`) and expect
+`docker compose up -d db`. Each pg test recreates its database with
+`force_drop`, so tests stay independent.

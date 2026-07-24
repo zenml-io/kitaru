@@ -44,10 +44,12 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionNotFound,
     AgentVersionNotRunnable,
+    MissingRunImage,
     NoRunnableAgentVersion,
     RunSpec,
 )
 from kitaru.server.domain.cohort import Cohort, CohortNotFound
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     ExperimentFrozen,
@@ -196,6 +198,7 @@ async def create_runnable_version(
     repository: FakeAgentVersionRepository,
     agent_id: uuid.UUID,
     version: str = "v1",
+    run_spec: RunSpec | None = None,
 ) -> AgentVersion:
     """Store a runnable agent version.
 
@@ -203,6 +206,7 @@ async def create_runnable_version(
         repository: Fake agent version repository.
         agent_id: Id of the agent.
         version: Version label.
+        run_spec: Run specification, ``None`` uses a minimal spec.
 
     Returns:
         Stored agent version.
@@ -212,7 +216,8 @@ async def create_runnable_version(
             owner_id=ACTOR.account.id,
             agent_id=agent_id,
             version=version,
-            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+            run_spec=run_spec
+            or RunSpec(command="python agent.py", timeout_seconds=600),
         )
     )
 
@@ -715,6 +720,8 @@ async def test_start_run_fans_out_replays(
     assert run.status is ExperimentRunStatus.PENDING
     assert run.agent_version_id == version.id
     assert run.score_baselines is True
+    assert run.execution_target is ExecutionTarget.POOL
+    assert run.executor_handle is None
     assert progress.pending == 3
     assert progress.total == 3
 
@@ -894,4 +901,88 @@ async def test_start_run_unknown_version(
     ):
         await service.start_run(
             created.id, agent_version_id=missing_id, score_baselines=False, actor=ACTOR
+        )
+
+
+async def test_start_run_explicit_execution_target(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Prefer the requested execution target over the run spec default."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    await create_runnable_version(
+        version_repository,
+        agent.id,
+        run_spec=RunSpec(
+            command="python agent.py",
+            timeout_seconds=600,
+            image="ghcr.io/acme/agent:v1",
+        ),
+    )
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    run, _ = await service.start_run(
+        created.id,
+        agent_version_id=None,
+        score_baselines=False,
+        actor=ACTOR,
+        execution_target=ExecutionTarget.ON_DEMAND,
+    )
+    assert run.execution_target is ExecutionTarget.ON_DEMAND
+
+
+async def test_start_run_execution_target_from_run_spec(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Fall back to the run spec default when no target is requested."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    await create_runnable_version(
+        version_repository,
+        agent.id,
+        run_spec=RunSpec(
+            command="python agent.py",
+            timeout_seconds=600,
+            image="ghcr.io/acme/agent:v1",
+            default_execution_target=ExecutionTarget.ON_DEMAND,
+        ),
+    )
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    run, _ = await service.start_run(
+        created.id, agent_version_id=None, score_baselines=False, actor=ACTOR
+    )
+    assert run.execution_target is ExecutionTarget.ON_DEMAND
+
+
+async def test_start_run_on_demand_without_image(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    agent: Agent,
+) -> None:
+    """Reject an on demand run when the version has no image."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    version = await create_runnable_version(version_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    with pytest.raises(
+        MissingRunImage, match=f"Agent version {version.id} has no run image"
+    ):
+        await service.start_run(
+            created.id,
+            agent_version_id=None,
+            score_baselines=False,
+            actor=ACTOR,
+            execution_target=ExecutionTarget.ON_DEMAND,
         )

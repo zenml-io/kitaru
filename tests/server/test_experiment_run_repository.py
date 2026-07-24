@@ -104,6 +104,7 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.cohort import Cohort
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import Experiment, ExperimentNotFound
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
@@ -315,12 +316,16 @@ def replay_entities(run: ExperimentRun, seed: Seed) -> list[Replay]:
 async def test_create_assigns_number_and_stores_replays(setup: Setup) -> None:
     """Store a run with its replays and assign the first number."""
     seed = await seed_experiment(setup)
-    run = run_entity(setup, seed, score_baselines=True)
+    run = run_entity(
+        setup, seed, score_baselines=True, execution_target=ExecutionTarget.ON_DEMAND
+    )
     created = await setup.runs.create(run, replay_entities(run, seed))
     assert created.number == 1
     assert created.status is ExperimentRunStatus.PENDING
     assert created.agent_version_id == seed.version.id
     assert created.score_baselines is True
+    assert created.execution_target is ExecutionTarget.ON_DEMAND
+    assert created.executor_handle is None
     assert created.created is not None
     assert created.updated is not None
     loaded = await setup.runs.get(created.id)
@@ -531,8 +536,10 @@ async def test_update_run(setup: Setup) -> None:
     seed = await seed_experiment(setup)
     created = await setup.runs.create(run_entity(setup, seed), [])
     created.start()
+    created.executor_handle = "job-1"
     updated = await setup.runs.update(created)
     assert updated.status is ExperimentRunStatus.RUNNING
+    assert updated.executor_handle == "job-1"
     assert updated.started_at is not None
     assert updated.updated is not None
     assert created.updated is not None
