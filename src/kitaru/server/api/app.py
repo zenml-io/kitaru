@@ -13,8 +13,9 @@
 #  permissions and limitations under the License.
 """FastAPI application factory."""
 
+import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
 
 from fastapi import FastAPI, Request
@@ -24,6 +25,7 @@ from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.importers import ImporterRegistry
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -33,6 +35,7 @@ from kitaru.server.adapters.rest.routers import (
     cohorts,
     experiment_runs,
     experiments,
+    import_jobs,
     replays,
     secrets,
     sessions,
@@ -48,6 +51,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.import_worker import ImportWorker
 
 
 def _register_domain_exception_handlers(app: FastAPI) -> None:
@@ -98,6 +102,7 @@ def create_app(settings: APISettings) -> FastAPI:
         if not settings.SKIP_DB_MIGRATION:
             await database.create_db_and_tables()
         app.state.database = database
+        app.state.importer_registry = ImporterRegistry()
         async for session in database.get_async_session():
             account_service = AccountService(
                 repository=SQLAccountRepository(session),
@@ -107,9 +112,21 @@ def create_app(settings: APISettings) -> FastAPI:
                 settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
             )
             await session.commit()
+        import_task: asyncio.Task[None] | None = None
+        if settings.IMPORT_WORKER_ENABLED:
+            worker = ImportWorker(
+                database,
+                app.state.importer_registry,
+                settings.IMPORT_WORKER_POLL_SECONDS,
+            )
+            import_task = asyncio.create_task(worker.run())
         try:
             yield
         finally:
+            if import_task is not None:
+                import_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await import_task
             await database.cleanup()
 
     app = FastAPI(
@@ -136,6 +153,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(
         experiments.router, prefix="/v1/experiments", tags=["experiments"]
     )
+    app.include_router(import_jobs.router, prefix="/v1", tags=["imports"])
     app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
     app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])

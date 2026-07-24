@@ -121,6 +121,11 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunNotFound,
 )
+from kitaru.server.domain.import_job import (
+    ImportJob,
+    ImportJobNotFound,
+    ImportJobStatus,
+)
 from kitaru.server.domain.replay import (
     DuplicateReplaySession,
     Replay,
@@ -1215,6 +1220,59 @@ class FakeAgentVersionRepository:
         del self._versions[version_id]
 
 
+class FakeImportJobRepository:
+    """In-memory import job repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._jobs: dict[uuid.UUID, ImportJob] = {}
+
+    async def create(self, job: ImportJob) -> ImportJob:
+        """Persist a new import job."""
+        now = datetime.now(UTC)
+        stored = job.model_copy(update={"created": now, "updated": now})
+        self._jobs[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, job_id: uuid.UUID) -> ImportJob:
+        """Load an import job by id."""
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise ImportJobNotFound(job_id)
+        return job.model_copy()
+
+    async def update(self, job: ImportJob) -> ImportJob:
+        """Persist import job changes."""
+        stored = self._jobs.get(job.id)
+        if stored is None:
+            raise ImportJobNotFound(job.id)
+        updated = job.model_copy(
+            update={
+                "created": stored.created,
+                "updated": _renewed_timestamp(stored.updated),
+            }
+        )
+        self._jobs[job.id] = updated
+        return updated.model_copy()
+
+    async def claim_next(self, worker_id: str) -> ImportJob | None:
+        """Claim the oldest pending import job."""
+        pending = [
+            job for job in self._jobs.values() if job.status is ImportJobStatus.PENDING
+        ]
+        if not pending:
+            return None
+        job = min(
+            pending,
+            key=lambda candidate: (
+                candidate.created or datetime.min.replace(tzinfo=UTC),
+                candidate.id.int,
+            ),
+        ).model_copy()
+        job.start(worker_id)
+        return await self.update(job)
+
+
 class FakeSessionRepository:
     """In-memory session repository."""
 
@@ -1276,8 +1334,24 @@ class FakeSessionRepository:
         if session.provider is None or session.external_id is None:
             return
         for other in self._sessions.values():
+            if session.source_revision is not None:
+                same_identity = (
+                    other.owner_id == session.owner_id
+                    and other.provider == session.provider
+                    and other.source_instance == session.source_instance
+                    and other.external_id == session.external_id
+                )
+                if same_identity and (
+                    other.source_revision == session.source_revision
+                    or other.source_digest == session.source_digest
+                ):
+                    raise DuplicateSessionExternalId(
+                        session.provider, session.external_id
+                    )
+                continue
             if (
                 other.id != session.id
+                and other.source_revision is None
                 and other.provider == session.provider
                 and other.external_id == session.external_id
             ):
@@ -1327,6 +1401,48 @@ class FakeSessionRepository:
         if session is None:
             raise SessionNotFound(session_id)
         return session.model_copy()
+
+    async def get_imported_by_digest(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+        source_digest: str,
+    ) -> Session | None:
+        """Load an exact imported source snapshot when it exists."""
+        for session in self._sessions.values():
+            if (
+                session.owner_id == owner_id
+                and session.provider == provider
+                and session.source_instance == source_instance
+                and session.external_id == external_id
+                and session.source_digest == source_digest
+            ):
+                return session.model_copy()
+        return None
+
+    async def get_latest_import(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+    ) -> Session | None:
+        """Load the latest revision of an imported source session."""
+        matches = [
+            session
+            for session in self._sessions.values()
+            if session.owner_id == owner_id
+            and session.provider == provider
+            and session.source_instance == source_instance
+            and session.external_id == external_id
+            and session.source_revision is not None
+        ]
+        if not matches:
+            return None
+        latest = max(matches, key=lambda session: session.source_revision or 0)
+        return latest.model_copy()
 
     def _matches(self, session: Session, session_filter: SessionFilter) -> bool:
         if (

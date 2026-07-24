@@ -34,7 +34,7 @@ class SessionFilter(FrozenModel):
     agent_version_id: uuid.UUID | None = None
     origin: SessionOrigin | None = None
     status: SessionStatus | None = None
-    provider: SessionProvider | None = None
+    provider: SessionProvider | str | None = None
     external_id: str | None = None
     name: str | None = None
     tag: str | None = None
@@ -67,7 +67,7 @@ class SessionCreate(FrozenModel):
     ended_at: AwareDatetime | None = None
     external_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider: SessionProvider | None = None
+    provider: SessionProvider | str | None = None
     framework: str | None = None
     adapter_version: str | None = None
     log_uri: str | None = None

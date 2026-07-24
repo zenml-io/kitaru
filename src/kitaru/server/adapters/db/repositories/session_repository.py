@@ -131,6 +131,48 @@ class SQLSessionRepository:
             raise SessionNotFound(session_id)
         return row.to_domain()
 
+    async def get_imported_by_digest(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+        source_digest: str,
+    ) -> Session | None:
+        """Load an exact imported source snapshot when it exists."""
+        statement = select(SessionSchema).where(
+            col(SessionSchema.owner_id) == owner_id,
+            col(SessionSchema.provider) == provider,
+            col(SessionSchema.source_instance) == source_instance,
+            col(SessionSchema.external_id) == external_id,
+            col(SessionSchema.source_digest) == source_digest,
+        )
+        row = (await self._session.execute(statement)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
+    async def get_latest_import(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+    ) -> Session | None:
+        """Load the latest revision of an imported source session."""
+        statement = (
+            select(SessionSchema)
+            .where(
+                col(SessionSchema.owner_id) == owner_id,
+                col(SessionSchema.provider) == provider,
+                col(SessionSchema.source_instance) == source_instance,
+                col(SessionSchema.external_id) == external_id,
+                col(SessionSchema.source_revision).is_not(None),
+            )
+            .order_by(col(SessionSchema.source_revision).desc())
+            .limit(1)
+        )
+        row = (await self._session.execute(statement)).scalar_one_or_none()
+        return row.to_domain() if row else None
+
     def _apply_filter(
         self,
         statement: Select[tuple[SessionSchema]],
@@ -163,7 +205,7 @@ class SQLSessionRepository:
             )
         if session_filter.provider is not None:
             statement = statement.where(
-                col(SessionSchema.provider) == session_filter.provider.value
+                col(SessionSchema.provider) == session_filter.provider
             )
         if session_filter.external_id is not None:
             statement = statement.where(
@@ -270,7 +312,15 @@ class SQLSessionRepository:
         row.ended_at = session.ended_at
         row.external_id = session.external_id
         row.metadata_ = session.metadata
-        row.provider = session.provider.value if session.provider else None
+        row.provider = session.provider
+        row.source_instance = session.source_instance
+        row.source_revision = session.source_revision
+        row.source_digest = session.source_digest
+        row.source_metadata = session.source_metadata
+        row.replay_readiness = session.replay_readiness
+        row.normalization_warnings = session.normalization_warnings
+        row.import_job_id = session.import_job_id
+        row.supersedes_session_id = session.supersedes_session_id
         row.framework = session.framework
         row.adapter_version = session.adapter_version
         row.log_uri = session.log_uri

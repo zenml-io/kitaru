@@ -70,7 +70,7 @@ class SessionNotFound(NotFoundError):
 class DuplicateSessionExternalId(ConflictError):
     """Raised when a provider session is already registered."""
 
-    def __init__(self, provider: SessionProvider, external_id: str) -> None:
+    def __init__(self, provider: str, external_id: str) -> None:
         """Initialize the error.
 
         Args:
@@ -106,6 +106,18 @@ class SessionNotInProgress(ConflictError):
             session_id: Id of the session.
         """
         super().__init__(f"Session {session_id} is not in progress")
+
+
+class ImportedSessionImmutable(ConflictError):
+    """Raised when imported execution evidence would be changed."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the imported session.
+        """
+        super().__init__(f"Imported session {session_id} evidence is immutable")
 
 
 class InvalidSession(ValidationError):
@@ -181,7 +193,15 @@ class Session(DomainModel):
     ended_at: datetime | None = None
     external_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider: SessionProvider | None = None
+    provider: SessionProvider | str | None = None
+    source_instance: str | None = None
+    source_revision: int | None = None
+    source_digest: str | None = None
+    source_metadata: dict[str, Any] = Field(default_factory=dict)
+    replay_readiness: dict[str, Any] | None = None
+    normalization_warnings: list[str] = Field(default_factory=list)
+    import_job_id: uuid.UUID | None = None
+    supersedes_session_id: uuid.UUID | None = None
     framework: str | None = None
     adapter_version: str | None = None
     log_uri: str | None = None
@@ -249,16 +269,33 @@ class Session(DomainModel):
     def check_node_ingest(self) -> None:
         """Check that the session accepts node ingest.
 
-        Imported sessions receive their nodes after terminal creation, all
-        other sessions accept nodes only while in progress.
+        Imported session evidence is immutable. Other sessions accept nodes
+        only while in progress.
 
         Raises:
+            ImportedSessionImmutable: The session is imported.
             SessionNotInProgress: The session does not accept node ingest.
         """
         if self.origin is SessionOrigin.IMPORTED:
-            return
+            raise ImportedSessionImmutable(self.id)
         if self.status is not SessionStatus.IN_PROGRESS:
             raise SessionNotInProgress(self.id)
+
+    def set_import_rollups(self, rollups: SessionRollups) -> None:
+        """Set rollups computed while atomically importing the session.
+
+        Args:
+            rollups: Rollups computed from normalized nodes.
+
+        Raises:
+            InvalidSession: The session is not imported.
+        """
+        if self.origin is not SessionOrigin.IMPORTED:
+            raise InvalidSession("Import rollups require an imported session")
+        self.cost = rollups.cost
+        self.tokens = rollups.tokens
+        self.llm_call_count = rollups.llm_call_count
+        self.tool_call_count = rollups.tool_call_count
 
     def finish(
         self,

@@ -46,6 +46,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.import_job_repository import (
+    SQLImportJobRepository,
+)
 from kitaru.server.adapters.db.repositories.replay_config_repository import (
     SQLReplayConfigRepository,
 )
@@ -79,6 +82,7 @@ from kitaru.server.application.services.experiment_run_service import (
 from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
+from kitaru.server.application.services.import_job_service import ImportJobService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
@@ -251,6 +255,18 @@ def get_experiment_run_service(
         session_repository=SQLSessionRepository(session),
         heartbeat_timeout_seconds=settings.REPLAY_HEARTBEAT_TIMEOUT_SECONDS,
         max_attempts=settings.REPLAY_MAX_ATTEMPTS,
+    )
+
+
+def get_import_job_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ImportJobService:
+    """Return an import job service for the current request."""
+    return ImportJobService(
+        repository=SQLImportJobRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        registry=request.app.state.importer_registry,
     )
 
 

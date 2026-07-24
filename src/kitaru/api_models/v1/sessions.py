@@ -91,7 +91,7 @@ class SessionCreateRequest(RequestModel):
         description="External session or conversation id.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="User metadata.")
-    provider: SessionProvider | None = Field(
+    provider: str | None = Field(
         default=None, description="Source provider, imported sessions only."
     )
     framework: str | None = Field(
@@ -160,8 +160,32 @@ class SessionResponse(ResponseModel):
     ended_at: datetime | None = Field(description="Execution end time.")
     external_id: str | None = Field(description="External session or conversation id.")
     metadata: dict[str, Any] = Field(description="User metadata.")
-    provider: SessionProvider | None = Field(
-        description="Source provider, imported sessions only."
+    provider: str | None = Field(description="Source provider, imported sessions only.")
+    source_instance: str | None = Field(
+        default=None,
+        description="Provider project or source instance for imported sessions.",
+    )
+    source_revision: int | None = Field(
+        default=None, description="Immutable source-session revision."
+    )
+    source_digest: str | None = Field(
+        default=None, description="Digest of the normalized source snapshot."
+    )
+    source_metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Immutable provider metadata."
+    )
+    replay_readiness: dict[str, Any] | None = Field(
+        default=None, description="Conservative imported replay-readiness report."
+    )
+    normalization_warnings: list[str] = Field(
+        default_factory=list,
+        description="Warnings produced while normalizing the source.",
+    )
+    import_job_id: uuid.UUID | None = Field(
+        default=None, description="Import job that created this session."
+    )
+    supersedes_session_id: uuid.UUID | None = Field(
+        default=None, description="Previous source revision, when any."
     )
     framework: str | None = Field(description="Recording framework.")
     adapter_version: str | None = Field(description="Adapter version.")

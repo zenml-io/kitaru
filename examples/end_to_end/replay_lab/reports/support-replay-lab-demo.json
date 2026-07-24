@@ -1,0 +1,2224 @@
+{
+  "candidate": {
+    "checkpoint_overrides": {},
+    "flow_inputs": {
+      "agent_profile": "candidate"
+    },
+    "label": "Cheaper deterministic support agent",
+    "notes": "Replay the same support cases from draft_response with a shorter deterministic candidate profile. It should reduce cost and latency, but the regulated medical case should make reviewers look twice."
+  },
+  "cases": [
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.16999999999999998,
+          "baseline": 0.42,
+          "comparison": 0.25,
+          "percent": -40.476190476190474
+        },
+        "duration_seconds": {
+          "absolute": -1.0,
+          "baseline": 12.0,
+          "comparison": 11.0,
+          "percent": -8.333333333333332
+        },
+        "latency_seconds": {
+          "absolute": -2.0999999999999996,
+          "baseline": 4.8,
+          "comparison": 2.7,
+          "percent": -43.74999999999999
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "case_id": "support-refund-delay",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "tier": "enterprise",
+        "trigger": "cost spike"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "f3fe61e4-202e-4884-8753-0d3008480769",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.42,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.8,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay",
+              "cost_usd": 0.42,
+              "latency_seconds": 4.8,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "ccec0330-76c5-4c8b-be30-c5a4b384520f",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.25,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.7,
+            "llm_call_count": 1,
+            "output_text": "Sorry about the refund delay. I checked the record: the next step is finance review, and the expected timeline is two business days.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "support-refund-delay",
+              "cost_usd": 0.25,
+              "latency_seconds": 2.7,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "7a5e84ac-f424-411b-9fb5-0ecd3eacd634",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.42,
+            "duration_seconds": 14.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.8,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay",
+              "cost_usd": 0.42,
+              "latency_seconds": 4.8,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Recent expensive reply for an enterprise refund complaint.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.42,
+          "comparison": 0.42,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": -2.0,
+          "baseline": 14.0,
+          "comparison": 12.0,
+          "percent": -14.285714285714285
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 4.8,
+          "comparison": 4.8,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "7a5e84ac-f424-411b-9fb5-0ecd3eacd634"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.18,
+          "baseline": 0.44,
+          "comparison": 0.26,
+          "percent": -40.90909090909091
+        },
+        "duration_seconds": {
+          "absolute": -4.0,
+          "baseline": 14.0,
+          "comparison": 10.0,
+          "percent": -28.57142857142857
+        },
+        "latency_seconds": {
+          "absolute": -2.3000000000000003,
+          "baseline": 5.2,
+          "comparison": 2.9,
+          "percent": -44.23076923076923
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "case_id": "support-refund-delay--hist-01",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "6c301d83-e90a-4122-93e0-e7b026cdfac7",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.44,
+            "duration_seconds": 14.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.2,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-01",
+              "cost_usd": 0.44,
+              "latency_seconds": 5.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "7b2c2b8c-6d5c-4ecf-a7fd-f2241e1d0491",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.26,
+            "duration_seconds": 10.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.9,
+            "llm_call_count": 1,
+            "output_text": "Sorry about the refund delay. I checked the record: the next step is finance review, and the expected timeline is two business days.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "support-refund-delay--hist-01",
+              "cost_usd": 0.26,
+              "latency_seconds": 2.9,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "42bd6afb-96a6-47c1-b845-fd38fbf68feb",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.44,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.2,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-01",
+              "cost_usd": 0.44,
+              "latency_seconds": 5.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Cost Outlier for enterprise refund delay case from Aster Cloud.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.44,
+          "comparison": 0.44,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 2.0,
+          "baseline": 12.0,
+          "comparison": 14.0,
+          "percent": 16.666666666666664
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.2,
+          "comparison": 5.2,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "42bd6afb-96a6-47c1-b845-fd38fbf68feb"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.18999999999999995,
+          "baseline": 0.47,
+          "comparison": 0.28,
+          "percent": -40.42553191489361
+        },
+        "duration_seconds": {
+          "absolute": 2.0,
+          "baseline": 9.0,
+          "comparison": 11.0,
+          "percent": 22.22222222222222
+        },
+        "latency_seconds": {
+          "absolute": -2.5,
+          "baseline": 5.7,
+          "comparison": 3.2,
+          "percent": -43.859649122807014
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "case_id": "support-refund-delay--hist-02",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "9490007f-03d6-439a-be01-e5a1c10d81bc",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.47,
+            "duration_seconds": 9.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.7,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-02",
+              "cost_usd": 0.47,
+              "latency_seconds": 5.7,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "889b6baa-6298-4b94-beb9-42091d6d5ef8",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.28,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 3.2,
+            "llm_call_count": 1,
+            "output_text": "Sorry about the refund delay. I checked the record: the next step is finance review, and the expected timeline is two business days.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "support-refund-delay--hist-02",
+              "cost_usd": 0.28,
+              "latency_seconds": 3.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "15e4deba-51e4-4735-8252-901911a8612e",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.47,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.7,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-02",
+              "cost_usd": 0.47,
+              "latency_seconds": 5.7,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Customer Complaint for enterprise refund delay case from Northwind Health.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.47,
+          "comparison": 0.47,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": -3.0,
+          "baseline": 12.0,
+          "comparison": 9.0,
+          "percent": -25.0
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.7,
+          "comparison": 5.7,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "15e4deba-51e4-4735-8252-901911a8612e"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.16000000000000003,
+          "baseline": 0.4,
+          "comparison": 0.24,
+          "percent": -40.00000000000001
+        },
+        "duration_seconds": {
+          "absolute": 0.0,
+          "baseline": 12.0,
+          "comparison": 12.0,
+          "percent": 0.0
+        },
+        "latency_seconds": {
+          "absolute": -1.9000000000000004,
+          "baseline": 4.4,
+          "comparison": 2.5,
+          "percent": -43.18181818181819
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "case_id": "support-refund-delay--hist-03",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "7cef3402-91ca-477a-91c7-2e132ffdaa44",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.4,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.4,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-03",
+              "cost_usd": 0.4,
+              "latency_seconds": 4.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "9f8879aa-b277-4e96-bc03-1db546f31a7b",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.24,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.5,
+            "llm_call_count": 1,
+            "output_text": "Sorry about the refund delay. I checked the record: the next step is finance review, and the expected timeline is two business days.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "support-refund-delay--hist-03",
+              "cost_usd": 0.24,
+              "latency_seconds": 2.5,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "5debdf93-acdb-4628-9871-d6badbd8ed11",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.4,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.4,
+            "llm_call_count": 1,
+            "output_text": "I understand the refund delay is frustrating. I will check the payment record, give you the next step, and share a timeline for when finance should see the refund.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "support-refund-delay--hist-03",
+              "cost_usd": 0.4,
+              "latency_seconds": 4.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Slow Resolution for enterprise refund delay case from Harbor Retail.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.4,
+          "comparison": 0.4,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 0.0,
+          "baseline": 12.0,
+          "comparison": 12.0,
+          "percent": 0.0
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 4.4,
+          "comparison": 4.4,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "5debdf93-acdb-4628-9871-d6badbd8ed11"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.24999999999999997,
+          "baseline": 0.48,
+          "comparison": 0.23,
+          "percent": -52.08333333333333
+        },
+        "duration_seconds": {
+          "absolute": 4.0,
+          "baseline": 11.0,
+          "comparison": 15.0,
+          "percent": 36.36363636363637
+        },
+        "latency_seconds": {
+          "absolute": -3.0000000000000004,
+          "baseline": 5.4,
+          "comparison": 2.4,
+          "percent": -55.55555555555556
+        },
+        "quality_score": {
+          "absolute": -0.12,
+          "baseline": 1.0,
+          "comparison": 0.88,
+          "percent": -12.0
+        }
+      },
+      "case_id": "regulated-medical-claim",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "tier": "regulated",
+        "trigger": "quality drop"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "57242877-9ce2-4568-888f-72afd5bd78a7",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.48,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.4,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim",
+              "cost_usd": 0.48,
+              "latency_seconds": 5.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "5b9c1240-243d-468e-aaa2-82d2819c0604",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.23,
+            "duration_seconds": 15.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.4,
+            "llm_call_count": 1,
+            "output_text": "Apologize and say the earlier answer was general information, not medical advice. Offer a safe response and close the loop.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "regulated-medical-claim",
+              "cost_usd": 0.23,
+              "latency_seconds": 2.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "human review"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "eb00758d-10b2-47e9-bc6b-453a83acb70b",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.48,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.4,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim",
+              "cost_usd": 0.48,
+              "latency_seconds": 5.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Quality-risk case where a terse answer can be unsafe.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.48,
+          "comparison": 0.48,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": -1.0,
+          "baseline": 12.0,
+          "comparison": 11.0,
+          "percent": -8.333333333333332
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.4,
+          "comparison": 5.4,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "eb00758d-10b2-47e9-bc6b-453a83acb70b"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.26,
+          "baseline": 0.5,
+          "comparison": 0.24,
+          "percent": -52.0
+        },
+        "duration_seconds": {
+          "absolute": -1.0,
+          "baseline": 11.0,
+          "comparison": 10.0,
+          "percent": -9.090909090909092
+        },
+        "latency_seconds": {
+          "absolute": -3.1999999999999997,
+          "baseline": 5.8,
+          "comparison": 2.6,
+          "percent": -55.172413793103445
+        },
+        "quality_score": {
+          "absolute": -0.12,
+          "baseline": 1.0,
+          "comparison": 0.88,
+          "percent": -12.0
+        }
+      },
+      "case_id": "regulated-medical-claim--hist-01",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "b37c6952-c310-436b-b09b-ec1e1208997f",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.5,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.8,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-01",
+              "cost_usd": 0.5,
+              "latency_seconds": 5.8,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "139cdbe0-75de-4a55-83c7-def907721b0a",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.24,
+            "duration_seconds": 10.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.6,
+            "llm_call_count": 1,
+            "output_text": "Apologize and say the earlier answer was general information, not medical advice. Offer a safe response and close the loop.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "regulated-medical-claim--hist-01",
+              "cost_usd": 0.24,
+              "latency_seconds": 2.6,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "human review"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "63674209-e985-4638-b4cd-10306e83f1ae",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.5,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.8,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-01",
+              "cost_usd": 0.5,
+              "latency_seconds": 5.8,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Cost Outlier for regulated medical claim routing case from Aster Cloud.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.5,
+          "comparison": 0.5,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 0.0,
+          "baseline": 11.0,
+          "comparison": 11.0,
+          "percent": 0.0
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.8,
+          "comparison": 5.8,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "63674209-e985-4638-b4cd-10306e83f1ae"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.28,
+          "baseline": 0.54,
+          "comparison": 0.26,
+          "percent": -51.85185185185185
+        },
+        "duration_seconds": {
+          "absolute": 1.0,
+          "baseline": 9.0,
+          "comparison": 10.0,
+          "percent": 11.11111111111111
+        },
+        "latency_seconds": {
+          "absolute": -3.6000000000000005,
+          "baseline": 6.4,
+          "comparison": 2.8,
+          "percent": -56.25
+        },
+        "quality_score": {
+          "absolute": -0.12,
+          "baseline": 1.0,
+          "comparison": 0.88,
+          "percent": -12.0
+        }
+      },
+      "case_id": "regulated-medical-claim--hist-02",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "67f0041a-20f0-4741-93e3-f179f0f8c224",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.54,
+            "duration_seconds": 9.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 6.4,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-02",
+              "cost_usd": 0.54,
+              "latency_seconds": 6.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "6585eeeb-b6ed-4e03-8546-518ca2246cb0",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.26,
+            "duration_seconds": 10.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.8,
+            "llm_call_count": 1,
+            "output_text": "Apologize and say the earlier answer was general information, not medical advice. Offer a safe response and close the loop.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "regulated-medical-claim--hist-02",
+              "cost_usd": 0.26,
+              "latency_seconds": 2.8,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "human review"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "944c31a1-07cc-4503-8591-a10ff6666e5b",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.54,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 6.4,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-02",
+              "cost_usd": 0.54,
+              "latency_seconds": 6.4,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Customer Complaint for regulated medical claim routing case from Northwind Health.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.54,
+          "comparison": 0.54,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": -3.0,
+          "baseline": 12.0,
+          "comparison": 9.0,
+          "percent": -25.0
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 6.4,
+          "comparison": 6.4,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "944c31a1-07cc-4503-8591-a10ff6666e5b"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.24000000000000002,
+          "baseline": 0.46,
+          "comparison": 0.22,
+          "percent": -52.17391304347826
+        },
+        "duration_seconds": {
+          "absolute": 0.0,
+          "baseline": 11.0,
+          "comparison": 11.0,
+          "percent": 0.0
+        },
+        "latency_seconds": {
+          "absolute": -2.8,
+          "baseline": 5.0,
+          "comparison": 2.2,
+          "percent": -55.99999999999999
+        },
+        "quality_score": {
+          "absolute": -0.12,
+          "baseline": 1.0,
+          "comparison": 0.88,
+          "percent": -12.0
+        }
+      },
+      "case_id": "regulated-medical-claim--hist-03",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "a2144a13-c7fc-47ac-9ad8-6e87c1fb0300",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.46,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.0,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-03",
+              "cost_usd": 0.46,
+              "latency_seconds": 5.0,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "8dc395ce-582a-47ec-a8bb-1cc02b43d999",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.22,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.2,
+            "llm_call_count": 1,
+            "output_text": "Apologize and say the earlier answer was general information, not medical advice. Offer a safe response and close the loop.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "regulated-medical-claim--hist-03",
+              "cost_usd": 0.22,
+              "latency_seconds": 2.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "human review"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "6f5a7f64-b319-423c-9cd0-359003623e81",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.46,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.0,
+            "llm_call_count": 1,
+            "output_text": "This needs human review. We should apologize, explain that the previous response was not medical advice, and route the case to a safe response specialist before sending anything final.",
+            "quality_score": 1.0,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "regulated-medical-claim--hist-03",
+              "cost_usd": 0.46,
+              "latency_seconds": 5.0,
+              "llm_call_count": 1,
+              "missing_required_terms": [],
+              "quality_score": 1.0,
+              "risky_terms": [],
+              "tool_call_count": 1
+            },
+            "tool_call_count": 1,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Slow Resolution for regulated medical claim routing case from Harbor Retail.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.46,
+          "comparison": 0.46,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": -1.0,
+          "baseline": 12.0,
+          "comparison": 11.0,
+          "percent": -8.333333333333332
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.0,
+          "comparison": 5.0,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 1.0,
+          "comparison": 1.0,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "6f5a7f64-b319-423c-9cd0-359003623e81"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": null,
+          "baseline": 0.31,
+          "comparison": null,
+          "percent": null
+        },
+        "duration_seconds": {
+          "absolute": null,
+          "baseline": 18.0,
+          "comparison": null,
+          "percent": null
+        },
+        "latency_seconds": {
+          "absolute": null,
+          "baseline": 4.2,
+          "comparison": null,
+          "percent": null
+        },
+        "quality_score": {
+          "absolute": null,
+          "baseline": 0.88,
+          "comparison": null,
+          "percent": null
+        }
+      },
+      "case_id": "shipping-tool-loop",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "tier": "standard",
+        "trigger": "tool trouble"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "46882836-9d90-4e89-a617-e40cb42282e5",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.31,
+            "duration_seconds": 18.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.2,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop",
+              "cost_usd": 0.31,
+              "latency_seconds": 4.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": "Failed to replay execution '62a3edf5-e0b4-427f-a646-dadc5087f576': Unable to create step `draft_response`: The step has exceeded the maximum number of retries.",
+          "exec_id": null,
+          "lane": "candidate_replay",
+          "limitations": [
+            "candidate_replay replay could not be started (KitaruBackendError)."
+          ],
+          "metrics": {
+            "artifact_count": 0,
+            "checkpoint_count": 0,
+            "cost": null,
+            "duration_seconds": null,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": null,
+            "llm_call_count": null,
+            "output_text": null,
+            "quality_score": null,
+            "scorecard": null,
+            "tool_call_count": null,
+            "warning_log_count": 0
+          },
+          "status": "failed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "62a3edf5-e0b4-427f-a646-dadc5087f576",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.31,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.2,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop",
+              "cost_usd": 0.31,
+              "latency_seconds": 4.2,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: candidate_replay replay could not be started (KitaruBackendError).",
+        "candidate_replay lane ended with status `failed`.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": null,
+      "reason": "Tool-loop style case with avoidable cost and latency.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.31,
+          "comparison": 0.31,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 7.0,
+          "baseline": 11.0,
+          "comparison": 18.0,
+          "percent": 63.63636363636363
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 4.2,
+          "comparison": 4.2,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "62a3edf5-e0b4-427f-a646-dadc5087f576"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.13,
+          "baseline": 0.32,
+          "comparison": 0.19,
+          "percent": -40.625
+        },
+        "duration_seconds": {
+          "absolute": -2518.0,
+          "baseline": 4493.0,
+          "comparison": 1975.0,
+          "percent": -56.04273314044068
+        },
+        "latency_seconds": {
+          "absolute": -2.2,
+          "baseline": 4.5,
+          "comparison": 2.3,
+          "percent": -48.88888888888889
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "case_id": "shipping-tool-loop--hist-01",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "7cc18c2a-7ab6-4cb6-9d67-5fe8fd935598",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.32,
+            "duration_seconds": 4493.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.5,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-01",
+              "cost_usd": 0.32,
+              "latency_seconds": 4.5,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "c3ed8983-4967-460e-93fe-f94bc4eecddc",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.19,
+            "duration_seconds": 1975.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.3,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. Use tracking once, explain the latest scan, and handoff if the parcel has not moved.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "shipping-tool-loop--hist-01",
+              "cost_usd": 0.19,
+              "latency_seconds": 2.3,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 2
+            },
+            "tool_call_count": 2,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "c43de6f0-2ee9-4796-9cf5-6a154e9efd2f",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.32,
+            "duration_seconds": 11.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 4.5,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-01",
+              "cost_usd": 0.32,
+              "latency_seconds": 4.5,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 4
+            },
+            "tool_call_count": 4,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Cost Outlier for standard shipping status loop case from Aster Cloud.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.32,
+          "comparison": 0.32,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 4482.0,
+          "baseline": 11.0,
+          "comparison": 4493.0,
+          "percent": 40745.454545454544
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 4.5,
+          "comparison": 4.5,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "c43de6f0-2ee9-4796-9cf5-6a154e9efd2f"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": -0.14999999999999997,
+          "baseline": 0.35,
+          "comparison": 0.2,
+          "percent": -42.85714285714285
+        },
+        "duration_seconds": {
+          "absolute": 1.0,
+          "baseline": 910.0,
+          "comparison": 911.0,
+          "percent": 0.10989010989010989
+        },
+        "latency_seconds": {
+          "absolute": -2.5,
+          "baseline": 5.0,
+          "comparison": 2.5,
+          "percent": -50.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "case_id": "shipping-tool-loop--hist-02",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "ac62ea82-e5fa-4106-aa88-733d04144483",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.35,
+            "duration_seconds": 910.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.0,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-02",
+              "cost_usd": 0.35,
+              "latency_seconds": 5.0,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 5
+            },
+            "tool_call_count": 5,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": null,
+          "exec_id": "8d493623-e318-4bb4-a58d-9591ff181632",
+          "lane": "candidate_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.2,
+            "duration_seconds": 911.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 2.5,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. Use tracking once, explain the latest scan, and handoff if the parcel has not moved.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "candidate",
+              "case_id": "shipping-tool-loop--hist-02",
+              "cost_usd": 0.2,
+              "latency_seconds": 2.5,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "01e34631-b49d-496e-aa55-ba840c89b124",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.35,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 5.0,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-02",
+              "cost_usd": 0.35,
+              "latency_seconds": 5.0,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 5
+            },
+            "tool_call_count": 5,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": true,
+      "reason": "Customer Complaint for standard shipping status loop case from Northwind Health.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.35,
+          "comparison": 0.35,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 898.0,
+          "baseline": 12.0,
+          "comparison": 910.0,
+          "percent": 7483.333333333333
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 5.0,
+          "comparison": 5.0,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "01e34631-b49d-496e-aa55-ba840c89b124"
+    },
+    {
+      "candidate_effect": {
+        "cost": {
+          "absolute": null,
+          "baseline": 0.3,
+          "comparison": null,
+          "percent": null
+        },
+        "duration_seconds": {
+          "absolute": null,
+          "baseline": 7386.0,
+          "comparison": null,
+          "percent": null
+        },
+        "latency_seconds": {
+          "absolute": null,
+          "baseline": 3.9,
+          "comparison": null,
+          "percent": null
+        },
+        "quality_score": {
+          "absolute": null,
+          "baseline": 0.88,
+          "comparison": null,
+          "percent": null
+        }
+      },
+      "case_id": "shipping-tool-loop--hist-03",
+      "from_checkpoint": "draft_response",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "lanes": {
+        "baseline_replay": {
+          "error_message": null,
+          "exec_id": "57127261-af32-4d06-be34-aacffce37f39",
+          "lane": "baseline_replay",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.3,
+            "duration_seconds": 7386.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 3.9,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-03",
+              "cost_usd": 0.3,
+              "latency_seconds": 3.9,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        },
+        "candidate_replay": {
+          "error_message": "Failed to replay execution 'bdf6191d-3ddc-47ba-b949-4e13d386cb1a': Pipeline run name 'support_replay_lab_case-2026_05_14-00_09_29_422063' already exists in this project. Each pipeline run must have a unique name.\n\nTo fix this, you can:\n1. Use a different run name\n2. Use a dynamic run name with placeholders like: \"support_replay_lab_case-2026_05_14-00_09_29_422063_{date}_{time}\"\n3. Remove the run name from your configuration to auto-generate unique names\n\nFor more information on run naming, see: https://docs.zenml.io/concepts/steps_and_pipelines/yaml_configuration#run-name",
+          "exec_id": null,
+          "lane": "candidate_replay",
+          "limitations": [
+            "candidate_replay replay could not be started (KitaruBackendError)."
+          ],
+          "metrics": {
+            "artifact_count": 0,
+            "checkpoint_count": 0,
+            "cost": null,
+            "duration_seconds": null,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": null,
+            "llm_call_count": null,
+            "output_text": null,
+            "quality_score": null,
+            "scorecard": null,
+            "tool_call_count": null,
+            "warning_log_count": 0
+          },
+          "status": "failed",
+          "timed_out": false
+        },
+        "observed": {
+          "error_message": null,
+          "exec_id": "bdf6191d-3ddc-47ba-b949-4e13d386cb1a",
+          "lane": "observed",
+          "limitations": [
+            "Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable."
+          ],
+          "metrics": {
+            "artifact_count": 6,
+            "checkpoint_count": 4,
+            "cost": 0.3,
+            "duration_seconds": 12.0,
+            "error_log_count": 0,
+            "failed_checkpoint_count": 0,
+            "latency_seconds": 3.9,
+            "llm_call_count": 1,
+            "output_text": "Sorry for the repeated checks. I will stop the loop, verify the tracking status once, and handoff to a human if the parcel has not moved by the next scan window.",
+            "quality_score": 0.88,
+            "scorecard": {
+              "agent_profile": "champion",
+              "case_id": "shipping-tool-loop--hist-03",
+              "cost_usd": 0.3,
+              "latency_seconds": 3.9,
+              "llm_call_count": 1,
+              "missing_required_terms": [
+                "apology"
+              ],
+              "quality_score": 0.88,
+              "risky_terms": [],
+              "tool_call_count": 3
+            },
+            "tool_call_count": 3,
+            "warning_log_count": 0
+          },
+          "status": "completed",
+          "timed_out": false
+        }
+      },
+      "limitations": [
+        "observed: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "baseline_replay: Could not read execution logs (KitaruLogRetrievalError: Failed to retrieve runtime logs for source 'step': Files in a local artifact store cannot be accessed from the server.); log-derived metrics are unavailable.",
+        "candidate_replay: candidate_replay replay could not be started (KitaruBackendError).",
+        "candidate_replay lane ended with status `failed`.",
+        "Observed-to-baseline replay drift is large; candidate effect has lower confidence."
+      ],
+      "output_changed_vs_baseline": null,
+      "reason": "Slow Resolution for standard shipping status loop case from Harbor Retail.",
+      "replay_drift": {
+        "cost": {
+          "absolute": 0.0,
+          "baseline": 0.3,
+          "comparison": 0.3,
+          "percent": 0.0
+        },
+        "duration_seconds": {
+          "absolute": 7374.0,
+          "baseline": 12.0,
+          "comparison": 7386.0,
+          "percent": 61450.0
+        },
+        "latency_seconds": {
+          "absolute": 0.0,
+          "baseline": 3.9,
+          "comparison": 3.9,
+          "percent": 0.0
+        },
+        "quality_score": {
+          "absolute": 0.0,
+          "baseline": 0.88,
+          "comparison": 0.88,
+          "percent": 0.0
+        }
+      },
+      "source_exec_id": "bdf6191d-3ddc-47ba-b949-4e13d386cb1a"
+    }
+  ],
+  "created_at": "2026-05-14T01:08:56.701240+00:00",
+  "description": "Synthetic customer-support regression cohort. Observed executions use the champion profile over a deterministic production-like history; Replay Lab then compares baseline replay against a cheaper candidate profile.",
+  "expected_artifacts": [
+    "scorecard",
+    "final_response"
+  ],
+  "name": "Support Replay Lab demo",
+  "report_paths": {},
+  "summary": {
+    "candidate_completed_count": 10,
+    "case_count": 12,
+    "changed_output_count": 10,
+    "failed_or_timed_out_lane_count": 2,
+    "replay_drift_warning_count": 6
+  }
+}

@@ -71,7 +71,7 @@ class SessionsResource:
         agent_version_id: uuid.UUID | None = None,
         origin: SessionOrigin | None = None,
         status: SessionStatus | None = None,
-        provider: SessionProvider | None = None,
+        provider: str | SessionProvider | None = None,
         external_id: str | None = None,
         name: str | None = None,
         tag: str | None = None,
@@ -123,7 +123,9 @@ class SessionsResource:
             "agent_version_id": str(agent_version_id) if agent_version_id else None,
             "origin": origin.value if origin else None,
             "status": status.value if status else None,
-            "provider": provider.value if provider else None,
+            "provider": (
+                provider.value if isinstance(provider, SessionProvider) else provider
+            ),
             "external_id": external_id,
             "name": name,
             "tag": tag,

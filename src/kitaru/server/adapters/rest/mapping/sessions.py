@@ -26,7 +26,6 @@ from kitaru.server.application.models.sessions import (
 from kitaru.server.domain.session import (
     Session,
     SessionOrigin,
-    SessionProvider,
     SessionStatus,
     TokenUsage,
 )
@@ -60,20 +59,18 @@ def status_to_domain(
     return SessionStatus(status.value)
 
 
-def provider_to_domain(
-    provider: session_models.SessionProvider | None,
-) -> SessionProvider | None:
-    """Convert an optional provider DTO to its domain enum.
+def provider_to_domain(provider: str | None) -> str | None:
+    """Pass an optional provider id to the domain.
 
     Args:
         provider: Provider from the API.
 
     Returns:
-        Domain provider, ``None`` for ``None``.
+        Provider id, ``None`` for ``None``.
     """
     if provider is None:
         return None
-    return SessionProvider(provider.value)
+    return provider
 
 
 def token_usage_to_domain(
@@ -197,9 +194,15 @@ def session_to_response(session: Session) -> SessionResponse:
         ended_at=session.ended_at,
         external_id=session.external_id,
         metadata=session.metadata,
-        provider=session_models.SessionProvider(session.provider.value)
-        if session.provider
-        else None,
+        provider=session.provider,
+        source_instance=session.source_instance,
+        source_revision=session.source_revision,
+        source_digest=session.source_digest,
+        source_metadata=session.source_metadata,
+        replay_readiness=session.replay_readiness,
+        normalization_warnings=session.normalization_warnings,
+        import_job_id=session.import_job_id,
+        supersedes_session_id=session.supersedes_session_id,
         framework=session.framework,
         adapter_version=session.adapter_version,
         log_uri=session.log_uri,

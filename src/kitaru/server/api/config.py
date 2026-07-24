@@ -17,7 +17,7 @@ import uuid
 from enum import StrEnum
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from kitaru.server.config import Settings
 
@@ -61,6 +61,9 @@ class APISettings(Settings):
     DEFAULT_ACCOUNT_PASSWORD: str | None = None
 
     SECRET_ENCRYPTION_KEY: str = ""
+
+    IMPORT_WORKER_ENABLED: bool = True
+    IMPORT_WORKER_POLL_SECONDS: float = Field(default=0.5, gt=0)
 
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:

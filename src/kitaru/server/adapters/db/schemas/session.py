@@ -27,6 +27,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
@@ -44,7 +45,6 @@ from kitaru.server.domain.names import MAX_NAME_LENGTH
 from kitaru.server.domain.session import (
     Session,
     SessionOrigin,
-    SessionProvider,
     SessionStatus,
     TokenUsage,
 )
@@ -52,16 +52,25 @@ from kitaru.server.domain.session import (
 SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["provider", "external_id"]
 )
+SESSION_IMPORT_REVISION_UNIQUE_CONSTRAINT = "uq_session_import_revision"
+SESSION_IMPORT_DIGEST_UNIQUE_CONSTRAINT = "uq_session_import_digest"
 SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
+SESSION_IMPORT_JOB_ID_FOREIGN_KEY = foreign_key_name("session", ["import_job_id"])
+SESSION_SUPERSEDES_SESSION_ID_FOREIGN_KEY = foreign_key_name(
+    "session", ["supersedes_session_id"]
+)
 SESSION_OWNER_ID_INDEX = index_name("session", ["owner_id"])
 SESSION_AGENT_ID_CREATED_INDEX = index_name("session", ["agent_id", "created"])
 SESSION_ORIGIN_INDEX = index_name("session", ["origin"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
 SESSION_EXTERNAL_ID_INDEX = index_name("session", ["external_id"])
+SESSION_SOURCE_IDENTITY_INDEX = index_name(
+    "session", ["provider", "source_instance", "external_id"]
+)
 
 MAX_STATUS_LENGTH = 16
-MAX_PROVIDER_LENGTH = 32
+MAX_PROVIDER_LENGTH = 255
 MAX_FRAMEWORK_LENGTH = 64
 
 
@@ -70,8 +79,28 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
 
     __tablename__ = "session"
     __table_args__ = (
+        Index(
+            SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            "provider",
+            "external_id",
+            unique=True,
+            postgresql_where=text("source_revision IS NULL"),
+        ),
         UniqueConstraint(
-            "provider", "external_id", name=SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT
+            "owner_id",
+            "provider",
+            "source_instance",
+            "external_id",
+            "source_revision",
+            name=SESSION_IMPORT_REVISION_UNIQUE_CONSTRAINT,
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "provider",
+            "source_instance",
+            "external_id",
+            "source_digest",
+            name=SESSION_IMPORT_DIGEST_UNIQUE_CONSTRAINT,
         ),
         ForeignKeyConstraint(
             ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
@@ -81,11 +110,27 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ["agent_version.id"],
             name=SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
         ),
+        ForeignKeyConstraint(
+            ["import_job_id"],
+            ["import_job.id"],
+            name=SESSION_IMPORT_JOB_ID_FOREIGN_KEY,
+        ),
+        ForeignKeyConstraint(
+            ["supersedes_session_id"],
+            ["session.id"],
+            name=SESSION_SUPERSEDES_SESSION_ID_FOREIGN_KEY,
+        ),
         Index(SESSION_OWNER_ID_INDEX, "owner_id"),
         Index(SESSION_AGENT_ID_CREATED_INDEX, "agent_id", "created"),
         Index(SESSION_ORIGIN_INDEX, "origin"),
         Index(SESSION_STATUS_INDEX, "status"),
         Index(SESSION_EXTERNAL_ID_INDEX, "external_id"),
+        Index(
+            SESSION_SOURCE_IDENTITY_INDEX,
+            "provider",
+            "source_instance",
+            "external_id",
+        ),
     )
 
     owner_id: uuid.UUID = Field(foreign_key="account.id", nullable=False)
@@ -112,6 +157,18 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         sa_column=Column("metadata", JSONB, nullable=False),
     )
     provider: str | None = Field(default=None, max_length=MAX_PROVIDER_LENGTH)
+    source_instance: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
+    source_revision: int | None = Field(default=None)
+    source_digest: str | None = Field(default=None, max_length=64)
+    source_metadata: dict[str, Any] = Field(
+        default_factory=dict, sa_type=JSONB, nullable=False
+    )
+    replay_readiness: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
+    normalization_warnings: list[str] = Field(
+        default_factory=list, sa_type=JSONB, nullable=False
+    )
+    import_job_id: uuid.UUID | None = Field(default=None)
+    supersedes_session_id: uuid.UUID | None = Field(default=None)
     framework: str | None = Field(default=None, max_length=MAX_FRAMEWORK_LENGTH)
     adapter_version: str | None = Field(default=None, max_length=MAX_FRAMEWORK_LENGTH)
     log_uri: str | None = Field(default=None, sa_type=Text)
@@ -156,7 +213,15 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ended_at=session.ended_at,
             external_id=session.external_id,
             metadata_=session.metadata,
-            provider=session.provider.value if session.provider else None,
+            provider=session.provider,
+            source_instance=session.source_instance,
+            source_revision=session.source_revision,
+            source_digest=session.source_digest,
+            source_metadata=session.source_metadata,
+            replay_readiness=session.replay_readiness,
+            normalization_warnings=session.normalization_warnings,
+            import_job_id=session.import_job_id,
+            supersedes_session_id=session.supersedes_session_id,
             framework=session.framework,
             adapter_version=session.adapter_version,
             log_uri=session.log_uri,
@@ -192,7 +257,15 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ended_at=self.ended_at,
             external_id=self.external_id,
             metadata=self.metadata_,
-            provider=SessionProvider(self.provider) if self.provider else None,
+            provider=self.provider,
+            source_instance=self.source_instance,
+            source_revision=self.source_revision,
+            source_digest=self.source_digest,
+            source_metadata=self.source_metadata,
+            replay_readiness=self.replay_readiness,
+            normalization_warnings=self.normalization_warnings,
+            import_job_id=self.import_job_id,
+            supersedes_session_id=self.supersedes_session_id,
             framework=self.framework,
             adapter_version=self.adapter_version,
             log_uri=self.log_uri,

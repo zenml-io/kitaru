@@ -32,6 +32,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.session import (
+    ImportedSessionImmutable,
     Session,
     SessionNotFound,
     SessionNotInProgress,
@@ -311,7 +312,7 @@ async def test_ingest_imported_session(
     agent_repository: FakeAgentRepository,
     session_repository: FakeSessionRepository,
 ) -> None:
-    """Accept node ingest for a terminal imported session."""
+    """Reject mutation of imported execution evidence."""
     agent = await agent_repository.create(
         Agent(owner_id=ACTOR.account.id, name="import-bot")
     )
@@ -325,8 +326,11 @@ async def test_ingest_imported_session(
             external_id="lf-1",
         )
     )
-    nodes = await service.ingest_nodes(imported.id, [upsert(0)], actor=ACTOR)
-    assert nodes[0].key == "span:run"
+    with pytest.raises(
+        ImportedSessionImmutable,
+        match=f"Imported session {imported.id} evidence is immutable",
+    ):
+        await service.ingest_nodes(imported.id, [upsert(0)], actor=ACTOR)
 
 
 async def test_ingest_unknown_session(service: SessionNodeService) -> None:

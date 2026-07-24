@@ -617,6 +617,42 @@
         "title": "ApiKeyUpdateRequest",
         "type": "object"
       },
+      "Body_create_import_job_v1_import_jobs_post": {
+        "properties": {
+          "agent_version_id": {
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "importer_id": {
+            "title": "Importer Id",
+            "type": "string"
+          },
+          "source_instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Instance"
+          }
+        },
+        "required": [
+          "file",
+          "importer_id",
+          "agent_version_id"
+        ],
+        "title": "Body_create_import_job_v1_import_jobs_post",
+        "type": "object"
+      },
       "Body_login_v1_login_post": {
         "properties": {
           "password": {
@@ -1587,6 +1623,252 @@
         ],
         "title": "HistoryScope",
         "type": "string"
+      },
+      "ImportJobErrorResponse": {
+        "description": "One source session that failed to import.",
+        "properties": {
+          "message": {
+            "description": "Failure message.",
+            "title": "Message",
+            "type": "string"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider session id, when known.",
+            "title": "Source Id"
+          }
+        },
+        "required": [
+          "source_id",
+          "message"
+        ],
+        "title": "ImportJobErrorResponse",
+        "type": "object"
+      },
+      "ImportJobResponse": {
+        "description": "Background trace import job.",
+        "properties": {
+          "agent_version_id": {
+            "description": "Target agent version id.",
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "deduplicated_count": {
+            "description": "Exact sessions reused.",
+            "title": "Deduplicated Count",
+            "type": "integer"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Processing end time.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whole-job failure.",
+            "title": "Error"
+          },
+          "errors": {
+            "description": "Per-session failures.",
+            "items": {
+              "$ref": "#/components/schemas/ImportJobErrorResponse"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "failed_count": {
+            "description": "Source sessions that failed.",
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "filename": {
+            "description": "Uploaded filename.",
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "description": "Import job id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "imported_count": {
+            "description": "New sessions created.",
+            "title": "Imported Count",
+            "type": "integer"
+          },
+          "importer_id": {
+            "description": "Importer id.",
+            "title": "Importer Id",
+            "type": "string"
+          },
+          "importer_version": {
+            "description": "Importer version.",
+            "title": "Importer Version",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Owning account id.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "session_ids": {
+            "description": "Created and reused session ids.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Session Ids",
+            "type": "array"
+          },
+          "source_instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source project or instance.",
+            "title": "Source Instance"
+          },
+          "source_session_count": {
+            "description": "Normalized source session count.",
+            "title": "Source Session Count",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Processing start time.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ImportJobStatus",
+            "description": "Job status."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "agent_version_id",
+          "importer_id",
+          "importer_version",
+          "source_instance",
+          "filename",
+          "status",
+          "started_at",
+          "ended_at",
+          "source_session_count",
+          "imported_count",
+          "deduplicated_count",
+          "failed_count",
+          "session_ids",
+          "errors",
+          "error",
+          "created",
+          "updated"
+        ],
+        "title": "ImportJobResponse",
+        "type": "object"
+      },
+      "ImportJobStatus": {
+        "description": "Import job lifecycle status.",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "completed_with_errors",
+          "failed"
+        ],
+        "title": "ImportJobStatus",
+        "type": "string"
+      },
+      "ImporterResponse": {
+        "description": "Available trace importer.",
+        "properties": {
+          "display_name": {
+            "description": "Importer display name.",
+            "title": "Display Name",
+            "type": "string"
+          },
+          "file_extensions": {
+            "description": "Accepted filename extensions.",
+            "items": {
+              "type": "string"
+            },
+            "title": "File Extensions",
+            "type": "array"
+          },
+          "id": {
+            "description": "Stable importer id.",
+            "title": "Id",
+            "type": "string"
+          },
+          "max_upload_bytes": {
+            "description": "Maximum upload size.",
+            "title": "Max Upload Bytes",
+            "type": "integer"
+          },
+          "version": {
+            "description": "Installed importer version.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "version",
+          "file_extensions",
+          "max_upload_bytes"
+        ],
+        "title": "ImporterResponse",
+        "type": "object"
       },
       "LLMPolicy": {
         "additionalProperties": false,
@@ -3303,13 +3585,14 @@
           "provider": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SessionProvider"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Source provider, imported sessions only."
+            "description": "Source provider, imported sessions only.",
+            "title": "Provider"
           },
           "replay_id": {
             "anyOf": [
@@ -4061,6 +4344,19 @@
             "title": "Id",
             "type": "string"
           },
+          "import_job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import job that created this session.",
+            "title": "Import Job Id"
+          },
           "inputs": {
             "description": "Initial task inputs.",
             "title": "Inputs"
@@ -4100,6 +4396,14 @@
             "description": "Display label.",
             "title": "Name"
           },
+          "normalization_warnings": {
+            "description": "Warnings produced while normalizing the source.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Normalization Warnings",
+            "type": "array"
+          },
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin"
           },
@@ -4116,13 +4420,27 @@
           "provider": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SessionProvider"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Source provider, imported sessions only."
+            "description": "Source provider, imported sessions only.",
+            "title": "Provider"
+          },
+          "replay_readiness": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Conservative imported replay-readiness report.",
+            "title": "Replay Readiness"
           },
           "scores": {
             "additionalProperties": {
@@ -4131,6 +4449,48 @@
             "description": "Score values by scorer name.",
             "title": "Scores",
             "type": "object"
+          },
+          "source_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Digest of the normalized source snapshot.",
+            "title": "Source Digest"
+          },
+          "source_instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider project or source instance for imported sessions.",
+            "title": "Source Instance"
+          },
+          "source_metadata": {
+            "additionalProperties": true,
+            "description": "Immutable provider metadata.",
+            "title": "Source Metadata",
+            "type": "object"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable source-session revision.",
+            "title": "Source Revision"
           },
           "started_at": {
             "anyOf": [
@@ -4147,6 +4507,19 @@
           },
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
+          },
+          "supersedes_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous source revision, when any.",
+            "title": "Supersedes Session Id"
           },
           "tokens": {
             "anyOf": [
@@ -6865,6 +7238,118 @@
         ]
       }
     },
+    "/v1/import-jobs": {
+      "post": {
+        "description": "Upload a JSONL export and create a background import job.",
+        "operationId": "create_import_job_v1_import_jobs_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_import_job_v1_import_jobs_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Import Job",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/v1/import-jobs/{job_id}": {
+      "get": {
+        "description": "Get a trace import job.",
+        "operationId": "get_import_job_v1_import_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Job",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/v1/importers": {
+      "get": {
+        "description": "List trace importers available in this deployment.",
+        "operationId": "list_importers_v1_importers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ImporterResponse"
+                  },
+                  "title": "Response List Importers V1 Importers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Importers",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
     "/v1/login": {
       "post": {
         "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
@@ -7690,7 +8175,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/SessionProvider"
+                  "type": "string"
                 },
                 {
                   "type": "null"

@@ -1,0 +1,200 @@
+{
+  "cases": [
+    {
+      "case_id": "support-refund-delay",
+      "exec_id": "7a5e84ac-f424-411b-9fb5-0ecd3eacd634",
+      "labels": {
+        "tier": "enterprise",
+        "trigger": "cost spike"
+      },
+      "reason": "Recent expensive reply for an enterprise refund complaint."
+    },
+    {
+      "case_id": "support-refund-delay--hist-01",
+      "exec_id": "42bd6afb-96a6-47c1-b845-fd38fbf68feb",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "reason": "Cost Outlier for enterprise refund delay case from Aster Cloud."
+    },
+    {
+      "case_id": "support-refund-delay--hist-02",
+      "exec_id": "15e4deba-51e4-4735-8252-901911a8612e",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "reason": "Customer Complaint for enterprise refund delay case from Northwind Health."
+    },
+    {
+      "case_id": "support-refund-delay--hist-03",
+      "exec_id": "5debdf93-acdb-4628-9871-d6badbd8ed11",
+      "labels": {
+        "base_case_id": "support-refund-delay",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "enterprise",
+        "topic": "refund delay",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "reason": "Slow Resolution for enterprise refund delay case from Harbor Retail."
+    },
+    {
+      "case_id": "regulated-medical-claim",
+      "exec_id": "eb00758d-10b2-47e9-bc6b-453a83acb70b",
+      "labels": {
+        "tier": "regulated",
+        "trigger": "quality drop"
+      },
+      "reason": "Quality-risk case where a terse answer can be unsafe."
+    },
+    {
+      "case_id": "regulated-medical-claim--hist-01",
+      "exec_id": "63674209-e985-4638-b4cd-10306e83f1ae",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "reason": "Cost Outlier for regulated medical claim routing case from Aster Cloud."
+    },
+    {
+      "case_id": "regulated-medical-claim--hist-02",
+      "exec_id": "944c31a1-07cc-4503-8591-a10ff6666e5b",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "reason": "Customer Complaint for regulated medical claim routing case from Northwind Health."
+    },
+    {
+      "case_id": "regulated-medical-claim--hist-03",
+      "exec_id": "6f5a7f64-b319-423c-9cd0-359003623e81",
+      "labels": {
+        "base_case_id": "regulated-medical-claim",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "regulated",
+        "topic": "medical claim routing",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "reason": "Slow Resolution for regulated medical claim routing case from Harbor Retail."
+    },
+    {
+      "case_id": "shipping-tool-loop",
+      "exec_id": "62a3edf5-e0b4-427f-a646-dadc5087f576",
+      "labels": {
+        "tier": "standard",
+        "trigger": "tool trouble"
+      },
+      "reason": "Tool-loop style case with avoidable cost and latency."
+    },
+    {
+      "case_id": "shipping-tool-loop--hist-01",
+      "exec_id": "c43de6f0-2ee9-4796-9cf5-6a154e9efd2f",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "email",
+        "company": "Aster Cloud",
+        "production_signal": "cost outlier",
+        "region": "us",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "cost spike",
+        "urgency": "normal",
+        "variant_index": "01"
+      },
+      "reason": "Cost Outlier for standard shipping status loop case from Aster Cloud."
+    },
+    {
+      "case_id": "shipping-tool-loop--hist-02",
+      "exec_id": "01e34631-b49d-496e-aa55-ba840c89b124",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "chat",
+        "company": "Northwind Health",
+        "production_signal": "customer complaint",
+        "region": "eu",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "quality drop",
+        "urgency": "high",
+        "variant_index": "02"
+      },
+      "reason": "Customer Complaint for standard shipping status loop case from Northwind Health."
+    },
+    {
+      "case_id": "shipping-tool-loop--hist-03",
+      "exec_id": "bdf6191d-3ddc-47ba-b949-4e13d386cb1a",
+      "labels": {
+        "base_case_id": "shipping-tool-loop",
+        "channel": "ticket",
+        "company": "Harbor Retail",
+        "production_signal": "slow resolution",
+        "region": "apac",
+        "scenario_version": "replay_lab_support_v1",
+        "tier": "standard",
+        "topic": "shipping status loop",
+        "trigger": "latency spike",
+        "urgency": "medium",
+        "variant_index": "03"
+      },
+      "reason": "Slow Resolution for standard shipping status loop case from Harbor Retail."
+    }
+  ],
+  "default_from_checkpoint": "draft_response",
+  "description": "Synthetic customer-support regression cohort. Observed executions use the champion profile over a deterministic production-like history; Replay Lab then compares baseline replay against a cheaper candidate profile.",
+  "expected_artifacts": [
+    "scorecard",
+    "final_response"
+  ],
+  "name": "Support Replay Lab demo"
+}

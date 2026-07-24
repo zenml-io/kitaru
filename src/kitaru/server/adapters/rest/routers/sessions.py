@@ -28,7 +28,6 @@ from kitaru.api_models.v1.session_nodes import (
 from kitaru.api_models.v1.sessions import (
     SessionCreateRequest,
     SessionOrigin,
-    SessionProvider,
     SessionResponse,
     SessionScoresRequest,
     SessionStatus,
@@ -93,7 +92,7 @@ async def list_sessions(
     agent_version_id: uuid.UUID | None = None,
     origin: SessionOrigin | None = None,
     status: SessionStatus | None = None,
-    provider: SessionProvider | None = None,
+    provider: str | None = None,
     external_id: str | None = None,
     name: str | None = None,
     tag: str | None = None,

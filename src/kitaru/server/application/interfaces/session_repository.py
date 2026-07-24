@@ -55,6 +55,27 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_imported_by_digest(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+        source_digest: str,
+    ) -> Session | None:
+        """Load an exact imported source snapshot when it exists."""
+        ...
+
+    async def get_latest_import(
+        self,
+        owner_id: uuid.UUID,
+        provider: str,
+        source_instance: str,
+        external_id: str,
+    ) -> Session | None:
+        """Load the latest revision of an imported source session."""
+        ...
+
     async def query(self, session_filter: SessionFilter) -> tuple[list[Session], int]:
         """Query sessions matching a filter.
 

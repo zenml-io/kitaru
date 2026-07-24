@@ -255,7 +255,7 @@ async def test_upsert_nodes_finished_session(client: httpx.AsyncClient) -> None:
 
 
 async def test_upsert_nodes_imported_session(client: httpx.AsyncClient) -> None:
-    """Accept node ingest for a terminal imported session."""
+    """Reject mutation of imported execution evidence."""
     session_id = await create_session(
         client,
         origin="imported",
@@ -266,8 +266,10 @@ async def test_upsert_nodes_imported_session(client: httpx.AsyncClient) -> None:
     response = await client.post(
         f"/v1/sessions/{session_id}/nodes", json={"nodes": [node_body(0)]}
     )
-    assert response.status_code == 200
-    assert response.json()[0]["key"] == "span:run"
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Imported session {session_id} evidence is immutable"
+    }
 
 
 async def test_upsert_nodes_unknown_session(client: httpx.AsyncClient) -> None:

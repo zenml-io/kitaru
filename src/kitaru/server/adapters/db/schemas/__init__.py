@@ -26,6 +26,7 @@ from kitaru.server.adapters.db.schemas.cohort import (
 )
 from kitaru.server.adapters.db.schemas.experiment import ExperimentSchema
 from kitaru.server.adapters.db.schemas.experiment_run import ExperimentRunSchema
+from kitaru.server.adapters.db.schemas.import_job import ImportJobSchema
 from kitaru.server.adapters.db.schemas.replay import ReplaySchema
 from kitaru.server.adapters.db.schemas.replay_config import ReplayConfigSchema
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
@@ -43,6 +44,7 @@ __all__ = [
     "CohortSessionSchema",
     "ExperimentRunSchema",
     "ExperimentSchema",
+    "ImportJobSchema",
     "ReplayConfigSchema",
     "ReplaySchema",
     "SecretSchema",
