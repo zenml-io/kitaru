@@ -48,6 +48,10 @@ dependencies = [
 pydantic-ai = [
     "pydantic-ai-slim[openai]>=2.14.1,<3",
 ]
+importers = [
+    "kitaru-importer-braintrust",
+    "kitaru-importer-langfuse",
+]
 server = [
     "fastapi>=0.139",
     "sqlalchemy[asyncio]>=2.0.51",
@@ -80,6 +84,17 @@ packages = ["src/kitaru"]
 
 [tool.uv]
 exclude-newer = "3 days"
+
+[tool.uv.sources]
+kitaru = { workspace = true }
+kitaru-importer-braintrust = { workspace = true }
+kitaru-importer-langfuse = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "plugins/braintrust",
+    "plugins/langfuse",
+]
 
 [dependency-groups]
 dev = [

@@ -393,6 +393,72 @@ async def test_replay_json_input_is_encoded_and_recorded_original(
     assert _nodes(client)[0].inputs == replay_input
 
 
+async def test_imported_conversation_replays_final_turn_with_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Project imported turns onto final prompt and prior message history."""
+    observed: list[ModelMessage] = []
+
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        observed.extend(messages)
+        return ModelResponse(parts=[TextPart("replayed")])
+
+    imported_inputs = {
+        "schema_version": 1,
+        "turns": [
+            {
+                "source_trace_id": "trace-1",
+                "inputs": {
+                    "messages": [{"role": "user", "content": "My name is Ada."}]
+                },
+                "outputs": {
+                    "role": "assistant",
+                    "content": "Hello Ada.",
+                },
+            },
+            {
+                "source_trace_id": "trace-2",
+                "inputs": {
+                    "messages": [{"role": "user", "content": "What is my name?"}]
+                },
+                "outputs": {
+                    "role": "assistant",
+                    "content": "Your name is Ada.",
+                },
+            },
+        ],
+    }
+    _set_replay(
+        monkeypatch,
+        _replay_spec(PassthroughPolicy(), inputs=imported_inputs),
+    )
+    agent = KitaruAgent(
+        Agent(FunctionModel(model), system_prompt="Answer from the conversation."),
+        agent_id=uuid.uuid4(),
+        api_url="http://kitaru.test",
+    )
+
+    await agent.run("caller prompt")
+
+    prompts = [
+        part.content
+        for message in observed
+        if isinstance(message, ModelRequest)
+        for part in message.parts
+        if isinstance(part, UserPromptPart)
+    ]
+    responses = [
+        part.content
+        for message in observed
+        if isinstance(message, ModelResponse)
+        for part in message.parts
+        if isinstance(part, TextPart)
+    ]
+    assert prompts == ["My name is Ada.", "What is my name?"]
+    assert responses == ["Hello Ada."]
+    assert _FakeClient.instances[0].sessions.created[0].inputs == imported_inputs
+
+
 async def test_live_json_input_is_encoded_and_recorded_original() -> None:
     seen_prompts: list[Any] = []
     live_input = {"question": "What is Kitaru?", "enabled": True}

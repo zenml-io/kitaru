@@ -78,9 +78,11 @@ from pydantic_ai.messages import (
     NativeToolReturnPart,
     SystemPromptPart,
     TextContent,
+    TextPart,
     ToolCallPart,
     UploadedFile,
     UserContent,
+    UserPromptPart,
     VideoUrl,
 )
 from pydantic_ai.models import ModelRequestContext, infer_model
@@ -138,6 +140,93 @@ def _pydantic_prompt(value: Any) -> str | Sequence[UserContent] | None:
     ):
         return value
     return json.dumps(_jsonable(value), sort_keys=True)
+
+
+def _message_content(value: Any, role: str) -> Any:
+    """Extract one role's content from common provider message shapes."""
+    if not isinstance(value, dict):
+        return value
+    messages = value.get("messages")
+    if isinstance(messages, list):
+        for message in reversed(messages):
+            if (
+                isinstance(message, dict)
+                and message.get("role") == role
+                and "content" in message
+            ):
+                return cast(dict[str, Any], message).get("content")
+    if value.get("role") in (None, role) and "content" in value:
+        return value["content"]
+    return value
+
+
+def _assistant_text(value: Any) -> str:
+    """Convert a recorded assistant output into a PydanticAI text part."""
+    content = _message_content(value, "assistant")
+    if isinstance(content, str):
+        return content
+    return json.dumps(_jsonable(content), sort_keys=True)
+
+
+def _project_conversation_input(
+    value: Any,
+) -> tuple[Any, list[ModelMessage]]:
+    """Project an imported session onto final prompt plus prior history."""
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        return value, []
+    turns = value.get("turns")
+    if not isinstance(turns, list) or not turns:
+        return value, []
+
+    history: list[ModelMessage] = []
+    for raw_turn in turns[:-1]:
+        if not isinstance(raw_turn, dict):
+            continue
+        prior_input = _message_content(raw_turn.get("inputs"), "user")
+        if prior_input is not None:
+            prompt = _pydantic_prompt(prior_input)
+            if prompt is not None:
+                history.append(ModelRequest(parts=[UserPromptPart(prompt)]))
+        prior_output = raw_turn.get("outputs")
+        if prior_output is not None:
+            history.append(
+                ModelResponse(parts=[TextPart(_assistant_text(prior_output))])
+            )
+    final_turn = turns[-1]
+    if not isinstance(final_turn, dict):
+        return value, history
+    return _message_content(final_turn.get("inputs"), "user"), history
+
+
+def _prepend_history(
+    messages: list[ModelMessage], history: list[ModelMessage]
+) -> list[ModelMessage]:
+    """Insert replay history after the original system prompt."""
+    if not history:
+        return messages
+    result = list(messages)
+    for index, message in enumerate(result):
+        if not isinstance(message, ModelRequest):
+            continue
+        system_parts = [
+            part for part in message.parts if isinstance(part, SystemPromptPart)
+        ]
+        if not system_parts and message.instructions is None:
+            return [*history, *result]
+        remaining_parts = [
+            part for part in message.parts if not isinstance(part, SystemPromptPart)
+        ]
+        result[index] = replace(
+            message,
+            parts=remaining_parts,
+            instructions=None,
+        )
+        prefix = ModelRequest(
+            parts=system_parts,
+            instructions=message.instructions,
+        )
+        return [prefix, *history, *result]
+    return [*history, *result]
 
 
 def _messages_json(messages: list[ModelMessage]) -> list[dict[str, Any]]:
@@ -249,6 +338,8 @@ class _RunState:
     spec: ReplaySpecResponse | None
     override: ReplayOverride | None
     effective_input: Any
+    prompt_input: Any
+    message_history: list[ModelMessage]
     session_id: uuid.UUID | None = None
     root_id: uuid.UUID | None = None
     started_at: datetime | None = None
@@ -295,6 +386,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                 effective_input = spec.inputs
             else:
                 effective_input = ctx.prompt
+            prompt_input, message_history = _project_conversation_input(effective_input)
             if spec is not None:
                 override = spec.override
             else:
@@ -315,6 +407,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                 spec=spec,
                 override=override,
                 effective_input=effective_input,
+                prompt_input=prompt_input,
+                message_history=message_history,
             ),
         )
 
@@ -414,7 +508,7 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Replace the initial PydanticAI prompt with replay-resolved inputs."""
         state = self._require_state()
         if isinstance(node, UserPromptNode):
-            return replace(node, user_prompt=_pydantic_prompt(state.effective_input))
+            return replace(node, user_prompt=_pydantic_prompt(state.prompt_input))
         return node
 
     async def wrap_model_request(
@@ -427,7 +521,13 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Apply replay overrides and record one model request."""
         state = self._require_state()
         requested_model = _model_identifier(request_context)
-        effective = request_context
+        effective = _replace_request_context(
+            request_context,
+            model=request_context.model,
+            messages=_prepend_history(request_context.messages, state.message_history),
+            model_settings=request_context.model_settings,
+            model_replaced=False,
+        )
         override = state.override
         if override is not None:
             replacement: str | None = None
@@ -436,14 +536,14 @@ class _KitaruCapability(AbstractCapability[Any]):
             elif isinstance(override.model, dict):
                 replacement = override.model.get(requested_model)
             model = infer_model(replacement) if replacement else request_context.model
-            messages = request_context.messages
+            messages = effective.messages
             if override.system_prompt is not None:
                 messages = _replace_system_prompt(messages, override.system_prompt)
-            model_settings = request_context.model_settings
+            model_settings = effective.model_settings
             if override.model_params is not None:
                 model_settings = cast(ModelSettings, dict(override.model_params))
             effective = _replace_request_context(
-                request_context,
+                effective,
                 model=model,
                 messages=messages,
                 model_settings=model_settings,
