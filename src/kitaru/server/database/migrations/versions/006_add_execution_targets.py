@@ -11,8 +11,8 @@ import sqlmodel.sql.sqltypes
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "005_add_execution_targets"
-down_revision = "004_add_record_replay"
+revision = "006_add_execution_targets"
+down_revision = "005_add_worker"
 branch_labels = None
 depends_on = None
 
