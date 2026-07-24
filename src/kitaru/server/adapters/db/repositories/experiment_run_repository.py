@@ -171,6 +171,8 @@ class SQLExperimentRunRepository:
         row.status = run.status.value
         row.agent_version_id = run.agent_version_id
         row.score_baselines = run.score_baselines
+        row.execution_target = run.execution_target.value
+        row.executor_handle = run.executor_handle
         row.started_at = run.started_at
         row.ended_at = run.ended_at
         row.summary = run.summary

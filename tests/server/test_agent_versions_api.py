@@ -128,6 +128,8 @@ async def test_create_version_with_run_spec(
         "env": {"MODE": "replay"},
         "secret_ids": [str(secret.id)],
         "timeout_seconds": 600,
+        "image": "ghcr.io/acme/agent:v1",
+        "default_execution_target": "on_demand",
     }
     response = await client.post(
         f"/v1/agents/{agent_id}/versions",
@@ -295,6 +297,8 @@ async def test_update_version(
         "env": {},
         "secret_ids": [str(secret.id)],
         "timeout_seconds": 600,
+        "image": None,
+        "default_execution_target": "pool",
     }
     response = await client.patch(
         f"/v1/agent-versions/{created['id']}",

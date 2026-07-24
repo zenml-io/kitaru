@@ -20,6 +20,9 @@ from kitaru.api_models.v1.agent_versions import (
     AgentVersionResponse,
     AgentVersionUpdateRequest,
 )
+from kitaru.api_models.v1.agent_versions import (
+    ExecutionTarget as ExecutionTargetModel,
+)
 from kitaru.api_models.v1.agent_versions import RunSpec as RunSpecModel
 from kitaru.server.adapters.rest.mapping.partial import set_fields
 from kitaru.server.application.models.agent_versions import AgentVersionUpdate
@@ -28,6 +31,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 
 
 def run_spec_to_domain(run_spec: RunSpecModel | None) -> RunSpec | None:
@@ -47,6 +51,10 @@ def run_spec_to_domain(run_spec: RunSpecModel | None) -> RunSpec | None:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
+        image=run_spec.image,
+        default_execution_target=ExecutionTarget(
+            run_spec.default_execution_target.value
+        ),
     )
 
 
@@ -67,6 +75,10 @@ def run_spec_to_response(run_spec: RunSpec | None) -> RunSpecModel | None:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
+        image=run_spec.image,
+        default_execution_target=ExecutionTargetModel(
+            run_spec.default_execution_target.value
+        ),
     )
 
 

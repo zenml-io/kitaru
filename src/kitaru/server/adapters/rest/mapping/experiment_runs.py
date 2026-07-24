@@ -13,6 +13,9 @@
 #  permissions and limitations under the License.
 """Experiment run DTO conversions."""
 
+from kitaru.api_models.v1.agent_versions import (
+    ExecutionTarget as ExecutionTargetModel,
+)
 from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunProgress as ExperimentRunProgressModel,
 )
@@ -22,6 +25,7 @@ from kitaru.api_models.v1.experiment_runs import (
 from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunStatus as ExperimentRunStatusModel,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunProgress,
@@ -43,6 +47,22 @@ def run_status_to_domain(
     if status is None:
         return None
     return ExperimentRunStatus(status.value)
+
+
+def execution_target_to_domain(
+    target: ExecutionTargetModel | None,
+) -> ExecutionTarget | None:
+    """Convert an optional execution target DTO to its domain enum.
+
+    Args:
+        target: Execution target DTO.
+
+    Returns:
+        Domain execution target, ``None`` for ``None``.
+    """
+    if target is None:
+        return None
+    return ExecutionTarget(target.value)
 
 
 def progress_to_response(
@@ -90,6 +110,8 @@ def experiment_run_to_response(
         status=ExperimentRunStatusModel(run.status.value),
         agent_version_id=run.agent_version_id,
         score_baselines=run.score_baselines,
+        execution_target=ExecutionTargetModel(run.execution_target.value),
+        executor_handle=run.executor_handle,
         started_at=run.started_at,
         ended_at=run.ended_at,
         summary=run.summary,

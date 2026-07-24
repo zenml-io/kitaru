@@ -72,6 +72,8 @@ async def test_versions_persist_across_requests(client: httpx.AsyncClient) -> No
         "env": {"MODE": "replay"},
         "secret_ids": [secret_id],
         "timeout_seconds": 600,
+        "image": "ghcr.io/acme/agent:v1",
+        "default_execution_target": "on_demand",
     }
     response = await client.post(
         f"/v1/agents/{agent_id}/versions",
@@ -123,6 +125,8 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
         "env": {},
         "secret_ids": [secret_id],
         "timeout_seconds": 600,
+        "image": None,
+        "default_execution_target": "pool",
     }
     response = await client.patch(
         f"/v1/agent-versions/{created['id']}",

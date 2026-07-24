@@ -28,6 +28,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.replay import ReplayStatus
 
@@ -139,6 +140,8 @@ class ExperimentRun(DomainModel):
     status: ExperimentRunStatus = ExperimentRunStatus.PENDING
     agent_version_id: uuid.UUID
     score_baselines: bool = False
+    execution_target: ExecutionTarget = ExecutionTarget.POOL
+    executor_handle: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     summary: dict[str, Any] | None = None

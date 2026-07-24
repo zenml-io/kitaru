@@ -156,7 +156,8 @@ class ExperimentsResource:
         Raises:
             APIError: The request failed, including 404 for a missing
                 experiment or agent version, 409 when no runnable agent
-                version resolves, and 422 for a version of another agent.
+                version resolves or an on demand run resolves to a version
+                without an image, and 422 for a version of another agent.
 
         Returns:
             Created experiment run.

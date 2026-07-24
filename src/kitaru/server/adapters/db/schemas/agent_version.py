@@ -34,7 +34,10 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.names import MAX_NAME_LENGTH
+
+MAX_EXECUTION_TARGET_LENGTH = 16
 
 AGENT_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
     "agent_version", ["agent_id", "version"]
@@ -73,6 +76,10 @@ class AgentVersionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     run_working_dir: str | None = Field(default=None, sa_type=Text)
     run_env: dict[str, str] | None = Field(default=None, sa_type=JSONB)
     run_timeout_seconds: int | None = Field(default=None)
+    run_image: str | None = Field(default=None, sa_type=Text)
+    run_default_execution_target: str | None = Field(
+        default=None, max_length=MAX_EXECUTION_TARGET_LENGTH
+    )
     capabilities: dict[str, Any] = Field(sa_type=JSONB, nullable=False)
 
     @classmethod
@@ -96,6 +103,10 @@ class AgentVersionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             run_working_dir=run_spec.working_dir if run_spec else None,
             run_env=run_spec.env if run_spec else None,
             run_timeout_seconds=run_spec.timeout_seconds if run_spec else None,
+            run_image=run_spec.image if run_spec else None,
+            run_default_execution_target=run_spec.default_execution_target.value
+            if run_spec
+            else None,
             capabilities=version.capabilities.model_dump(),
         )
 
@@ -111,12 +122,17 @@ class AgentVersionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         run_spec = None
         if self.run_command is not None:
             assert self.run_timeout_seconds is not None
+            assert self.run_default_execution_target is not None
             run_spec = RunSpec(
                 command=self.run_command,
                 working_dir=self.run_working_dir,
                 env=self.run_env or {},
                 secret_ids=secret_ids,
                 timeout_seconds=self.run_timeout_seconds,
+                image=self.run_image,
+                default_execution_target=ExecutionTarget(
+                    self.run_default_execution_target
+                ),
             )
         return AgentVersion(
             id=self.id,

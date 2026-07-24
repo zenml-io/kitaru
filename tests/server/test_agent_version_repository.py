@@ -56,6 +56,7 @@ from kitaru.server.domain.agent_version import (
     DuplicateAgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.secret import Secret, SecretInUse, SecretNotFound
 
 Setup = tuple[AgentVersionRepository, AgentRepository, SecretRepository, uuid.UUID]
@@ -136,6 +137,8 @@ async def test_create_with_run_spec(setup: Setup) -> None:
         env={"MODE": "replay"},
         secret_ids=[db.id, smtp.id],
         timeout_seconds=600,
+        image="ghcr.io/acme/agent:v1",
+        default_execution_target=ExecutionTarget.ON_DEMAND,
     )
     version = await repository.create(
         AgentVersion(
@@ -270,6 +273,8 @@ async def test_update(setup: Setup) -> None:
         env={"MODE": "replay"},
         secret_ids=[smtp.id],
         timeout_seconds=900,
+        image="ghcr.io/acme/agent:v2",
+        default_execution_target=ExecutionTarget.ON_DEMAND,
     )
     created.update_run_spec(run_spec, frozen=False)
     created.update_capabilities(CAPABILITIES, frozen=False)

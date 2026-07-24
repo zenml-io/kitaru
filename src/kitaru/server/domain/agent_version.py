@@ -26,6 +26,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -91,6 +92,18 @@ class AgentVersionNotRunnable(ConflictError):
         super().__init__(f"Agent version {version_id} has no run spec")
 
 
+class MissingRunImage(ConflictError):
+    """Raised when an operation requires a run spec image."""
+
+    def __init__(self, version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            version_id: Id of the agent version.
+        """
+        super().__init__(f"Agent version {version_id} has no run image")
+
+
 class NoRunnableAgentVersion(ConflictError):
     """Raised when an agent has no runnable version to resolve."""
 
@@ -139,6 +152,8 @@ class RunSpec(FrozenModel):
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: SecretIds = Field(default_factory=list)
     timeout_seconds: PositiveInt
+    image: str | None = None
+    default_execution_target: ExecutionTarget = ExecutionTarget.POOL
 
 
 class AgentCapabilities(FrozenModel):

@@ -831,6 +831,15 @@
         "title": "DiffValue",
         "type": "object"
       },
+      "ExecutionTarget": {
+        "description": "Execution target.",
+        "enum": [
+          "pool",
+          "on_demand"
+        ],
+        "title": "ExecutionTarget",
+        "type": "string"
+      },
       "ExperimentCreateRequest": {
         "additionalProperties": false,
         "description": "Experiment create request.",
@@ -993,6 +1002,17 @@
             "description": "Id of the agent version to execute, the latest runnable version when omitted.",
             "title": "Agent Version Id"
           },
+          "execution_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution target, the agent version's default when omitted."
+          },
           "score_baselines": {
             "default": false,
             "description": "Whether the runner also scores originals missing scores.",
@@ -1100,6 +1120,21 @@
             "description": "Error message.",
             "title": "Error"
           },
+          "execution_target": {
+            "$ref": "#/components/schemas/ExecutionTarget"
+          },
+          "executor_handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Executor handle.",
+            "title": "Executor Handle"
+          },
           "experiment_id": {
             "description": "Id of the experiment.",
             "format": "uuid",
@@ -1177,6 +1212,8 @@
           "status",
           "agent_version_id",
           "score_baselines",
+          "execution_target",
+          "executor_handle",
           "started_at",
           "ended_at",
           "summary",
@@ -2543,6 +2580,11 @@
             "title": "Command",
             "type": "string"
           },
+          "default_execution_target": {
+            "$ref": "#/components/schemas/ExecutionTarget",
+            "default": "pool",
+            "description": "Execution target for runs that omit one."
+          },
           "env": {
             "additionalProperties": {
               "type": "string"
@@ -2550,6 +2592,18 @@
             "description": "Literal environment variables.",
             "title": "Env",
             "type": "object"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Container image running the agent.",
+            "title": "Image"
           },
           "secret_ids": {
             "description": "Ids of secrets whose entries become environment variables.",
@@ -6656,7 +6710,7 @@
         ]
       },
       "post": {
-        "description": "Start an experiment run.\n\nCreates the run plus one pending replay per cohort session.\n\nClients observe HTTP 201 on success, 404 when no experiment or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves, and 422 when the version belongs to another agent.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment run.",
+        "description": "Start an experiment run.\n\nCreates the run plus one pending replay per cohort session.\n\nClients observe HTTP 201 on success, 404 when no experiment or agent\nversion has the referenced id, 409 when no runnable agent version\nresolves or an on demand run resolves to a version without an image,\nand 422 when the version belongs to another agent.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment run.",
         "operationId": "create_experiment_run_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {

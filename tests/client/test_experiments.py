@@ -21,6 +21,7 @@ import pytest
 from conftest import asgi_api_client, experiment_app
 from kitaru.api_models.v1.agent_versions import (
     AgentVersionCreateRequest,
+    ExecutionTarget,
     RunSpec,
 )
 from kitaru.api_models.v1.agents import AgentCreateRequest
@@ -74,7 +75,11 @@ async def create_cohort(api_client: KitaruAPIClient) -> tuple[uuid.UUID, uuid.UU
         agent.id,
         AgentVersionCreateRequest(
             version="v1",
-            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+            run_spec=RunSpec(
+                command="python agent.py",
+                timeout_seconds=600,
+                image="ghcr.io/acme/agent:v1",
+            ),
         ),
     )
     session = await api_client.sessions.create(
@@ -179,9 +184,17 @@ async def test_create_and_list_runs(api_client: KitaruAPIClient) -> None:
     assert run.number == 1
     assert run.agent_version_id == version_id
     assert run.score_baselines is True
+    assert run.execution_target is ExecutionTarget.POOL
+    assert run.executor_handle is None
     assert run.progress.pending == 1
     assert run.progress.total == 1
 
+    on_demand = await api_client.experiments.create_run(
+        created.id,
+        ExperimentRunCreateRequest(execution_target=ExecutionTarget.ON_DEMAND),
+    )
+    assert on_demand.execution_target is ExecutionTarget.ON_DEMAND
+
     page = await api_client.experiments.list_runs(created.id)
-    assert page.total == 1
+    assert page.total == 2
     assert page.items[0].id == run.id
