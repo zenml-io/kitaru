@@ -118,6 +118,50 @@ preparation plus an interface only.
 - The `JobExecutor` seam ships `ExecutorLaunchRequest(image, env)` and
   `ExecutorJobStatus` (running, succeeded, failed, unknown).
 
+### Replay-to-job rename
+
+- The rename landed as its own behavior-preserving commit before the
+  kind discriminator, keeping the tree green at every step.
+- Replay-kind concepts keep their names inside the renamed modules:
+  `ReplayCreateRequest`, `ReplayOverride`, `ReplayConfig`,
+  `replay_diff.py` with its DTOs and `replay_id` diff field, tool
+  policy and scoring DTOs, `SessionOrigin.REPLAY`, and the run summary
+  keys.
+- The routers and client resources split along the endpoint layout:
+  `/v1/jobs` owns the lifecycle, `/v1/replays` keeps only standalone
+  replay creation.
+- `Runner.run_replay` became `run_job`, it drives the generic job
+  lifecycle.
+- `AgentVersionFrozen` and the `InUse` errors now say "jobs", they name
+  rows of the renamed table.
+
+### Job kinds and global claim
+
+- `JobKindMismatch(ConflictError)` guards tool lookup and diff on
+  session runs, message names the required kind.
+- The base `Job.standalone` returns True and `Replay` overrides it with
+  the run link, keeping the state machine and service checks
+  kind-agnostic.
+- `create_replay` stamps `run_spec.default_execution_target` on
+  standalone replays, otherwise unfiltered pool claims could never see
+  them. Replay creation has no explicit target parameter and therefore
+  no image check.
+- Claim scoping uses correlated EXISTS subqueries (experiment_run for
+  the pool fallback, agent_version for the agent filter) so
+  `FOR UPDATE SKIP LOCKED` locks only job rows.
+- The migration adds `kind` with a temporary server default of
+  'replay', and drops and re-adds `worker_id` as uuid since old values
+  are names.
+- The no-live-worker warning lives in a shared
+  `application/services/worker_liveness.py` helper used by run creation
+  and session-run creation, backed by a repository-level `seen_after`
+  worker filter.
+- `client.jobs.claim` is the global claim, the per-job standalone claim
+  became `client.jobs.claim_standalone`.
+- `claim_jobs` bumps the worker's `last_seen_at` on every call
+  including empty claims, the standalone claim bumps after a successful
+  claim.
+
 ### Runner and env contract
 
 - `KITARU_REPLAY_ID` becomes `KITARU_JOB_ID` everywhere, including the
@@ -128,6 +172,29 @@ preparation plus an interface only.
   is stored with `origin=replay` as before. A session_run-kind `job_id`
   links `result_session_id` on the job and the session stays
   `origin=recorded`.
-- `Runner.run_session` now executes one session_run job by id. The old
-  client-side live run (resolve spec locally, `KITARU_SESSION_ID_FILE`
-  handoff) is removed, superseded by server-visible session_run jobs.
+- `Runner.run_session` is removed rather than repointed: `run_job`
+  claims and executes any standalone job, replay or session run, so a
+  separate session method added nothing. The old client-side live run
+  (resolve spec locally, `KITARU_SESSION_ID_FILE` handoff,
+  `KITARU_OVERRIDE`) is removed from runner and adapter, superseded by
+  server-visible session_run jobs. `RunnerError` went with it, nothing
+  raised it anymore.
+
+### Runner split
+
+- `JobRunner(api_url, api_key, heartbeat_interval)` executes one
+  already-claimed job via `execute(client, job_id)`. `Runner` composes
+  it and owns the scopings (`run_job`, `run_experiment_run`,
+  `run_worker`) over one shared claim loop whose stop predicate is
+  checked after empty claims, so a stopping worker drains in-flight
+  claims first.
+- The `worker_id` constructor parameter became `worker_name`,
+  registration is by name. The default hostname-pid name is sanitized
+  to the server's `Name` charset, macOS hostnames contain dots and
+  every default-named runner failed to register (regression test).
+- `run_worker(agent_ids, stop)` registers with its agent filter, other
+  modes register with empty agent_ids.
+- The adapter installs its tool interceptor only when the spec carries
+  a tool policy, session_run jobs execute tools directly.
+- The e2e driver's live-run step now creates a session run via
+  `client.session_runs.create` and executes it with `run_job`.
