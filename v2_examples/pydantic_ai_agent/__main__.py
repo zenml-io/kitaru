@@ -2,8 +2,10 @@
 
 import asyncio
 import os
+import tempfile
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic_ai import Agent
 
@@ -22,6 +24,12 @@ _REQUIRED_ENV = (
     "KITARU_API_KEY",
     "KITARU_AGENT_ID",
 )
+_LANGFUSE_ENV = (
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_BASE_URL",
+)
+_LANGFUSE_ENABLED_ENV = "KITARU_EXAMPLE_LANGFUSE"
 
 
 def get_current_utc_time() -> str:
@@ -37,15 +45,35 @@ def multiply(left: int, right: int) -> int:
 def _require_environment() -> None:
     """Raise a clear error when required configuration is missing."""
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    if os.environ.get(_LANGFUSE_ENABLED_ENV) == "1":
+        missing.extend(name for name in _LANGFUSE_ENV if not os.environ.get(name))
     if missing:
         names = ", ".join(missing)
         raise RuntimeError(f"Missing required environment variables: {names}")
+
+
+def _configure_langfuse() -> Any | None:
+    """Enable optional PydanticAI tracing and return the Langfuse client."""
+    if os.environ.get(_LANGFUSE_ENABLED_ENV) != "1":
+        return None
+    try:
+        from langfuse import get_client
+    except ImportError as exc:
+        raise RuntimeError(
+            "Langfuse tracing requires the 'langfuse' package. Run this example "
+            "with: uv run --with langfuse python -m "
+            "v2_examples.pydantic_ai_agent"
+        ) from exc
+
+    Agent.instrument_all()
+    return get_client()
 
 
 async def main() -> None:
     """Run the example once and print the final answer."""
     _require_environment()
     version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
+    langfuse = _configure_langfuse()
     pydantic_agent = Agent("openai:gpt-5-nano")
     pydantic_agent.tool_plain(get_current_utc_time)
     pydantic_agent.tool_plain(multiply)
@@ -55,8 +83,39 @@ async def main() -> None:
         agent_version_id=uuid.UUID(version_value) if version_value else None,
         api_url=os.environ["KITARU_API_URL"],
     )
-    result = await agent.run(PROMPT)
+
+    configured_session_file = os.environ.get("KITARU_SESSION_ID_FILE")
+    with tempfile.TemporaryDirectory(prefix="kitaru-example-") as temporary_dir:
+        session_file = configured_session_file or os.path.join(
+            temporary_dir, "session_id"
+        )
+        os.environ["KITARU_SESSION_ID_FILE"] = session_file
+        try:
+            if langfuse is None:
+                result = await agent.run(PROMPT)
+                trace_id = None
+            else:
+                with langfuse.start_as_current_observation(
+                    as_type="span",
+                    name="kitaru-pydantic-ai-example",
+                    input=PROMPT,
+                ) as observation:
+                    trace_id = langfuse.get_current_trace_id()
+                    result = await agent.run(PROMPT)
+                    observation.update(output=result.output)
+        finally:
+            if configured_session_file is None:
+                os.environ.pop("KITARU_SESSION_ID_FILE", None)
+            if langfuse is not None:
+                langfuse.flush()
+
+        with open(session_file, encoding="utf-8") as file:
+            session_id = file.read().strip()
+
     print(result.output)
+    print(f"kitaru_session_id={session_id}")
+    if trace_id is not None:
+        print(f"langfuse_trace_id={trace_id}")
 
 
 if __name__ == "__main__":

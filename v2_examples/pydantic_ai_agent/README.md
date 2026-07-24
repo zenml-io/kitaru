@@ -24,8 +24,29 @@ set -a; source .env; set +a
 uv run python -m v2_examples.pydantic_ai_agent
 ```
 
-The run records the session input and final output, model requests and responses,
-token usage, and both tool calls with their arguments and results.
+The example prints the final answer and the recorded `kitaru_session_id`.
+
+## Record the same run in Kitaru and Langfuse
+
+Set the Langfuse credentials and enable the optional instrumentation:
+
+```bash
+export LANGFUSE_PUBLIC_KEY="..."
+export LANGFUSE_SECRET_KEY="..."
+export LANGFUSE_BASE_URL="https://cloud.langfuse.com"
+export KITARU_EXAMPLE_LANGFUSE=1
+
+uv run --with langfuse python -m v2_examples.pydantic_ai_agent
+```
+
+This uses PydanticAI's OpenTelemetry instrumentation and prints both the
+`kitaru_session_id` and `langfuse_trace_id`. The explicit parent Langfuse span
+records the original prompt and final output, while its child observations capture
+the model and tool activity. Calling `flush()` before exit makes the short-lived
+script wait until its trace has been exported.
+
+The Kitaru run records the session input and final output, model requests and
+responses, token usage, and both tool calls with their arguments and results.
 
 Use `uv run python -m v2_examples.pydantic_ai_agent` as the agent version's run
 command. The current local Kitaru Runner launches that registered command for
