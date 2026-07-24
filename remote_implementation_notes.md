@@ -180,6 +180,28 @@ preparation plus an interface only.
   server-visible session_run jobs. `RunnerError` went with it, nothing
   raised it anymore.
 
+## Validation
+
+Beyond the test suite (1257 tests) and `./scripts/run_e2e.sh` (exit 0
+on the squashed migration from an empty database), a live validation
+ran the exact target scenario: dedicated database, server on port
+8400, three sessions recorded by running `adapter_example.main`
+directly, and one background polling worker process
+(`Runner(...).run_worker(agent_ids=[agent_id])`, concurrency 2). With
+no other runner active, all three cases executed through that worker:
+
+- A standalone replay with a model override and three scorers
+  completed scored, with the worker's id stamped, an `origin=replay`
+  result session, and a diff summary.
+- An experiment run over a three-session cohort drained to completed
+  with a summary and pass rate, all jobs claimed by the worker.
+- A fresh session run created via `POST /v1/session-runs` completed
+  unscored with a linked `origin=recorded` result session carrying the
+  requested inputs and name.
+
+Worker liveness advanced through claim polling and reported
+`live=true` throughout. No bugs surfaced during the live pass.
+
 ### Runner split
 
 - `JobRunner(api_url, api_key, heartbeat_interval)` executes one
