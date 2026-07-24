@@ -1,0 +1,799 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""PydanticAI capability implementing Kitaru recording and replay."""
+
+import asyncio
+import json
+import os
+import secrets
+import time
+import uuid
+from collections.abc import Sequence
+from contextlib import suppress
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from typing import Any, cast
+
+from pydantic import TypeAdapter
+
+from kitaru.api_models.v1.replays import (
+    HistoryPolicy,
+    LLMPolicy,
+    PassthroughPolicy,
+    ReplayOverride,
+    ReplaySpecResponse,
+    StaticCase,
+    StaticMatchMode,
+    StaticPolicy,
+    ToolLookupRequest,
+    ToolPolicy,
+    ToolPolicyOnMiss,
+)
+from kitaru.api_models.v1.session_nodes import (
+    NodeStatus,
+    NodeType,
+    SessionNodeBatchRequest,
+    SessionNodeCreateRequest,
+)
+from kitaru.api_models.v1.sessions import (
+    SessionCreateRequest,
+    SessionOrigin,
+    SessionStatus,
+    SessionUpdateRequest,
+    TokenUsage,
+)
+from kitaru.client import KitaruAPIClient
+from kitaru.hashing import tool_call_cache_key
+from pydantic_ai import UserPromptNode
+from pydantic_ai.capabilities import (
+    AbstractCapability,
+    CapabilityOrdering,
+    WrapModelRequestHandler,
+    WrapRunHandler,
+    WrapToolExecuteHandler,
+)
+from pydantic_ai.messages import (
+    AudioUrl,
+    BinaryContent,
+    CachePoint,
+    DocumentUrl,
+    ImageUrl,
+    ModelMessage,
+    ModelMessagesTypeAdapter,
+    ModelRequest,
+    ModelRequestPart,
+    ModelResponse,
+    NativeToolCallPart,
+    NativeToolReturnPart,
+    SystemPromptPart,
+    TextContent,
+    ToolCallPart,
+    UploadedFile,
+    UserContent,
+    VideoUrl,
+)
+from pydantic_ai.models import ModelRequestContext, infer_model
+from pydantic_ai.run import AgentRunResult
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.tools import RunContext, ToolDefinition
+
+ADAPTER_VERSION = "0.1.0"
+FRAMEWORK = "pydantic_ai"
+_JSON_ADAPTER = TypeAdapter(Any)
+_USER_CONTENT_TYPES = (
+    str,
+    TextContent,
+    ImageUrl,
+    AudioUrl,
+    DocumentUrl,
+    VideoUrl,
+    BinaryContent,
+    UploadedFile,
+    CachePoint,
+)
+
+
+class ToolPolicyError(RuntimeError):
+    """Raised when a replay tool policy cannot be applied."""
+
+
+class ToolPolicyMissError(ToolPolicyError):
+    """Raised when a replay tool lookup misses with fail behavior."""
+
+
+def _uuid7() -> uuid.UUID:
+    """Generate a portable UUIDv7 node identifier."""
+    value = (time.time_ns() // 1_000_000) << 80
+    value |= 0x7 << 76
+    value |= secrets.randbits(12) << 64
+    value |= 0b10 << 62
+    value |= secrets.randbits(62)
+    return uuid.UUID(int=value)
+
+
+def _jsonable(value: Any) -> Any:
+    """Convert framework and user values to JSON-compatible data."""
+    return _JSON_ADAPTER.dump_python(
+        value, mode="json", warnings=False, fallback=str, serialize_as_any=True
+    )
+
+
+def _pydantic_prompt(value: Any) -> str | Sequence[UserContent] | None:
+    """Convert arbitrary Kitaru JSON to a valid PydanticAI user prompt."""
+    if value is None or isinstance(value, str):
+        return value
+    if isinstance(value, Sequence) and all(
+        isinstance(item, _USER_CONTENT_TYPES) for item in value
+    ):
+        return value
+    return json.dumps(_jsonable(value), sort_keys=True)
+
+
+def _messages_json(messages: list[ModelMessage]) -> list[dict[str, Any]]:
+    """Serialize PydanticAI messages with its public type adapter."""
+    return ModelMessagesTypeAdapter.dump_python(messages, mode="json", fallback=str)
+
+
+def _error_text(error: BaseException) -> str:
+    """Return a useful message for an exception, including empty exceptions."""
+    return str(error) or type(error).__name__
+
+
+def _case_matches(case: StaticCase, arguments: dict[str, Any]) -> bool:
+    """Check whether a static replay case matches validated tool arguments."""
+    if case.match is None:
+        return True
+    if case.match_mode is StaticMatchMode.EXACT:
+        return arguments == case.match
+    return all(
+        name in arguments and arguments[name] == value
+        for name, value in case.match.items()
+    )
+
+
+def _model_identifier(request_context: ModelRequestContext) -> str:
+    """Return the best public identifier for a requested model."""
+    return request_context.model_id or request_context.model.model_id
+
+
+def _replace_request_context(
+    request_context: ModelRequestContext,
+    *,
+    model: Any,
+    messages: list[ModelMessage],
+    model_settings: ModelSettings | None,
+    model_replaced: bool,
+) -> ModelRequestContext:
+    """Copy a request context while preserving its read-only run flags."""
+    updated = replace(
+        request_context,
+        model=model,
+        messages=messages,
+        model_settings=model_settings,
+    )
+    updated.model_id = None if model_replaced else request_context.model_id
+    updated.streaming = request_context.streaming
+    return updated
+
+
+def _replace_system_prompt(
+    messages: list[ModelMessage], system_prompt: str
+) -> list[ModelMessage]:
+    """Replace all materialized system prompts and instructions with one prompt."""
+    result: list[ModelMessage] = []
+    first_request = True
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            result.append(message)
+            continue
+        parts: list[ModelRequestPart] = [
+            part for part in message.parts if not isinstance(part, SystemPromptPart)
+        ]
+        if first_request:
+            parts.insert(0, SystemPromptPart(system_prompt))
+            first_request = False
+        result.append(replace(message, parts=parts, instructions=None))
+    return result
+
+
+def _token_usage(response: ModelResponse) -> TokenUsage:
+    """Translate PydanticAI request usage into Kitaru's token fields."""
+    usage = response.usage
+    reasoning = usage.details.get("reasoning_tokens") if usage.details else None
+    return TokenUsage(
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cached_input_tokens=usage.cache_read_tokens,
+        reasoning_tokens=reasoning if isinstance(reasoning, int) else None,
+    )
+
+
+def _unpaired_native_calls(response: ModelResponse) -> list[dict[str, Any]]:
+    """Serialize native calls whose provider result is not publicly exposed."""
+    returned_ids = {
+        part.tool_call_id
+        for part in response.parts
+        if isinstance(part, NativeToolReturnPart)
+    }
+    return [
+        {
+            "external_id": part.tool_call_id,
+            "tool_name": part.tool_name,
+            "inputs": _jsonable(part.args_as_dict()),
+            "provider": part.provider_name,
+            "provider_details": _jsonable(part.provider_details),
+        }
+        for part in response.parts
+        if isinstance(part, NativeToolCallPart)
+        and part.tool_call_id not in returned_ids
+    ]
+
+
+@dataclass
+class _RunState:
+    """Mutable state isolated to one PydanticAI run."""
+
+    client: KitaruAPIClient
+    replay_id: uuid.UUID | None
+    spec: ReplaySpecResponse | None
+    override: ReplayOverride | None
+    effective_input: Any
+    session_id: uuid.UUID | None = None
+    root_id: uuid.UUID | None = None
+    started_at: datetime | None = None
+    next_sequence: int = 1
+    latest_llm_id: uuid.UUID | None = None
+    buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    finished: bool = False
+    closed: bool = False
+
+
+@dataclass
+class _KitaruCapability(AbstractCapability[Any]):
+    """Run-local PydanticAI hooks for Kitaru recording and replay."""
+
+    agent_id: uuid.UUID
+    agent_version_id: uuid.UUID | None
+    api_url: str
+    api_key: str | None
+    session_name: str | None
+    batch_size: int
+    _state: _RunState | None = field(default=None, repr=False)
+
+    @classmethod
+    def get_serialization_name(cls) -> None:
+        """Exclude this runtime capability from PydanticAI agent specs."""
+        return None
+
+    def get_ordering(self) -> CapabilityOrdering:
+        """Record outside other capabilities so their final behavior is observed."""
+        return CapabilityOrdering(position="outermost")
+
+    async def for_run(self, ctx: RunContext[Any]) -> "_KitaruCapability":
+        """Create isolated client and replay state for one run."""
+        client = KitaruAPIClient(base_url=self.api_url, api_key=self.api_key)
+        try:
+            replay_value = os.environ.get("KITARU_REPLAY_ID")
+            replay_id = uuid.UUID(replay_value) if replay_value else None
+            spec = await client.replays.get_spec(replay_id) if replay_id else None
+            raw_inputs = os.environ.get("KITARU_INPUTS")
+            if raw_inputs is not None:
+                effective_input = json.loads(raw_inputs)
+            elif spec is not None:
+                effective_input = spec.inputs
+            else:
+                effective_input = ctx.prompt
+            if spec is not None:
+                override = spec.override
+            else:
+                raw_override = os.environ.get("KITARU_OVERRIDE")
+                override = (
+                    ReplayOverride.model_validate_json(raw_override)
+                    if raw_override
+                    else None
+                )
+        except BaseException:
+            await client.close()
+            raise
+        return replace(
+            self,
+            _state=_RunState(
+                client=client,
+                replay_id=replay_id,
+                spec=spec,
+                override=override,
+                effective_input=effective_input,
+            ),
+        )
+
+    async def wrap_run(
+        self, ctx: RunContext[Any], *, handler: WrapRunHandler
+    ) -> AgentRunResult[Any]:
+        """Create the Kitaru session before executing the agent."""
+        state = self._require_state()
+        started_at = datetime.now(UTC)
+        try:
+            session = await state.client.sessions.create(
+                SessionCreateRequest(
+                    agent_id=self.agent_id,
+                    agent_version_id=self.agent_version_id,
+                    origin=SessionOrigin.RECORDED,
+                    name=self.session_name,
+                    inputs=_jsonable(state.effective_input),
+                    started_at=started_at,
+                    framework=FRAMEWORK,
+                    adapter_version=ADAPTER_VERSION,
+                    replay_id=state.replay_id,
+                )
+            )
+            state.session_id = session.id
+            state.root_id = _uuid7()
+            state.started_at = started_at
+            session_id_path = os.environ.get("KITARU_SESSION_ID_FILE")
+            if session_id_path:
+                with open(session_id_path, "w", encoding="utf-8") as file:
+                    file.write(str(session.id))
+            await state.client.session_nodes.upsert(
+                session.id,
+                SessionNodeBatchRequest(
+                    nodes=[
+                        SessionNodeCreateRequest(
+                            id=state.root_id,
+                            parent_id=None,
+                            sequence=0,
+                            node_type=NodeType.SPAN,
+                            name="run",
+                            status=NodeStatus.IN_PROGRESS,
+                            started_at=started_at,
+                            inputs=_jsonable(state.effective_input),
+                        )
+                    ]
+                ),
+            )
+        except BaseException as error:
+            if state.session_id is not None:
+                with suppress(BaseException):
+                    await state.client.sessions.update(
+                        state.session_id,
+                        SessionUpdateRequest(
+                            status=SessionStatus.FAILED,
+                            error=_error_text(error),
+                            ended_at=datetime.now(UTC),
+                        ),
+                    )
+            with suppress(BaseException):
+                await self._close()
+            raise
+        return await handler()
+
+    async def after_run(
+        self, ctx: RunContext[Any], *, result: AgentRunResult[Any]
+    ) -> AgentRunResult[Any]:
+        """Complete the Kitaru session with the final PydanticAI output."""
+        try:
+            await self._finish(
+                node_status=NodeStatus.COMPLETED,
+                session_status=SessionStatus.COMPLETED,
+                outputs=result.output,
+                error=None,
+            )
+        finally:
+            await self._close()
+        return result
+
+    async def on_run_error(
+        self, ctx: RunContext[Any], *, error: BaseException
+    ) -> AgentRunResult[Any]:
+        """Fail the Kitaru session, then propagate the original agent error."""
+        try:
+            await self._finish(
+                node_status=NodeStatus.FAILED,
+                session_status=SessionStatus.FAILED,
+                outputs=None,
+                error=_error_text(error),
+            )
+        except BaseException as recording_error:
+            raise recording_error from error
+        finally:
+            await self._close()
+        raise error
+
+    async def before_node_run(self, ctx: RunContext[Any], *, node: Any) -> Any:
+        """Replace the initial PydanticAI prompt with replay-resolved inputs."""
+        state = self._require_state()
+        if isinstance(node, UserPromptNode):
+            return replace(node, user_prompt=_pydantic_prompt(state.effective_input))
+        return node
+
+    async def wrap_model_request(
+        self,
+        ctx: RunContext[Any],
+        *,
+        request_context: ModelRequestContext,
+        handler: WrapModelRequestHandler,
+    ) -> ModelResponse:
+        """Apply replay overrides and record one model request."""
+        state = self._require_state()
+        requested_model = _model_identifier(request_context)
+        effective = request_context
+        override = state.override
+        if override is not None:
+            replacement: str | None = None
+            if isinstance(override.model, str):
+                replacement = override.model
+            elif isinstance(override.model, dict):
+                replacement = override.model.get(requested_model)
+            model = infer_model(replacement) if replacement else request_context.model
+            messages = request_context.messages
+            if override.system_prompt is not None:
+                messages = _replace_system_prompt(messages, override.system_prompt)
+            model_settings = request_context.model_settings
+            if override.model_params is not None:
+                model_settings = cast(ModelSettings, dict(override.model_params))
+            effective = _replace_request_context(
+                request_context,
+                model=model,
+                messages=messages,
+                model_settings=model_settings,
+                model_replaced=replacement is not None,
+            )
+
+        node_id, sequence = await self._allocate_node()
+        started_at = datetime.now(UTC)
+        try:
+            response = await handler(effective)
+        except BaseException as error:
+            await self._buffer_node(
+                SessionNodeCreateRequest(
+                    id=node_id,
+                    parent_id=state.root_id,
+                    sequence=sequence,
+                    node_type=NodeType.LLM_CALL,
+                    name="model_request",
+                    status=NodeStatus.FAILED,
+                    error=_error_text(error),
+                    started_at=started_at,
+                    ended_at=datetime.now(UTC),
+                    inputs=_messages_json(effective.messages),
+                    requested_model=requested_model,
+                    model=_model_identifier(effective),
+                    model_params=_jsonable(effective.model_settings),
+                )
+            )
+            raise
+
+        unpaired_native_calls = _unpaired_native_calls(response)
+        llm_node = SessionNodeCreateRequest(
+            id=node_id,
+            parent_id=state.root_id,
+            sequence=sequence,
+            node_type=NodeType.LLM_CALL,
+            name="model_request",
+            status=NodeStatus.COMPLETED,
+            started_at=started_at,
+            ended_at=datetime.now(UTC),
+            inputs=_messages_json(effective.messages),
+            outputs=_jsonable(response),
+            requested_model=requested_model,
+            model=response.model_name or _model_identifier(effective),
+            provider=response.provider_name,
+            tokens=_token_usage(response),
+            cost=None,
+            model_params=_jsonable(effective.model_settings),
+            attributes=(
+                {"provider_native_calls": unpaired_native_calls}
+                if unpaired_native_calls
+                else {}
+            ),
+        )
+        await self._buffer_node(llm_node)
+        state.latest_llm_id = node_id
+        unsupported_native = await self._record_native_tools(response, node_id)
+        if unsupported_native is not None:
+            raise unsupported_native
+        return response
+
+    async def wrap_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        tool_def: ToolDefinition,
+        args: dict[str, Any],
+        handler: WrapToolExecuteHandler,
+    ) -> Any:
+        """Apply a replay policy around local function-tool execution."""
+        del ctx, tool_def
+        state = self._require_state()
+        node_id, sequence = await self._allocate_node()
+        started_at = datetime.now(UTC)
+        policy = self._tool_policy(call.tool_name)
+        json_args = cast(dict[str, Any], _jsonable(args))
+        mocked_policy: str | None = None
+        failed_result = False
+        try:
+            if policy is None or isinstance(policy, PassthroughPolicy):
+                result = await handler(args)
+            elif isinstance(policy, StaticPolicy):
+                matching = next(
+                    (case for case in policy.cases if _case_matches(case, json_args)),
+                    None,
+                )
+                if matching is not None:
+                    result = matching.result
+                    mocked_policy = policy.type
+                else:
+                    result, mocked_policy, failed_result = await self._handle_miss(
+                        policy.type, policy.on_miss, call.tool_name, args, handler
+                    )
+            elif isinstance(policy, HistoryPolicy):
+                assert state.replay_id is not None
+                response = await state.client.replays.tool_lookup(
+                    state.replay_id,
+                    ToolLookupRequest(
+                        tool_name=call.tool_name,
+                        inputs=json_args,
+                        cache_key=tool_call_cache_key(call.tool_name, json_args),
+                    ),
+                )
+                if response.found:
+                    result = response.result
+                    mocked_policy = policy.type
+                else:
+                    result, mocked_policy, failed_result = await self._handle_miss(
+                        policy.type, policy.on_miss, call.tool_name, args, handler
+                    )
+            elif isinstance(policy, LLMPolicy):
+                raise ToolPolicyError(
+                    "Tool policy 'llm' is not supported by the PydanticAI adapter"
+                )
+            else:  # pragma: no cover - discriminated DTO union guards this branch
+                raise ToolPolicyError(f"Unsupported tool policy '{policy.type}'")
+        except BaseException as error:
+            await self._record_tool(
+                node_id=node_id,
+                sequence=sequence,
+                parent_id=state.latest_llm_id or state.root_id,
+                tool_name=call.tool_name,
+                arguments=json_args,
+                result=None,
+                started_at=started_at,
+                status=NodeStatus.FAILED,
+                error=_error_text(error),
+                attributes={},
+                external_id=call.tool_call_id,
+            )
+            raise
+
+        attributes = {"mocked": True, "policy": mocked_policy} if mocked_policy else {}
+        await self._record_tool(
+            node_id=node_id,
+            sequence=sequence,
+            parent_id=state.latest_llm_id or state.root_id,
+            tool_name=call.tool_name,
+            arguments=json_args,
+            result=result,
+            started_at=started_at,
+            status=NodeStatus.FAILED if failed_result else NodeStatus.COMPLETED,
+            error=(
+                json.dumps(_jsonable(result), sort_keys=True) if failed_result else None
+            ),
+            attributes=attributes,
+            external_id=call.tool_call_id,
+        )
+        return result
+
+    async def _handle_miss(
+        self,
+        policy_type: str,
+        on_miss: ToolPolicyOnMiss,
+        tool_name: str,
+        args: dict[str, Any],
+        handler: WrapToolExecuteHandler,
+    ) -> tuple[Any, str | None, bool]:
+        """Apply static/history miss behavior."""
+        if on_miss is ToolPolicyOnMiss.PASSTHROUGH:
+            return await handler(args), None, False
+        message = f"No {policy_type} result for tool '{tool_name}'"
+        if on_miss is ToolPolicyOnMiss.ERROR_RESULT:
+            return {"error": message}, policy_type, True
+        raise ToolPolicyMissError(message)
+
+    def _tool_policy(self, tool_name: str) -> ToolPolicy | None:
+        """Select a replay policy by exact tool name, then default."""
+        state = self._require_state()
+        if state.spec is None:
+            return None
+        config = state.spec.tool_policy
+        return config.tools.get(tool_name, config.default)
+
+    async def _record_native_tools(
+        self, response: ModelResponse, parent_id: uuid.UUID
+    ) -> ToolPolicyError | None:
+        """Record public provider-native call/return parts truthfully."""
+        calls = {
+            part.tool_call_id: part
+            for part in response.parts
+            if isinstance(part, NativeToolCallPart)
+        }
+        returns = {
+            part.tool_call_id: part
+            for part in response.parts
+            if isinstance(part, NativeToolReturnPart)
+        }
+        unsupported: str | None = None
+        for call_id, call in calls.items():
+            policy = self._tool_policy(call.tool_name)
+            if isinstance(policy, LLMPolicy):
+                unsupported = call.tool_name
+            result = returns.get(call_id)
+            if result is None:
+                continue
+            node_id, sequence = await self._allocate_node()
+            status = (
+                NodeStatus.COMPLETED
+                if result.outcome == "success"
+                else NodeStatus.FAILED
+            )
+            await self._record_tool(
+                node_id=node_id,
+                sequence=sequence,
+                parent_id=parent_id,
+                tool_name=call.tool_name,
+                arguments=call.args_as_dict(),
+                result=result.content,
+                started_at=response.timestamp,
+                status=status,
+                error=(
+                    None
+                    if status is NodeStatus.COMPLETED
+                    else json.dumps(_jsonable(result.content), sort_keys=True)
+                ),
+                attributes={
+                    "provider_native": True,
+                    **(
+                        {"provider": call.provider_name}
+                        if call.provider_name is not None
+                        else {}
+                    ),
+                    **(
+                        {"provider_details": _jsonable(call.provider_details)}
+                        if call.provider_details is not None
+                        else {}
+                    ),
+                },
+                external_id=call_id,
+            )
+        if unsupported is None:
+            return None
+        return ToolPolicyError(
+            f"Tool policy 'llm' is not supported for provider-native tool "
+            f"'{unsupported}'"
+        )
+
+    async def _record_tool(
+        self,
+        *,
+        node_id: uuid.UUID,
+        sequence: int,
+        parent_id: uuid.UUID | None,
+        tool_name: str,
+        arguments: Any,
+        result: Any,
+        started_at: datetime,
+        status: NodeStatus,
+        error: str | None,
+        attributes: dict[str, Any],
+        external_id: str | None,
+    ) -> None:
+        """Buffer a terminal tool-call node."""
+        await self._buffer_node(
+            SessionNodeCreateRequest(
+                id=node_id,
+                parent_id=parent_id,
+                sequence=sequence,
+                external_id=external_id,
+                node_type=NodeType.TOOL_CALL,
+                name=tool_name,
+                status=status,
+                error=error,
+                started_at=started_at,
+                ended_at=datetime.now(UTC),
+                inputs=_jsonable(arguments),
+                outputs=_jsonable(result),
+                tool_name=tool_name,
+                attributes=attributes,
+            )
+        )
+
+    async def _allocate_node(self) -> tuple[uuid.UUID, int]:
+        """Allocate a stable node id and monotonic child sequence."""
+        state = self._require_state()
+        async with state.lock:
+            sequence = state.next_sequence
+            state.next_sequence += 1
+        return _uuid7(), sequence
+
+    async def _buffer_node(self, node: SessionNodeCreateRequest) -> None:
+        """Buffer one node and flush at the configured batch size."""
+        state = self._require_state()
+        async with state.lock:
+            state.buffer.append(node)
+            if len(state.buffer) >= self.batch_size:
+                await self._flush_locked(state)
+
+    async def _flush_locked(self, state: _RunState) -> None:
+        """Flush buffered nodes while the caller holds the state lock."""
+        if not state.buffer or state.session_id is None:
+            return
+        count = len(state.buffer)
+        batch = SessionNodeBatchRequest(nodes=list(state.buffer))
+        await state.client.session_nodes.upsert(state.session_id, batch)
+        del state.buffer[:count]
+
+    async def _finish(
+        self,
+        *,
+        node_status: NodeStatus,
+        session_status: SessionStatus,
+        outputs: Any,
+        error: str | None,
+    ) -> None:
+        """Write the terminal root, flush children, and finish the session."""
+        state = self._require_state()
+        if state.finished or state.session_id is None or state.root_id is None:
+            return
+        state.finished = True
+        ended_at = datetime.now(UTC)
+        async with state.lock:
+            state.buffer.append(
+                SessionNodeCreateRequest(
+                    id=state.root_id,
+                    parent_id=None,
+                    sequence=0,
+                    node_type=NodeType.SPAN,
+                    name="run",
+                    status=node_status,
+                    error=error,
+                    started_at=state.started_at,
+                    ended_at=ended_at,
+                    inputs=_jsonable(state.effective_input),
+                    outputs=_jsonable(outputs),
+                )
+            )
+            await self._flush_locked(state)
+        await state.client.sessions.update(
+            state.session_id,
+            SessionUpdateRequest(
+                status=session_status,
+                outputs=_jsonable(outputs),
+                error=error,
+                ended_at=ended_at,
+            ),
+        )
+
+    async def _close(self) -> None:
+        """Close the per-run client exactly once."""
+        state = self._state
+        if state is None or state.closed:
+            return
+        state.closed = True
+        await state.client.close()
+
+    def _require_state(self) -> _RunState:
+        """Return run-local state or fail on a broken capability lifecycle."""
+        if self._state is None:
+            raise RuntimeError("Kitaru capability has no active run state")
+        return self._state

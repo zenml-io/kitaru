@@ -37,6 +37,8 @@ stack.
 
 Typical loop: write code -> `just fix` -> `just check` -> `just test`.
 
+After code changes, run the aggregate `just check` and `just test` commands rather than raw underlying tools or only piecemeal recipes; during development, run targeted tests as `just test <pytest-node>`.
+
 When running the full suite through output that may truncate, preserve the
 failure names:
 
