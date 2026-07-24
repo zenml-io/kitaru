@@ -14,11 +14,12 @@
 """Kitaru."""
 
 from kitaru.replay_context import replay_id, replay_inputs
-from kitaru.runner import Runner
+from kitaru.runner import Runner, RunnerError
 from kitaru.scoring import SessionView, evaluate_scoring_policy, load_scorer
 
 __all__ = [
     "Runner",
+    "RunnerError",
     "SessionView",
     "evaluate_scoring_policy",
     "load_scorer",

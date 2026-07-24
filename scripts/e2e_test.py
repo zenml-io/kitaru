@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# The runner imports user_code.scorers in-process for scoring.
+# The runner imports adapter_example.scorers in-process for scoring.
 sys.path.insert(0, str(REPO_ROOT))
 
 from kitaru import Runner  # noqa: E402
@@ -99,19 +99,19 @@ def scoring_policy() -> ScoringPolicy:
         scorers=[
             ScorerConfig(
                 name="answer_quality",
-                source="user_code.scorers:answer_quality",
+                source="adapter_example.scorers:answer_quality",
                 params={"keywords": ["answer"]},
                 weight=2.0,
             ),
             ScorerConfig(
                 name="tool_efficiency",
-                source="user_code.scorers:tool_efficiency",
+                source="adapter_example.scorers:tool_efficiency",
                 params={"budget": 4},
                 weight=1.0,
             ),
             ScorerConfig(
                 name="token_budget",
-                source="user_code.scorers:token_budget",
+                source="adapter_example.scorers:token_budget",
                 params={"max_tokens": 4000},
                 weight=0.5,
             ),
@@ -138,7 +138,7 @@ def check(condition: bool, message: str) -> None:
 
 async def run_agent_process(env: dict[str, str], argument: str | None = None) -> None:
     """Run the mock agent entrypoint as a regular subprocess."""
-    args = [AGENT_PYTHON, "-m", "user_code.main"]
+    args = [AGENT_PYTHON, "-m", "adapter_example.main"]
     if argument is not None:
         args.append(argument)
     process = await asyncio.create_subprocess_exec(
@@ -227,6 +227,16 @@ def node_by_tool(
     return matches[0]
 
 
+def check_llm_models(nodes: list[SessionNodeResponse], expect_model: str) -> None:
+    """Assert every LLM call node used the expected model."""
+    for node in nodes:
+        if node.node_type is NodeType.LLM_CALL:
+            check(
+                node.model == expect_model,
+                f"expected model {expect_model}, got {node.model}",
+            )
+
+
 async def check_replay_result(
     client: KitaruAPIClient,
     replay: ReplayResponse,
@@ -247,8 +257,17 @@ async def check_replay_result(
     )
     check(replay.diff is not None, "replay has no diff summary")
     assert replay.diff is not None
-    for field in ("cost_delta", "token_deltas", "tool_calls", "score_deltas"):
+    for field in ("cost", "tokens", "tool_calls", "score_deltas"):
         check(field in replay.diff, f"diff summary lacks {field}")
+    for side in ("original", "replay"):
+        check(
+            replay.diff["cost"][side] is not None and replay.diff["cost"][side] > 0,
+            f"diff summary lacks {side} cost: {replay.diff['cost']}",
+        )
+        check(
+            replay.diff["tokens"][side]["input_tokens"] is not None,
+            f"diff summary lacks {side} tokens: {replay.diff['tokens']}",
+        )
     check(replay.result_session_id is not None, "replay has no result session")
     assert replay.result_session_id is not None
 
@@ -256,12 +275,7 @@ async def check_replay_result(
     check(result.origin is SessionOrigin.REPLAY, "result session origin is not replay")
     nodes = await client.session_nodes.list(result.id, include_payloads=True)
     check_session_tree(result, nodes)
-    for node in nodes:
-        if node.node_type is NodeType.LLM_CALL:
-            check(
-                node.model == expect_model,
-                f"expected model {expect_model}, got {node.model}",
-            )
+    check_llm_models(nodes, expect_model)
 
     original_nodes = await client.session_nodes.list(original.id, include_payloads=True)
     weather = node_by_tool(nodes, "get_weather")
@@ -353,6 +367,14 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
         total_cost["replay"] is not None and total_cost["replay"] > 0,
         f"replay total cost {total_cost}",
     )
+    total_tokens = run.summary["total_tokens"]
+    for side in ("baseline", "replay"):
+        for kind in ("input_tokens", "output_tokens"):
+            count = total_tokens[side][kind]
+            check(
+                count is not None and count > 0,
+                f"{side} total {kind} {total_tokens}",
+            )
 
 
 async def main() -> int:
@@ -384,7 +406,7 @@ async def main() -> int:
             AgentVersionCreateRequest(
                 version="v1",
                 run_spec=RunSpec(
-                    command=f"{AGENT_PYTHON} -m user_code.main",
+                    command=f"{AGENT_PYTHON} -m adapter_example.main",
                     working_dir=str(REPO_ROOT),
                     env={"KITARU_E2E_AGENT_ID": str(agent.id)},
                     secret_ids=[secret.id],
@@ -397,7 +419,7 @@ async def main() -> int:
             version.id,
             AgentVersionUpdateRequest(
                 run_spec=RunSpec(
-                    command=f"{AGENT_PYTHON} -m user_code.main",
+                    command=f"{AGENT_PYTHON} -m adapter_example.main",
                     working_dir=str(REPO_ROOT),
                     env={
                         "KITARU_E2E_AGENT_ID": str(agent.id),
@@ -544,7 +566,31 @@ async def main() -> int:
         await check_replay_diff(client, standalone, ORIGINAL_MODEL, ORIGINAL_MODEL)
         ok("standalone replay completed, scored, and diffed")
 
-        # Step h: negative controls.
+        # Step h: live session run with an override.
+        live_inputs = {"question": "Live run: Berlin weather and 21 * 2?"}
+        live = await runner.run_session(
+            version.id,
+            inputs=live_inputs,
+            override=ReplayOverride(
+                model=OVERRIDE_MODEL, system_prompt="Answer tersely."
+            ),
+        )
+        check(live.origin is SessionOrigin.RECORDED, "live session origin")
+        check(
+            live.status is SessionStatus.COMPLETED,
+            f"live session is {live.status}: {live.error}",
+        )
+        check(live.inputs == live_inputs, f"live session inputs {live.inputs}")
+        check(
+            live.agent_version_id == version.id,
+            "live session agent version not recorded",
+        )
+        live_nodes = await client.session_nodes.list(live.id, include_payloads=True)
+        check_session_tree(live, live_nodes)
+        check_llm_models(live_nodes, OVERRIDE_MODEL)
+        ok("live session recorded with the model and system prompt override")
+
+        # Step i: negative controls.
         try:
             await client.experiments.update(
                 experiment.id,

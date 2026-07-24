@@ -29,6 +29,7 @@ from typing import Any, TypeVar
 from kitaru.api_models.v1.replays import (
     HistoryPolicy,
     PassthroughPolicy,
+    ReplayOverride,
     ReplaySpecResponse,
     StaticCase,
     StaticMatchMode,
@@ -51,7 +52,7 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client import KitaruAPIClient
 from kitaru.hashing import tool_call_cache_key
-from user_code.agent import (  # ty: ignore[unresolved-import]
+from adapter_example.agent import (  # ty: ignore[unresolved-import]
     AgentHooks,
     LLMCall,
     MockAgent,
@@ -151,8 +152,13 @@ class KitaruAdapter(AgentHooks):
         self._spec: ReplaySpecResponse | None = None
         if self._replay_id is not None:
             self._spec = self._run(self._client.replays.get_spec(self._replay_id))
-            self._apply_override()
+            if self._spec.override is not None:
+                self._apply_override(self._spec.override)
             agent.tool_interceptor = self._intercept_tool
+        else:
+            raw_override = os.environ.get("KITARU_OVERRIDE")
+            if raw_override:
+                self._apply_override(ReplayOverride.model_validate_json(raw_override))
         agent.register_hooks(self)
 
     @property
@@ -180,12 +186,8 @@ class KitaruAdapter(AgentHooks):
             return self._spec.inputs
         return default
 
-    def _apply_override(self) -> None:
-        """Apply the replay override to the agent configuration."""
-        assert self._spec is not None
-        override = self._spec.override
-        if override is None:
-            return
+    def _apply_override(self, override: ReplayOverride) -> None:
+        """Apply an execution override to the agent configuration."""
         model: str | None = None
         if isinstance(override.model, str):
             model = override.model
@@ -287,6 +289,10 @@ class KitaruAdapter(AgentHooks):
             )
         )
         self._session_id = session.id
+        session_id_path = os.environ.get("KITARU_SESSION_ID_FILE")
+        if session_id_path:
+            with open(session_id_path, "w", encoding="utf-8") as file:
+                file.write(str(session.id))
         self._root_id = _uuid7()
         self._last_llm_id = None
         self._sequence = 0

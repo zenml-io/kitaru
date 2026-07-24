@@ -19,8 +19,8 @@ import sys
 import uuid
 from typing import Any
 
-from user_code.adapter import KitaruAdapter  # ty: ignore[unresolved-import]
-from user_code.agent import (  # ty: ignore[unresolved-import]
+from adapter_example.adapter import KitaruAdapter  # ty: ignore[unresolved-import]
+from adapter_example.agent import (  # ty: ignore[unresolved-import]
     DEFAULT_MODEL,
     DEFAULT_SYSTEM_PROMPT,
     MockAgent,

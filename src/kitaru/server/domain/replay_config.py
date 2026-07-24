@@ -92,6 +92,21 @@ class ReplayOverride(FrozenModel):
     model_params: dict[str, Any] | None = None
 
 
+def effective_inputs(inputs: Any, override: ReplayOverride | None) -> Any:
+    """Apply a prompt override to session inputs.
+
+    Args:
+        inputs: Original session inputs.
+        override: Execution override.
+
+    Returns:
+        The override prompt when set, the inputs otherwise.
+    """
+    if override is not None and override.prompt is not None:
+        return override.prompt
+    return inputs
+
+
 class ScorerConfig(FrozenModel):
     """Scorer configuration."""
 

@@ -291,7 +291,9 @@ class ReplaySpecResponse(ResponseModel):
     """Replay spec response."""
 
     replay_id: uuid.UUID = Field(description="Replay id.")
-    inputs: Any = Field(description="Original session inputs.")
+    inputs: Any = Field(
+        description="Effective session inputs, with any prompt override applied."
+    )
     override: ReplayOverride | None = Field(description="Execution override.")
     tool_policy: ToolPolicyConfig = Field(description="Tool policy.")
     scoring_policy: ScoringPolicy = Field(description="Scoring policy.")

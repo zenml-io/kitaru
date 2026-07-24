@@ -80,6 +80,7 @@ from kitaru.server.domain.replay_config import (
     ReplayConfig,
     ScoringResult,
     ToolPolicyConfig,
+    effective_inputs,
 )
 from kitaru.server.domain.replay_diff import (
     ReplayDiff,
@@ -305,7 +306,7 @@ class ReplayService:
             secret_env.update(secret.values)
         return ReplaySpec(
             replay_id=replay.id,
-            inputs=session.inputs,
+            inputs=effective_inputs(session.inputs, config.override),
             override=config.override,
             tool_policy=config.tool_policy,
             scoring_policy=config.scoring_policy,

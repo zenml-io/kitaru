@@ -829,6 +829,31 @@ async def test_get_spec_standalone(
     } == {"OPENAI_API_KEY": "sk-1", "SHARED": "second"}
 
 
+async def test_get_spec_applies_prompt_override(
+    service: ReplayService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve the spec inputs from the prompt override."""
+    session = await session_repository.create(
+        Session(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+            inputs={"prompt": "hi"},
+        )
+    )
+    override = ReplayOverride(prompt="rewritten task")
+    replay, _ = await service.create_replay(
+        replay_create(session.id, override=override), actor=ACTOR
+    )
+    spec = await service.get_spec(replay.id, actor=ACTOR)
+    assert spec.inputs == "rewritten task"
+    assert spec.run_spec == version.run_spec
+
+
 async def test_get_spec_run_replay_carries_score_baselines(
     service: ReplayService,
     repository: FakeReplayRepository,

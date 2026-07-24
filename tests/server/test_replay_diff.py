@@ -291,8 +291,22 @@ def test_diff_summary_scalars() -> None:
         original_nodes,
         result_nodes,
     )
-    assert summary["cost_delta"] == pytest.approx(-0.2)
-    assert summary["token_deltas"] == {
+    assert summary["cost"]["original"] == pytest.approx(0.3)
+    assert summary["cost"]["replay"] == pytest.approx(0.1)
+    assert summary["cost"]["delta"] == pytest.approx(-0.2)
+    assert summary["tokens"]["original"] == {
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+    }
+    assert summary["tokens"]["replay"] == {
+        "input_tokens": 80,
+        "output_tokens": 70,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+    }
+    assert summary["tokens"]["deltas"] == {
         "input_tokens": -20,
         "output_tokens": 20,
         "cached_input_tokens": None,
@@ -313,11 +327,25 @@ def test_diff_summary_scalars() -> None:
 def test_run_summary_aggregates() -> None:
     """Aggregate replay counts, pass rate, scores, and cost."""
     originals = [
-        session(id=uuid.uuid4(), cost=Decimal("0.30"), scores={"conciseness": 0.4}),
-        session(id=uuid.uuid4(), cost=Decimal("0.10"), scores={"conciseness": 0.6}),
+        session(
+            id=uuid.uuid4(),
+            cost=Decimal("0.30"),
+            tokens=TokenUsage(input_tokens=100, output_tokens=50),
+            scores={"conciseness": 0.4},
+        ),
+        session(
+            id=uuid.uuid4(),
+            cost=Decimal("0.10"),
+            tokens=TokenUsage(input_tokens=40),
+            scores={"conciseness": 0.6},
+        ),
     ]
     results = [
-        session(id=uuid.uuid4(), cost=Decimal("0.20")),
+        session(
+            id=uuid.uuid4(),
+            cost=Decimal("0.20"),
+            tokens=TokenUsage(input_tokens=80, output_tokens=70),
+        ),
         session(id=uuid.uuid4(), cost=Decimal("0.05")),
     ]
     run_id = uuid.uuid4()
@@ -358,6 +386,18 @@ def test_run_summary_aggregates() -> None:
     assert baseline["median"] == pytest.approx(0.6)
     assert summary["total_cost"]["replay"] == pytest.approx(0.25)
     assert summary["total_cost"]["baseline"] > 0.25
+    assert summary["total_tokens"]["baseline"] == {
+        "input_tokens": 180,
+        "output_tokens": 50,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+    }
+    assert summary["total_tokens"]["replay"] == {
+        "input_tokens": 80,
+        "output_tokens": 70,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+    }
 
 
 def test_run_summary_without_scores() -> None:
@@ -374,3 +414,13 @@ def test_run_summary_without_scores() -> None:
     assert summary["pass_rate"] is None
     assert summary["scores"] == {}
     assert summary["total_cost"] == {"baseline": None, "replay": None}
+    empty_totals = {
+        "input_tokens": None,
+        "output_tokens": None,
+        "cached_input_tokens": None,
+        "reasoning_tokens": None,
+    }
+    assert summary["total_tokens"] == {
+        "baseline": empty_totals,
+        "replay": empty_totals,
+    }

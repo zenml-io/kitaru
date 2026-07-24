@@ -22,7 +22,7 @@ from typing import Any
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.replay import Replay
-from kitaru.server.domain.replay_config import ReplayOverride
+from kitaru.server.domain.replay_config import ReplayOverride, effective_inputs
 from kitaru.server.domain.session import Session, TokenUsage
 from kitaru.server.domain.session_node import NodeType, SessionNode
 
@@ -335,14 +335,12 @@ def compute_replay_diff(
     """
     pairs, added, removed = _align(original_nodes, result_nodes)
     original_models = _distinct_models(original_nodes)
-    effective_inputs = original_session.inputs
-    system_prompt = None
-    if override is not None:
-        if override.prompt is not None:
-            effective_inputs = override.prompt
-        system_prompt = override.system_prompt
+    system_prompt = None if override is None else override.system_prompt
     input_diff = ReplayInputDiff(
-        inputs=DiffValue(original=original_session.inputs, effective=effective_inputs),
+        inputs=DiffValue(
+            original=original_session.inputs,
+            effective=effective_inputs(original_session.inputs, override),
+        ),
         model=DiffValue(
             original=original_models,
             effective=_effective_models(original_models, override),
@@ -387,11 +385,19 @@ def compute_diff_summary(
     for name, score in replay_scores.items():
         original = original_session.scores.get(name)
         score_deltas[name] = None if original is None else score - original
+    original_tokens = original_session.tokens or TokenUsage()
+    result_tokens = result_session.tokens or TokenUsage()
     return {
-        "cost_delta": _delta(original_session.cost, result_session.cost),
-        "token_deltas": _token_deltas(
-            original_session.tokens, result_session.tokens
-        ).model_dump(),
+        "cost": {
+            "original": _cost_value(original_session.cost),
+            "replay": _cost_value(result_session.cost),
+            "delta": _delta(original_session.cost, result_session.cost),
+        },
+        "tokens": {
+            "original": original_tokens.model_dump(),
+            "replay": result_tokens.model_dump(),
+            "deltas": _token_deltas(original_tokens, result_tokens).model_dump(),
+        },
         "duration_delta": _delta(
             _duration_seconds(original_session.started_at, original_session.ended_at),
             _duration_seconds(result_session.started_at, result_session.ended_at),
@@ -470,6 +476,10 @@ def compute_run_summary(
             "baseline": _total_cost(originals),
             "replay": _total_cost(results),
         },
+        "total_tokens": {
+            "baseline": _total_tokens(originals).model_dump(),
+            "replay": _total_tokens(results).model_dump(),
+        },
     }
 
 
@@ -500,3 +510,52 @@ def _total_cost(sessions: Sequence[Session]) -> float | None:
     if not values:
         return None
     return sum(values)
+
+
+def _total_tokens(sessions: Sequence[Session]) -> TokenUsage:
+    """Sum the token usages of a set of sessions.
+
+    Args:
+        sessions: Sessions to sum over.
+
+    Returns:
+        Per-kind token totals, ``None`` per kind when no session reports it.
+    """
+    usages = [session.tokens for session in sessions if session.tokens is not None]
+    return TokenUsage(
+        input_tokens=_sum_counts([usage.input_tokens for usage in usages]),
+        output_tokens=_sum_counts([usage.output_tokens for usage in usages]),
+        cached_input_tokens=_sum_counts(
+            [usage.cached_input_tokens for usage in usages]
+        ),
+        reasoning_tokens=_sum_counts([usage.reasoning_tokens for usage in usages]),
+    )
+
+
+def _sum_counts(values: list[int | None]) -> int | None:
+    """Sum optional counts.
+
+    Args:
+        values: Counts to sum.
+
+    Returns:
+        Sum of the present counts, ``None`` when none are present.
+    """
+    present = [value for value in values if value is not None]
+    if not present:
+        return None
+    return sum(present)
+
+
+def _cost_value(cost: Decimal | None) -> float | None:
+    """Convert an optional cost to a float.
+
+    Args:
+        cost: Cost to convert.
+
+    Returns:
+        Cost, ``None`` when absent.
+    """
+    if cost is None:
+        return None
+    return float(cost)

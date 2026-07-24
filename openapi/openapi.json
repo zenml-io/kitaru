@@ -2604,7 +2604,7 @@
         "description": "Replay spec response.",
         "properties": {
           "inputs": {
-            "description": "Original session inputs.",
+            "description": "Effective session inputs, with any prompt override applied.",
             "title": "Inputs"
           },
           "original_session_id": {

@@ -147,7 +147,15 @@ resolved. Ordered roughly by implementation phase.
   the original system prompt is never recorded.
 - Run summary shape: `replay_counts_by_status`, `pass_rate` (fraction
   among scored replays, null when none), `scores.{name}.{baseline,
-  replay}.{mean,median}`, `total_cost.{baseline,replay}`, all floats.
+  replay}.{mean,median}`, `total_cost.{baseline,replay}`, and
+  `total_tokens.{baseline,replay}` per token kind. Costs are floats,
+  token totals are ints, null per kind when no session reports it.
+  Baseline sums count an original session once per replay referencing
+  it, so shared originals weigh in proportionally to their replays.
+- Replay diff summary carries before/after values, not only deltas:
+  `cost.{original,replay,delta}` and `tokens.{original,replay,deltas}`
+  per token kind, alongside `duration_delta`, `status_changed`,
+  `tool_calls`, and `score_deltas`.
 - Tool lookup: non-history policy for the tool and cache-key mismatch
   are 422. Most recent means `started_at` desc nulls last, then id
   desc. Mocked exclusion treats boolean true or string "true".
@@ -187,8 +195,24 @@ resolved. Ordered roughly by implementation phase.
 - Baseline scores are posted via the merging scores endpoint with only
   newly computed values. A baseline scorer error also fails the replay.
 - No CLI, the runner is a Python API (`kitaru.Runner`), per the goal.
+- `Runner.run_session` executes an agent version once as a fresh recorded
+  session, outside any replay. Overrides work like replay overrides: the
+  prompt replaces the inputs, model, system prompt, and model params are
+  shipped to the adapter as JSON in `KITARU_OVERRIDE` (prompt excluded,
+  since it is already folded into `KITARU_INPUTS`). The runner resolves
+  the run spec and secret values client-side, since no spec endpoint
+  exists for a bare agent version.
+- The created session id flows back through `KITARU_SESSION_ID_FILE`, a
+  temp file path the adapter writes after session create. There is no
+  server-side entity linking a live run to its session.
+- Live runs deliver inputs only via `KITARU_INPUTS`. Inputs over the
+  threshold raise `RunnerError`, there is no spec fetch to fall back to.
+- The prompt-replaces-inputs rule lives in one domain helper,
+  `effective_inputs` in `replay_config.py`, used by both the spec
+  resolution and the diff computation. The runner mirrors it client-side
+  for live runs.
 
-### E2E user code (`user_code/`)
+### E2E user code (`adapter_example/`)
 
 - `MockAgent` simulates llm and tool calls deterministically: every llm
   output, token count, and cost is a hash of (model, model_params,
@@ -212,7 +236,7 @@ resolved. Ordered roughly by implementation phase.
 - The adapter vendors a local UUIDv7 generator (stdlib gains
   `uuid.uuid7` only in 3.14 and `server.domain.ids` is server-only).
 - Per an instruction mid-implementation there are no tests for
-  `user_code/`. Verification ran as scratchpad smoke scripts covering
+  `adapter_example/`. Verification ran as scratchpad smoke scripts covering
   recording, determinism, overrides, all tool policies, and scorers.
 
 ### E2E scripts
@@ -230,14 +254,15 @@ resolved. Ordered roughly by implementation phase.
   experiment (model override, history default policy plus per-tool
   static entry, 3 weighted scorers), run with `score_baselines=true`,
   in-process runner execution, run summary and per-replay
-  score/diff/mock assertions, baseline writes, a standalone replay, and
-  negative controls (frozen experiment config PATCH 409, empty claim on
-  a drained run).
+  score/diff/mock assertions, baseline writes, a standalone replay, a
+  live session via `Runner.run_session` with a model and system prompt
+  override, and negative controls (frozen experiment config PATCH 409,
+  empty claim on a drained run).
 - Chicken-and-egg on the version id in the run spec env: the version's
   run_spec is patched with `KITARU_E2E_AGENT_VERSION_ID` after
   creation, legal until a replay references the version.
 - The run_spec command uses the absolute venv python
-  (`<repo>/.venv/bin/python -m user_code.main`) with the repo root as
+  (`<repo>/.venv/bin/python -m adapter_example.main`) with the repo root as
   working directory.
 
 ## Issues
@@ -291,6 +316,14 @@ resolved. Ordered roughly by implementation phase.
 - `Numeric(12,6)` round-trips as `Decimal("0.750000")`, tests compare
   `Decimal` values.
 
+### Unapplied prompt override
+
+- `get_spec` returned the original session inputs even when the config
+  carried a prompt override, so the agent replayed the original prompt
+  while the diff reported the override as effective. Fixed by resolving
+  the effective inputs in `get_spec` (regression test on the service).
+  The spec `inputs` field is now documented as effective inputs.
+
 ### Replay execution workflow
 
 - SQLAlchemy savepoint trap: mutating an ORM row before
@@ -300,3 +333,123 @@ resolved. Ordered roughly by implementation phase.
   same latent pattern, pre-existing and left untouched.
 - Staleness-aware progress counting stays a SQL GROUP BY via a CASE
   expression over `coalesce(heartbeat_at, claimed_at)`.
+
+## Future improvements
+
+Issues found in the current code, improvable areas, and missing
+features, collected after the implementation. Not ordered by priority
+within each group.
+
+### Correctness and robustness
+
+- Requeue keeps `result_session_id`, but `link_result_session` rejects a
+  replay that already has one. A retry whose prior attempt died after
+  creating its session can never record a new result session and fails
+  every remaining attempt with `ReplayAlreadyLinked`. Requeue should
+  clear the link (and decide what happens to the orphaned session).
+- Zombie workers never stop: the server answers a requeued attempt's
+  heartbeat with a 409, but the runner treats every heartbeat `APIError`
+  as transient and keeps the agent process running. The old attempt then
+  races the new claimant. The runner should kill the process on a
+  non-transient heartbeat rejection.
+- Runner error paths beyond the spec fetch leave the replay `running`
+  until staleness burns an attempt: a spawn failure (bad `working_dir`),
+  a rejected `running` update, or a read failure during scoring only
+  logs. A deterministic spawn failure loops through all attempts, each
+  paying the full heartbeat timeout. Fail the replay on these paths.
+- Standalone replays have no staleness recovery and no cancellation:
+  requeue only runs inside a run claim, `start()` sets neither
+  `claimed_at` nor `heartbeat_at` so they are never even reported stale,
+  and no cancel endpoint exists for them.
+- No server-side reaper: staleness handling and run finalization only
+  run inside claim and update requests. If every worker dies, the run
+  stays `running` forever. This includes the known gap that a canceling
+  run with a stale running replay never drains. A periodic reaper (or
+  reaping inside cancel and reads) would close both.
+- `run_experiment_run` polls a run that never drains forever, with no
+  deadline or escape hatch.
+- Timeout and cancel SIGKILL the process group, so the adapter never
+  runs `on_run_error`: the result session stays `in_progress` forever
+  and up to a batch of buffered nodes is lost. A SIGTERM grace period
+  plus a reaper for stale `in_progress` sessions would bound both. The
+  same orphan exists for a timed-out `run_session`.
+- Scorers run synchronously on the runner event loop. A scorer slower
+  than the 60s heartbeat timeout stalls every heartbeat in the process
+  and gets all in-flight replays of the worker requeued. Run scoring in
+  a thread.
+- Replay updates are unlocked read-modify-write, last write wins: a
+  heartbeat racing a concurrent requeue-and-claim can write the old
+  claim state back over the new worker's. Optimistic versioning or row
+  locks on the replay update path would close it.
+- Adapter recording is fail-closed with connect-only retries: a
+  transient 5xx during a node flush crashes an otherwise healthy run.
+  Response retries with backoff, and possibly a fail-open recording
+  mode, would make recording robust.
+- Concurrent replays of a `score_baselines` run recompute the same
+  missing baseline scores in parallel, duplicate work with racing
+  merges.
+- The claim loop gathers a whole claimed batch before claiming again,
+  so one slow replay idles the remaining concurrency slots.
+- `_read_session_id` raises a raw `ValueError` on corrupt file content
+  instead of a `RunnerError`.
+
+### Missing features
+
+- CLI entry points (`kitaru run <run-id>`, `kitaru replay <id>`): the
+  runner is a Python API only, a deliberate scope cut.
+- Session importers (design 4.1): no `SessionImporter`, registry, or
+  Langfuse/OTLP implementation exists, so the `provider` and
+  `external_id` columns have no producer.
+- Real framework adapters (design 4.2, `kitaru.adapters.<framework>`):
+  the only adapter is the mock one in `adapter_example/`.
+- The `llm` tool policy passes validation but has no execution path, the
+  adapter raises on it at replay time. Either reject it at config
+  creation or implement it.
+- Live runs are invisible server-side: no entity records a
+  `run_session` execution, no cancellation, no timeout status, and the
+  session id handoff is a temp file. A server-resolved run spec
+  endpoint for agent versions would also move secret resolution and the
+  inputs-size policy back to one side of the wire, and give live runs
+  the same large-inputs fallback replays have.
+- `MAX_INPUTS_ENV_BYTES` is a client constant, the design wants it
+  server-configured (existing TODO in `runner.py`).
+- Run-level `failed` is unreachable: the claim does not resolve specs,
+  so a permanently broken spec surfaces per replay instead of failing
+  the run.
+- `session.log_uri` has no pipeline: nothing writes or serves logs, only
+  the 8 KiB error tail of failed replays survives.
+- Design open questions remain open: smarter history matching via
+  `tool_definition`, multi-turn conversation replay, per-node scores,
+  deployed/LLM-judge scorer kinds, push-based run progress for a UI,
+  node payload size limits and blob offload.
+- `AgentVersion.version` rejects dots via the shared `Name` type, so
+  semver labels like "1.0.0" are not accepted.
+- The `None`-means-unchanged PATCH convention means optional fields
+  (`run_spec`, `description`, experiment `override`) can never be
+  cleared back to null.
+- Tag links neither validate the referenced resource nor translate the
+  attach-vs-delete FK race (the tag FK was never retrofitted onto the
+  named-constraint translation).
+- The client default server URL is hardcoded (existing TODO in
+  `client.py`).
+
+### Security
+
+- Authorization is recorded but not enforced: every service discards
+  `actor`, so any authenticated caller can read any replay's spec
+  including resolved secret values. Secret visibility scoping and
+  tenancy are unimplemented design sections.
+- The captured stdout/stderr tail is persisted into `replay.error`, so a
+  secret printed by the agent lands in the database. The runner also
+  passes its own API key into the agent env by contract.
+
+### Performance and scale
+
+- Run finalization loads every replay plus one session read per
+  distinct session (N+1) inside the completing PATCH transaction.
+- Cohort-scope tool lookup resolves all member session ids and passes
+  them as one `IN` list on every tool call.
+- Diff computation loads both sessions' full node payloads on every
+  replay completion.
+- Node `inputs`/`outputs` are unbounded JSONB with no size cap or
+  truncation, one large session degrades ingest and diff computation.
