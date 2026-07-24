@@ -52,7 +52,7 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client import KitaruAPIClient
 from kitaru.hashing import tool_call_cache_key
-from adapter_example.agent import (  # ty: ignore[unresolved-import]
+from v2_examples.mock_adapter.agent import (  # ty: ignore[unresolved-import]
     AgentHooks,
     LLMCall,
     MockAgent,

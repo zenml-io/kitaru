@@ -1,0 +1,63 @@
+"""Run a PydanticAI agent through the Kitaru adapter."""
+
+import asyncio
+import os
+import uuid
+from datetime import UTC, datetime
+
+from pydantic_ai import Agent
+
+from kitaru.adapters.pydantic_ai import KitaruAgent
+
+PROMPT = """
+Call both available tools exactly once:
+1. Call get_current_utc_time.
+2. Call multiply with left=17 and right=6.
+After both tools return, report both results in one sentence. Do not calculate or
+invent either result yourself.
+""".strip()
+_REQUIRED_ENV = (
+    "OPENAI_API_KEY",
+    "KITARU_API_URL",
+    "KITARU_API_KEY",
+    "KITARU_AGENT_ID",
+)
+
+
+def get_current_utc_time() -> str:
+    """Return the current UTC time from the local Python process."""
+    return datetime.now(UTC).isoformat()
+
+
+def multiply(left: int, right: int) -> int:
+    """Multiply two integers."""
+    return left * right
+
+
+def _require_environment() -> None:
+    """Raise a clear error when required configuration is missing."""
+    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        names = ", ".join(missing)
+        raise RuntimeError(f"Missing required environment variables: {names}")
+
+
+async def main() -> None:
+    """Run the example once and print the final answer."""
+    _require_environment()
+    version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
+    pydantic_agent = Agent("openai:gpt-5-nano")
+    pydantic_agent.tool_plain(get_current_utc_time)
+    pydantic_agent.tool_plain(multiply)
+    agent = KitaruAgent(
+        pydantic_agent,
+        agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
+        agent_version_id=uuid.UUID(version_value) if version_value else None,
+        api_url=os.environ["KITARU_API_URL"],
+    )
+    result = await agent.run(PROMPT)
+    print(result.output)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
