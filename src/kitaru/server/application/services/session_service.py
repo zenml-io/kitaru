@@ -36,7 +36,7 @@ from kitaru.server.application.models.sessions import (
     SessionFilter,
     SessionUpdate,
 )
-from kitaru.server.domain.job import Replay
+from kitaru.server.domain.job import ReplayJob
 from kitaru.server.domain.session import (
     InvalidSession,
     Session,
@@ -80,7 +80,7 @@ class SessionService:
         A set job id links the session to its job: the session becomes
         the job's result session and is stored with origin ``replay``
         for a replay job, keeping origin ``recorded`` for a session run
-        job.
+        job. A job takes at most one session.
 
         Args:
             command: Session create command.
@@ -91,7 +91,7 @@ class SessionService:
             AgentNotFound: No agent has this id.
             AgentVersionNotFound: No agent version has this id.
             JobNotFound: No job has the referenced job id.
-            JobNotActive: The job is not claimed or running.
+            JobNotRunning: The job is not running.
             JobAlreadyLinked: The job already has a result session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
@@ -107,7 +107,7 @@ class SessionService:
                     "Sessions linked to a job require origin 'recorded'"
                 )
             job = await self._job_repository.get(command.job_id)
-            if isinstance(job, Replay):
+            if isinstance(job, ReplayJob):
                 origin = SessionOrigin.REPLAY
         elif command.origin is SessionOrigin.REPLAY:
             raise InvalidSession("Session origin 'replay' requires a job id")
@@ -128,6 +128,7 @@ class SessionService:
             owner_id=actor.account.id,
             agent_id=command.agent_id,
             agent_version_id=command.agent_version_id,
+            job_id=command.job_id,
             origin=origin,
             status=command.status or SessionStatus.IN_PROGRESS,
             name=command.name,

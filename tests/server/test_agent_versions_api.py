@@ -23,7 +23,6 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeJobRepository,
-    FakeReplayConfigRepository,
     FakeSecretRepository,
     FakeSessionRepository,
     create_secret,
@@ -64,7 +63,6 @@ async def client(
     job_repository = FakeJobRepository(
         FakeSessionRepository(agent_repository, version_repository),
         version_repository,
-        FakeReplayConfigRepository(),
     )
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(

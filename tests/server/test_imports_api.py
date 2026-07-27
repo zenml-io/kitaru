@@ -133,7 +133,7 @@ async def test_create_import(client: httpx.AsyncClient) -> None:
     assert body["plugin_version_id"] == latest["id"]
     assert body["payload_blob_id"] == payload_blob_id
     assert body["inputs"] == {"project": "demo"}
-    assert body["stats"] is None
+    assert body["result"] is None
     assert uuid.UUID(body["id"])
 
 
@@ -281,7 +281,7 @@ async def test_create_import_unknown_agent(client: httpx.AsyncClient) -> None:
 
 
 async def test_import_lifecycle_through_job_routes(client: httpx.AsyncClient) -> None:
-    """Claim, run, report stats, and complete an import job."""
+    """Claim, run, and complete an import job with its stats result."""
     await register_importer(client)
     agent_id = await create_agent(client)
     payload_blob_id = await upload_blob(
@@ -326,7 +326,7 @@ async def test_import_lifecycle_through_job_routes(client: httpx.AsyncClient) ->
 
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 409
-    assert response.json() == {"detail": f"Job {job_id} has no stats"}
+    assert response.json() == {"detail": f"Job {job_id} has no result"}
 
     stats = {
         "created": 2,
@@ -334,15 +334,12 @@ async def test_import_lifecycle_through_job_routes(client: httpx.AsyncClient) ->
         "failed": 1,
         "failures": [{"line": 7, "external_id": "ext-7", "error": "bad line"}],
     }
-    response = await client.patch(f"/v1/jobs/{job_id}", json={"stats": stats})
-    assert response.status_code == 200
-    assert response.json()["stats"] == stats
-    assert response.json()["status"] == "running"
-
-    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
+    response = await client.patch(
+        f"/v1/jobs/{job_id}", json={"status": "completed", "result": stats}
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
-    assert response.json()["stats"] == stats
+    assert response.json()["result"] == stats
 
 
 async def test_list_jobs_filters_imports(client: httpx.AsyncClient) -> None:

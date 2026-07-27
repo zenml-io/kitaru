@@ -620,6 +620,7 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
 ]
 
 [package.optional-dependencies]
@@ -629,7 +630,6 @@ server = [
     { name = "bcrypt" },
     { name = "cryptography" },
     { name = "fastapi" },
-    { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "python-multipart" },
     { name = "sqlalchemy", extra = ["asyncio"] },
@@ -657,7 +657,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2" },
-    { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
+    { name = "pydantic-settings", specifier = ">=2.14" },
     { name = "pyjwt", marker = "extra == 'server'", specifier = ">=2.13" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'server'", specifier = ">=2.0.51" },

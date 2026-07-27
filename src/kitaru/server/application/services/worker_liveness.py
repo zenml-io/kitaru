@@ -27,20 +27,22 @@ logger = logging.getLogger(__name__)
 
 async def warn_if_no_live_worker(
     repository: WorkerRepository,
-    agent_id: uuid.UUID,
+    agent_version_id: uuid.UUID,
     liveness_timeout_seconds: int,
 ) -> None:
-    """Log a warning when no live worker serves an agent.
+    """Log a warning when no live worker serves an agent version.
 
     Args:
         repository: Worker repository.
-        agent_id: Id of the agent.
+        agent_version_id: Id of the agent version.
         liveness_timeout_seconds: Seconds after which a worker counts as
             dead.
     """
     seen_after = datetime.now(UTC) - timedelta(seconds=liveness_timeout_seconds)
     _, total = await repository.query(
-        WorkerFilter(agent_id=agent_id, seen_after=seen_after, page_size=1)
+        WorkerFilter(
+            agent_version_id=agent_version_id, seen_after=seen_after, page_size=1
+        )
     )
     if total == 0:
-        logger.warning("No live worker serves agent %s", agent_id)
+        logger.warning("No live worker serves agent version %s", agent_version_id)

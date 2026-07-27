@@ -48,7 +48,7 @@ async def create_replay(
         **overrides: Create request body overrides.
 
     Returns:
-        Created job body.
+        Created replay body.
     """
     body: dict[str, object] = {
         "input_session_id": session_id,
@@ -74,12 +74,16 @@ async def test_create_replay_defaults(client: httpx.AsyncClient) -> None:
     assert body["experiment_run_id"] is None
     assert body["input_session_id"] == session_id
     assert body["result_session_id"] is None
-    assert body["agent_version_id"] == version_id
-    assert body["status"] == "pending"
-    assert body["attempt"] == 1
-    assert body["worker_id"] is None
     assert body["passed"] is None
+    assert body["score"] is None
+    assert body["scores"] is None
+    assert body["error"] is None
     assert body["override"] is None
+    job = await client.get(f"/v1/jobs/{body['job_id']}")
+    assert job.status_code == 200
+    assert job.json()["kind"] == "replay"
+    assert job.json()["agent_version_id"] == version_id
+    assert job.json()["status"] == "pending"
     assert body["tool_policy"] == {
         "default": {
             "type": "history",
@@ -197,3 +201,48 @@ async def test_create_replay_missing_scoring_policy(client: httpx.AsyncClient) -
     session_id = await create_completed_session(client, agent_id)
     response = await client.post("/v1/replays", json={"input_session_id": session_id})
     assert response.status_code == 422
+
+
+async def test_get_and_list_replays(client: httpx.AsyncClient) -> None:
+    """Get a replay by id and list replays by filter."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+
+    response = await client.get(f"/v1/replays/{created['id']}")
+    assert response.status_code == 200
+    assert response.json() == created
+
+    response = await client.get("/v1/replays", params={"input_session_id": session_id})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == created["id"]
+
+    response = await client.get("/v1/replays", params={"passed": "true"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+
+
+async def test_get_replay_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown replay id."""
+    missing_id = uuid.uuid4()
+    response = await client.get(f"/v1/replays/{missing_id}")
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Replay {missing_id} was not found"}
+
+
+async def test_get_replay_diff_requires_a_result_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 409 while the replay's job has no result session."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(client, session_id)
+    response = await client.get(f"/v1/replays/{created['id']}/diff")
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Job {created['job_id']} has no result session"
+    }

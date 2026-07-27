@@ -27,6 +27,7 @@ from conftest import (
     FakeJobRepository,
     FakePluginRepository,
     FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
     FakeWorkerRepository,
@@ -39,6 +40,7 @@ from kitaru.server.application.models.experiments import (
     ExperimentUpdate,
 )
 from kitaru.server.application.models.jobs import JobFilter
+from kitaru.server.application.models.replays import ReplayFilter
 from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
@@ -66,7 +68,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.job import JobStatus, Replay
+from kitaru.server.domain.job import JobStatus, ReplayJob
 from kitaru.server.domain.plugin import (
     Plugin,
     PluginFormat,
@@ -168,9 +170,7 @@ def job_repository(
     plugin_repository: FakePluginRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(
-        session_repository, version_repository, config_repository, plugin_repository
-    )
+    return FakeJobRepository(session_repository, version_repository, plugin_repository)
 
 
 @pytest.fixture
@@ -178,9 +178,24 @@ def run_repository(
     repository: FakeExperimentRepository,
     job_repository: FakeJobRepository,
     tag_repository: FakeTagRepository,
+    replay_repository: FakeReplayRepository,
 ) -> FakeExperimentRunRepository:
     """Provide a fake experiment run repository."""
-    return FakeExperimentRunRepository(repository, job_repository, tag_repository)
+    run_repository = FakeExperimentRunRepository(
+        repository, job_repository, tag_repository
+    )
+    run_repository.replay_repository = replay_repository
+    return run_repository
+
+
+@pytest.fixture
+def replay_repository(
+    job_repository: FakeJobRepository,
+    config_repository: FakeReplayConfigRepository,
+    session_repository: FakeSessionRepository,
+) -> FakeReplayRepository:
+    """Provide a fake replay repository."""
+    return FakeReplayRepository(job_repository, config_repository, session_repository)
 
 
 @pytest.fixture
@@ -740,6 +755,7 @@ async def test_start_run_fans_out_jobs(
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     job_repository: FakeJobRepository,
+    replay_repository: FakeReplayRepository,
     agent: Agent,
 ) -> None:
     """Create one pending job per cohort session with the stamped config."""
@@ -765,16 +781,23 @@ async def test_start_run_fans_out_jobs(
 
     jobs, total = await job_repository.query(JobFilter(experiment_run_id=run.id))
     assert total == 3
-    replays = [job for job in jobs if isinstance(job, Replay)]
-    assert {replay.input_session_id for replay in replays} == {
+    replay_jobs = [job for job in jobs if isinstance(job, ReplayJob)]
+    assert {job.input_session_id for job in replay_jobs} == {
         session.id for session in sessions
     }
+    for job in replay_jobs:
+        assert job.status is JobStatus.PENDING
+        assert job.attempt == 1
+        assert job.agent_version_id == version.id
+        assert job.execution_target is run.execution_target
+    replays, total = await replay_repository.query(
+        ReplayFilter(experiment_run_id=run.id)
+    )
+    assert total == 3
+    assert {replay.job_id for replay in replays} == {job.id for job in replay_jobs}
     for replay in replays:
-        assert replay.status is JobStatus.PENDING
-        assert replay.attempt == 1
         assert replay.replay_config_id == config.id
-        assert replay.agent_version_id == version.id
-        assert replay.execution_target is run.execution_target
+        assert replay.experiment_run_id == run.id
 
 
 async def test_start_run_increments_number(
@@ -1038,9 +1061,9 @@ async def test_start_run_warns_without_live_worker(
     agent: Agent,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Warn on a pool target when no live worker serves the agent."""
+    """Warn on a pool target when no live worker serves the agent version."""
     cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
-    await create_runnable_version(version_repository, agent.id)
+    version = await create_runnable_version(version_repository, agent.id)
     created, _ = await service.create_experiment(
         experiment_create(cohort.id), actor=ACTOR
     )
@@ -1048,7 +1071,7 @@ async def test_start_run_warns_without_live_worker(
         await service.start_run(
             created.id, agent_version_id=None, score_baselines=False, actor=ACTOR
         )
-    assert f"No live worker serves agent {agent.id}" in caplog.text
+    assert f"No live worker serves agent version {version.id}" in caplog.text
 
     caplog.clear()
     await create_worker(worker_repository, ACTOR.account.id)

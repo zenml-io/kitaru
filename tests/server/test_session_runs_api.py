@@ -50,8 +50,6 @@ async def test_create_session_run(client: httpx.AsyncClient) -> None:
     assert body["execution_target"] == "pool"
     assert body["experiment_run_id"] is None
     assert body["input_session_id"] is None
-    assert body["tool_policy"] is None
-    assert body["scoring_policy"] is None
 
     response = await client.get(f"/v1/jobs/{body['id']}")
     assert response.status_code == 200
@@ -160,23 +158,23 @@ async def test_session_run_lifecycle_through_job_routes(
     result_session = response.json()
     assert result_session["origin"] == "recorded"
 
-    response = await client.patch(
-        f"/v1/jobs/{job_id}",
-        json={"status": "completed", "passed": True, "score": 1.0, "scores": {}},
-    )
-    assert response.status_code == 422
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Result session {result_session['id']} of job {job_id} "
+        "is not completed"
+    }
 
+    response = await client.patch(
+        f"/v1/sessions/{result_session['id']}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
     assert body["result_session_id"] == result_session["id"]
-    assert body["passed"] is None
-    assert body["scores"] is None
-
-    response = await client.get(f"/v1/jobs/{job_id}/diff")
-    assert response.status_code == 409
-    assert response.json() == {"detail": f"Job {job_id} is not of kind 'replay'"}
+    assert body["result"] is None
 
     response = await client.post(
         f"/v1/jobs/{job_id}/tool-lookup",

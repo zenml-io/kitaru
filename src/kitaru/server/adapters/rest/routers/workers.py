@@ -30,6 +30,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_job_service,
     get_worker_service,
 )
+from kitaru.server.adapters.rest.mapping.jobs import worker_scope_to_domain
 from kitaru.server.adapters.rest.mapping.workers import worker_to_response
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.workers import WorkerFilter
@@ -47,7 +48,7 @@ async def register_worker(
 ) -> WorkerResponse:
     """Register a worker, upserting by name.
 
-    A worker already registered under the name gets its served agents and
+    A worker already registered under the name gets its claim scope and
     metadata replaced and its last seen time bumped, so clients observe
     HTTP 200 instead of 201 on success, and 422 on invalid input.
 
@@ -61,7 +62,7 @@ async def register_worker(
     """
     worker = await service.register_worker(
         name=body.name,
-        agent_ids=body.agent_ids,
+        scope=worker_scope_to_domain(body.scope),
         metadata=body.metadata,
         actor=actor,
     )

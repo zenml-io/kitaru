@@ -14,6 +14,7 @@
 """Worker DTO conversions."""
 
 from kitaru.api_models.v1.workers import WorkerResponse
+from kitaru.server.adapters.rest.mapping.jobs import worker_scope_to_response
 from kitaru.server.domain.worker import Worker
 
 
@@ -34,7 +35,7 @@ def worker_to_response(worker: Worker, liveness_timeout_seconds: int) -> WorkerR
         id=worker.id,
         owner_id=worker.owner_id,
         name=worker.name,
-        agent_ids=worker.agent_ids,
+        scope=worker_scope_to_response(worker.scope),
         last_seen_at=worker.last_seen_at,
         live=worker.is_live(liveness_timeout_seconds),
         metadata=worker.metadata,

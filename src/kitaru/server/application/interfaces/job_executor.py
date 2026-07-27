@@ -38,10 +38,10 @@ class ExecutorLaunchRequest(FrozenModel):
 
 
 class JobExecutor(Protocol):
-    """Runner launching operations."""
+    """Worker launching operations."""
 
     async def launch(self, request: ExecutorLaunchRequest) -> str:
-        """Launch a runner for pending work.
+        """Launch a worker for pending work.
 
         Args:
             request: Launch request.

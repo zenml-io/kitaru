@@ -170,6 +170,7 @@ class Session(DomainModel):
     owner_id: uuid.UUID
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
     origin: SessionOrigin
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None

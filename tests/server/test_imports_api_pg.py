@@ -112,16 +112,15 @@ async def test_import_flow_persists_across_requests(client: httpx.AsyncClient) -
     )
     assert response.status_code == 200
     stats = {"created": 1, "skipped": 0, "failed": 0, "failures": []}
-    response = await client.patch(f"/v1/jobs/{created['id']}", json={"stats": stats})
-    assert response.status_code == 200
     response = await client.patch(
-        f"/v1/jobs/{created['id']}", json={"status": "completed"}
+        f"/v1/jobs/{created['id']}",
+        json={"status": "completed", "result": stats},
     )
     assert response.status_code == 200
 
     response = await client.get(f"/v1/jobs/{created['id']}")
     assert response.json()["status"] == "completed"
-    assert response.json()["stats"] == stats
+    assert response.json()["result"] == stats
 
 
 async def test_import_rejects_unknown_payload(client: httpx.AsyncClient) -> None:

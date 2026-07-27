@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
-from kitaru.job_context import job_id, job_inputs
+from kitaru.job import job_id, job_inputs
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +50,7 @@ def test_job_inputs_outside_job_mode() -> None:
 
 
 def test_job_inputs_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Parse KITARU_JOB_INPUTS when the runner set it."""
+    """Parse KITARU_JOB_INPUTS when the worker set it."""
     monkeypatch.setenv("KITARU_JOB_ID", "job-1")
     monkeypatch.setenv("KITARU_JOB_INPUTS", '{"question": "hi"}')
     assert job_inputs() == {"question": "hi"}

@@ -85,7 +85,7 @@ async def test_create_import(api_client: KitaruAPIClient, tmp_path: Path) -> Non
     assert created.agent_id == agent_id
     assert created.payload_blob_id == payload.id
     assert created.inputs == {"project": "demo"}
-    assert created.stats is None
+    assert created.result is None
 
     fetched = await api_client.jobs.get(created.id)
     assert fetched == created

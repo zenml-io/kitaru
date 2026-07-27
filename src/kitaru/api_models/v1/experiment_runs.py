@@ -41,7 +41,6 @@ class ExperimentRunProgress(ResponseModel):
     pending: int = Field(description="Pending job count.")
     claimed: int = Field(description="Claimed job count.")
     running: int = Field(description="Running job count.")
-    scoring: int = Field(description="Scoring job count.")
     completed: int = Field(description="Completed job count.")
     failed: int = Field(description="Failed job count.")
     timed_out: int = Field(description="Timed out job count.")

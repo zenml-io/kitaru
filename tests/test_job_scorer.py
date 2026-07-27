@@ -11,8 +11,9 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the score job harness."""
+"""Tests for the scorer contract and the score flow."""
 
+import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,25 +26,14 @@ from kitaru.api_models.v1.jobs import (
     JobSpecPlugin,
     JobSpecResponse,
     JobSpecScorer,
-    JobUpdateRequest,
     RegistryScorerConfig,
     SourceScorerConfig,
 )
 from kitaru.api_models.v1.plugins import PluginFormat
 from kitaru.api_models.v1.session_nodes import SessionNodeResponse
-from kitaru.api_models.v1.sessions import (
-    SessionOrigin,
-    SessionResponse,
-    SessionStatus,
-)
+from kitaru.api_models.v1.sessions import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.plugin_loader import required_env
-from kitaru.score import (
-    load_plugin_scorer,
-    resolve_scorer,
-    score_job,
-)
-from kitaru.scoring import ScoringError, SessionView
+from kitaru.job.scorer import ScoringError, SessionView, call_scorer, load_scorer, run
 
 NOW = datetime.now(UTC)
 
@@ -59,6 +49,24 @@ NOT_CALLABLE = "text"
 def constant_scorer(session: SessionView, value: float = 1.0) -> float:
     """Return a configured constant score."""
     return value
+
+
+def raising_scorer(session: SessionView) -> float:
+    """Raise an error."""
+    raise RuntimeError("boom")
+
+
+def string_scorer(session: SessionView) -> Any:
+    """Return a non-numeric score."""
+    return "high"
+
+
+def boolean_scorer(session: SessionView) -> Any:
+    """Return a boolean score."""
+    return True
+
+
+NOT_CALLABLE = "not callable"
 
 
 def make_session(session_id: uuid.UUID) -> SessionResponse:
@@ -93,6 +101,11 @@ def make_session(session_id: uuid.UUID) -> SessionResponse:
     )
 
 
+def make_view() -> SessionView:
+    """Build a session view around a minimal completed session."""
+    return SessionView(session=make_session(uuid.uuid4()), nodes=[])
+
+
 def make_spec(job_id: uuid.UUID, scorer: JobSpecScorer | None) -> JobSpecResponse:
     """Build a score job spec."""
     return JobSpecResponse(
@@ -114,7 +127,7 @@ def source_scorer(session_id: uuid.UUID, params: dict[str, Any]) -> JobSpecScore
     """Build the scorer of a source arm score job."""
     return JobSpecScorer(
         config=SourceScorerConfig(
-            name="quality", source="test_score:constant_scorer", params=params
+            name="quality", source="test_job_scorer:constant_scorer", params=params
         ),
         plugin=None,
         input_session_id=session_id,
@@ -146,10 +159,6 @@ class FakeJobsResource:
         """Return the configured spec."""
         return self._client.spec
 
-    async def update(self, job_id: uuid.UUID, request: JobUpdateRequest) -> None:
-        """Record the update."""
-        self._client.updates.append(request)
-
 
 class FakeSessionsResource:
     """Fake sessions resource."""
@@ -159,7 +168,7 @@ class FakeSessionsResource:
         self._client = client
 
     async def get(self, session_id: uuid.UUID) -> SessionResponse:
-        """Return a completed session."""
+        """Record the request and return a completed session."""
         self._client.session_requests.append(session_id)
         return make_session(session_id)
 
@@ -180,12 +189,11 @@ class FakeSessionNodesResource:
 
 
 class FakeClient:
-    """Fake API client implementing the resource methods the harness uses."""
+    """Fake API client implementing the resource methods the flow uses."""
 
     def __init__(self, spec: JobSpecResponse) -> None:
         """Initialize the client."""
         self.spec = spec
-        self.updates: list[JobUpdateRequest] = []
         self.session_requests: list[uuid.UUID] = []
         self.node_requests: list[tuple[uuid.UUID, bool]] = []
         self.jobs = FakeJobsResource(self)
@@ -200,105 +208,127 @@ def write_plugin(tmp_path: Path, code: str = PLUGIN_CODE) -> Path:
     return path
 
 
-def test_required_env_reads_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Return the value of a set variable."""
-    monkeypatch.setenv("KITARU_JOB_ID", "job")
-    assert required_env("KITARU_JOB_ID", ScoringError) == "job"
+def test_load_scorer() -> None:
+    """Import the referenced function."""
+    assert load_scorer("test_job_scorer:constant_scorer") is constant_scorer
 
 
-def test_required_env_rejects_a_missing_variable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Reject a variable that is not set."""
-    monkeypatch.delenv("KITARU_JOB_PLUGIN_PATH", raising=False)
-    with pytest.raises(ScoringError, match="KITARU_JOB_PLUGIN_PATH is not set"):
-        required_env("KITARU_JOB_PLUGIN_PATH", ScoringError)
+@pytest.mark.parametrize("source", ["noseparator", ":attribute", "module:"])
+def test_load_scorer_malformed_source(source: str) -> None:
+    """Reject sources that are not 'module:attribute'."""
+    with pytest.raises(ScoringError, match="expected 'module:attribute'"):
+        load_scorer(source)
 
 
-def test_load_plugin_scorer_imports_a_suffixless_file(tmp_path: Path) -> None:
-    """Import the entrypoint of a cached code file."""
-    scorer = load_plugin_scorer(write_plugin(tmp_path), "score")
-    assert scorer(None, factor=2.0) == 1.0
+def test_load_scorer_missing_module() -> None:
+    """Reject a module that does not import."""
+    with pytest.raises(ScoringError, match="Failed to import scorer module"):
+        load_scorer("kitaru_missing_module:scorer")
 
 
-def test_load_plugin_scorer_missing_attribute(tmp_path: Path) -> None:
-    """Reject an entrypoint the code does not define."""
-    with pytest.raises(ScoringError, match="has no attribute 'missing'"):
-        load_plugin_scorer(write_plugin(tmp_path), "missing")
+def test_load_scorer_missing_attribute() -> None:
+    """Reject a missing attribute."""
+    with pytest.raises(ScoringError, match="has no attribute"):
+        load_scorer("test_job_scorer:missing_scorer")
 
 
-def test_load_plugin_scorer_not_callable(tmp_path: Path) -> None:
-    """Reject an entrypoint that is not callable."""
+def test_load_scorer_not_callable() -> None:
+    """Reject a non-callable attribute."""
     with pytest.raises(ScoringError, match="is not callable"):
-        load_plugin_scorer(write_plugin(tmp_path), "NOT_CALLABLE")
+        load_scorer("test_job_scorer:NOT_CALLABLE")
 
 
-def test_load_plugin_scorer_import_error(tmp_path: Path) -> None:
-    """Reject code that raises while importing."""
-    path = write_plugin(tmp_path, "raise RuntimeError('boom')\n")
-    with pytest.raises(ScoringError, match="RuntimeError: boom"):
-        load_plugin_scorer(path, "score")
+def test_call_scorer_passes_params() -> None:
+    """Call the scorer with the session view and configured params."""
+    assert call_scorer("quality", constant_scorer, make_view(), {"value": 0.3}) == 0.3
 
 
-def test_load_plugin_scorer_missing_file(tmp_path: Path) -> None:
-    """Reject a code file that does not exist."""
-    with pytest.raises(ScoringError, match="Failed to import scorer code"):
-        load_plugin_scorer(tmp_path / "absent", "score")
+@pytest.mark.parametrize("value", [-0.1, 1.5])
+def test_call_scorer_out_of_range(value: float) -> None:
+    """Reject scores outside 0..1."""
+    with pytest.raises(ScoringError, match=r"expected a value in 0\.\.1"):
+        call_scorer("quality", constant_scorer, make_view(), {"value": value})
 
 
-def test_resolve_scorer_registry_arm(
+def test_call_scorer_non_numeric() -> None:
+    """Reject a non-numeric score."""
+    with pytest.raises(ScoringError, match=r"expected a float in 0\.\.1"):
+        call_scorer("quality", string_scorer, make_view(), {})
+
+
+def test_call_scorer_boolean() -> None:
+    """Reject a boolean score."""
+    with pytest.raises(ScoringError, match=r"expected a float in 0\.\.1"):
+        call_scorer("quality", boolean_scorer, make_view(), {})
+
+
+def test_call_scorer_exception_propagates() -> None:
+    """Wrap a raising scorer in a ScoringError naming the scorer."""
+    with pytest.raises(ScoringError, match="'quality' raised RuntimeError: boom"):
+        call_scorer("quality", raising_scorer, make_view(), {})
+
+
+async def test_run_source_arm_writes_the_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Score the input session with payloads and write the score, making no writes."""
+    job_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_JOB_RESULT_PATH", str(result_path))
+    fake = FakeClient(make_spec(job_id, source_scorer(session_id, {"value": 0.25})))
+
+    await run(cast(KitaruAPIClient, fake), job_id)
+
+    assert fake.session_requests == [session_id]
+    assert fake.node_requests == [(session_id, True)]
+    assert json.loads(result_path.read_text()) == 0.25
+
+
+async def test_run_registry_arm_loads_the_materialized_plugin(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Load registered code from the path the worker materialized."""
+    job_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    result_path = tmp_path / "result.json"
     monkeypatch.setenv("KITARU_JOB_PLUGIN_PATH", str(write_plugin(tmp_path)))
-    scorer = resolve_scorer(plugin_scorer(uuid.uuid4()))
-    assert scorer(None) == 0.5
+    monkeypatch.setenv("KITARU_JOB_RESULT_PATH", str(result_path))
+    fake = FakeClient(make_spec(job_id, plugin_scorer(session_id)))
+
+    await run(cast(KitaruAPIClient, fake), job_id)
+
+    assert json.loads(result_path.read_text()) == 0.5
 
 
-def test_resolve_scorer_registry_arm_without_path(
+async def test_run_registry_arm_without_plugin_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reject a registry scorer without a materialized code path."""
-    monkeypatch.delenv("KITARU_JOB_PLUGIN_PATH", raising=False)
-    with pytest.raises(ScoringError, match="KITARU_JOB_PLUGIN_PATH is not set"):
-        resolve_scorer(plugin_scorer(uuid.uuid4()))
-
-
-def test_resolve_scorer_source_arm() -> None:
-    """Resolve a source reference against the ambient environment."""
-    scorer = resolve_scorer(source_scorer(uuid.uuid4(), {}))
-    assert scorer is constant_scorer
-
-
-async def test_score_job_records_the_score() -> None:
-    """Score the input session with payloads and patch the score."""
     job_id = uuid.uuid4()
-    session_id = uuid.uuid4()
-    fake = FakeClient(make_spec(job_id, source_scorer(session_id, {"value": 0.25})))
-
-    score = await score_job(cast(KitaruAPIClient, fake), job_id)
-
-    assert score == 0.25
-    assert fake.session_requests == [session_id]
-    assert fake.node_requests == [(session_id, True)]
-    assert [update.score for update in fake.updates] == [0.25]
-    assert fake.updates[0].status is None
+    monkeypatch.delenv("KITARU_JOB_PLUGIN_PATH", raising=False)
+    fake = FakeClient(make_spec(job_id, plugin_scorer(uuid.uuid4())))
+    with pytest.raises(ScoringError, match="KITARU_JOB_PLUGIN_PATH is not set"):
+        await run(cast(KitaruAPIClient, fake), job_id)
 
 
-async def test_score_job_rejects_another_kind() -> None:
+async def test_run_rejects_another_kind() -> None:
     """Reject a job spec without a scorer."""
     job_id = uuid.uuid4()
     fake = FakeClient(make_spec(job_id, None))
     with pytest.raises(ScoringError, match="is not a score job"):
-        await score_job(cast(KitaruAPIClient, fake), job_id)
+        await run(cast(KitaruAPIClient, fake), job_id)
 
 
-async def test_score_job_propagates_a_scorer_error() -> None:
-    """Propagate an invalid score without patching the job."""
+async def test_run_propagates_a_scorer_error_without_writing_a_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Propagate an invalid score without writing the result file."""
     job_id = uuid.uuid4()
-    fake = FakeClient(
-        make_spec(job_id, source_scorer(uuid.uuid4(), {"value": 1.5})),
-    )
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_JOB_RESULT_PATH", str(result_path))
+    fake = FakeClient(make_spec(job_id, source_scorer(uuid.uuid4(), {"value": 1.5})))
+
     with pytest.raises(ScoringError, match=r"expected a value in 0\.\.1"):
-        await score_job(cast(KitaruAPIClient, fake), job_id)
-    assert fake.updates == []
+        await run(cast(KitaruAPIClient, fake), job_id)
+    assert not result_path.exists()

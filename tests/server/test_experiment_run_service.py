@@ -27,6 +27,7 @@ from conftest import (
     FakeJobRepository,
     FakePluginRepository,
     FakeReplayConfigRepository,
+    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
     FakeWorkerRepository,
@@ -56,7 +57,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunStatus,
     InvalidExperimentRunTransition,
 )
-from kitaru.server.domain.job import JobStatus
+from kitaru.server.domain.job import JobStatus, WorkerScope
 from kitaru.server.domain.replay_config import (
     ReplayConfigNotFound,
     ScoringPolicy,
@@ -146,25 +147,39 @@ def job_repository(
     config_repository: FakeReplayConfigRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(session_repository, version_repository, config_repository)
+    return FakeJobRepository(session_repository, version_repository)
+
+
+@pytest.fixture
+def replay_repository(
+    job_repository: FakeJobRepository,
+    config_repository: FakeReplayConfigRepository,
+    session_repository: FakeSessionRepository,
+) -> FakeReplayRepository:
+    """Provide a fake replay repository."""
+    return FakeReplayRepository(job_repository, config_repository, session_repository)
 
 
 @pytest.fixture
 def repository(
     experiment_repository: FakeExperimentRepository,
     job_repository: FakeJobRepository,
+    replay_repository: FakeReplayRepository,
     tag_repository: FakeTagRepository,
 ) -> FakeExperimentRunRepository:
     """Provide a fake experiment run repository."""
-    return FakeExperimentRunRepository(
+    run_repository = FakeExperimentRunRepository(
         experiment_repository, job_repository, tag_repository
     )
+    run_repository.replay_repository = replay_repository
+    return run_repository
 
 
 @pytest.fixture
 def service(
     repository: FakeExperimentRunRepository,
     job_repository: FakeJobRepository,
+    replay_repository: FakeReplayRepository,
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
     session_repository: FakeSessionRepository,
@@ -173,6 +188,7 @@ def service(
     return ExperimentRunService(
         repository=repository,
         job_repository=job_repository,
+        replay_repository=replay_repository,
         replay_config_repository=config_repository,
         experiment_repository=experiment_repository,
         session_repository=session_repository,
@@ -364,7 +380,7 @@ async def test_list_run_jobs(
     experiment_service: ExperimentService,
     experiment: Experiment,
 ) -> None:
-    """List the jobs of a run with their inlined config."""
+    """List the jobs of a run."""
     created, _ = await experiment_service.start_run(
         experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
     )
@@ -372,11 +388,9 @@ async def test_list_run_jobs(
         created.id, ExperimentRunJobsFilter(), actor=ACTOR
     )
     assert total == 2
-    for job, config in jobs:
+    for job in jobs:
         assert job.experiment_run_id == created.id
         assert job.status is JobStatus.PENDING
-        assert config.id == job.replay_config_id
-        assert config.scoring_policy == SCORING_POLICY
 
     jobs, total = await service.list_run_jobs(
         created.id, ExperimentRunJobsFilter(page=2, page_size=1), actor=ACTOR
@@ -405,7 +419,9 @@ async def test_cancel_run_cancels_pending_and_claimed(
     run, _ = await experiment_service.start_run(
         experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
     )
-    await job_repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
+    await job_repository.claim_pending(
+        WORKER_ID, 1, WorkerScope(experiment_run_id=run.id)
+    )
     canceled, progress = await service.cancel_run(run.id, actor=ACTOR)
     assert canceled.status is ExperimentRunStatus.CANCELED
     assert canceled.ended_at is not None
@@ -426,7 +442,9 @@ async def test_cancel_run_keeps_running_jobs(
     run, _ = await experiment_service.start_run(
         experiment.id, agent_version_id=None, score_baselines=False, actor=ACTOR
     )
-    claimed = await job_repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
+    claimed = await job_repository.claim_pending(
+        WORKER_ID, 1, WorkerScope(experiment_run_id=run.id)
+    )
     running = claimed[0]
     running.start()
     await job_repository.update(running)

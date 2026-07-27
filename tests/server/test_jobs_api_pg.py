@@ -83,9 +83,13 @@ async def test_standalone_job_flow_persists_across_requests(
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
 
-    response = await client.get(f"/v1/jobs/{first['id']}")
+    response = await client.get(f"/v1/replays/{first['id']}")
     assert response.status_code == 200
     assert response.json() == first
+
+    response = await client.get(f"/v1/jobs/{first['job_id']}")
+    assert response.status_code == 200
+    assert response.json()["kind"] == "replay"
 
     response = await client.get(
         "/v1/jobs",
@@ -108,16 +112,21 @@ async def test_standalone_worker_lifecycle_end_to_end(
     body = {"input_session_id": session_id, "scoring_policy": SCORING_POLICY}
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
-    job_id = response.json()["id"]
+    job_id = response.json()["job_id"]
 
     response = await client.post("/v1/workers", json={"name": "worker-1"})
     assert response.status_code == 200
     worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
+        "/v1/jobs/claim",
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 1,
+            "scope": {"job_id": job_id},
+        },
     )
     assert response.status_code == 200
-    claimed = response.json()
+    claimed = response.json()["jobs"][0]["job"]
     assert claimed["status"] == "claimed"
     assert claimed["worker_id"] == worker_id
 
@@ -132,9 +141,15 @@ async def test_standalone_worker_lifecycle_end_to_end(
     assert response.status_code == 200
     other_worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": other_worker_id}
+        "/v1/jobs/claim",
+        json={
+            "worker_id": other_worker_id,
+            "max_jobs": 1,
+            "scope": {"job_id": job_id},
+        },
     )
     assert response.status_code == 200
+    assert len(response.json()["jobs"]) == 1
 
     response = await client.post(
         f"/v1/workers/{other_worker_id}/heartbeat", json={"job_ids": [job_id]}
@@ -226,12 +241,16 @@ async def test_session_run_flow_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.json()["origin"] == "recorded"
     result_session_id = response.json()["id"]
 
+    response = await client.patch(
+        f"/v1/sessions/{result_session_id}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
     assert body["result_session_id"] == result_session_id
-    assert body["passed"] is None
+    assert body["result"] is None
 
 
 async def test_migrated_job_table_carries_the_hot_path_indexes(

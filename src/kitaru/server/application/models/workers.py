@@ -25,7 +25,7 @@ class WorkerFilter(FrozenModel):
     """Worker list filter."""
 
     name: str | None = None
-    agent_id: uuid.UUID | None = None
+    agent_version_id: uuid.UUID | None = None
     seen_after: datetime | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)

@@ -21,7 +21,7 @@ from typing import Any
 
 from kitaru.api_models.v1.session_nodes import NodeStatus, NodeType
 from kitaru.api_models.v1.sessions import TokenUsage
-from kitaru.importing import ParsedNode, ParsedSession, ParseFailure
+from kitaru.job.importer import ParsedNode, ParsedSession, ParseFailure
 
 SPAN_NODE_TYPES = {"llm": NodeType.LLM_CALL, "tool": NodeType.TOOL_CALL}
 
@@ -125,7 +125,7 @@ def _parsed_session(record: dict[str, Any]) -> ParsedSession:
     )
 
 
-def parse(payload: bytes) -> Iterator[ParsedSession | ParseFailure]:
+def parse(payload: bytes, params: dict) -> Iterator[ParsedSession | ParseFailure]:
     """Parse a JSONL trace export into sessions, one record per line."""
     for line, raw in enumerate(payload.decode("utf-8").splitlines(), start=1):
         if not raw.strip():

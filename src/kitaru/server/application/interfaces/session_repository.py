@@ -33,6 +33,8 @@ class SessionRepository(Protocol):
             AgentNotFound: No agent has the session's agent id.
             AgentVersionNotFound: No agent version has the session's agent
                 version id.
+            JobNotFound: No job has the session's job id.
+            JobAlreadyLinked: The job already has a session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 

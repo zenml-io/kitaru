@@ -28,7 +28,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-        sa.Column("agent_ids", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("scope", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(
@@ -123,7 +123,6 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("kind", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("experiment_run_id", sa.Uuid(), nullable=True),
-        sa.Column("replay_config_id", sa.Uuid(), nullable=True),
         sa.Column("agent_version_id", sa.Uuid(), nullable=True),
         sa.Column("agent_id", sa.Uuid(), nullable=True),
         sa.Column("parent_job_id", sa.Uuid(), nullable=True),
@@ -159,11 +158,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("error", sa.Text(), nullable=True),
-        sa.Column("passed", sa.Boolean(), nullable=True),
-        sa.Column("score", sa.Float(), nullable=True),
-        sa.Column("scores", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("diff", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
-        sa.Column("stats", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("result", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_job_agent_id"),
         sa.ForeignKeyConstraint(
             ["agent_version_id"], ["agent_version.id"], name="fk_job_agent_version_id"
@@ -190,9 +185,6 @@ def upgrade() -> None:
             ["plugin_version_id"],
             ["plugin_version.id"],
             name="fk_job_plugin_version_id",
-        ),
-        sa.ForeignKeyConstraint(
-            ["replay_config_id"], ["replay_config.id"], name="fk_job_replay_config_id"
         ),
         sa.ForeignKeyConstraint(
             ["result_session_id"], ["session.id"], name="fk_job_result_session_id"
@@ -244,6 +236,59 @@ def upgrade() -> None:
         batch_op.drop_index(batch_op.f("ix_replay_original_session_id"))
 
     op.drop_table("replay")
+    op.create_table(
+        "replay",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("job_id", sa.Uuid(), nullable=False),
+        sa.Column("experiment_run_id", sa.Uuid(), nullable=True),
+        sa.Column("replay_config_id", sa.Uuid(), nullable=False),
+        sa.Column("input_session_id", sa.Uuid(), nullable=False),
+        sa.Column("passed", sa.Boolean(), nullable=True),
+        sa.Column("score", sa.Float(), nullable=True),
+        sa.Column("scores", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("diff", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["experiment_run_id"],
+            ["experiment_run.id"],
+            name="fk_replay_experiment_run_id",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["input_session_id"], ["session.id"], name="fk_replay_input_session_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["job_id"], ["job.id"], name="fk_replay_job_id", ondelete="CASCADE"
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name="fk_replay_owner_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["replay_config_id"],
+            ["replay_config.id"],
+            name="fk_replay_replay_config_id",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("job_id", name="uq_replay_job_id"),
+    )
+    with op.batch_alter_table("replay", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_replay_experiment_run_id", ["experiment_run_id"], unique=False
+        )
+        batch_op.create_index(
+            "ix_replay_input_session_id", ["input_session_id"], unique=False
+        )
+
+    with op.batch_alter_table("session", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("job_id", sa.Uuid(), nullable=True))
+        batch_op.create_foreign_key(
+            "fk_session_job_id", "job", ["job_id"], ["id"], ondelete="SET NULL"
+        )
+        batch_op.create_unique_constraint("uq_session_job_id", ["job_id"])
+
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
         batch_op.add_column(sa.Column("run_image", sa.Text(), nullable=True))
         batch_op.add_column(
@@ -282,6 +327,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
     # ### commands auto generated by Alembic - please adjust! ###
+    with op.batch_alter_table("session", schema=None) as batch_op:
+        batch_op.drop_constraint("uq_session_job_id", type_="unique")
+        batch_op.drop_constraint("fk_session_job_id", type_="foreignkey")
+        batch_op.drop_column("job_id")
+
+    with op.batch_alter_table("replay", schema=None) as batch_op:
+        batch_op.drop_index("ix_replay_input_session_id")
+        batch_op.drop_index("ix_replay_experiment_run_id")
+
+    op.drop_table("replay")
     with op.batch_alter_table("experiment_run", schema=None) as batch_op:
         batch_op.drop_column("executor_handle")
         batch_op.drop_column("execution_target")

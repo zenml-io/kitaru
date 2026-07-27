@@ -22,6 +22,7 @@ from kitaru.server.application.interfaces.worker_repository import (
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.workers import WorkerFilter
+from kitaru.server.domain.job import WorkerScope
 from kitaru.server.domain.worker import DuplicateWorkerName, Worker
 
 
@@ -44,19 +45,19 @@ class WorkerService:
     async def register_worker(
         self,
         name: str,
-        agent_ids: list[uuid.UUID],
+        scope: WorkerScope,
         metadata: dict[str, Any],
         actor: AuthContext,
     ) -> Worker:
         """Register a worker owned by the caller, upserting by name.
 
-        A worker already registered under the name gets its served agents
+        A worker already registered under the name gets its claim scope
         and metadata replaced and its last seen time bumped. A concurrent
         registration of the same name falls back to the update path.
 
         Args:
             name: Worker name.
-            agent_ids: Ids of the served agents, empty means all agents.
+            scope: Claim scope.
             metadata: Worker metadata.
             actor: Caller context.
 
@@ -70,7 +71,7 @@ class WorkerService:
         worker = Worker(
             owner_id=actor.account.id,
             name=name,
-            agent_ids=agent_ids,
+            scope=scope,
             last_seen_at=datetime.now(UTC),
             metadata=metadata,
         )
@@ -78,7 +79,7 @@ class WorkerService:
             return await self._repository.create(worker)
         except DuplicateWorkerName:
             existing = await self._repository.get_by_name(name)
-            existing.refresh(agent_ids=agent_ids, metadata=metadata)
+            existing.refresh(scope=scope, metadata=metadata)
             return await self._repository.update(existing)
 
     async def get_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> Worker:

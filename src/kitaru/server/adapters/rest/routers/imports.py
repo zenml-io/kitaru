@@ -57,4 +57,4 @@ async def create_import(
         Created job.
     """
     job = await service.create_import(import_create_to_command(body), actor=actor)
-    return job_to_response(job, None)
+    return job_to_response(job)

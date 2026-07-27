@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""End-to-end test driver for the record, job, and experiment loop."""
+"""End-to-end test driver for the record, replay, and experiment loop."""
 
 import asyncio
 import os
@@ -20,7 +20,6 @@ import traceback
 import uuid
 from pathlib import Path
 
-from kitaru import Runner
 from kitaru.api_models.v1.agent_versions import (
     AgentVersionCreateRequest,
     AgentVersionUpdateRequest,
@@ -42,11 +41,12 @@ from kitaru.api_models.v1.imports import ImportCreateRequest
 from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
     HistoryScope,
+    ImportStats,
     JobClaimRequest,
+    JobKind,
     JobResponse,
     JobStatus,
     RegistryScorerConfig,
-    ReplayCreateRequest,
     ReplayOverride,
     ScoringPolicy,
     SourceScorerConfig,
@@ -54,7 +54,9 @@ from kitaru.api_models.v1.jobs import (
     StaticPolicy,
     ToolPolicyConfig,
     ToolPolicyOnMiss,
+    WorkerScope,
 )
+from kitaru.api_models.v1.replays import ReplayCreateRequest, ReplayResponse
 from kitaru.api_models.v1.secrets import SecretCreateRequest
 from kitaru.api_models.v1.session_nodes import (
     NodeStatus,
@@ -71,6 +73,7 @@ from kitaru.api_models.v1.sessions import (
 from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
+from kitaru.worker import Worker, WorkerConfig
 
 API_URL = os.environ.get("KITARU_E2E_API_URL", "http://127.0.0.1:8300")
 ACCOUNT_NAME = os.environ.get("KITARU_E2E_ACCOUNT_NAME", "default")
@@ -98,6 +101,18 @@ IMPORTED_NODE_COUNTS = {
     "trace-2026-07-20-004": 4,
 }
 
+# Wall clock bound on every worker entry, so a stuck job fails the run
+# instead of hanging it.
+WORKER_TIMEOUT_SECONDS = 300.0
+WORKER_POLL_INTERVAL_SECONDS = 0.5
+
+TERMINAL_JOB_STATUSES = (
+    JobStatus.COMPLETED,
+    JobStatus.FAILED,
+    JobStatus.TIMED_OUT,
+    JobStatus.CANCELED,
+)
+
 POPULATE_RUNS: list[dict[str, str] | str] = [
     '{"question": "What is the weather in Berlin, and what is 21 * 2?"}',
     "Weather in Berlin plus 21 * 2, please answer briefly.",
@@ -110,7 +125,7 @@ POPULATE_RUNS: list[dict[str, str] | str] = [
 
 
 def scoring_policy(registry_version: int | None = None) -> ScoringPolicy:
-    """Build the scoring policy shared by the experiment and standalone job."""
+    """Build the scoring policy shared by the experiment and standalone replay."""
     scorers: list[SourceScorerConfig | RegistryScorerConfig] = [
         SourceScorerConfig(
             name="answer_quality",
@@ -157,6 +172,63 @@ def check(condition: bool, message: str) -> None:
     """Assert a condition with a readable message."""
     if not condition:
         raise AssertionError(message)
+
+
+def worker_config(name: str, scope: WorkerScope, concurrency: int = 1) -> WorkerConfig:
+    """Build a worker config for one e2e scope."""
+    return WorkerConfig(
+        name=name,
+        scope=scope,
+        concurrency=concurrency,
+        poll_interval=WORKER_POLL_INTERVAL_SECONDS,
+        timeout=WORKER_TIMEOUT_SECONDS,
+    )
+
+
+async def run_experiment_run(run_id: uuid.UUID, concurrency: int = 2) -> None:
+    """Drain an experiment run with a run-pinned worker."""
+    await Worker(
+        worker_config(
+            f"e2e-run-{run_id.hex[:8]}",
+            WorkerScope(experiment_run_id=run_id),
+            concurrency,
+        )
+    ).run()
+
+
+async def run_job(client: KitaruAPIClient, job_id: uuid.UUID) -> JobResponse:
+    """Drain one job and its fan-out children with a job-pinned worker."""
+    await Worker(
+        worker_config(f"e2e-job-{job_id.hex[:8]}", WorkerScope(job_id=job_id))
+    ).run()
+    return await client.jobs.get(job_id)
+
+
+async def run_pool_worker(
+    client: KitaruAPIClient, job_id: uuid.UUID, scope: WorkerScope
+) -> JobResponse:
+    """Drain one pool job with an unpinned worker stopped by a watcher.
+
+    An unpinned scope claims until it is told to stop, so a watcher polls
+    the job and sets the stop event once it goes terminal.
+    """
+    stop = asyncio.Event()
+
+    async def watch() -> None:
+        while not stop.is_set():
+            job = await client.jobs.get(job_id)
+            if job.status in TERMINAL_JOB_STATUSES:
+                stop.set()
+                return
+            await asyncio.sleep(WORKER_POLL_INTERVAL_SECONDS)
+
+    watcher = asyncio.create_task(watch())
+    try:
+        await Worker(worker_config("e2e-pool-worker", scope)).run(stop)
+    finally:
+        stop.set()
+        await watcher
+    return await client.jobs.get(job_id)
 
 
 async def run_agent_process(env: dict[str, str], argument: str | None = None) -> None:
@@ -262,41 +334,49 @@ def check_llm_models(nodes: list[SessionNodeResponse], expect_model: str) -> Non
 
 async def check_replay_result(
     client: KitaruAPIClient,
+    replay: ReplayResponse,
     job: JobResponse,
     original: SessionResponse,
     expect_model: str,
     expect_calculate_policy: str,
     scorer_names: tuple[str, ...] = SCORER_NAMES,
 ) -> None:
-    """Assert a completed job, its result session, and its node tree."""
+    """Assert a settled replay, its job, its result session, and its nodes."""
     check(
         job.status is JobStatus.COMPLETED,
-        f"job {job.id} is {job.status}: {job.error}",
+        f"replay job {job.id} is {job.status}: {job.error}",
     )
-    check(job.passed is not None, "job has no passed outcome")
-    check(job.score is not None, "job has no score")
+    check(replay.job_id == job.id, "replay is not bound to its job")
+    check(replay.error is None, f"replay {replay.id} failed: {replay.error}")
+    check(replay.passed is not None, "replay has no passed outcome")
+    check(replay.score is not None, "replay has no score")
     check(
-        job.scores is not None and set(job.scores) == set(scorer_names),
-        f"job scores incomplete: {job.scores}",
+        replay.scores is not None and set(replay.scores) == set(scorer_names),
+        f"replay scores incomplete: {replay.scores}",
     )
-    check(job.diff is not None, "job has no diff summary")
-    assert job.diff is not None
-    for field in ("cost", "tokens", "tool_calls", "score_deltas"):
-        check(field in job.diff, f"diff summary lacks {field}")
-    for side in ("original", "replay"):
-        check(
-            job.diff["cost"][side] is not None and job.diff["cost"][side] > 0,
-            f"diff summary lacks {side} cost: {job.diff['cost']}",
-        )
-        check(
-            job.diff["tokens"][side]["input_tokens"] is not None,
-            f"diff summary lacks {side} tokens: {job.diff['tokens']}",
-        )
-    check(job.result_session_id is not None, "job has no result session")
+    check(job.result_session_id is not None, "replay job has no result session")
     assert job.result_session_id is not None
+    check(
+        replay.result_session_id == job.result_session_id,
+        "replay result session differs from the job's",
+    )
+    check(job.result is None, f"replay job carries a result: {job.result}")
+
+    children = await client.jobs.list(kind=JobKind.SCORE, page_size=50)
+    scored = [child for child in children.items if child.parent_job_id == job.id]
+    check(scored != [], f"replay job {job.id} fanned out no score jobs")
+    for child in scored:
+        check(
+            child.status is JobStatus.COMPLETED,
+            f"score job {child.id} is {child.status}: {child.error}",
+        )
+        check(
+            isinstance(child.result, int | float) and 0 <= child.result <= 1,
+            f"score job {child.id} carries no score result: {child.result}",
+        )
 
     result = await client.sessions.get(job.result_session_id)
-    check(result.origin is SessionOrigin.REPLAY, "result session origin is not job")
+    check(result.origin is SessionOrigin.REPLAY, "result session origin is not replay")
     nodes = await client.session_nodes.list(result.id, include_payloads=True)
     check_session_tree(result, nodes)
     check_llm_models(nodes, expect_model)
@@ -325,14 +405,16 @@ async def check_replay_result(
 
 async def check_replay_diff(
     client: KitaruAPIClient,
+    replay: ReplayResponse,
     job: JobResponse,
     original_model: str,
     effective_model: str,
     scorer_names: tuple[str, ...] = SCORER_NAMES,
 ) -> None:
     """Assert the computed diff aligns the node trees and shows the override."""
-    diff = await client.jobs.get_diff(job.id)
-    check(diff.original_session_id == job.input_session_id, "diff original id")
+    diff = await client.replays.get_diff(replay.id)
+    check(diff.replay_id == replay.id, "diff replay id")
+    check(diff.original_session_id == replay.input_session_id, "diff original id")
     check(diff.result_session_id == job.result_session_id, "diff result id")
     check(
         len(diff.node_pairs) == 5,
@@ -347,6 +429,14 @@ async def check_replay_diff(
     check(
         diff.input_diff.model.effective == [effective_model],
         f"diff effective models {diff.input_diff.model.effective}",
+    )
+    check(
+        any(pair.cost_delta is not None for pair in diff.node_pairs),
+        "no node pair reports a cost delta",
+    )
+    check(
+        any(pair.token_deltas.input_tokens is not None for pair in diff.node_pairs),
+        "no node pair reports token deltas",
     )
     mocked_pairs = [pair for pair in diff.node_pairs if pair.mocked]
     check(len(mocked_pairs) == 2, f"expected 2 mocked pairs, got {len(mocked_pairs)}")
@@ -405,21 +495,21 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
 def check_import_stats(
     job: JobResponse, created: int, skipped: int, failed: int
 ) -> None:
-    """Assert the stats an import job reported."""
+    """Assert the stats an import job shipped as its result."""
     check(
         job.status is JobStatus.COMPLETED,
         f"import job {job.id} is {job.status}: {job.error}",
     )
-    check(job.stats is not None, "import job has no stats")
-    assert job.stats is not None
-    counts = (job.stats.created, job.stats.skipped, job.stats.failed)
+    check(job.result is not None, "import job has no result")
+    stats = ImportStats.model_validate(job.result)
+    counts = (stats.created, stats.skipped, stats.failed)
     check(
         counts == (created, skipped, failed),
         f"unexpected import stats {counts}, expected {(created, skipped, failed)}",
     )
     check(
-        len(job.stats.failures) == failed,
-        f"unexpected failure sample {job.stats.failures}",
+        len(stats.failures) == failed,
+        f"unexpected failure sample {stats.failures}",
     )
 
 
@@ -469,6 +559,9 @@ async def main() -> int:
     ) as jwt_client:
         issued = await jwt_client.api_keys.create(ApiKeyCreateRequest(name="e2e"))
     api_key = issued.key
+    # The worker reads its connection from the process environment.
+    os.environ["KITARU_API_URL"] = API_URL
+    os.environ["KITARU_API_KEY"] = api_key
     ok(f"logged in as {ACCOUNT_NAME} and created API key {issued.name}")
 
     async with KitaruAPIClient(base_url=API_URL, api_key=api_key) as client:
@@ -589,36 +682,44 @@ async def main() -> int:
             run.progress.pending == 4 and run.progress.total == 4,
             f"unexpected initial progress {run.progress}",
         )
-        replays_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
-        check(replays_page.total == 4, f"expected 4 jobs, got {replays_page.total}")
-        spec = await client.jobs.get_spec(replays_page.items[0].id)
+        jobs_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
+        check(jobs_page.total == 4, f"expected 4 jobs, got {jobs_page.total}")
+        spec = await client.jobs.get_spec(jobs_page.items[0].id)
         check(
             spec.secret_env == {"E2E_SECRET_TOKEN": SECRET_VALUE},
             f"secret env not resolved: {list(spec.secret_env)}",
         )
         check(spec.scorer is None, "replay spec carries a scorer")
-        ok("experiment run created with 4 pending jobs and resolved secret env")
+        replays_page = await client.replays.list(experiment_run_id=run.id, page_size=50)
+        check(replays_page.total == 4, f"expected 4 replays, got {replays_page.total}")
+        check(
+            all(replay.passed is None for replay in replays_page.items),
+            "a replay is settled before the run executed",
+        )
+        ok("experiment run created with 4 pending jobs, replays, and secret env")
 
-        # Step f: execute the run with the in-process runner.
-        runner = Runner(API_URL, api_key, concurrency=2)
-        run = await runner.run_experiment_run(run.id)
+        # Step f: execute the run with a run-pinned worker.
+        await run_experiment_run(run.id, concurrency=2)
+        run = await client.experiment_runs.get(run.id)
         check_run_summary(run, replay_count=4)
         ok("experiment run completed with an aggregate summary")
 
-        replays_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
+        replays_page = await client.replays.list(experiment_run_id=run.id, page_size=50)
+        check(replays_page.total == 4, f"expected 4 replays, got {replays_page.total}")
         sessions_by_id = {session.id: session for session in sessions}
-        for job in replays_page.items:
-            assert job.input_session_id is not None
-            original = sessions_by_id[job.input_session_id]
+        for replay in replays_page.items:
+            job = await client.jobs.get(replay.job_id)
+            original = sessions_by_id[replay.input_session_id]
             await check_replay_result(
                 client,
+                replay,
                 job,
                 original,
                 expect_model=OVERRIDE_MODEL,
                 expect_calculate_policy="static",
             )
-            await check_replay_diff(client, job, ORIGINAL_MODEL, OVERRIDE_MODEL)
-        ok("all 4 jobs completed, scored, mocked as configured, and diffed")
+            await check_replay_diff(client, replay, job, ORIGINAL_MODEL, OVERRIDE_MODEL)
+        ok("all 4 replays completed, scored, mocked as configured, and diffed")
 
         for session in sessions:
             refreshed = await client.sessions.get(session.id)
@@ -628,7 +729,7 @@ async def main() -> int:
             )
         ok("baseline scores written to every original session")
 
-        # Step g: standalone job scored by a registered scorer as well.
+        # Step g: standalone replay scored by a registered scorer as well.
         registered = await client.scorers.register(
             REGISTRY_SCORER_NAME,
             REGISTRY_SCORER_FILE,
@@ -645,11 +746,14 @@ async def main() -> int:
                 scoring_policy=scoring_policy(registry_version=registered.version),
             )
         )
-        check(standalone.experiment_run_id is None, "standalone job has a run")
-        standalone = await runner.run_job(standalone.id)
+        check(standalone.experiment_run_id is None, "standalone replay has a run")
+        check(standalone.passed is None, "standalone replay is settled on creation")
+        standalone_job = await run_job(client, standalone.job_id)
+        standalone = await client.replays.get(standalone.id)
         await check_replay_result(
             client,
             standalone,
+            standalone_job,
             sessions[0],
             expect_model=ORIGINAL_MODEL,
             expect_calculate_policy="history",
@@ -658,6 +762,7 @@ async def main() -> int:
         await check_replay_diff(
             client,
             standalone,
+            standalone_job,
             ORIGINAL_MODEL,
             ORIGINAL_MODEL,
             scorer_names=registry_names,
@@ -667,9 +772,14 @@ async def main() -> int:
             and standalone.scores[REGISTRY_SCORER_NAME] > 0,
             f"registered scorer produced no score: {standalone.scores}",
         )
-        ok("standalone job completed, scored by a registered scorer, and diffed")
+        passed_page = await client.replays.list(passed=True, page_size=50)
+        check(
+            standalone.id in {replay.id for replay in passed_page.items},
+            "the settled standalone replay is missing from the passed filter",
+        )
+        ok("standalone replay completed, scored by a registered scorer, and diffed")
 
-        # Step h: session run executed as a standalone job.
+        # Step h: session run drained by a version-pinned pool worker.
         live_inputs = {"question": "Live run: Berlin weather and 21 * 2?"}
         live_job = await client.session_runs.create(
             SessionRunCreateRequest(
@@ -678,7 +788,11 @@ async def main() -> int:
                 name="e2e-live-run",
             )
         )
-        live_job = await runner.run_job(live_job.id)
+        live_job = await run_pool_worker(
+            client,
+            live_job.id,
+            WorkerScope(agent_version_ids=[version.id], kinds=[JobKind.SESSION_RUN]),
+        )
         check(
             live_job.status is JobStatus.COMPLETED,
             f"session run job is {live_job.status}: {live_job.error}",
@@ -700,7 +814,7 @@ async def main() -> int:
         live_nodes = await client.session_nodes.list(live.id, include_payloads=True)
         check_session_tree(live, live_nodes)
         check_llm_models(live_nodes, ORIGINAL_MODEL)
-        ok("session run job completed with a recorded live session")
+        ok("session run drained by a version-pinned pool worker")
 
         # Step i: negative controls.
         try:
@@ -716,17 +830,31 @@ async def main() -> int:
         else:
             raise AssertionError("config update on a frozen experiment succeeded")
         negative_worker = await client.workers.create(
-            WorkerCreateRequest(name="e2e-negative")
+            WorkerCreateRequest(
+                name="e2e-negative", scope=WorkerScope(experiment_run_id=run.id)
+            )
+        )
+        check(
+            negative_worker.scope.experiment_run_id == run.id,
+            f"worker scope not stored: {negative_worker.scope}",
         )
         claim = await client.jobs.claim(
             JobClaimRequest(
                 worker_id=negative_worker.id,
                 max_jobs=10,
-                experiment_run_id=run.id,
+                scope=WorkerScope(experiment_run_id=run.id),
             )
         )
         check(claim.jobs == [], "claim on a completed run returned jobs")
-        ok("frozen experiment rejects config updates, drained run claims nothing")
+        claim = await client.jobs.claim(
+            JobClaimRequest(
+                worker_id=negative_worker.id,
+                max_jobs=10,
+                scope=WorkerScope(kinds=[JobKind.REPLAY]),
+            )
+        )
+        check(claim.jobs == [], "kind-scoped claim on drained pool work returned jobs")
+        ok("frozen experiment rejects config updates, drained scopes claim nothing")
 
         # Step j: import recorded traces through an import job.
         registered_importer = await client.importers.register(
@@ -744,13 +872,14 @@ async def main() -> int:
         )
         import_job = await client.imports.create(import_request)
         check(import_job.agent_id == agent.id, "import job is not bound to the agent")
-        import_job = await runner.run_job(import_job.id)
+        import_job = await run_job(client, import_job.id)
         check_import_stats(import_job, created=3, skipped=0, failed=1)
         await check_imported_sessions(client, agent.id)
         ok("import job completed, 3 traces imported with their node trees")
 
         # Step k: re-importing the same payload skips every session.
-        repeat = await runner.run_job((await client.imports.create(import_request)).id)
+        repeat = await client.imports.create(import_request)
+        repeat = await run_job(client, repeat.id)
         check_import_stats(repeat, created=0, skipped=3, failed=1)
         page = await client.sessions.list(
             agent_id=agent.id, origin=SessionOrigin.IMPORTED, page_size=50

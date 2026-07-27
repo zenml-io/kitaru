@@ -11,19 +11,30 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Scoring of sessions with user-defined scorer functions."""
+"""Scorer contract, loading, validation, and the score flow."""
 
+import asyncio
 import importlib
+import json
+import os
+import uuid
 from collections.abc import Callable
-from types import ModuleType
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from kitaru.api_models.v1.jobs import JobSpecScorer, SourceScorerConfig
 from kitaru.api_models.v1.session_nodes import SessionNodeResponse
 from kitaru.api_models.v1.sessions import SessionResponse
-from kitaru.plugin_loader import PluginLoadError, module_attribute
+from kitaru.client.api_client import KitaruAPIClient
+from kitaru.job.plugins import (
+    PluginLoadError,
+    get_module_attribute,
+    load_plugin_module,
+)
 
+PLUGIN_MODULE_NAME = "kitaru_scorer_plugin"
 SCORER_LABEL = "Scorer"
 
 
@@ -38,23 +49,22 @@ class SessionView(BaseModel):
     nodes: list[SessionNodeResponse]
 
 
-def scorer_attribute(module: ModuleType, attribute: str) -> Callable[..., float]:
-    """Return the scorer attribute of an imported module.
+def _required_env(name: str) -> str:
+    """Read an environment variable of the score job contract.
 
     Args:
-        module: Module holding the scorer.
-        attribute: Name of the scorer attribute.
+        name: Name of the variable.
 
     Raises:
-        ScoringError: The attribute is missing or not callable.
+        ScoringError: The variable is not set.
 
     Returns:
-        Scorer function.
+        Value of the variable.
     """
-    try:
-        return module_attribute(module, attribute, SCORER_LABEL)
-    except PluginLoadError as exc:
-        raise ScoringError(str(exc)) from exc
+    value = os.environ.get(name)
+    if not value:
+        raise ScoringError(f"{name} is not set")
+    return value
 
 
 def load_scorer(source: str) -> Callable[..., float]:
@@ -84,7 +94,10 @@ def load_scorer(source: str) -> Callable[..., float]:
         raise ScoringError(
             f"Failed to import scorer module {module_name!r}: {exc}"
         ) from exc
-    return scorer_attribute(module, attribute)
+    try:
+        return get_module_attribute(module, attribute, SCORER_LABEL)
+    except PluginLoadError as exc:
+        raise ScoringError(str(exc)) from exc
 
 
 def call_scorer(
@@ -122,3 +135,65 @@ def call_scorer(
             f"Scorer {name!r} returned {value}, expected a value in 0..1"
         )
     return float(value)
+
+
+def _resolve_scorer(scorer: JobSpecScorer) -> Callable[..., float]:
+    """Load the scorer function a score job runs.
+
+    Registered code is imported from the file the worker materialized,
+    source references resolve against the ambient environment.
+
+    Args:
+        scorer: Scorer of the job spec.
+
+    Raises:
+        ScoringError: The code does not import, or the attribute is
+            missing or not callable.
+
+    Returns:
+        Scorer function.
+    """
+    if scorer.plugin is not None:
+        path = Path(_required_env("KITARU_JOB_PLUGIN_PATH"))
+        try:
+            module = load_plugin_module(PLUGIN_MODULE_NAME, path)
+        except PluginLoadError as exc:
+            raise ScoringError(
+                f"Failed to import scorer code from {path}: {exc}"
+            ) from exc
+        try:
+            return get_module_attribute(module, scorer.plugin.entrypoint, SCORER_LABEL)
+        except PluginLoadError as exc:
+            raise ScoringError(str(exc)) from exc
+    if not isinstance(scorer.config, SourceScorerConfig):
+        raise ScoringError(f"Scorer {scorer.config.name!r} has no code to run")
+    return load_scorer(scorer.config.source)
+
+
+async def run(client: KitaruAPIClient, job_id: uuid.UUID) -> None:
+    """Score the session of a score job and write the result.
+
+    Args:
+        client: API client.
+        job_id: Id of the job.
+
+    Raises:
+        ScoringError: The job is not a score job, its scorer does not
+            load, or the scorer raised or returned an invalid score.
+        APIError: A read failed.
+    """
+    spec = await client.jobs.get_spec(job_id)
+    if spec.scorer is None:
+        raise ScoringError(f"Job {job_id} is not a score job")
+    session, nodes = await asyncio.gather(
+        client.sessions.get(spec.scorer.input_session_id),
+        client.session_nodes.list(spec.scorer.input_session_id, include_payloads=True),
+    )
+    scorer = _resolve_scorer(spec.scorer)
+    score = call_scorer(
+        spec.scorer.config.name,
+        scorer,
+        SessionView(session=session, nodes=nodes),
+        spec.scorer.config.params,
+    )
+    Path(_required_env("KITARU_JOB_RESULT_PATH")).write_text(json.dumps(score))

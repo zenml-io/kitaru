@@ -13,24 +13,14 @@
 #  permissions and limitations under the License.
 """Deterministic session scorers."""
 
-from typing import Protocol
-
 from kitaru.api_models.v1.session_nodes import (
     NodeStatus,
     NodeType,
-    SessionNodeResponse,
 )
-from kitaru.api_models.v1.sessions import SessionResponse
+from kitaru.job.scorer import SessionView
 
 
-class ScoredSession(Protocol):
-    """Session view scored by the scorer functions."""
-
-    session: SessionResponse
-    nodes: list[SessionNodeResponse]
-
-
-def answer_quality(session: ScoredSession, keywords: list[str] | None = None) -> float:
+def answer_quality(session: SessionView, keywords: list[str] | None = None) -> float:
     """Score the final answer on keyword coverage and brevity."""
     text = str(session.session.outputs or "")
     if not text:
@@ -42,7 +32,7 @@ def answer_quality(session: ScoredSession, keywords: list[str] | None = None) ->
     return round((coverage + brevity) / 2, 4)
 
 
-def tool_efficiency(session: ScoredSession, budget: int = 4) -> float:
+def tool_efficiency(session: SessionView, budget: int = 4) -> float:
     """Score tool usage on success rate within a call budget."""
     tool_nodes = [
         node for node in session.nodes if node.node_type is NodeType.TOOL_CALL
@@ -53,7 +43,7 @@ def tool_efficiency(session: ScoredSession, budget: int = 4) -> float:
     return round((completed / len(tool_nodes)) * min(1.0, budget / len(tool_nodes)), 4)
 
 
-def token_budget(session: ScoredSession, max_tokens: int = 2000) -> float:
+def token_budget(session: SessionView, max_tokens: int = 2000) -> float:
     """Score total token usage against a budget."""
     tokens = session.session.tokens
     if tokens is None:

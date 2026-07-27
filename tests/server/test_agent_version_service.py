@@ -46,15 +46,7 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.execution import ExecutionTarget
-from kitaru.server.domain.job import Replay
-from kitaru.server.domain.replay_config import (
-    HistoryPolicy,
-    ReplayConfig,
-    ScoringPolicy,
-    SourceRef,
-    SourceScorerConfig,
-    ToolPolicyConfig,
-)
+from kitaru.server.domain.job import ReplayJob
 from kitaru.server.domain.secret import SecretNotFound
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
 
@@ -105,10 +97,9 @@ def config_repository() -> FakeReplayConfigRepository:
 def job_repository(
     session_repository: FakeSessionRepository,
     repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(session_repository, repository, config_repository)
+    return FakeJobRepository(session_repository, repository)
 
 
 @pytest.fixture
@@ -519,7 +510,6 @@ async def freeze_version(
     service: AgentVersionService,
     session_repository: FakeSessionRepository,
     job_repository: FakeJobRepository,
-    config_repository: FakeReplayConfigRepository,
     agent: Agent,
 ) -> uuid.UUID:
     """Store a runnable version referenced by a job.
@@ -528,7 +518,6 @@ async def freeze_version(
         service: Agent version service.
         session_repository: Fake session repository.
         job_repository: Fake job repository.
-        config_repository: Fake replay config repository.
         agent: Stored agent.
 
     Returns:
@@ -550,26 +539,8 @@ async def freeze_version(
             status=SessionStatus.COMPLETED,
         )
     )
-    config = await config_repository.create(
-        ReplayConfig(
-            owner_id=ACTOR.account.id,
-            tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
-            scoring_policy=ScoringPolicy(
-                scorers=[
-                    SourceScorerConfig(
-                        name="conciseness",
-                        source=SourceRef(
-                            module="my_pkg.scorers", attribute="conciseness"
-                        ),
-                    )
-                ],
-                pass_threshold=0.5,
-            ),
-        )
-    )
     await job_repository.create(
-        Replay(
-            replay_config_id=config.id,
+        ReplayJob(
             agent_version_id=version.id,
             input_session_id=session.id,
             execution_target=ExecutionTarget.POOL,
@@ -587,7 +558,7 @@ async def test_update_version_frozen_by_job(
 ) -> None:
     """Reject run spec and capability changes on a replayed version."""
     version_id = await freeze_version(
-        service, session_repository, job_repository, config_repository, agent
+        service, session_repository, job_repository, agent
     )
     frozen_message = f"Agent version {version_id} is frozen by existing jobs"
     with pytest.raises(AgentVersionFrozen, match=frozen_message):
@@ -623,7 +594,7 @@ async def test_delete_version_referenced_by_job(
 ) -> None:
     """Reject deleting a version that a job references."""
     version_id = await freeze_version(
-        service, session_repository, job_repository, config_repository, agent
+        service, session_repository, job_repository, agent
     )
     with pytest.raises(
         AgentVersionInUse,

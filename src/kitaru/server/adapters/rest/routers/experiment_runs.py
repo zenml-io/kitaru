@@ -169,7 +169,7 @@ async def list_experiment_run_jobs(
     )
     jobs, total = await service.list_run_jobs(run_id, jobs_filter, actor=actor)
     return Page[JobResponse](
-        items=[job_to_response(job, config) for job, config in jobs],
+        items=[job_to_response(job) for job in jobs],
         total=total,
         page=page,
         page_size=page_size,
@@ -184,9 +184,10 @@ async def cancel_experiment_run(
 ) -> ExperimentRunResponse:
     """Cancel an experiment run.
 
-    Pending and claimed jobs are canceled immediately, running ones
-    drain through the heartbeat path. The run lands on canceled right away
-    when no running job remains.
+    Pending and claimed jobs are canceled immediately, together with the
+    fan-out children of every job. Running jobs drain through the
+    heartbeat path. The run lands on canceled right away when no running
+    job remains.
 
     Clients observe HTTP 200 on success, 404 when no experiment run has
     this id, and 409 when the run is already terminal.

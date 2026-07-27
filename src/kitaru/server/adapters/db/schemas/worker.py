@@ -36,6 +36,7 @@ from kitaru.server.adapters.db.schemas.schema_utils import (
     index_name,
     unique_constraint_name,
 )
+from kitaru.server.domain.job import WorkerScope
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 from kitaru.server.domain.worker import Worker
 
@@ -58,7 +59,7 @@ class WorkerSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
 
     owner_id: uuid.UUID = Field(nullable=False)
     name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
-    agent_ids: list[str] = Field(default_factory=list, sa_type=JSONB, nullable=False)
+    scope: dict[str, Any] = Field(default_factory=dict, sa_type=JSONB, nullable=False)
     last_seen_at: datetime = Field(
         sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
         nullable=False,
@@ -82,7 +83,7 @@ class WorkerSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             id=worker.id,
             owner_id=worker.owner_id,
             name=worker.name,
-            agent_ids=[str(agent_id) for agent_id in worker.agent_ids],
+            scope=worker.scope.model_dump(mode="json"),
             last_seen_at=worker.last_seen_at,
             metadata_=worker.metadata,
         )
@@ -97,7 +98,7 @@ class WorkerSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             id=self.id,
             owner_id=self.owner_id,
             name=self.name,
-            agent_ids=[uuid.UUID(agent_id) for agent_id in self.agent_ids],
+            scope=WorkerScope.model_validate(self.scope),
             last_seen_at=self.last_seen_at,
             metadata=self.metadata_,
             created=self.created,

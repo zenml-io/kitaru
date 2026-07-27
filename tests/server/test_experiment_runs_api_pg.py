@@ -167,7 +167,11 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     worker_id = response.json()["id"]
     response = await client.post(
         "/v1/jobs/claim",
-        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 5,
+            "scope": {"experiment_run_id": run_id},
+        },
     )
     assert response.status_code == 200
     jobs = response.json()["jobs"]
@@ -235,13 +239,17 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
 
-    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 200
-    assert response.json()["status"] == "scoring"
+    assert response.json()["status"] == "completed"
 
     response = await client.post(
         "/v1/jobs/claim",
-        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 5,
+            "scope": {"experiment_run_id": run_id},
+        },
     )
     assert response.status_code == 200
     children = [claimed["job"] for claimed in response.json()["jobs"]]
@@ -254,20 +262,15 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
         )
         assert response.status_code == 200
         response = await client.patch(
-            f"/v1/jobs/{child['id']}", json={"status": "completed", "score": 0.8}
+            f"/v1/jobs/{child['id']}", json={"status": "completed", "result": 0.8}
         )
         assert response.status_code == 200
 
-    response = await client.get(f"/v1/jobs/{job_id}")
+    response = await client.get("/v1/replays", params={"experiment_run_id": run_id})
     assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "completed"
-    assert body["diff"]["tool_calls"] == {
-        "matched": 1,
-        "mocked": 1,
-        "added": 0,
-        "removed": 0,
-    }
+    replay = response.json()["items"][0]
+    assert replay["passed"] is True
+    assert replay["score"] == 0.8
 
     response = await client.get(f"/v1/experiment-runs/{run_id}")
     assert response.status_code == 200
@@ -278,7 +281,7 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert run["summary"]["pass_rate"] == 1.0
     assert run["progress"]["completed"] == 1
 
-    response = await client.get(f"/v1/jobs/{job_id}/diff")
+    response = await client.get(f"/v1/replays/{replay['id']}/diff")
     assert response.status_code == 200
     diff = response.json()
     assert diff["original_session_id"] == session_id
@@ -317,7 +320,11 @@ async def test_cancel_run_end_to_end(client: httpx.AsyncClient) -> None:
     worker_id = response.json()["id"]
     response = await client.post(
         "/v1/jobs/claim",
-        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 5,
+            "scope": {"experiment_run_id": run_id},
+        },
     )
     assert response.status_code == 200
     assert response.json()["jobs"] == []

@@ -27,16 +27,14 @@ from kitaru.api_models.v1.agent_versions import (
 from kitaru.api_models.v1.agents import AgentCreateRequest
 from kitaru.api_models.v1.experiment_runs import ExperimentRunCreateRequest
 from kitaru.api_models.v1.jobs import (
-    HistoryPolicy,
     JobClaimRequest,
     JobKind,
     JobStatus,
     JobUpdateRequest,
-    ReplayCreateRequest,
-    StandaloneJobClaimRequest,
     ToolLookupRequest,
-    ToolPolicyConfig,
+    WorkerScope,
 )
+from kitaru.api_models.v1.replays import ReplayCreateRequest
 from kitaru.api_models.v1.session_nodes import (
     NodeStatus,
     NodeType,
@@ -92,18 +90,15 @@ async def create_session(api_client: KitaruAPIClient) -> tuple[uuid.UUID, uuid.U
 async def test_create_get_list_round_trip(api_client: KitaruAPIClient) -> None:
     """Round-trip a standalone job through create, get, and list."""
     session_id, version_id = await create_session(api_client)
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
     )
+    created = await api_client.jobs.get(replay.job_id)
     assert created.experiment_run_id is None
     assert created.input_session_id == session_id
     assert created.agent_version_id == version_id
     assert created.status is JobStatus.PENDING
-    assert created.tool_policy == ToolPolicyConfig(default=HistoryPolicy())
-    assert created.scoring_policy == SCORING_POLICY
-
-    loaded = await api_client.jobs.get(created.id)
-    assert loaded == created
+    assert created.kind is JobKind.REPLAY
 
     page = await api_client.jobs.list(
         input_session_id=session_id,
@@ -126,7 +121,11 @@ async def test_list_by_run_and_worker(api_client: KitaruAPIClient) -> None:
     )
     worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
     claimed = await api_client.jobs.claim(
-        JobClaimRequest(worker_id=worker.id, max_jobs=1, experiment_run_id=created.id)
+        JobClaimRequest(
+            worker_id=worker.id,
+            max_jobs=1,
+            scope=WorkerScope(experiment_run_id=created.id),
+        )
     )
     assert len(claimed.jobs) == 1
     job_id = claimed.jobs[0].job.id
@@ -151,11 +150,12 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
-    """Round-trip a job through spec, update, and diff."""
+    """Round-trip a job through spec, update, fan-out, and diff."""
     session_id, _ = await create_session(api_client)
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
     )
+    created = await api_client.jobs.get(replay.job_id)
     spec = await api_client.jobs.get_spec(created.id)
     assert spec.job_id == created.id
     assert spec.input_session_id == session_id
@@ -182,14 +182,17 @@ async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
         result.id, SessionUpdateRequest(status=SessionStatus.COMPLETED)
     )
 
-    scoring = await api_client.jobs.update(
-        created.id, JobUpdateRequest(status=JobStatus.SCORING)
+    completed = await api_client.jobs.update(
+        created.id, JobUpdateRequest(status=JobStatus.COMPLETED)
     )
-    assert scoring.status is JobStatus.SCORING
+    assert completed.status is JobStatus.COMPLETED
+    assert completed.result_session_id == result.id
 
     worker = await api_client.workers.create(WorkerCreateRequest(name="scorer-1"))
     claimed = await api_client.jobs.claim(
-        JobClaimRequest(worker_id=worker.id, max_jobs=5, parent_job_id=created.id)
+        JobClaimRequest(
+            worker_id=worker.id, max_jobs=5, scope=WorkerScope(job_id=created.id)
+        )
     )
     assert {claimed_job.job.parent_job_id for claimed_job in claimed.jobs} == {
         created.id
@@ -204,15 +207,14 @@ async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
             child.id, JobUpdateRequest(status=JobStatus.RUNNING)
         )
         await api_client.jobs.update(
-            child.id, JobUpdateRequest(status=JobStatus.COMPLETED, score=0.8)
+            child.id, JobUpdateRequest(status=JobStatus.COMPLETED, result=0.8)
         )
-    completed = await api_client.jobs.get(created.id)
-    assert completed.status is JobStatus.COMPLETED
-    assert completed.result_session_id == result.id
-    assert completed.diff is not None
+    settled = await api_client.replays.get(replay.id)
+    assert settled.passed is True
+    assert settled.score == 0.8
 
-    diff = await api_client.jobs.get_diff(created.id)
-    assert diff.replay_id == created.id
+    diff = await api_client.replays.get_diff(replay.id)
+    assert diff.replay_id == replay.id
     assert diff.original_session_id == session_id
     assert diff.result_session_id == result.id
     assert diff.node_pairs == []
@@ -221,23 +223,28 @@ async def test_runner_round_trip(api_client: KitaruAPIClient) -> None:
 async def test_worker_lifecycle_round_trip(api_client: KitaruAPIClient) -> None:
     """Round-trip a job through claim, release, retry, and delete."""
     session_id, _ = await create_session(api_client)
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
     )
+    created = await api_client.jobs.get(replay.job_id)
     worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
-    claimed = await api_client.jobs.claim_standalone(
-        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
+    claimed = await api_client.jobs.claim(
+        JobClaimRequest(
+            worker_id=worker.id, max_jobs=1, scope=WorkerScope(job_id=created.id)
+        )
     )
-    assert claimed.status is JobStatus.CLAIMED
-    assert claimed.worker_id == worker.id
+    assert claimed.jobs[0].job.status is JobStatus.CLAIMED
+    assert claimed.jobs[0].job.worker_id == worker.id
 
     released = await api_client.jobs.release(created.id)
     assert released.status is JobStatus.PENDING
     assert released.attempt == 2
     assert released.worker_id is None
 
-    await api_client.jobs.claim_standalone(
-        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
+    await api_client.jobs.claim(
+        JobClaimRequest(
+            worker_id=worker.id, max_jobs=1, scope=WorkerScope(job_id=created.id)
+        )
     )
     failed = await api_client.jobs.update(
         created.id,
@@ -256,22 +263,23 @@ async def test_worker_lifecycle_round_trip(api_client: KitaruAPIClient) -> None:
         await api_client.jobs.get(created.id)
 
 
-async def test_claim_conflict(api_client: KitaruAPIClient) -> None:
-    """Surface HTTP 409 for a claim on a non-pending job."""
+async def test_claim_yields_a_job_once(api_client: KitaruAPIClient) -> None:
+    """Yield a claimed job to the first worker only."""
     session_id, _ = await create_session(api_client)
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
     )
     worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
     other = await api_client.workers.create(WorkerCreateRequest(name="worker-2"))
-    await api_client.jobs.claim_standalone(
-        created.id, StandaloneJobClaimRequest(worker_id=worker.id)
+    scope = WorkerScope(job_id=replay.job_id)
+    first = await api_client.jobs.claim(
+        JobClaimRequest(worker_id=worker.id, max_jobs=1, scope=scope)
     )
-    with pytest.raises(APIError) as exc_info:
-        await api_client.jobs.claim_standalone(
-            created.id, StandaloneJobClaimRequest(worker_id=other.id)
-        )
-    assert exc_info.value.status_code == 409
+    assert len(first.jobs) == 1
+    second = await api_client.jobs.claim(
+        JobClaimRequest(worker_id=other.id, max_jobs=1, scope=scope)
+    )
+    assert second.jobs == []
 
 
 async def test_tool_lookup_round_trip(api_client: KitaruAPIClient) -> None:
@@ -308,9 +316,10 @@ async def test_tool_lookup_round_trip(api_client: KitaruAPIClient) -> None:
     await api_client.sessions.update(
         session.id, SessionUpdateRequest(status=SessionStatus.COMPLETED)
     )
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session.id, scoring_policy=SCORING_POLICY)
     )
+    created = await api_client.jobs.get(replay.job_id)
     found = await api_client.jobs.tool_lookup(
         created.id,
         ToolLookupRequest(
@@ -337,12 +346,12 @@ async def test_tool_lookup_round_trip(api_client: KitaruAPIClient) -> None:
 async def test_update_illegal_transition(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 409 for an illegal runner transition."""
     session_id, _ = await create_session(api_client)
-    created = await api_client.replays.create(
+    replay = await api_client.replays.create(
         ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
     )
     with pytest.raises(APIError) as exc_info:
         await api_client.jobs.update(
-            created.id,
-            JobUpdateRequest(status=JobStatus.SCORING),
+            replay.job_id,
+            JobUpdateRequest(status=JobStatus.COMPLETED),
         )
     assert exc_info.value.status_code == 409

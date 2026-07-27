@@ -11,26 +11,24 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the import job harness."""
+"""Tests for the importer contract and the import flow."""
 
-import subprocess
-import sys
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from kitaru.api_models.v1.jobs import (
     MAX_IMPORT_FAILURES,
+    ImportStats,
     JobKind,
     JobSpecImporter,
     JobSpecPayload,
     JobSpecPlugin,
     JobSpecResponse,
-    JobUpdateRequest,
 )
 from kitaru.api_models.v1.plugins import PluginFormat
 from kitaru.api_models.v1.session_nodes import (
@@ -47,43 +45,64 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, ConflictError
-from kitaru.importing import (
+from kitaru.job.importer import (
+    NODE_BATCH_SIZE,
     ParsedItem,
     ParsedNode,
     ParsedSession,
-    ParseFailure,
     SessionImportError,
+    call_parser,
     flatten_nodes,
+    run,
     session_request,
 )
-from kitaru.imports import (
-    NODE_BATCH_SIZE,
-    PLUGIN_MODULE_NAME,
-    import_job,
-    import_sessions,
-    load_plugin_parser,
-    read_payload,
-)
-from kitaru.plugin_loader import required_env
 
 NOW = datetime.now(UTC)
 
-EXAMPLE_ROOT = Path(__file__).resolve().parent.parent / "importer_example"
-IMPORTER_FILE = EXAMPLE_ROOT / "importer.py"
-TRACE_FILE = EXAMPLE_ROOT / "trace.jsonl"
-
-PLUGIN_CODE = """
-def parse(payload):
-    return []
-
-
-NOT_CALLABLE = "text"
-"""
-
 AGENT_ID = uuid.uuid4()
 
+GENERIC_PLUGIN_CODE = """
+from kitaru.job.importer import ParseFailure, ParsedNode, ParsedSession
 
-def make_importer(params: dict | None = None) -> JobSpecImporter:
+
+def _node(children):
+    return ParsedNode(
+        node_type="span",
+        name="trace",
+        children=[
+            ParsedNode(node_type="llm_call", name=f"call-{i}")
+            for i in range(children)
+        ],
+    )
+
+
+def parse(payload, params):
+    for item in params["items"]:
+        kind = item["kind"]
+        if kind == "session":
+            yield ParsedSession(
+                external_id=item["external_id"],
+                nodes=[_node(item.get("children", 0))],
+            )
+        elif kind == "failure":
+            yield ParseFailure(
+                line=item["line"],
+                external_id=item.get("external_id"),
+                error=item["error"],
+            )
+        elif kind == "raise":
+            raise RuntimeError(item["message"])
+"""
+
+
+def write_plugin(tmp_path: Path, code: str = GENERIC_PLUGIN_CODE) -> Path:
+    """Write importer code to a file without a suffix, as the cache does."""
+    path = tmp_path / ("a" * 64)
+    path.write_text(code)
+    return path
+
+
+def make_importer(items: list[dict[str, Any]] | None = None) -> JobSpecImporter:
     """Build the importer of an import job spec."""
     return JobSpecImporter(
         plugin=JobSpecPlugin(
@@ -95,7 +114,7 @@ def make_importer(params: dict | None = None) -> JobSpecImporter:
         payload=JobSpecPayload(blob_id=uuid.uuid4(), sha256="1" * 64),
         provider=SessionProvider.OTLP,
         agent_id=AGENT_ID,
-        params=params or {},
+        params={"items": items or []},
     )
 
 
@@ -148,23 +167,6 @@ def make_session(session_id: uuid.UUID) -> SessionResponse:
     )
 
 
-def parsed_session(external_id: str, children: int = 0) -> ParsedSession:
-    """Build a parsed session with one root span and its children."""
-    return ParsedSession(
-        external_id=external_id,
-        nodes=[
-            ParsedNode(
-                node_type=NodeType.SPAN,
-                name="trace",
-                children=[
-                    ParsedNode(node_type=NodeType.LLM_CALL, name=f"call-{index}")
-                    for index in range(children)
-                ],
-            )
-        ],
-    )
-
-
 class FakeJobsResource:
     """Fake jobs resource."""
 
@@ -175,10 +177,6 @@ class FakeJobsResource:
     async def get_spec(self, job_id: uuid.UUID) -> JobSpecResponse:
         """Return the configured spec."""
         return self._client.spec
-
-    async def update(self, job_id: uuid.UUID, request: JobUpdateRequest) -> None:
-        """Record the update."""
-        self._client.updates.append(request)
 
 
 class FakeSessionsResource:
@@ -194,9 +192,7 @@ class FakeSessionsResource:
         error = self._client.create_errors.get(request.external_id or "")
         if error is not None:
             raise error
-        session_id = uuid.uuid4()
-        self._client.sessions_by_external_id[request.external_id or ""] = session_id
-        return make_session(session_id)
+        return make_session(uuid.uuid4())
 
 
 class FakeSessionNodesResource:
@@ -216,7 +212,7 @@ class FakeSessionNodesResource:
 
 
 class FakeClient:
-    """Fake API client implementing the resource methods the harness uses."""
+    """Fake API client implementing the resource methods the flow uses."""
 
     def __init__(
         self,
@@ -228,94 +224,61 @@ class FakeClient:
         self.spec = spec
         self.create_errors = create_errors or {}
         self.ingest_error = ingest_error
-        self.updates: list[JobUpdateRequest] = []
         self.session_requests: list[SessionCreateRequest] = []
-        self.sessions_by_external_id: dict[str, uuid.UUID] = {}
         self.node_batches: list[tuple[uuid.UUID, SessionNodeBatchRequest]] = []
         self.jobs = FakeJobsResource(self)
         self.sessions = FakeSessionsResource(self)
         self.session_nodes = FakeSessionNodesResource(self)
 
 
-def write_plugin(tmp_path: Path, code: str = PLUGIN_CODE) -> Path:
-    """Write importer code to a file without a suffix, as the cache does."""
-    path = tmp_path / ("a" * 64)
-    path.write_text(code)
-    return path
-
-
-def test_required_env_reads_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Return the value of a set variable."""
-    monkeypatch.setenv("KITARU_JOB_PAYLOAD_PATH", "/payload")
-    assert required_env("KITARU_JOB_PAYLOAD_PATH", SessionImportError) == "/payload"
-
-
-def test_required_env_rejects_a_missing_variable(
+async def run_import(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Reject a variable that is not set."""
-    monkeypatch.delenv("KITARU_JOB_PAYLOAD_PATH", raising=False)
-    with pytest.raises(SessionImportError, match="KITARU_JOB_PAYLOAD_PATH is not set"):
-        required_env("KITARU_JOB_PAYLOAD_PATH", SessionImportError)
+    fake: FakeClient,
+    job_id: uuid.UUID,
+) -> Path:
+    """Materialize the job env and run the import flow, returning the result path."""
+    monkeypatch.setenv("KITARU_JOB_PLUGIN_PATH", str(write_plugin(tmp_path)))
+    payload_path = tmp_path / "payload"
+    payload_path.write_bytes(b"")
+    monkeypatch.setenv("KITARU_JOB_PAYLOAD_PATH", str(payload_path))
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_JOB_RESULT_PATH", str(result_path))
+    await run(cast(KitaruAPIClient, fake), job_id)
+    return result_path
 
 
-def test_module_entrypoint_reports_a_missing_environment(tmp_path: Path) -> None:
-    """Exit non-zero naming the missing variable when run as a module."""
-    result = subprocess.run(
-        [sys.executable, "-m", "kitaru.imports"],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-        check=False,
-    )
-
-    assert result.returncode == 1
-    assert "KITARU_JOB_ID is not set" in result.stderr
-
-
-def test_plugin_models_are_the_harness_models() -> None:
-    """Share the model classes between the harness and the loaded importer."""
-    load_plugin_parser(IMPORTER_FILE, "parse")
-    module = sys.modules[PLUGIN_MODULE_NAME]
-
-    assert module.ParsedSession is ParsedSession
-    assert module.ParseFailure is ParseFailure
-
-
-def test_load_plugin_parser_imports_a_suffixless_file(tmp_path: Path) -> None:
-    """Import the entrypoint of a cached code file."""
-    assert load_plugin_parser(write_plugin(tmp_path), "parse")(b"") == []
-
-
-def test_load_plugin_parser_missing_attribute(tmp_path: Path) -> None:
-    """Reject an entrypoint the code does not define."""
-    with pytest.raises(SessionImportError, match="has no attribute 'missing'"):
-        load_plugin_parser(write_plugin(tmp_path), "missing")
-
-
-def test_load_plugin_parser_not_callable(tmp_path: Path) -> None:
-    """Reject an entrypoint that is not callable."""
-    with pytest.raises(SessionImportError, match="is not callable"):
-        load_plugin_parser(write_plugin(tmp_path), "NOT_CALLABLE")
-
-
-def test_load_plugin_parser_import_error(tmp_path: Path) -> None:
-    """Reject code that raises while importing."""
-    path = write_plugin(tmp_path, "raise RuntimeError('boom')\n")
-    with pytest.raises(SessionImportError, match="RuntimeError: boom"):
-        load_plugin_parser(path, "parse")
-
-
-def test_read_payload_rejects_a_missing_file(tmp_path: Path) -> None:
-    """Reject a payload the worker did not materialize."""
-    with pytest.raises(SessionImportError, match="Failed to read the payload"):
-        read_payload(tmp_path / "absent")
+def read_stats(path: Path) -> ImportStats:
+    """Parse the stats the import flow wrote."""
+    return ImportStats.model_validate_json(path.read_text())
 
 
 def test_parsed_session_rejects_a_non_terminal_status() -> None:
     """Reject a parsed session that is still in progress."""
     with pytest.raises(ValueError, match="Imported sessions cannot be in progress"):
         ParsedSession(external_id="ext", status=SessionStatus.IN_PROGRESS)
+
+
+def test_call_parser_passes_params_as_a_dict() -> None:
+    """Call the parser with payload and params as a positional dict, not kwargs."""
+    calls: list[tuple[bytes, dict[str, Any]]] = []
+
+    def parser(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedItem]:
+        calls.append((payload, params))
+        return iter([])
+
+    list(call_parser(parser, b"data", {"a": 1}))
+    assert calls == [(b"data", {"a": 1})]
+
+
+def test_call_parser_wraps_a_raising_parser() -> None:
+    """Wrap a parser that raises in a SessionImportError."""
+
+    def parser(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedItem]:
+        raise ValueError("bad payload")
+
+    with pytest.raises(SessionImportError, match="Importer raised ValueError"):
+        call_parser(parser, b"data", {})
 
 
 def test_flatten_nodes_walks_parent_before_child() -> None:
@@ -409,15 +372,19 @@ def test_session_request_maps_the_session_fields() -> None:
     assert request.metadata == {"tenant": "acme"}
 
 
-async def test_import_sessions_creates_and_batches_nodes() -> None:
+async def test_run_creates_and_batches_nodes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Create every parsed session and ingest its tree in batches."""
-    fake = FakeClient(make_spec(uuid.uuid4(), make_importer()))
-    parsed = [parsed_session("trace-1", children=NODE_BATCH_SIZE + 3)]
+    job_id = uuid.uuid4()
+    items = [
+        {"kind": "session", "external_id": "trace-1", "children": NODE_BATCH_SIZE + 3}
+    ]
+    fake = FakeClient(make_spec(job_id, make_importer(items)))
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert (stats.created, stats.skipped, stats.failed) == (1, 0, 0)
     assert [request.external_id for request in fake.session_requests] == ["trace-1"]
     assert [len(batch.nodes) for _, batch in fake.node_batches] == [NODE_BATCH_SIZE, 4]
@@ -427,170 +394,166 @@ async def test_import_sessions_creates_and_batches_nodes() -> None:
     assert sequences == list(range(NODE_BATCH_SIZE + 4))
 
 
-async def test_import_sessions_counts_a_conflict_as_skipped() -> None:
+async def test_run_counts_a_conflict_as_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Count a session the server already holds as skipped."""
+    job_id = uuid.uuid4()
+    items = [
+        {"kind": "session", "external_id": "trace-1"},
+        {"kind": "session", "external_id": "trace-2"},
+    ]
     fake = FakeClient(
-        make_spec(uuid.uuid4(), make_importer()),
+        make_spec(job_id, make_importer(items)),
         create_errors={"trace-2": ConflictError(409, "duplicate")},
     )
-    parsed = [parsed_session("trace-1"), parsed_session("trace-2")]
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert (stats.created, stats.skipped, stats.failed) == (1, 1, 0)
     assert stats.failures == []
     assert len(fake.node_batches) == 1
 
 
-async def test_import_sessions_counts_a_create_error_as_failed() -> None:
+async def test_run_counts_a_create_error_as_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Sample a create failure under the position of the session in the stream."""
+    job_id = uuid.uuid4()
+    items = [
+        {"kind": "session", "external_id": "trace-1"},
+        {"kind": "session", "external_id": "trace-2"},
+    ]
     fake = FakeClient(
-        make_spec(uuid.uuid4(), make_importer()),
+        make_spec(job_id, make_importer(items)),
         create_errors={"trace-2": APIError(500, "boom")},
     )
-    parsed = [parsed_session("trace-1"), parsed_session("trace-2")]
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert (stats.created, stats.skipped, stats.failed) == (1, 0, 1)
     assert stats.failures[0].line == 2
     assert stats.failures[0].external_id == "trace-2"
     assert "boom" in stats.failures[0].error
 
 
-async def test_import_sessions_counts_an_ingest_error_as_failed() -> None:
+async def test_run_counts_an_ingest_error_as_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Count a session whose node ingest failed as failed, not created."""
+    job_id = uuid.uuid4()
+    items = [{"kind": "session", "external_id": "trace-1", "children": 1}]
     fake = FakeClient(
-        make_spec(uuid.uuid4(), make_importer()),
+        make_spec(job_id, make_importer(items)),
         ingest_error=APIError(422, "unknown parent"),
     )
-    parsed = [parsed_session("trace-1", children=1)]
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert (stats.created, stats.skipped, stats.failed) == (0, 0, 1)
     assert stats.failures[0].external_id == "trace-1"
 
 
-async def test_import_sessions_counts_parse_failures() -> None:
+async def test_run_counts_parse_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Count reported parse failures without touching the server."""
-    fake = FakeClient(make_spec(uuid.uuid4(), make_importer()))
-    parsed: list[ParsedItem] = [
-        ParseFailure(line=3, external_id="trace-3", error="Invalid JSON"),
-        parsed_session("trace-1"),
+    job_id = uuid.uuid4()
+    items = [
+        {
+            "kind": "failure",
+            "line": 3,
+            "external_id": "trace-3",
+            "error": "Invalid JSON",
+        },
+        {"kind": "session", "external_id": "trace-1"},
     ]
+    fake = FakeClient(make_spec(job_id, make_importer(items)))
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert (stats.created, stats.skipped, stats.failed) == (1, 0, 1)
     assert stats.failures[0].line == 3
     assert stats.failures[0].external_id == "trace-3"
     assert stats.failures[0].error == "Invalid JSON"
 
 
-async def test_import_sessions_bounds_the_failure_sample() -> None:
+async def test_run_bounds_the_failure_sample(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Count every failure but keep only the first samples."""
-    fake = FakeClient(make_spec(uuid.uuid4(), make_importer()))
-    parsed: list[ParsedItem] = [
-        ParseFailure(line=line, error=f"bad line {line}")
+    job_id = uuid.uuid4()
+    items = [
+        {"kind": "failure", "line": line, "error": f"bad line {line}"}
         for line in range(MAX_IMPORT_FAILURES + 5)
     ]
+    fake = FakeClient(make_spec(job_id, make_importer(items)))
 
-    stats = await import_sessions(
-        cast(KitaruAPIClient, fake), make_importer(), iter(parsed)
-    )
+    result_path = await run_import(tmp_path, monkeypatch, fake, job_id)
 
+    stats = read_stats(result_path)
     assert stats.failed == MAX_IMPORT_FAILURES + 5
     assert len(stats.failures) == MAX_IMPORT_FAILURES
     assert stats.failures[0].line == 0
     assert stats.failures[-1].line == MAX_IMPORT_FAILURES - 1
 
 
-async def test_import_sessions_streams_until_the_parser_raises() -> None:
+async def test_run_streams_until_the_parser_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Process what the parser yielded before it raised, then propagate."""
-    fake = FakeClient(make_spec(uuid.uuid4(), make_importer()))
-
-    def parsed() -> Iterator[ParsedItem]:
-        yield parsed_session("trace-1")
-        yield parsed_session("trace-2")
-        raise RuntimeError("truncated export")
+    job_id = uuid.uuid4()
+    items = [
+        {"kind": "session", "external_id": "trace-1"},
+        {"kind": "session", "external_id": "trace-2"},
+        {"kind": "raise", "message": "truncated export"},
+    ]
+    fake = FakeClient(make_spec(job_id, make_importer(items)))
+    monkeypatch.setenv("KITARU_JOB_PLUGIN_PATH", str(write_plugin(tmp_path)))
+    payload_path = tmp_path / "payload"
+    payload_path.write_bytes(b"")
+    monkeypatch.setenv("KITARU_JOB_PAYLOAD_PATH", str(payload_path))
+    result_path = tmp_path / "result.json"
+    monkeypatch.setenv("KITARU_JOB_RESULT_PATH", str(result_path))
 
     with pytest.raises(RuntimeError, match="truncated export"):
-        await import_sessions(cast(KitaruAPIClient, fake), make_importer(), parsed())
+        await run(cast(KitaruAPIClient, fake), job_id)
 
     assert [request.external_id for request in fake.session_requests] == [
         "trace-1",
         "trace-2",
     ]
+    assert not result_path.exists()
 
 
-async def test_import_job_records_the_stats(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Run the registered importer over the payload and patch the stats."""
-    job_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_JOB_PLUGIN_PATH", str(write_plugin(tmp_path)))
-    payload = tmp_path / "payload.jsonl"
-    payload.write_bytes(b"{}\n")
-    monkeypatch.setenv("KITARU_JOB_PAYLOAD_PATH", str(payload))
-    fake = FakeClient(make_spec(job_id, make_importer()))
-
-    stats = await import_job(cast(KitaruAPIClient, fake), job_id)
-
-    assert (stats.created, stats.skipped, stats.failed) == (0, 0, 0)
-    assert [update.stats for update in fake.updates] == [stats]
-
-
-async def test_import_job_rejects_another_kind() -> None:
+async def test_run_rejects_another_kind() -> None:
     """Reject a job spec without an importer."""
     job_id = uuid.uuid4()
     fake = FakeClient(make_spec(job_id, None))
     with pytest.raises(SessionImportError, match="is not an import job"):
-        await import_job(cast(KitaruAPIClient, fake), job_id)
+        await run(cast(KitaruAPIClient, fake), job_id)
 
 
-def test_example_importer_parses_the_example_trace() -> None:
-    """Parse the example trace into three sessions and one failure."""
-    parse = load_plugin_parser(IMPORTER_FILE, "parse")
-    items = list(parse(TRACE_FILE.read_bytes()))
-    sessions = [item for item in items if isinstance(item, ParsedSession)]
-    failures = [item for item in items if isinstance(item, ParseFailure)]
-
-    assert [session.external_id for session in sessions] == [
-        "trace-2026-07-20-001",
-        "trace-2026-07-20-002",
-        "trace-2026-07-20-004",
-    ]
-    assert [len(flatten_nodes(session.nodes)) for session in sessions] == [5, 3, 4]
-    assert len(failures) == 1
-    assert failures[0].line == 3
-    assert "Invalid JSON" in failures[0].error
+async def test_run_without_plugin_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject an import job without a materialized code path."""
+    job_id = uuid.uuid4()
+    monkeypatch.delenv("KITARU_JOB_PLUGIN_PATH", raising=False)
+    fake = FakeClient(make_spec(job_id, make_importer()))
+    with pytest.raises(SessionImportError, match="KITARU_JOB_PLUGIN_PATH is not set"):
+        await run(cast(KitaruAPIClient, fake), job_id)
 
 
-def test_example_importer_nests_tool_calls_under_the_llm_call() -> None:
-    """Nest the tool calls of a trace under the LLM call that requested them."""
-    parse = load_plugin_parser(IMPORTER_FILE, "parse")
-    items = list(parse(TRACE_FILE.read_bytes()))
-    session = next(item for item in items if isinstance(item, ParsedSession))
-    requests = flatten_nodes(session.nodes)
-
-    assert [request.node_type for request in requests] == [
-        NodeType.SPAN,
-        NodeType.LLM_CALL,
-        NodeType.TOOL_CALL,
-        NodeType.TOOL_CALL,
-        NodeType.LLM_CALL,
-    ]
-    assert requests[2].parent_id == requests[1].id
-    assert requests[2].tool_name == "get_weather"
-    assert requests[1].model == "gpt-4o-mini"
-    assert requests[1].tokens is not None
-    assert requests[1].cost is not None
+async def test_run_rejects_a_missing_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject a payload the worker did not materialize."""
+    job_id = uuid.uuid4()
+    fake = FakeClient(make_spec(job_id, make_importer()))
+    monkeypatch.setenv("KITARU_JOB_PLUGIN_PATH", str(write_plugin(tmp_path)))
+    monkeypatch.setenv("KITARU_JOB_PAYLOAD_PATH", str(tmp_path / "absent"))
+    with pytest.raises(SessionImportError, match="Failed to read the payload"):
+        await run(cast(KitaruAPIClient, fake), job_id)

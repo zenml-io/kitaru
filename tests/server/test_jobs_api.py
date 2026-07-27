@@ -54,12 +54,54 @@ async def register_worker(client: httpx.AsyncClient, name: str = "worker-1") -> 
     return response.json()["id"]
 
 
+async def create_replay_job(
+    client: httpx.AsyncClient, session_id: str, **overrides: object
+) -> dict:
+    """Store a standalone replay and return its job.
+
+    Args:
+        client: HTTP client for the app.
+        session_id: Id of the session to replay.
+        **overrides: Create request body overrides.
+
+    Returns:
+        Created job body.
+    """
+    replay = await create_replay(client, session_id, **overrides)
+    response = await client.get(f"/v1/jobs/{replay['job_id']}")
+    assert response.status_code == 200
+    return response.json()
+
+
+async def claim_one(client: httpx.AsyncClient, worker_id: str, job_id: str) -> dict:
+    """Claim one job through a job-pinned scope.
+
+    Args:
+        client: HTTP client for the app.
+        worker_id: Id of the claiming worker.
+        job_id: Id of the job.
+
+    Returns:
+        Claim response body.
+    """
+    response = await client.post(
+        "/v1/jobs/claim",
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 1,
+            "scope": {"job_id": job_id},
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 async def test_get_job(client: httpx.AsyncClient) -> None:
     """Get a job by id."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     response = await client.get(f"/v1/jobs/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
@@ -79,8 +121,8 @@ async def test_list_jobs_filters(client: httpx.AsyncClient) -> None:
     await create_runnable_version(client, agent_id)
     first_session = await create_completed_session(client, agent_id)
     second_session = await create_completed_session(client, agent_id)
-    first = await create_replay(client, first_session)
-    await create_replay(client, second_session)
+    first = await create_replay_job(client, first_session)
+    await create_replay_job(client, second_session)
 
     response = await client.get("/v1/jobs")
     assert response.status_code == 200
@@ -127,7 +169,11 @@ async def test_list_jobs_by_run_and_worker(client: httpx.AsyncClient) -> None:
     worker_id = await register_worker(client)
     response = await client.post(
         "/v1/jobs/claim",
-        json={"worker_id": worker_id, "max_jobs": 1, "experiment_run_id": run_id},
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 1,
+            "scope": {"experiment_run_id": run_id},
+        },
     )
     assert response.status_code == 200
     claimed_id = response.json()["jobs"][0]["job"]["id"]
@@ -168,7 +214,11 @@ async def test_list_jobs_stale_claim_matches_pending() -> None:
         worker_id = await register_worker(client)
         response = await client.post(
             "/v1/jobs/claim",
-            json={"worker_id": worker_id, "max_jobs": 1, "experiment_run_id": run_id},
+            json={
+                "worker_id": worker_id,
+                "max_jobs": 1,
+                "scope": {"experiment_run_id": run_id},
+            },
         )
         assert response.status_code == 200
         job_id = response.json()["jobs"][0]["job"]["id"]
@@ -265,7 +315,7 @@ async def run_score_jobs(
         assert response.status_code == 200
         response = await client.patch(
             f"/v1/jobs/{child['id']}",
-            json={"status": "completed", "score": scores[child["scorer"]["name"]]},
+            json={"status": "completed", "result": scores[child["scorer"]["name"]]},
         )
         assert response.status_code == 200
 
@@ -284,17 +334,17 @@ async def test_get_spec(client: httpx.AsyncClient) -> None:
         f"/v1/sessions/{session_id}", json={"status": "completed"}
     )
     assert response.status_code == 200
-    created = await create_replay(client, session_id)
+    replay = await create_replay(client, session_id)
 
-    response = await client.get(f"/v1/jobs/{created['id']}/spec")
+    response = await client.get(f"/v1/jobs/{replay['job_id']}/spec")
     assert response.status_code == 200
     spec = response.json()
     assert spec == {
-        "job_id": created["id"],
+        "job_id": replay["job_id"],
         "kind": "replay",
         "inputs": {"prompt": "hi"},
         "override": None,
-        "tool_policy": created["tool_policy"],
+        "tool_policy": replay["tool_policy"],
         "scorer": None,
         "importer": None,
         "run": {
@@ -321,8 +371,9 @@ async def test_runner_flow_completes_job(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
-    job_id = created["id"]
+    replay = await create_replay(client, session_id)
+    replay_id = replay["id"]
+    job_id = replay["job_id"]
 
     await start_job(client, job_id)
     result_session_id = await link_result_session(client, job_id)
@@ -334,31 +385,26 @@ async def test_runner_flow_completes_job(client: httpx.AsyncClient) -> None:
         f"/v1/sessions/{result_session_id}", json={"status": "completed"}
     )
     assert response.status_code == 200
-    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 200
-    assert response.json()["status"] == "scoring"
+    assert response.json()["status"] == "completed"
+    # The score jobs exist before the completion response returns.
+    response = await client.get("/v1/jobs", params={"kind": "score"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
 
     await run_score_jobs(client, job_id, {"conciseness": 0.8})
-    response = await client.get(f"/v1/jobs/{job_id}")
+    response = await client.get(f"/v1/replays/{replay_id}")
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
     assert body["passed"] is True
     assert body["score"] == 0.8
     assert body["scores"] == {"conciseness": 0.8}
-    assert body["ended_at"] is not None
-    assert body["diff"]["status_changed"] is False
-    assert body["diff"]["tool_calls"] == {
-        "matched": 0,
-        "mocked": 0,
-        "added": 0,
-        "removed": 0,
-    }
 
-    response = await client.get(f"/v1/jobs/{job_id}/diff")
+    response = await client.get(f"/v1/replays/{replay_id}/diff")
     assert response.status_code == 200
     diff = response.json()
-    assert diff["replay_id"] == job_id
+    assert diff["replay_id"] == replay_id
     assert diff["original_session_id"] == session_id
     assert diff["result_session_id"] == result_session_id
     assert diff["node_pairs"] == []
@@ -371,30 +417,50 @@ async def test_patch_job_illegal_transition(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     response = await client.patch(
-        f"/v1/jobs/{created['id']}", json={"status": "scoring"}
+        f"/v1/jobs/{created['id']}", json={"status": "completed"}
     )
     assert response.status_code == 409
     assert response.json() == {
-        "detail": f"Job {created['id']} cannot transition from 'pending' to 'scoring'"
+        "detail": f"Job {created['id']} cannot transition from 'pending' to 'completed'"
     }
 
 
-async def test_patch_job_scoring_without_result_session(
+async def test_patch_job_completion_without_result_session(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 409 when scoring an unlinked job."""
+    """Observe HTTP 409 when completing an unlinked job."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     await start_job(client, created["id"])
     response = await client.patch(
-        f"/v1/jobs/{created['id']}", json={"status": "scoring"}
+        f"/v1/jobs/{created['id']}", json={"status": "completed"}
     )
     assert response.status_code == 409
     assert response.json() == {"detail": f"Job {created['id']} has no result session"}
+
+
+async def test_patch_job_completion_requires_a_completed_result_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 409 when the linked result session is still open."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay_job(client, session_id)
+    await start_job(client, created["id"])
+    result_session_id = await link_result_session(client, created["id"])
+    response = await client.patch(
+        f"/v1/jobs/{created['id']}", json={"status": "completed"}
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": f"Result session {result_session_id} of job {created['id']} "
+        "is not completed"
+    }
 
 
 async def test_patch_job_failed_requires_error(client: httpx.AsyncClient) -> None:
@@ -402,7 +468,7 @@ async def test_patch_job_failed_requires_error(client: httpx.AsyncClient) -> Non
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     await start_job(client, created["id"])
     response = await client.patch(
         f"/v1/jobs/{created['id']}", json={"status": "failed"}
@@ -427,12 +493,9 @@ async def test_worker_heartbeat_touches_owned_active_jobs(
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     worker_id = await register_worker(client)
-    response = await client.post(
-        f"/v1/jobs/{created['id']}/claim", json={"worker_id": worker_id}
-    )
-    assert response.status_code == 200
+    assert len(await claim_one(client, worker_id, created["id"])) == 1
 
     response = await client.post(
         f"/v1/workers/{worker_id}/heartbeat", json={"job_ids": [created["id"]]}
@@ -452,7 +515,7 @@ async def test_worker_heartbeat_abandons_terminal_and_foreign_jobs(
     await create_runnable_version(client, agent_id)
     worker_id = await register_worker(client)
     other_worker_id = await register_worker(client, name="worker-2")
-    canceled = await create_replay(
+    canceled = await create_replay_job(
         client, await create_completed_session(client, agent_id)
     )
     await start_job(client, canceled["id"])
@@ -460,13 +523,10 @@ async def test_worker_heartbeat_abandons_terminal_and_foreign_jobs(
         f"/v1/jobs/{canceled['id']}", json={"status": "canceled"}
     )
     assert response.status_code == 200
-    foreign = await create_replay(
+    foreign = await create_replay_job(
         client, await create_completed_session(client, agent_id)
     )
-    response = await client.post(
-        f"/v1/jobs/{foreign['id']}/claim", json={"worker_id": other_worker_id}
-    )
-    assert response.status_code == 200
+    await claim_one(client, other_worker_id, foreign["id"])
     missing_id = str(uuid.uuid4())
 
     response = await client.post(
@@ -508,64 +568,65 @@ async def create_run_job(client: httpx.AsyncClient) -> str:
     return response.json()["items"][0]["id"]
 
 
-async def test_claim_job(client: httpx.AsyncClient) -> None:
-    """Claim a standalone job for a worker."""
+async def test_claim_jobs_job_scope(client: httpx.AsyncClient) -> None:
+    """Claim a pending job through a job-pinned scope, once."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     job_id = created["id"]
 
     worker_id = await register_worker(client)
     other_worker_id = await register_worker(client, name="worker-2")
-    response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "claimed"
-    assert body["worker_id"] == worker_id
-    assert body["claimed_at"] is not None
-    assert body["heartbeat_at"] is not None
+    body = await claim_one(client, worker_id, job_id)
+    assert len(body["jobs"]) == 1
+    job = body["jobs"][0]["job"]
+    assert job["status"] == "claimed"
+    assert job["worker_id"] == worker_id
+    assert job["claimed_at"] is not None
+    assert job["heartbeat_at"] is not None
 
-    response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": other_worker_id}
-    )
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Job {job_id} cannot transition from 'claimed' to 'claimed'"
-    }
+    assert await claim_one(client, other_worker_id, job_id) == {"jobs": []}
 
 
-async def test_claim_job_not_found(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 404 for an unknown job id."""
+async def test_claim_jobs_unknown_worker(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown worker id."""
     missing_id = uuid.uuid4()
-    worker_id = await register_worker(client)
     response = await client.post(
-        f"/v1/jobs/{missing_id}/claim", json={"worker_id": worker_id}
+        "/v1/jobs/claim",
+        json={"worker_id": str(missing_id), "max_jobs": 1},
     )
     assert response.status_code == 404
+    assert response.json() == {"detail": f"Worker {missing_id} was not found"}
 
 
-async def test_claim_run_job(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 409 when claiming a run job directly."""
-    job_id = await create_run_job(client)
+async def test_claim_jobs_rejects_a_scope_pinned_twice(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for a scope pinned to a run and a job."""
     worker_id = await register_worker(client)
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
+        "/v1/jobs/claim",
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 1,
+            "scope": {
+                "experiment_run_id": str(uuid.uuid4()),
+                "job_id": str(uuid.uuid4()),
+            },
+        },
     )
-    assert response.status_code == 409
-    assert response.json() == {"detail": f"Job {job_id} belongs to an experiment run"}
+    assert response.status_code == 422
 
 
-async def test_claim_resolves_stale_started_job() -> None:
-    """Claim a started standalone job whose worker lost its heartbeat."""
+async def test_claim_jobs_resolves_stale_started_job() -> None:
+    """Claim a started job whose worker lost its heartbeat."""
     transport = httpx.ASGITransport(app=experiment_app(heartbeat_timeout_seconds=-60))
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         agent_id = await create_agent(client)
         await create_runnable_version(client, agent_id)
         session_id = await create_completed_session(client, agent_id)
-        created = await create_replay(client, session_id)
+        created = await create_replay_job(client, session_id)
         job_id = created["id"]
         await start_job(client, job_id)
 
@@ -574,21 +635,19 @@ async def test_claim_resolves_stale_started_job() -> None:
         assert response.json()["status"] == "pending"
 
         worker_id = await register_worker(client, name="worker-2")
-        response = await client.post(
-            f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
-        )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["status"] == "claimed"
-        assert body["worker_id"] == worker_id
-        assert body["attempt"] == 2
+        body = await claim_one(client, worker_id, job_id)
+        assert len(body["jobs"]) == 1
+        job = body["jobs"][0]["job"]
+        assert job["status"] == "claimed"
+        assert job["worker_id"] == worker_id
+        assert job["attempt"] == 2
 
         response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
         assert response.status_code == 200
 
 
-async def test_claim_times_out_exhausted_stale_job() -> None:
-    """Observe HTTP 409 claiming a stale job out of attempts."""
+async def test_claim_jobs_times_out_exhausted_stale_job() -> None:
+    """Time a stale job out of attempts and yield nothing."""
     transport = httpx.ASGITransport(
         app=experiment_app(heartbeat_timeout_seconds=-60, max_attempts=1)
     )
@@ -596,18 +655,12 @@ async def test_claim_times_out_exhausted_stale_job() -> None:
         agent_id = await create_agent(client)
         await create_runnable_version(client, agent_id)
         session_id = await create_completed_session(client, agent_id)
-        created = await create_replay(client, session_id)
+        created = await create_replay_job(client, session_id)
         job_id = created["id"]
         await start_job(client, job_id)
 
         worker_id = await register_worker(client, name="worker-2")
-        response = await client.post(
-            f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
-        )
-        assert response.status_code == 409
-        assert response.json() == {
-            "detail": f"Job {job_id} cannot transition from 'timed_out' to 'claimed'"
-        }
+        assert await claim_one(client, worker_id, job_id) == {"jobs": []}
         response = await client.get(f"/v1/jobs/{job_id}")
         assert response.status_code == 200
         assert response.json()["status"] == "timed_out"
@@ -618,14 +671,11 @@ async def test_release_job(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     job_id = created["id"]
 
     worker_id = await register_worker(client)
-    response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": worker_id}
-    )
-    assert response.status_code == 200
+    await claim_one(client, worker_id, job_id)
     response = await client.post(f"/v1/jobs/{job_id}/release")
     assert response.status_code == 200
     body = response.json()
@@ -659,7 +709,7 @@ async def test_retry_job(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     job_id = created["id"]
     await start_job(client, job_id)
     await link_result_session(client, job_id)
@@ -685,7 +735,7 @@ async def test_retry_job_conflicts(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     response = await client.post(f"/v1/jobs/{created['id']}/retry")
     assert response.status_code == 409
     assert response.json() == {
@@ -705,7 +755,7 @@ async def test_delete_job(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
 
     response = await client.delete(f"/v1/jobs/{created['id']}")
     assert response.status_code == 204
@@ -718,7 +768,7 @@ async def test_delete_job_conflicts(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
     await start_job(client, created["id"])
     response = await client.delete(f"/v1/jobs/{created['id']}")
     assert response.status_code == 409
@@ -771,7 +821,7 @@ async def test_tool_lookup(client: httpx.AsyncClient) -> None:
         f"/v1/sessions/{session_id}", json={"status": "completed"}
     )
     assert response.status_code == 200
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
 
     cache_key = tool_call_cache_key("get_weather", inputs)
     response = await client.post(
@@ -803,30 +853,17 @@ async def test_tool_lookup(client: httpx.AsyncClient) -> None:
     }
 
 
-async def test_diff_requires_result_session(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 409 for a diff without a result session."""
-    agent_id = await create_agent(client)
-    await create_runnable_version(client, agent_id)
-    session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
-    response = await client.get(f"/v1/jobs/{created['id']}/diff")
-    assert response.status_code == 409
-    assert response.json() == {"detail": f"Job {created['id']} has no result session"}
-
-
 async def test_session_link_conflicts(client: httpx.AsyncClient) -> None:
     """Observe link errors for inactive, linked, and unknown jobs."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(client, session_id)
+    created = await create_replay_job(client, session_id)
 
     body = {"agent_id": agent_id, "origin": "recorded", "job_id": created["id"]}
     response = await client.post("/v1/sessions", json=body)
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Job {created['id']} is not claimed or running"
-    }
+    assert response.json() == {"detail": f"Job {created['id']} is not running"}
 
     await start_job(client, created["id"])
     response = await client.post("/v1/sessions", json=body)
@@ -904,23 +941,27 @@ async def test_score_job_spec_and_lifecycle(client: httpx.AsyncClient) -> None:
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    created = await create_replay(
+    replay = await create_replay(
         client, session_id, scoring_policy=REGISTRY_SCORING_POLICY
     )
-    job_id = created["id"]
+    job_id = replay["job_id"]
     await start_job(client, job_id)
     result_session_id = await link_result_session(client, job_id)
     response = await client.patch(
         f"/v1/sessions/{result_session_id}", json={"status": "completed"}
     )
     assert response.status_code == 200
-    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "completed"})
     assert response.status_code == 200
 
     worker_id = await register_worker(client)
     response = await client.post(
         "/v1/jobs/claim",
-        json={"worker_id": worker_id, "max_jobs": 5, "parent_job_id": job_id},
+        json={
+            "worker_id": worker_id,
+            "max_jobs": 5,
+            "scope": {"job_id": job_id},
+        },
     )
     assert response.status_code == 200
     children = [claimed["job"] for claimed in response.json()["jobs"]]
@@ -955,18 +996,15 @@ async def test_score_job_spec_and_lifecycle(client: httpx.AsyncClient) -> None:
             f"/v1/jobs/{entry['id']}", json={"status": "running"}
         )
         assert response.status_code == 200
-        response = await client.patch(f"/v1/jobs/{entry['id']}", json={"score": 0.9})
-        assert response.status_code == 200
-        assert response.json()["score"] == 0.9
         response = await client.patch(
-            f"/v1/jobs/{entry['id']}", json={"status": "completed"}
+            f"/v1/jobs/{entry['id']}", json={"status": "completed", "result": 0.9}
         )
         assert response.status_code == 200
+        assert response.json()["result"] == 0.9
 
-    response = await client.get(f"/v1/jobs/{job_id}")
+    response = await client.get(f"/v1/replays/{replay['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
     assert body["passed"] is True
     assert body["score"] == 0.9
     assert body["scores"] == {"relevance": 0.9}

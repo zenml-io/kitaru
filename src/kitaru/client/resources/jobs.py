@@ -26,8 +26,6 @@ from kitaru.api_models.v1.jobs import (
     JobSpecResponse,
     JobStatus,
     JobUpdateRequest,
-    ReplayDiffResponse,
-    StandaloneJobClaimRequest,
     ToolLookupRequest,
     ToolLookupResponse,
 )
@@ -171,30 +169,6 @@ class JobsResource:
         )
         return JobClaimResponse.model_validate(response.json())
 
-    async def claim_standalone(
-        self, job_id: uuid.UUID, request: StandaloneJobClaimRequest
-    ) -> JobResponse:
-        """Claim a standalone job for a worker.
-
-        Args:
-            job_id: Id of the job.
-            request: Standalone job claim request.
-
-        Raises:
-            APIError: The request failed, including 404 for a missing
-                job or worker and 409 when the job belongs to an
-                experiment run or is not pending.
-
-        Returns:
-            Claimed job.
-        """
-        response = await self._client.request(
-            "POST",
-            f"/v1/jobs/{job_id}/claim",
-            json=request.model_dump(mode="json", exclude_unset=True),
-        )
-        return JobResponse.model_validate(response.json())
-
     async def release(self, job_id: uuid.UUID) -> JobResponse:
         """Requeue a claimed or running job for another attempt.
 
@@ -264,19 +238,3 @@ class JobsResource:
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ToolLookupResponse.model_validate(response.json())
-
-    async def get_diff(self, job_id: uuid.UUID) -> ReplayDiffResponse:
-        """Compute the full diff between a job's sessions.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            APIError: The request failed, including 404 for a missing
-                job and 409 when the job has no result session yet.
-
-        Returns:
-            Computed replay diff.
-        """
-        response = await self._client.request("GET", f"/v1/jobs/{job_id}/diff")
-        return ReplayDiffResponse.model_validate(response.json())

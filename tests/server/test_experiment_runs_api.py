@@ -19,7 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 from test_experiments_api import (
-    SCORING_POLICY_RESPONSE,
     create_agent,
     create_cohort,
     create_experiment,
@@ -92,7 +91,7 @@ async def claim_run_jobs(
         json={
             "worker_id": worker_id,
             "max_jobs": max_jobs,
-            "experiment_run_id": run_id,
+            "scope": {"experiment_run_id": run_id},
         },
     )
 
@@ -227,7 +226,7 @@ async def test_list_experiment_runs_by_tag(client: httpx.AsyncClient) -> None:
 
 
 async def test_list_experiment_run_jobs(client: httpx.AsyncClient) -> None:
-    """List the jobs of a run with their inlined config."""
+    """List the jobs of a run."""
     created = await seed_run(client)
     response = await client.get(f"/v1/experiment-runs/{created['id']}/jobs")
     assert response.status_code == 200
@@ -238,12 +237,7 @@ async def test_list_experiment_run_jobs(client: httpx.AsyncClient) -> None:
         assert item["status"] == "pending"
         assert item["attempt"] == 1
         assert item["result_session_id"] is None
-        assert item["diff"] is None
-        assert item["tool_policy"] == {
-            "default": {"type": "passthrough"},
-            "tools": {},
-        }
-        assert item["scoring_policy"] == SCORING_POLICY_RESPONSE
+        assert item["result"] is None
 
     response = await client.get(
         f"/v1/experiment-runs/{created['id']}/jobs",
@@ -342,7 +336,6 @@ async def test_claim_jobs(client: httpx.AsyncClient) -> None:
     assert claimed["worker_id"] is not None
     assert claimed["claimed_at"] is not None
     assert claimed["heartbeat_at"] is not None
-    assert claimed["scoring_policy"] == SCORING_POLICY_RESPONSE
     spec = body["jobs"][0]["spec"]
     assert spec["job_id"] == claimed["id"]
     assert spec["kind"] == "replay"
@@ -458,7 +451,9 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
             f"/v1/sessions/{result_session_id}", json={"status": "completed"}
         )
         assert response.status_code == 200
-        response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+        response = await client.patch(
+            f"/v1/jobs/{job_id}", json={"status": "completed"}
+        )
         assert response.status_code == 200
         await run_score_jobs(client, job_id, {"conciseness": 0.8 - index * 0.6})
 

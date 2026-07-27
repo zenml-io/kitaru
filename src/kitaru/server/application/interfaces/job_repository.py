@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.jobs import JobFilter
-from kitaru.server.domain.job import Job, JobStatus
+from kitaru.server.domain.job import Job, JobStatus, WorkerScope
 
 
 class JobRepository(Protocol):
@@ -134,6 +134,20 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def list_children_many(
+        self, parent_job_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Job]]:
+        """Load every job fanned out from a set of parent jobs.
+
+        Args:
+            parent_job_ids: Ids of the parent jobs.
+
+        Returns:
+            Child jobs keyed by parent job id, parents without children
+            omitted.
+        """
+        ...
+
     async def delete_children(self, parent_job_id: uuid.UUID) -> None:
         """Delete every job fanned out from a parent job.
 
@@ -143,30 +157,19 @@ class JobRepository(Protocol):
         ...
 
     async def requeue_stale(
-        self,
-        stale_before: datetime,
-        max_attempts: int,
-        agent_ids: Sequence[uuid.UUID] | None = None,
-        experiment_run_id: uuid.UUID | None = None,
-        parent_job_id: uuid.UUID | None = None,
+        self, stale_before: datetime, max_attempts: int, scope: WorkerScope
     ) -> list[Job]:
         """Requeue or time out jobs with lost heartbeats within a scope.
 
         A claimed or running job whose last heartbeat, or claim when no
         heartbeat arrived yet, is older than the threshold goes back to
         pending with the attempt incremented, or to timed out once the
-        attempt count reached the maximum. With a parent job id the scope
-        is that job's children, with an experiment run id it is that run's
-        jobs and their children, without either it is pool-target work. An
-        agent ids scope keeps only jobs of those agents' versions and jobs
-        without an agent version.
+        attempt count reached the maximum.
 
         Args:
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
-            agent_ids: Ids of the agents to scope to.
-            experiment_run_id: Id of the experiment run to scope to.
-            parent_job_id: Id of the parent job to scope to.
+            scope: Claim scope.
 
         Returns:
             Jobs the staleness rule moved.
@@ -174,28 +177,21 @@ class JobRepository(Protocol):
         ...
 
     async def claim_pending(
-        self,
-        worker_id: uuid.UUID,
-        limit: int,
-        agent_ids: Sequence[uuid.UUID] | None = None,
-        experiment_run_id: uuid.UUID | None = None,
-        parent_job_id: uuid.UUID | None = None,
+        self, worker_id: uuid.UUID, limit: int, scope: WorkerScope
     ) -> list[Job]:
         """Atomically claim pending jobs within a scope for a worker.
 
         Rows locked by a concurrent claim are skipped, so parallel workers
-        never double-claim. With a parent job id the scope is that job's
+        never double-claim. With a job id the scope is that job and its
         children, with an experiment run id it is that run's jobs and
-        their children, without either it is pool-target work. An agent
-        ids scope keeps only jobs of those agents' versions and jobs
-        without an agent version.
+        their children, without either it is pool-target work. Agent
+        version ids keep only jobs of those versions and jobs without a
+        version, kinds keep only jobs of those kinds.
 
         Args:
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
-            agent_ids: Ids of the agents to scope to.
-            experiment_run_id: Id of the experiment run to scope to.
-            parent_job_id: Id of the parent job to scope to.
+            scope: Claim scope.
 
         Returns:
             Claimed jobs.

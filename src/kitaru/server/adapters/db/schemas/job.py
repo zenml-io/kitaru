@@ -40,11 +40,10 @@ from kitaru.server.adapters.db.schemas.schema_utils import (
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.job import (
     Import,
-    ImportStats,
     Job,
     JobKind,
     JobStatus,
-    Replay,
+    ReplayJob,
     Score,
     SessionRun,
 )
@@ -58,7 +57,6 @@ JOB_SCORER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "job", ["parent_job_id", "input_session_id", "scorer_name"]
 )
 JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY = foreign_key_name("job", ["experiment_run_id"])
-JOB_REPLAY_CONFIG_ID_FOREIGN_KEY = foreign_key_name("job", ["replay_config_id"])
 JOB_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("job", ["agent_version_id"])
 JOB_AGENT_ID_FOREIGN_KEY = foreign_key_name("job", ["agent_id"])
 JOB_INPUT_SESSION_ID_FOREIGN_KEY = foreign_key_name("job", ["input_session_id"])
@@ -107,11 +105,6 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ["experiment_run.id"],
             name=JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY,
             ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["replay_config_id"],
-            ["replay_config.id"],
-            name=JOB_REPLAY_CONFIG_ID_FOREIGN_KEY,
         ),
         ForeignKeyConstraint(
             ["agent_version_id"],
@@ -172,7 +165,6 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
 
     kind: str = Field(max_length=MAX_KIND_LENGTH, nullable=False)
     experiment_run_id: uuid.UUID | None = Field(default=None)
-    replay_config_id: uuid.UUID | None = Field(default=None)
     agent_version_id: uuid.UUID | None = Field(default=None)
     agent_id: uuid.UUID | None = Field(default=None)
     parent_job_id: uuid.UUID | None = Field(default=None)
@@ -210,11 +202,7 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
     )
     error: str | None = Field(default=None, sa_type=Text)
-    passed: bool | None = Field(default=None)
-    score: float | None = Field(default=None)
-    scores: dict[str, float] | None = Field(default=None, sa_type=JSONB)
-    diff: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
-    stats: dict[str, Any] | None = Field(default=None, sa_type=JSONB)
+    result: Any = Field(default=None, sa_type=JSONB)
 
     @classmethod
     def from_domain(cls, job: Job) -> "JobSchema":
@@ -241,15 +229,11 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             started_at=job.started_at,
             ended_at=job.ended_at,
             error=job.error,
+            result=job.result,
         )
-        if isinstance(job, Replay):
+        if isinstance(job, ReplayJob):
             row.experiment_run_id = job.experiment_run_id
-            row.replay_config_id = job.replay_config_id
             row.input_session_id = job.input_session_id
-            row.passed = job.passed
-            row.score = job.score
-            row.scores = job.scores
-            row.diff = job.diff
         elif isinstance(job, SessionRun):
             row.inputs = job.inputs
             row.name = job.name
@@ -259,20 +243,18 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             row.plugin_version_id = job.plugin_version_id
             row.scorer_name = job.scorer_config.name
             row.scorer_config = job.scorer_config.model_dump(mode="json")
-            row.score = job.score
         elif isinstance(job, Import):
             row.plugin_version_id = job.plugin_version_id
             row.payload_blob_id = job.payload_blob_id
             row.agent_id = job.agent_id
             row.inputs = job.inputs
-            row.stats = None if job.stats is None else job.stats.model_dump(mode="json")
         return row
 
     def to_domain(self) -> Job:
         """Build a domain job from this row.
 
         Returns:
-            Replay, session run, score, or import by kind, with
+            Replay job, session run, score, or import by kind, with
             timestamps set.
         """
         shared: dict[str, Any] = {
@@ -289,6 +271,7 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "error": self.error,
+            "result": self.result,
             "created": self.created,
             "updated": self.updated,
         }
@@ -304,7 +287,6 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
                 payload_blob_id=self.payload_blob_id,
                 agent_id=self.agent_id,
                 inputs=self.inputs,
-                stats=None if self.stats is None else ImportStats(**self.stats),
                 **shared,
             )
         assert self.input_session_id is not None
@@ -315,17 +297,10 @@ class JobSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
                 input_session_id=self.input_session_id,
                 plugin_version_id=self.plugin_version_id,
                 scorer_config=parse_scorer_config(self.scorer_config),
-                score=self.score,
                 **shared,
             )
-        assert self.replay_config_id is not None
-        return Replay(
+        return ReplayJob(
             experiment_run_id=self.experiment_run_id,
-            replay_config_id=self.replay_config_id,
             input_session_id=self.input_session_id,
-            passed=self.passed,
-            score=self.score,
-            scores=self.scores,
-            diff=self.diff,
             **shared,
         )

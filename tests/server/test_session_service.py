@@ -45,19 +45,11 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.job import (
     JobAlreadyLinked,
-    JobNotActive,
     JobNotFound,
+    JobNotRunning,
     JobStatus,
-    Replay,
+    ReplayJob,
     SessionRun,
-)
-from kitaru.server.domain.replay_config import (
-    HistoryPolicy,
-    ReplayConfig,
-    ScoringPolicy,
-    SourceRef,
-    SourceScorerConfig,
-    ToolPolicyConfig,
 )
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
@@ -134,7 +126,7 @@ def job_repository(
     config_repository: FakeReplayConfigRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(repository, version_repository, config_repository)
+    return FakeJobRepository(repository, version_repository)
 
 
 @pytest.fixture
@@ -698,17 +690,15 @@ async def test_delete_session_not_found(service: SessionService) -> None:
 async def create_running_job(
     repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
     job_repository: FakeJobRepository,
     agent: Agent,
     status: JobStatus = JobStatus.RUNNING,
-) -> Replay:
-    """Store a job of a completed session in a given status.
+) -> ReplayJob:
+    """Store a replay job of a completed session in a given status.
 
     Args:
         repository: Fake session repository.
         version_repository: Fake agent version repository.
-        config_repository: Fake replay config repository.
         job_repository: Fake job repository.
         agent: Agent of the session.
         status: Job status.
@@ -732,33 +722,15 @@ async def create_running_job(
             status=SessionStatus.COMPLETED,
         )
     )
-    config = await config_repository.create(
-        ReplayConfig(
-            owner_id=ACTOR.account.id,
-            tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
-            scoring_policy=ScoringPolicy(
-                scorers=[
-                    SourceScorerConfig(
-                        name="conciseness",
-                        source=SourceRef(
-                            module="my_pkg.scorers", attribute="conciseness"
-                        ),
-                    )
-                ],
-                pass_threshold=0.5,
-            ),
-        )
-    )
     job = await job_repository.create(
-        Replay(
-            replay_config_id=config.id,
+        ReplayJob(
             agent_version_id=version.id,
             input_session_id=original.id,
             status=status,
             execution_target=ExecutionTarget.POOL,
         )
     )
-    assert isinstance(job, Replay)
+    assert isinstance(job, ReplayJob)
     return job
 
 
@@ -766,84 +738,54 @@ async def test_create_session_links_job(
     service: SessionService,
     repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
     job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
     """Link a created session to its job and rewrite the origin."""
     job = await create_running_job(
-        repository, version_repository, config_repository, job_repository, agent
+        repository, version_repository, job_repository, agent
     )
     session = await service.create_session(
         recorded_command(agent, job_id=job.id), actor=ACTOR
     )
     assert session.origin is SessionOrigin.REPLAY
     assert session.status is SessionStatus.IN_PROGRESS
+    assert session.job_id == job.id
     linked = await job_repository.get(job.id)
     assert linked.result_session_id == session.id
 
 
-async def test_create_session_links_claimed_job(
+async def test_create_session_link_requires_a_running_job(
     service: SessionService,
     repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
     job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
-    """Accept the link while the job is still claimed."""
-    job = await create_running_job(
-        repository,
-        version_repository,
-        config_repository,
-        job_repository,
-        agent,
-        status=JobStatus.CLAIMED,
-    )
-    session = await service.create_session(
-        recorded_command(agent, job_id=job.id), actor=ACTOR
-    )
-    linked = await job_repository.get(job.id)
-    assert linked.result_session_id == session.id
-
-
-async def test_create_session_link_requires_active_job(
-    service: SessionService,
-    repository: FakeSessionRepository,
-    version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
-    job_repository: FakeJobRepository,
-    agent: Agent,
-) -> None:
-    """Reject linking a job that is not claimed or running."""
-    job = await create_running_job(
-        repository,
-        version_repository,
-        config_repository,
-        job_repository,
-        agent,
-        status=JobStatus.PENDING,
-    )
-    with pytest.raises(JobNotActive, match=f"Job {job.id} is not claimed or running"):
-        await service.create_session(
-            recorded_command(agent, job_id=job.id), actor=ACTOR
+    """Reject linking a job that is not running."""
+    for status in (JobStatus.PENDING, JobStatus.CLAIMED):
+        job = await create_running_job(
+            repository, version_repository, job_repository, agent, status=status
         )
-    # The failed link stores no session.
+        with pytest.raises(JobNotRunning, match=f"Job {job.id} is not running"):
+            await service.create_session(
+                recorded_command(agent, job_id=job.id), actor=ACTOR
+            )
+    # The failed links store no session.
     _, total = await service.list_sessions(SessionFilter(), actor=ACTOR)
-    assert total == 1
+    assert total == 2
 
 
 async def test_create_session_link_rejects_linked_job(
     service: SessionService,
     repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
     job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
     """Reject linking a job that already has a result session."""
     job = await create_running_job(
-        repository, version_repository, config_repository, job_repository, agent
+        repository, version_repository, job_repository, agent
     )
     await service.create_session(recorded_command(agent, job_id=job.id), actor=ACTOR)
     with pytest.raises(
@@ -870,13 +812,12 @@ async def test_create_session_link_requires_recorded_origin(
     service: SessionService,
     repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
-    config_repository: FakeReplayConfigRepository,
     job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
     """Reject a job link on a non-recorded origin."""
     job = await create_running_job(
-        repository, version_repository, config_repository, job_repository, agent
+        repository, version_repository, job_repository, agent
     )
     with pytest.raises(
         InvalidSession, match="Sessions linked to a job require origin 'recorded'"

@@ -34,7 +34,6 @@ from kitaru.server.domain.plugin import PluginFormat
 from kitaru.server.domain.replay_config import (
     ReplayOverride,
     ScorerConfig,
-    ScoringResult,
     SourceScorerConfig,
     ToolPolicyConfig,
 )
@@ -56,7 +55,6 @@ class JobStatus(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     RUNNING = "running"
-    SCORING = "scoring"
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
@@ -73,8 +71,6 @@ TERMINAL_JOB_STATUSES = frozenset(
 )
 
 HEARTBEAT_TIMEOUT_ERROR = "Job heartbeat timed out"
-
-MAX_IMPORT_FAILURES = 20
 
 
 class JobNotFound(NotFoundError):
@@ -108,6 +104,10 @@ class InvalidJob(ValidationError):
     """Raised when a job violates its shape rules."""
 
 
+class InvalidWorkerScope(ValidationError):
+    """Raised when a worker scope violates its shape rules."""
+
+
 class InvalidJobTransition(ConflictError):
     """Raised when a job status transition is illegal."""
 
@@ -124,8 +124,8 @@ class InvalidJobTransition(ConflictError):
         )
 
 
-class JobNotActive(ConflictError):
-    """Raised when an operation requires a claimed or running job."""
+class JobNotRunning(ConflictError):
+    """Raised when an operation requires a running job."""
 
     def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
@@ -133,7 +133,7 @@ class JobNotActive(ConflictError):
         Args:
             job_id: Id of the job.
         """
-        super().__init__(f"Job {job_id} is not claimed or running")
+        super().__init__(f"Job {job_id} is not running")
 
 
 class JobActive(ConflictError):
@@ -184,8 +184,23 @@ class JobMissingResultSession(ConflictError):
         super().__init__(f"Job {job_id} has no result session")
 
 
+class JobResultSessionNotCompleted(ConflictError):
+    """Raised when an operation requires a completed result session."""
+
+    def __init__(self, job_id: uuid.UUID, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            job_id: Id of the job.
+            session_id: Id of the result session.
+        """
+        super().__init__(
+            f"Result session {session_id} of job {job_id} is not completed"
+        )
+
+
 class JobMissingScore(ConflictError):
-    """Raised when an operation requires a recorded score."""
+    """Raised when an operation requires a score result."""
 
     def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
@@ -196,8 +211,8 @@ class JobMissingScore(ConflictError):
         super().__init__(f"Job {job_id} has no score")
 
 
-class JobMissingStats(ConflictError):
-    """Raised when an operation requires recorded import stats."""
+class JobMissingResult(ConflictError):
+    """Raised when an operation requires a job result."""
 
     def __init__(self, job_id: uuid.UUID) -> None:
         """Initialize the error.
@@ -205,7 +220,7 @@ class JobMissingStats(ConflictError):
         Args:
             job_id: Id of the job.
         """
-        super().__init__(f"Job {job_id} has no stats")
+        super().__init__(f"Job {job_id} has no result")
 
 
 class DuplicateScoreJob(ConflictError):
@@ -244,6 +259,22 @@ class JobKindMismatch(ConflictError):
         super().__init__(f"Job {job_id} is not of kind '{kind}'")
 
 
+def _score_value(result: Any) -> float | None:
+    """Read a score value out of a job result.
+
+    Args:
+        result: Result of a score job.
+
+    Returns:
+        Score value, ``None`` when the result is no number within 0 and 1.
+    """
+    if isinstance(result, bool) or not isinstance(result, int | float):
+        return None
+    if not 0 <= result <= 1:
+        return None
+    return float(result)
+
+
 class PluginSpec(FrozenModel):
     """Plugin spec."""
 
@@ -278,37 +309,45 @@ class ImporterSpec(FrozenModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-class ImportFailure(FrozenModel):
-    """Import failure."""
+class WorkerScope(FrozenModel):
+    """Worker claim scope."""
 
-    line: int = Field(ge=0)
-    external_id: str | None = None
-    error: str
-
-
-class ImportStats(FrozenModel):
-    """Import stats."""
-
-    created: int = Field(ge=0)
-    skipped: int = Field(ge=0)
-    failed: int = Field(ge=0)
-    failures: list[ImportFailure] = Field(default_factory=list)
+    agent_version_ids: list[uuid.UUID] | None = None
+    kinds: list[JobKind] | None = None
+    experiment_run_id: uuid.UUID | None = None
+    job_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
-    def validate_failures(self) -> Self:
-        """Validate the failure sample size.
+    def validate_scope(self) -> Self:
+        """Validate the mutual exclusivity and non-emptiness of the fields.
 
         Raises:
-            InvalidJob: The sample exceeds the entry limit.
+            InvalidWorkerScope: Both experiment_run_id and job_id are set,
+                or kinds or agent_version_ids is set to an empty list.
 
         Returns:
-            Validated stats.
+            Validated scope.
         """
-        if len(self.failures) > MAX_IMPORT_FAILURES:
-            raise InvalidJob(
-                f"Import stats carry at most {MAX_IMPORT_FAILURES} failures"
+        if self.experiment_run_id is not None and self.job_id is not None:
+            raise InvalidWorkerScope(
+                "Worker scope experiment run id and job id are mutually exclusive"
+            )
+        if self.kinds is not None and not self.kinds:
+            raise InvalidWorkerScope("Worker scope kinds must be non-empty when set")
+        if self.agent_version_ids is not None and not self.agent_version_ids:
+            raise InvalidWorkerScope(
+                "Worker scope agent version ids must be non-empty when set"
             )
         return self
+
+    @property
+    def pinned(self) -> bool:
+        """Whether the scope is pinned to an experiment run or a job.
+
+        Returns:
+            Whether the scope is pinned to an experiment run or a job.
+        """
+        return self.experiment_run_id is not None or self.job_id is not None
 
 
 class JobSpec(FrozenModel):
@@ -343,6 +382,7 @@ class Job(DomainModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     error: str | None = None
+    result: Any = None
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -439,7 +479,31 @@ class Job(DomainModel):
         self.started_at = None
         self.ended_at = None
         self.error = None
+        self.result = None
         self.result_session_id = None
+
+    def check_result(self, result: Any) -> None:
+        """Check the result a completion ships against the job's kind.
+
+        Args:
+            result: Result shipped with the completion.
+        """
+
+    def complete(self, result: Any) -> None:
+        """Complete the job with its result.
+
+        Args:
+            result: Result shipped with the completion.
+
+        Raises:
+            InvalidJobTransition: The job is not running.
+        """
+        if self.status is not JobStatus.RUNNING:
+            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
+        self.check_result(result)
+        self.status = JobStatus.COMPLETED
+        self.result = result
+        self.ended_at = datetime.now(UTC)
 
     def fail(self, error: str) -> None:
         """Fail the job.
@@ -448,14 +512,9 @@ class Job(DomainModel):
             error: Error message.
 
         Raises:
-            InvalidJobTransition: The job is not claimed, running, or
-                scoring.
+            InvalidJobTransition: The job is not claimed or running.
         """
-        if self.status not in (
-            JobStatus.CLAIMED,
-            JobStatus.RUNNING,
-            JobStatus.SCORING,
-        ):
+        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
             raise InvalidJobTransition(self.id, self.status, JobStatus.FAILED)
         self.status = JobStatus.FAILED
         self.error = error
@@ -488,17 +547,17 @@ class Job(DomainModel):
         self.ended_at = datetime.now(UTC)
 
     def link_result_session(self, session_id: uuid.UUID) -> None:
-        """Link the session recorded by the replayed agent.
+        """Link the session recorded by the running agent.
 
         Args:
             session_id: Id of the result session.
 
         Raises:
-            JobNotActive: The job is not claimed or running.
+            JobNotRunning: The job is not running.
             JobAlreadyLinked: The job already has a result session.
         """
-        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
-            raise JobNotActive(self.id)
+        if self.status is not JobStatus.RUNNING:
+            raise JobNotRunning(self.id)
         if self.result_session_id is not None:
             raise JobAlreadyLinked(self.id)
         self.result_session_id = session_id
@@ -540,16 +599,11 @@ class Job(DomainModel):
         return copy
 
 
-class Replay(Job):
+class ReplayJob(Job):
     """Replay job."""
 
     experiment_run_id: uuid.UUID | None = None
-    replay_config_id: uuid.UUID
     input_session_id: uuid.UUID
-    passed: bool | None = None
-    score: float | None = None
-    scores: dict[str, float] | None = None
-    diff: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_agent_version(self) -> Self:
@@ -583,40 +637,18 @@ class Replay(Job):
         """
         return self.experiment_run_id is None
 
-    def enter_scoring(self) -> None:
-        """Hand the job over to its score jobs.
-
-        Raises:
-            InvalidJobTransition: The job is not running.
-            JobMissingResultSession: The job has no result session.
-        """
-        if self.status is not JobStatus.RUNNING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.SCORING)
-        if self.result_session_id is None:
-            raise JobMissingResultSession(self.id)
-        self.status = JobStatus.SCORING
-
-    def complete(self, result: ScoringResult, diff: dict[str, Any] | None) -> None:
-        """Complete the job with its scoring result.
+    def check_result(self, result: Any) -> None:
+        """Check that the job recorded a result session.
 
         Args:
-            result: Scoring result computed from the score jobs.
-            diff: Diff summary.
+            result: Result shipped with the completion.
 
         Raises:
-            InvalidJobTransition: The job is not scoring.
             JobMissingResultSession: The job has no result session.
         """
-        if self.status is not JobStatus.SCORING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
+        _ = result
         if self.result_session_id is None:
             raise JobMissingResultSession(self.id)
-        self.status = JobStatus.COMPLETED
-        self.passed = result.passed
-        self.score = result.score
-        self.scores = result.scores
-        self.diff = diff
-        self.ended_at = datetime.now(UTC)
 
 
 class SessionRun(Job):
@@ -648,19 +680,18 @@ class SessionRun(Job):
         """
         return JobKind.SESSION_RUN
 
-    def complete(self) -> None:
-        """Complete the job.
+    def check_result(self, result: Any) -> None:
+        """Check that the job recorded a result session.
+
+        Args:
+            result: Result shipped with the completion.
 
         Raises:
-            InvalidJobTransition: The job is not running.
             JobMissingResultSession: The job has no result session.
         """
-        if self.status is not JobStatus.RUNNING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
+        _ = result
         if self.result_session_id is None:
             raise JobMissingResultSession(self.id)
-        self.status = JobStatus.COMPLETED
-        self.ended_at = datetime.now(UTC)
 
 
 class Score(Job):
@@ -670,7 +701,27 @@ class Score(Job):
     input_session_id: uuid.UUID
     plugin_version_id: uuid.UUID | None = None
     scorer_config: ScorerConfig
-    score: float | None = None
+
+    @property
+    def score(self) -> float | None:
+        """Score the scorer produced.
+
+        Returns:
+            Score value, ``None`` when the result carries no score.
+        """
+        return _score_value(self.result)
+
+    def check_result(self, result: Any) -> None:
+        """Check that the result is a score value.
+
+        Args:
+            result: Result shipped with the completion.
+
+        Raises:
+            JobMissingScore: The result is no number within 0 and 1.
+        """
+        if _score_value(result) is None:
+            raise JobMissingScore(self.id)
 
     @model_validator(mode="after")
     def validate_arm(self) -> Self:
@@ -704,43 +755,6 @@ class Score(Job):
         """
         return JobKind.SCORE
 
-    def record_score(self, score: float) -> None:
-        """Record the score the scorer produced.
-
-        Args:
-            score: Score value.
-
-        Raises:
-            JobNotActive: The job is not claimed or running.
-        """
-        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
-            raise JobNotActive(self.id)
-        self.score = score
-
-    def complete(self) -> None:
-        """Complete the job.
-
-        Raises:
-            InvalidJobTransition: The job is not running.
-            JobMissingScore: The job has no recorded score.
-        """
-        if self.status is not JobStatus.RUNNING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
-        if self.score is None:
-            raise JobMissingScore(self.id)
-        self.status = JobStatus.COMPLETED
-        self.ended_at = datetime.now(UTC)
-
-    def retry(self) -> None:
-        """Requeue the job for another attempt after it finished.
-
-        Raises:
-            InvalidJobTransition: The job is not failed, timed out,
-                or canceled.
-        """
-        super().retry()
-        self.score = None
-
 
 class Import(Job):
     """Import job."""
@@ -749,7 +763,6 @@ class Import(Job):
     payload_blob_id: uuid.UUID
     agent_id: uuid.UUID
     inputs: Any = None
-    stats: ImportStats | None = None
 
     @model_validator(mode="after")
     def validate_agent_version(self) -> Self:
@@ -774,39 +787,14 @@ class Import(Job):
         """
         return JobKind.IMPORT
 
-    def record_stats(self, stats: ImportStats) -> None:
-        """Record the stats the importer produced.
+    def check_result(self, result: Any) -> None:
+        """Check that the completion ships a result.
 
         Args:
-            stats: Import stats.
+            result: Result shipped with the completion.
 
         Raises:
-            JobNotActive: The job is not claimed or running.
+            JobMissingResult: The completion ships no result.
         """
-        if self.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
-            raise JobNotActive(self.id)
-        self.stats = stats
-
-    def complete(self) -> None:
-        """Complete the job.
-
-        Raises:
-            InvalidJobTransition: The job is not running.
-            JobMissingStats: The job has no recorded stats.
-        """
-        if self.status is not JobStatus.RUNNING:
-            raise InvalidJobTransition(self.id, self.status, JobStatus.COMPLETED)
-        if self.stats is None:
-            raise JobMissingStats(self.id)
-        self.status = JobStatus.COMPLETED
-        self.ended_at = datetime.now(UTC)
-
-    def retry(self) -> None:
-        """Requeue the job for another attempt after it finished.
-
-        Raises:
-            InvalidJobTransition: The job is not failed, timed out,
-                or canceled.
-        """
-        super().retry()
-        self.stats = None
+        if result is None:
+            raise JobMissingResult(self.id)

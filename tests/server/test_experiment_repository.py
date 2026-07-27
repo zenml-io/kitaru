@@ -145,7 +145,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         cohorts = FakeCohortRepository(sessions, agents, tags)
         configs = FakeReplayConfigRepository()
         experiments = FakeExperimentRepository(cohorts, configs, tags)
-        jobs = FakeJobRepository(sessions, versions, configs)
+        jobs = FakeJobRepository(sessions, versions)
         runs = FakeExperimentRunRepository(experiments, jobs, tags)
         yield Setup(
             experiments,
@@ -294,6 +294,7 @@ async def seed_run(setup: Setup, experiment: Experiment) -> ExperimentRun:
             experiment_id=experiment.id,
             agent_version_id=version.id,
         ),
+        [],
         [],
     )
 

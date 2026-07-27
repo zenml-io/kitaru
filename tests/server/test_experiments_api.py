@@ -588,7 +588,6 @@ async def test_create_run_fans_out(client: httpx.AsyncClient) -> None:
         "pending": 3,
         "claimed": 0,
         "running": 0,
-        "scoring": 0,
         "completed": 0,
         "failed": 0,
         "timed_out": 0,

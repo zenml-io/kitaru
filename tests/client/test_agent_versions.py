@@ -22,7 +22,6 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeJobRepository,
-    FakeReplayConfigRepository,
     FakeSecretRepository,
     FakeSessionRepository,
     asgi_api_client,
@@ -73,7 +72,6 @@ async def api_client(
     job_repository = FakeJobRepository(
         FakeSessionRepository(agent_repository, version_repository),
         version_repository,
-        FakeReplayConfigRepository(),
     )
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(

@@ -28,6 +28,9 @@ from kitaru.server.application.interfaces.job_repository import (
 from kitaru.server.application.interfaces.replay_config_repository import (
     ReplayConfigRepository,
 )
+from kitaru.server.application.interfaces.replay_repository import (
+    ReplayRepository,
+)
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
@@ -47,8 +50,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunActive,
     ExperimentRunProgress,
 )
-from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, JobStatus, Replay
-from kitaru.server.domain.replay_config import ReplayConfig
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, JobStatus, ReplayJob
 
 
 class ExperimentRunService:
@@ -58,6 +60,7 @@ class ExperimentRunService:
         self,
         repository: ExperimentRunRepository,
         job_repository: JobRepository,
+        replay_repository: ReplayRepository,
         replay_config_repository: ReplayConfigRepository,
         experiment_repository: ExperimentRepository,
         session_repository: SessionRepository,
@@ -69,6 +72,7 @@ class ExperimentRunService:
         Args:
             repository: Experiment run repository.
             job_repository: Job repository.
+            replay_repository: Replay repository.
             replay_config_repository: Replay config repository.
             experiment_repository: Experiment repository.
             session_repository: Session repository.
@@ -78,6 +82,7 @@ class ExperimentRunService:
         """
         self._repository = repository
         self._job_repository = job_repository
+        self._replay_repository = replay_repository
         self._replay_config_repository = replay_config_repository
         self._experiment_repository = experiment_repository
         self._session_repository = session_repository
@@ -148,7 +153,7 @@ class ExperimentRunService:
         run_id: uuid.UUID,
         jobs_filter: ExperimentRunJobsFilter,
         actor: AuthContext,
-    ) -> tuple[list[tuple[Replay, ReplayConfig]], int]:
+    ) -> tuple[list[ReplayJob], int]:
         """List the jobs of an experiment run.
 
         Args:
@@ -160,8 +165,7 @@ class ExperimentRunService:
             ExperimentRunNotFound: No experiment run has this id.
 
         Returns:
-            Page of jobs with their replay configs and the total match
-            count.
+            Page of jobs and the total match count.
         """
         _ = actor
         await self._repository.get(run_id)
@@ -176,25 +180,21 @@ class ExperimentRunService:
                 page_size=jobs_filter.page_size,
             )
         )
-        replays = [
+        return [
             job.with_staleness(stale_before, self._max_attempts)
             for job in jobs
-            if isinstance(job, Replay)
-        ]
-        configs = await self._replay_config_repository.get_many(
-            [replay.replay_config_id for replay in replays]
-        )
-        return [(replay, configs[replay.replay_config_id]) for replay in replays], total
+            if isinstance(job, ReplayJob)
+        ], total
 
     async def cancel_run(
         self, run_id: uuid.UUID, actor: AuthContext
     ) -> tuple[ExperimentRun, ExperimentRunProgress]:
         """Cancel an experiment run.
 
-        Pending, claimed, and scoring jobs are canceled immediately,
-        together with the score jobs of the scoring ones. Running jobs
-        drain through the heartbeat path. The run lands on canceled right
-        away when no running job remains.
+        Pending and claimed jobs are canceled immediately, together with
+        the fan-out children of every job. Running jobs drain through the
+        heartbeat path. The run lands on canceled right away when no
+        running job remains.
 
         Args:
             run_id: Id of the experiment run.
@@ -213,22 +213,18 @@ class ExperimentRunService:
         run = await self._repository.update(run)
         jobs = await load_run_jobs(self._job_repository, run_id)
         for job in jobs:
-            if job.status not in (
-                JobStatus.PENDING,
-                JobStatus.CLAIMED,
-                JobStatus.SCORING,
-            ):
+            for child in await self._job_repository.list_children(job.id):
+                if child.status not in TERMINAL_JOB_STATUSES:
+                    child.cancel()
+                    await self._job_repository.update(child)
+            if job.status not in (JobStatus.PENDING, JobStatus.CLAIMED):
                 continue
-            if job.status is JobStatus.SCORING:
-                for child in await self._job_repository.list_children(job.id):
-                    if child.status not in TERMINAL_JOB_STATUSES:
-                        child.cancel()
-                        await self._job_repository.update(child)
             job.cancel()
             await self._job_repository.update(job)
         await finalize_run_if_drained(
             self._repository,
             self._job_repository,
+            self._replay_repository,
             self._session_repository,
             run_id,
         )
@@ -252,7 +248,10 @@ class ExperimentRunService:
         if run.status not in TERMINAL_RUN_STATUSES:
             raise ExperimentRunActive(run.id)
         jobs = await load_run_jobs(self._job_repository, run_id)
-        config_ids = {job.replay_config_id for job in jobs}
+        replays = await self._replay_repository.get_many_by_jobs(
+            [job.id for job in jobs]
+        )
+        config_ids = {replay.replay_config_id for replay in replays.values()}
         await self._repository.delete(run_id)
         for config_id in config_ids:
             await self._replay_config_repository.delete_if_unreferenced(config_id)

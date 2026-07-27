@@ -59,6 +59,9 @@ from kitaru.server.adapters.db.repositories.plugin_repository import (
 from kitaru.server.adapters.db.repositories.replay_config_repository import (
     SQLReplayConfigRepository,
 )
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
@@ -92,6 +95,7 @@ from kitaru.server.application.services.experiment_service import (
 )
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.plugin_service import PluginService
+from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -285,6 +289,7 @@ def get_experiment_run_service(
     return ExperimentRunService(
         repository=SQLExperimentRunRepository(session),
         job_repository=SQLJobRepository(session),
+        replay_repository=SQLReplayRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
         experiment_repository=SQLExperimentRepository(session),
         session_repository=SQLSessionRepository(session),
@@ -308,6 +313,7 @@ def get_job_service(
     """
     return JobService(
         repository=SQLJobRepository(session),
+        replay_repository=SQLReplayRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
         session_repository=SQLSessionRepository(session),
         agent_repository=SQLAgentRepository(session),
@@ -325,6 +331,28 @@ def get_job_service(
         heartbeat_timeout_seconds=settings.JOB_HEARTBEAT_TIMEOUT_SECONDS,
         max_attempts=settings.JOB_MAX_ATTEMPTS,
         worker_liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
+
+
+def get_replay_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ReplayService:
+    """Return a replay service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Replay service bound to the SQL repositories.
+    """
+    return ReplayService(
+        repository=SQLReplayRepository(session),
+        job_repository=SQLJobRepository(session),
+        replay_config_repository=SQLReplayConfigRepository(session),
+        session_repository=SQLSessionRepository(session),
+        session_node_repository=SQLSessionNodeRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
     )
 
 

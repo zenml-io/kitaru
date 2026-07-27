@@ -52,8 +52,10 @@ from kitaru.server.domain.session import (
 SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["provider", "external_id"]
 )
+SESSION_JOB_ID_UNIQUE_CONSTRAINT = unique_constraint_name("session", ["job_id"])
 SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
+SESSION_JOB_ID_FOREIGN_KEY = foreign_key_name("session", ["job_id"])
 SESSION_OWNER_ID_INDEX = index_name("session", ["owner_id"])
 SESSION_AGENT_ID_CREATED_INDEX = index_name("session", ["agent_id", "created"])
 SESSION_ORIGIN_INDEX = index_name("session", ["origin"])
@@ -73,6 +75,7 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         UniqueConstraint(
             "provider", "external_id", name=SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT
         ),
+        UniqueConstraint("job_id", name=SESSION_JOB_ID_UNIQUE_CONSTRAINT),
         ForeignKeyConstraint(
             ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
         ),
@@ -80,6 +83,12 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             ["agent_version_id"],
             ["agent_version.id"],
             name=SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+        ),
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["job.id"],
+            name=SESSION_JOB_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
         ),
         Index(SESSION_OWNER_ID_INDEX, "owner_id"),
         Index(SESSION_AGENT_ID_CREATED_INDEX, "agent_id", "created"),
@@ -91,6 +100,7 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     owner_id: uuid.UUID = Field(foreign_key="account.id", nullable=False)
     agent_id: uuid.UUID = Field(nullable=False)
     agent_version_id: uuid.UUID | None = Field(default=None)
+    job_id: uuid.UUID | None = Field(default=None)
     origin: str = Field(max_length=MAX_STATUS_LENGTH, nullable=False)
     status: str = Field(max_length=MAX_STATUS_LENGTH, nullable=False)
     name: str | None = Field(default=None, max_length=MAX_NAME_LENGTH)
@@ -145,6 +155,7 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             owner_id=session.owner_id,
             agent_id=session.agent_id,
             agent_version_id=session.agent_version_id,
+            job_id=session.job_id,
             origin=session.origin.value,
             status=session.status.value,
             name=session.name,
@@ -181,6 +192,7 @@ class SessionSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
             owner_id=self.owner_id,
             agent_id=self.agent_id,
             agent_version_id=self.agent_version_id,
+            job_id=self.job_id,
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,

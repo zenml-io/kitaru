@@ -32,6 +32,7 @@ from kitaru.server.application.interfaces.worker_repository import (
 )
 from kitaru.server.application.models.workers import WorkerFilter
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.job import WorkerScope
 from kitaru.server.domain.worker import (
     DuplicateWorkerName,
     Worker,
@@ -44,7 +45,7 @@ Setup = tuple[WorkerRepository, uuid.UUID]
 def worker(
     owner_id: uuid.UUID,
     name: str = "runner",
-    agent_ids: list[uuid.UUID] | None = None,
+    scope: WorkerScope | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Worker:
     """Build an unstored worker.
@@ -52,7 +53,7 @@ def worker(
     Args:
         owner_id: Id of the owning account.
         name: Worker name.
-        agent_ids: Ids of the served agents.
+        scope: Claim scope.
         metadata: Worker metadata.
 
     Returns:
@@ -61,7 +62,7 @@ def worker(
     return Worker(
         owner_id=owner_id,
         name=name,
-        agent_ids=agent_ids or [],
+        scope=scope or WorkerScope(),
         last_seen_at=datetime.now(UTC),
         metadata=metadata or {},
     )
@@ -86,13 +87,17 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 async def test_create_sets_timestamps(setup: Setup) -> None:
     """Store a new worker with both timestamps set."""
     repository, owner_id = setup
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     created = await repository.create(
-        worker(owner_id, agent_ids=[agent_id], metadata={"hostname": "pool-1"})
+        worker(
+            owner_id,
+            scope=WorkerScope(agent_version_ids=[version_id]),
+            metadata={"hostname": "pool-1"},
+        )
     )
     assert created.name == "runner"
     assert created.owner_id == owner_id
-    assert created.agent_ids == [agent_id]
+    assert created.scope.agent_version_ids == [version_id]
     assert created.metadata == {"hostname": "pool-1"}
     assert created.created is not None
     assert created.updated is not None
@@ -173,19 +178,27 @@ async def test_query(setup: Setup) -> None:
     assert workers == []
 
 
-async def test_query_agent_id_filter(setup: Setup) -> None:
+async def test_query_agent_version_id_filter(setup: Setup) -> None:
     """Query workers serving an agent, including catch-all workers."""
     repository, owner_id = setup
-    agent_id = uuid.uuid4()
-    await repository.create(worker(owner_id, name="serving", agent_ids=[agent_id]))
-    await repository.create(worker(owner_id, name="other", agent_ids=[uuid.uuid4()]))
+    version_id = uuid.uuid4()
+    await repository.create(
+        worker(
+            owner_id, name="serving", scope=WorkerScope(agent_version_ids=[version_id])
+        )
+    )
+    await repository.create(
+        worker(
+            owner_id, name="other", scope=WorkerScope(agent_version_ids=[uuid.uuid4()])
+        )
+    )
     await repository.create(worker(owner_id, name="catch-all"))
 
-    workers, total = await repository.query(WorkerFilter(agent_id=agent_id))
+    workers, total = await repository.query(WorkerFilter(agent_version_id=version_id))
     assert total == 2
     assert [item.name for item in workers] == ["serving", "catch-all"]
 
-    workers, total = await repository.query(WorkerFilter(agent_id=uuid.uuid4()))
+    workers, total = await repository.query(WorkerFilter(agent_version_id=uuid.uuid4()))
     assert total == 1
     assert [item.name for item in workers] == ["catch-all"]
 
@@ -194,10 +207,13 @@ async def test_update(setup: Setup) -> None:
     """Persist field changes and renew the updated timestamp."""
     repository, owner_id = setup
     created = await repository.create(worker(owner_id))
-    agent_id = uuid.uuid4()
-    created.refresh(agent_ids=[agent_id], metadata={"hostname": "pool-2"})
+    version_id = uuid.uuid4()
+    created.refresh(
+        scope=WorkerScope(agent_version_ids=[version_id]),
+        metadata={"hostname": "pool-2"},
+    )
     updated = await repository.update(created)
-    assert updated.agent_ids == [agent_id]
+    assert updated.scope.agent_version_ids == [version_id]
     assert updated.metadata == {"hostname": "pool-2"}
     assert updated.last_seen_at == created.last_seen_at
     assert updated.created == created.created
@@ -231,15 +247,19 @@ async def test_update_duplicate_name(setup: Setup) -> None:
 async def test_touch(setup: Setup) -> None:
     """Bump only the last seen time of a stored worker."""
     repository, owner_id = setup
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     created = await repository.create(
-        worker(owner_id, agent_ids=[agent_id], metadata={"hostname": "pool-1"})
+        worker(
+            owner_id,
+            scope=WorkerScope(agent_version_ids=[version_id]),
+            metadata={"hostname": "pool-1"},
+        )
     )
     last_seen_at = datetime.now(UTC)
     await repository.touch(created.id, last_seen_at)
     loaded = await repository.get(created.id)
     assert loaded.last_seen_at == last_seen_at
-    assert loaded.agent_ids == [agent_id]
+    assert loaded.scope.agent_version_ids == [version_id]
     assert loaded.metadata == {"hostname": "pool-1"}
     assert loaded.updated is not None
     assert created.updated is not None

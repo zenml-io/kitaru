@@ -127,7 +127,14 @@ async def test_experiment_flow_persists_across_requests(
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 2
-    assert all(item["override"]["model"] == "claude-sonnet-5" for item in body["items"])
+
+    response = await client.get("/v1/replays", params={"experiment_run_id": run["id"]})
+    assert response.status_code == 200
+    replays = response.json()
+    assert replays["total"] == 2
+    assert all(
+        item["override"]["model"] == "claude-sonnet-5" for item in replays["items"]
+    )
 
     response = await client.delete(f"/v1/experiments/{experiment_id}")
     assert response.status_code == 409

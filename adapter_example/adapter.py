@@ -58,6 +58,7 @@ from kitaru.api_models.v1.sessions import (
 from kitaru.client import KitaruAPIClient
 from kitaru.hashing import tool_call_cache_key
 from kitaru.ids import uuid7
+from kitaru.job import job_id as get_job_id
 
 ADAPTER_VERSION = "0.1.0"
 FRAMEWORK = "mock"
@@ -115,7 +116,7 @@ class KitaruAdapter(AgentHooks):
         self._session_name = session_name or os.environ.get("KITARU_JOB_SESSION_NAME")
         self._batch_size = batch_size
         if job_id is None:
-            job_env = os.environ.get("KITARU_JOB_ID")
+            job_env = get_job_id()
             job_id = uuid.UUID(job_env) if job_env else None
         self._job_id = job_id
         if api_client is None:

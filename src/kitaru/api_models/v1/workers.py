@@ -20,16 +20,14 @@ from typing import Any
 from pydantic import Field
 
 from kitaru.api_models.v1.base import JsonValue, RequestModel, ResponseModel
+from kitaru.api_models.v1.jobs import WorkerScope
 
 
 class WorkerCreateRequest(RequestModel):
     """Worker create request."""
 
     name: str = Field(description="Worker name.")
-    agent_ids: list[uuid.UUID] = Field(
-        default_factory=list,
-        description="Ids of the served agents, empty means all agents.",
-    )
+    scope: WorkerScope = Field(default=WorkerScope(), description="Claim scope.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Worker metadata."
     )
@@ -57,9 +55,7 @@ class WorkerResponse(ResponseModel):
     id: uuid.UUID = Field(description="Worker id.")
     owner_id: uuid.UUID = Field(description="Id of the owning account.")
     name: str = Field(description="Worker name.")
-    agent_ids: list[uuid.UUID] = Field(
-        description="Ids of the served agents, empty means all agents."
-    )
+    scope: WorkerScope = Field(description="Claim scope.")
     last_seen_at: datetime = Field(description="Time of the last registration.")
     live: bool = Field(
         description="Whether the worker was seen within the liveness timeout."

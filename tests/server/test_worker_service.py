@@ -23,6 +23,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.workers import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.job import WorkerScope
 from kitaru.server.domain.worker import WorkerNotFound
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -42,16 +43,16 @@ def service(repository: FakeWorkerRepository) -> WorkerService:
 
 async def test_register_worker(service: WorkerService) -> None:
     """Register a worker owned by the caller."""
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     worker = await service.register_worker(
         name="runner",
-        agent_ids=[agent_id],
+        scope=WorkerScope(agent_version_ids=[version_id]),
         metadata={"hostname": "pool-1"},
         actor=ACTOR,
     )
     assert worker.name == "runner"
     assert worker.owner_id == ACTOR.account.id
-    assert worker.agent_ids == [agent_id]
+    assert worker.scope.agent_version_ids == [version_id]
     assert worker.metadata == {"hostname": "pool-1"}
     assert worker.last_seen_at is not None
     assert worker.created is not None
@@ -62,19 +63,19 @@ async def test_register_worker_upserts_by_name(service: WorkerService) -> None:
     """Update an existing worker on a repeated registration."""
     created = await service.register_worker(
         name="runner",
-        agent_ids=[uuid.uuid4()],
+        scope=WorkerScope(agent_version_ids=[uuid.uuid4()]),
         metadata={"hostname": "pool-1"},
         actor=ACTOR,
     )
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     registered = await service.register_worker(
         name="runner",
-        agent_ids=[agent_id],
+        scope=WorkerScope(agent_version_ids=[version_id]),
         metadata={"hostname": "pool-2"},
         actor=ACTOR,
     )
     assert registered.id == created.id
-    assert registered.agent_ids == [agent_id]
+    assert registered.scope.agent_version_ids == [version_id]
     assert registered.metadata == {"hostname": "pool-2"}
     assert registered.last_seen_at > created.last_seen_at
     assert registered.created == created.created
@@ -89,7 +90,7 @@ async def test_register_worker_after_duplicate_failure(
     """Fall back to the update path when the name is already stored."""
     created = await create_worker(repository, ACTOR.account.id, name="runner")
     registered = await service.register_worker(
-        name="runner", agent_ids=[], metadata={}, actor=ACTOR
+        name="runner", scope=WorkerScope(), metadata={}, actor=ACTOR
     )
     assert registered.id == created.id
     assert registered.last_seen_at > created.last_seen_at
@@ -98,7 +99,7 @@ async def test_register_worker_after_duplicate_failure(
 async def test_get_worker(service: WorkerService) -> None:
     """Get a stored worker by id."""
     created = await service.register_worker(
-        name="runner", agent_ids=[], metadata={}, actor=ACTOR
+        name="runner", scope=WorkerScope(), metadata={}, actor=ACTOR
     )
     loaded = await service.get_worker(created.id, actor=ACTOR)
     assert loaded == created
@@ -113,10 +114,13 @@ async def test_get_worker_not_found(service: WorkerService) -> None:
 
 async def test_list_workers(service: WorkerService) -> None:
     """List workers with filters and pagination."""
-    agent_id = uuid.uuid4()
-    for name, agent_ids in [("a", [agent_id]), ("b", [uuid.uuid4()]), ("c", [])]:
+    version_id = uuid.uuid4()
+    for name, version_ids in [("a", [version_id]), ("b", [uuid.uuid4()]), ("c", None)]:
         await service.register_worker(
-            name=name, agent_ids=agent_ids, metadata={}, actor=ACTOR
+            name=name,
+            scope=WorkerScope(agent_version_ids=version_ids),
+            metadata={},
+            actor=ACTOR,
         )
 
     workers, total = await service.list_workers(WorkerFilter(), actor=ACTOR)
@@ -128,7 +132,7 @@ async def test_list_workers(service: WorkerService) -> None:
     assert workers[0].name == "b"
 
     workers, total = await service.list_workers(
-        WorkerFilter(agent_id=agent_id), actor=ACTOR
+        WorkerFilter(agent_version_id=version_id), actor=ACTOR
     )
     assert total == 2
     assert [worker.name for worker in workers] == ["a", "c"]
@@ -143,7 +147,7 @@ async def test_list_workers(service: WorkerService) -> None:
 async def test_delete_worker(service: WorkerService) -> None:
     """Delete a stored worker."""
     created = await service.register_worker(
-        name="runner", agent_ids=[], metadata={}, actor=ACTOR
+        name="runner", scope=WorkerScope(), metadata={}, actor=ACTOR
     )
     await service.delete_worker(created.id, actor=ACTOR)
     with pytest.raises(WorkerNotFound):
@@ -160,7 +164,7 @@ async def test_delete_worker_not_found(service: WorkerService) -> None:
 async def test_worker_liveness(service: WorkerService) -> None:
     """Report liveness from the last seen time and the timeout."""
     worker = await service.register_worker(
-        name="runner", agent_ids=[], metadata={}, actor=ACTOR
+        name="runner", scope=WorkerScope(), metadata={}, actor=ACTOR
     )
     assert worker.is_live(service.liveness_timeout_seconds)
     stale = worker.model_copy(

@@ -42,7 +42,7 @@ class WorkersResource:
     async def create(self, request: WorkerCreateRequest) -> WorkerResponse:
         """Register a worker, upserting by name.
 
-        A worker already registered under the name gets its served agents
+        A worker already registered under the name gets its claim scope
         and metadata replaced and its last seen time bumped.
 
         Args:

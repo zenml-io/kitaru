@@ -24,9 +24,9 @@ from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
     HistoryScope,
     PassthroughPolicy,
-    ReplayCreateRequest,
     ToolPolicyConfig,
 )
+from kitaru.api_models.v1.replays import ReplayCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
 
@@ -70,3 +70,40 @@ async def test_create_rejects_cohort_scope(api_client: KitaruAPIClient) -> None:
             )
         )
     assert exc_info.value.status_code == 422
+
+
+async def test_get_and_list_round_trip(api_client: KitaruAPIClient) -> None:
+    """Round-trip a replay through create, get, and list."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
+    )
+    assert created.experiment_run_id is None
+    assert created.input_session_id == session_id
+    assert created.result_session_id is None
+    assert created.passed is None
+    assert created.tool_policy == ToolPolicyConfig(default=HistoryPolicy())
+    assert created.scoring_policy == SCORING_POLICY
+
+    loaded = await api_client.replays.get(created.id)
+    assert loaded == created
+
+    page = await api_client.replays.list(input_session_id=session_id)
+    assert page.total == 1
+    assert page.items[0].id == created.id
+
+    page = await api_client.replays.list(passed=True)
+    assert page.total == 0
+
+
+async def test_get_diff_requires_a_result_session(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Surface HTTP 409 while the replay has no result session."""
+    session_id, _ = await create_session(api_client)
+    created = await api_client.replays.create(
+        ReplayCreateRequest(input_session_id=session_id, scoring_policy=SCORING_POLICY)
+    )
+    with pytest.raises(APIError) as exc_info:
+        await api_client.replays.get_diff(created.id)
+    assert exc_info.value.status_code == 409

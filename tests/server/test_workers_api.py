@@ -55,12 +55,12 @@ async def client(
 
 async def test_register_worker(client: httpx.AsyncClient) -> None:
     """Register a worker and observe HTTP 200."""
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     response = await client.post(
         "/v1/workers",
         json={
             "name": "runner",
-            "agent_ids": [str(agent_id)],
+            "scope": {"agent_version_ids": [str(version_id)], "kinds": ["replay"]},
             "metadata": {"hostname": "pool-1"},
         },
     )
@@ -68,7 +68,9 @@ async def test_register_worker(client: httpx.AsyncClient) -> None:
     body = response.json()
     assert body["name"] == "runner"
     assert body["owner_id"] == str(ACCOUNT.id)
-    assert body["agent_ids"] == [str(agent_id)]
+    assert body["scope"]["agent_version_ids"] == [str(version_id)]
+    assert body["scope"]["kinds"] == ["replay"]
+    assert body["scope"]["experiment_run_id"] is None
     assert body["metadata"] == {"hostname": "pool-1"}
     assert body["live"] is True
     assert body["last_seen_at"] is not None
@@ -83,19 +85,19 @@ async def test_register_worker_upserts_by_name(client: httpx.AsyncClient) -> Non
     assert response.status_code == 200
     created = response.json()
 
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     response = await client.post(
         "/v1/workers",
         json={
             "name": "runner",
-            "agent_ids": [str(agent_id)],
+            "scope": {"agent_version_ids": [str(version_id)]},
             "metadata": {"hostname": "pool-2"},
         },
     )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == created["id"]
-    assert body["agent_ids"] == [str(agent_id)]
+    assert body["scope"]["agent_version_ids"] == [str(version_id)]
     assert body["metadata"] == {"hostname": "pool-2"}
     assert body["last_seen_at"] > created["last_seen_at"]
 

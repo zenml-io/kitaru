@@ -20,7 +20,8 @@ from decimal import Decimal
 import pytest
 
 from kitaru.server.domain.execution import ExecutionTarget
-from kitaru.server.domain.job import JobStatus, Replay
+from kitaru.server.domain.job import JobStatus, ReplayJob
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.replay_diff import (
     compute_diff_summary,
@@ -92,7 +93,7 @@ def node(session_id: uuid.UUID, key: str, **overrides: object) -> SessionNode:
 
 
 def replay(**overrides: object) -> Replay:
-    """Build a replay entity with a linked result session.
+    """Build a replay entity.
 
     Args:
         **overrides: Field overrides.
@@ -101,14 +102,32 @@ def replay(**overrides: object) -> Replay:
         Replay entity.
     """
     values: dict[str, object] = {
+        "owner_id": uuid.uuid4(),
+        "job_id": uuid.uuid4(),
         "replay_config_id": uuid.uuid4(),
+        "input_session_id": uuid.uuid4(),
+        **overrides,
+    }
+    return Replay.model_validate(values)
+
+
+def replay_job(**overrides: object) -> ReplayJob:
+    """Build a replay job entity with a linked result session.
+
+    Args:
+        **overrides: Field overrides.
+
+    Returns:
+        Replay job entity.
+    """
+    values: dict[str, object] = {
         "agent_version_id": uuid.uuid4(),
         "input_session_id": uuid.uuid4(),
         "result_session_id": uuid.uuid4(),
         "execution_target": ExecutionTarget.POOL,
         **overrides,
     }
-    return Replay.model_validate(values)
+    return ReplayJob.model_validate(values)
 
 
 def test_diff_aligns_nodes_by_key_with_occurrences() -> None:
@@ -160,7 +179,6 @@ def test_diff_aligns_nodes_by_key_with_occurrences() -> None:
     ]
     subject = replay(
         input_session_id=original.id,
-        result_session_id=result.id,
         scores={"conciseness": 0.7},
     )
     diff = compute_replay_diff(
@@ -211,7 +229,7 @@ def test_diff_input_diff_applies_override() -> None:
         model={"gpt-4o": "claude-sonnet-5"}, system_prompt="Be brief."
     )
     diff = compute_replay_diff(
-        replay(input_session_id=original.id, result_session_id=result.id),
+        replay(input_session_id=original.id),
         override,
         original,
         result,
@@ -227,7 +245,7 @@ def test_diff_input_diff_applies_override() -> None:
 
     string_override = ReplayOverride(model="claude-sonnet-5", prompt="new task")
     diff = compute_replay_diff(
-        replay(input_session_id=original.id, result_session_id=result.id),
+        replay(input_session_id=original.id),
         string_override,
         original,
         result,
@@ -351,44 +369,54 @@ def test_run_summary_aggregates() -> None:
         session(id=uuid.uuid4(), cost=Decimal("0.05")),
     ]
     run_id = uuid.uuid4()
-    replays = [
-        replay(
+    jobs = [
+        replay_job(
             experiment_run_id=run_id,
             input_session_id=originals[0].id,
             result_session_id=results[0].id,
             status=JobStatus.COMPLETED,
-            passed=True,
-            score=0.8,
-            scores={"conciseness": 0.8},
         ),
-        replay(
+        replay_job(
             experiment_run_id=run_id,
             input_session_id=originals[1].id,
             result_session_id=results[1].id,
             status=JobStatus.COMPLETED,
-            passed=False,
-            score=0.2,
-            scores={"conciseness": 0.2},
         ),
-        replay(
+        replay_job(
             experiment_run_id=run_id,
             input_session_id=originals[1].id,
             result_session_id=None,
             status=JobStatus.FAILED,
         ),
-        replay(
+        replay_job(
             experiment_run_id=run_id,
             result_session_id=None,
             status=JobStatus.TIMED_OUT,
         ),
-        replay(
+        replay_job(
             experiment_run_id=run_id,
             result_session_id=None,
             status=JobStatus.CANCELED,
         ),
     ]
+    verdicts = [
+        {"passed": True, "score": 0.8, "scores": {"conciseness": 0.8}},
+        {"passed": False, "score": 0.2, "scores": {"conciseness": 0.2}},
+        {},
+        {},
+        {},
+    ]
+    replays = {
+        job.id: replay(
+            job_id=job.id,
+            experiment_run_id=run_id,
+            input_session_id=job.input_session_id,
+            **verdict,
+        )
+        for job, verdict in zip(jobs, verdicts, strict=True)
+    }
     sessions = {entity.id: entity for entity in originals + results}
-    summary = compute_run_summary(replays, sessions)
+    summary = compute_run_summary(jobs, replays, sessions)
     assert summary["replay_counts_by_status"] == {
         "completed": 2,
         "failed": 1,
@@ -421,13 +449,17 @@ def test_run_summary_aggregates() -> None:
 def test_run_summary_without_scores() -> None:
     """Report null statistics when nothing was scored."""
     original = session(id=uuid.uuid4())
-    subject = replay(
-        experiment_run_id=uuid.uuid4(),
+    run_id = uuid.uuid4()
+    job = replay_job(
+        experiment_run_id=run_id,
         input_session_id=original.id,
         result_session_id=None,
         status=JobStatus.CANCELED,
     )
-    summary = compute_run_summary([subject], {original.id: original})
+    subject = replay(
+        job_id=job.id, experiment_run_id=run_id, input_session_id=original.id
+    )
+    summary = compute_run_summary([job], {job.id: subject}, {original.id: original})
     assert summary["replay_counts_by_status"] == {"canceled": 1}
     assert summary["pass_rate"] is None
     assert summary["scores"] == {}

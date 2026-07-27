@@ -30,10 +30,15 @@ from kitaru.server.adapters.db.schemas.job import (
     JOB_INPUT_SESSION_ID_FOREIGN_KEY,
     JOB_RESULT_SESSION_ID_FOREIGN_KEY,
 )
+from kitaru.server.adapters.db.schemas.replay import (
+    REPLAY_INPUT_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.schemas.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
     SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+    SESSION_JOB_ID_FOREIGN_KEY,
+    SESSION_JOB_ID_UNIQUE_CONSTRAINT,
     SessionSchema,
 )
 from kitaru.server.adapters.db.schemas.tag import TagLinkSchema
@@ -41,6 +46,7 @@ from kitaru.server.adapters.db.tag_filtering import tagged_resource_ids
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.job import JobAlreadyLinked, JobNotFound
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
@@ -74,6 +80,8 @@ class SQLSessionRepository:
             AgentNotFound: No agent has the session's agent id.
             AgentVersionNotFound: No agent version has the session's agent
                 version id.
+            JobNotFound: No job has the session's job id.
+            JobAlreadyLinked: The job already has a session.
         """
         constraint = violated_constraint(exc)
         if constraint == SESSION_EXTERNAL_ID_UNIQUE_CONSTRAINT:
@@ -87,6 +95,12 @@ class SQLSessionRepository:
         if constraint == SESSION_AGENT_VERSION_ID_FOREIGN_KEY:
             assert session.agent_version_id is not None
             raise AgentVersionNotFound(session.agent_version_id) from exc
+        if constraint == SESSION_JOB_ID_FOREIGN_KEY:
+            assert session.job_id is not None
+            raise JobNotFound(session.job_id) from exc
+        if constraint == SESSION_JOB_ID_UNIQUE_CONSTRAINT:
+            assert session.job_id is not None
+            raise JobAlreadyLinked(session.job_id) from exc
 
     async def create(self, session: Session) -> Session:
         """Persist a new session.
@@ -98,6 +112,8 @@ class SQLSessionRepository:
             AgentNotFound: No agent has the session's agent id.
             AgentVersionNotFound: No agent version has the session's agent
                 version id.
+            JobNotFound: No job has the session's job id.
+            JobAlreadyLinked: The job already has a session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
@@ -274,6 +290,7 @@ class SQLSessionRepository:
         row.owner_id = session.owner_id
         row.agent_id = session.agent_id
         row.agent_version_id = session.agent_version_id
+        row.job_id = session.job_id
         row.origin = session.origin.value
         row.status = session.status.value
         row.name = session.name
@@ -340,6 +357,7 @@ class SQLSessionRepository:
             if constraint in (
                 JOB_INPUT_SESSION_ID_FOREIGN_KEY,
                 JOB_RESULT_SESSION_ID_FOREIGN_KEY,
+                REPLAY_INPUT_SESSION_ID_FOREIGN_KEY,
             ):
                 raise SessionInUse(session_id, "jobs") from exc
             raise

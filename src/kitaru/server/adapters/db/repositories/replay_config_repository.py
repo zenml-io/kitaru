@@ -24,8 +24,8 @@ from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.schemas.experiment import (
     EXPERIMENT_REPLAY_CONFIG_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.schemas.job import (
-    JOB_REPLAY_CONFIG_ID_FOREIGN_KEY,
+from kitaru.server.adapters.db.schemas.replay import (
+    REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.schemas.replay_config import ReplayConfigSchema
 from kitaru.server.domain.replay_config import (
@@ -115,7 +115,7 @@ class SQLReplayConfigRepository:
             constraint = violated_constraint(exc)
             if constraint in (
                 EXPERIMENT_REPLAY_CONFIG_ID_FOREIGN_KEY,
-                JOB_REPLAY_CONFIG_ID_FOREIGN_KEY,
+                REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY,
             ):
                 return False
             raise

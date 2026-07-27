@@ -17,14 +17,14 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
-from test_experiments import SCORING_POLICY, create_cohort, create_experiment
+from test_experiments import create_cohort, create_experiment
 
 from conftest import asgi_api_client, experiment_app
 from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunCreateRequest,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.jobs import JobClaimRequest, JobStatus
+from kitaru.api_models.v1.jobs import JobClaimRequest, JobStatus, WorkerScope
 from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
@@ -73,7 +73,7 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_list_jobs(api_client: KitaruAPIClient) -> None:
-    """List the jobs of a run with their inlined config."""
+    """List the jobs of a run."""
     cohort_id, version_id = await create_cohort(api_client)
     experiment = await create_experiment(api_client, cohort_id)
     created = await api_client.experiments.create_run(
@@ -85,7 +85,6 @@ async def test_list_jobs(api_client: KitaruAPIClient) -> None:
     assert job.experiment_run_id == created.id
     assert job.agent_version_id == version_id
     assert job.status is JobStatus.PENDING
-    assert job.scoring_policy == SCORING_POLICY
 
     page = await api_client.experiment_runs.list_jobs(
         created.id, status=JobStatus.PENDING
@@ -108,7 +107,11 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
     )
     worker = await api_client.workers.create(WorkerCreateRequest(name="worker-1"))
     claimed = await api_client.jobs.claim(
-        JobClaimRequest(worker_id=worker.id, max_jobs=5, experiment_run_id=created.id)
+        JobClaimRequest(
+            worker_id=worker.id,
+            max_jobs=5,
+            scope=WorkerScope(experiment_run_id=created.id),
+        )
     )
     assert len(claimed.jobs) == 1
     assert claimed.jobs[0].job.status is JobStatus.CLAIMED
@@ -120,7 +123,11 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
     assert canceled.summary is not None
 
     empty = await api_client.jobs.claim(
-        JobClaimRequest(worker_id=worker.id, max_jobs=5, experiment_run_id=created.id)
+        JobClaimRequest(
+            worker_id=worker.id,
+            max_jobs=5,
+            scope=WorkerScope(experiment_run_id=created.id),
+        )
     )
     assert empty.jobs == []
 

@@ -32,6 +32,7 @@ from kitaru.server.adapters.db.schemas.plugin import (
     PluginSchema,
     PluginVersionSchema,
 )
+from kitaru.server.adapters.db.schemas.replay import ReplaySchema
 from kitaru.server.adapters.db.schemas.replay_config import ReplayConfigSchema
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.session import SessionSchema
@@ -54,6 +55,7 @@ __all__ = [
     "PluginSchema",
     "PluginVersionSchema",
     "ReplayConfigSchema",
+    "ReplaySchema",
     "SecretSchema",
     "SessionNodeSchema",
     "SessionSchema",

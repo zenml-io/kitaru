@@ -57,4 +57,4 @@ async def create_session_run(
     job = await service.create_session_run(
         session_run_create_to_command(body), actor=actor
     )
-    return job_to_response(job, None)
+    return job_to_response(job)

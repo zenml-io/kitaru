@@ -95,14 +95,13 @@ from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.job import (
     DuplicateScoreJob,
     Import,
-    ImportFailure,
-    ImportStats,
     JobKind,
     JobNotFound,
     JobStatus,
-    Replay,
+    ReplayJob,
     Score,
     SessionRun,
+    WorkerScope,
 )
 from kitaru.server.domain.plugin import (
     Plugin,
@@ -115,9 +114,7 @@ from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     RegistryScorerConfig,
     ReplayConfig,
-    ReplayConfigNotFound,
     ScoringPolicy,
-    ScoringResult,
     SourceRef,
     SourceScorerConfig,
     ToolPolicyConfig,
@@ -174,7 +171,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         configs = FakeReplayConfigRepository()
         blobs = FakeBlobRepository()
         plugins = FakePluginRepository(blobs)
-        jobs = FakeJobRepository(sessions, versions, configs, plugins, blobs)
+        jobs = FakeJobRepository(sessions, versions, plugins, blobs)
         yield Setup(
             jobs,
             configs,
@@ -244,24 +241,23 @@ async def seed_rows(setup: Setup, name: str = "support-bot") -> Seed:
     return Seed(session, version, config)
 
 
-def job_entity(seed: Seed, **overrides: object) -> Replay:
-    """Build a standalone job entity.
+def job_entity(seed: Seed, **overrides: object) -> ReplayJob:
+    """Build a standalone replay job entity.
 
     Args:
         seed: Seeded rows.
         **overrides: Field overrides.
 
     Returns:
-        Replay entity.
+        Replay job entity.
     """
     values: dict[str, object] = {
-        "replay_config_id": seed.config.id,
         "agent_version_id": seed.version.id,
         "input_session_id": seed.session.id,
         "execution_target": ExecutionTarget.POOL,
         **overrides,
     }
-    return Replay.model_validate(values)
+    return ReplayJob.model_validate(values)
 
 
 def session_run_entity(seed: Seed, **overrides: object) -> SessionRun:
@@ -290,29 +286,21 @@ async def test_create_round_trips_all_fields(setup: Setup) -> None:
     assert created.updated is not None
     loaded = await setup.jobs.get(created.id)
     assert loaded == created
-    assert isinstance(loaded, Replay)
+    assert isinstance(loaded, ReplayJob)
     assert loaded.kind is JobKind.REPLAY
     assert loaded.experiment_run_id is None
-    assert loaded.replay_config_id == seed.config.id
     assert loaded.agent_version_id == seed.version.id
     assert loaded.input_session_id == seed.session.id
     assert loaded.result_session_id is None
     assert loaded.status is JobStatus.PENDING
     assert loaded.attempt == 1
-    assert loaded.passed is None
-    assert loaded.score is None
-    assert loaded.scores is None
-    assert loaded.diff is None
+    assert loaded.result is None
 
 
 async def test_create_unknown_references(setup: Setup) -> None:
-    """Raise for unknown config, version, and session ids."""
+    """Raise for unknown version and session ids."""
     seed = await seed_rows(setup)
     missing_id = uuid.uuid4()
-    with pytest.raises(
-        ReplayConfigNotFound, match=f"Replay config {missing_id} was not found"
-    ):
-        await setup.jobs.create(job_entity(seed, replay_config_id=missing_id))
     with pytest.raises(
         AgentVersionNotFound, match=f"Agent version {missing_id} was not found"
     ):
@@ -326,8 +314,8 @@ async def test_standalone_jobs_repeat_freely(setup: Setup) -> None:
     seed = await seed_rows(setup)
     first = await setup.jobs.create(job_entity(seed))
     second = await setup.jobs.create(job_entity(seed))
-    assert isinstance(first, Replay)
-    assert isinstance(second, Replay)
+    assert isinstance(first, ReplayJob)
+    assert isinstance(second, ReplayJob)
     assert first.input_session_id == second.input_session_id
     _, total = await setup.jobs.query(JobFilter(input_session_id=seed.session.id))
     assert total == 2
@@ -420,23 +408,13 @@ async def test_agent_version_delete_blocked_by_job(setup: Setup) -> None:
         await setup.versions.delete(seed.version.id)
 
 
-async def test_config_delete_if_unreferenced_by_job(setup: Setup) -> None:
-    """Keep a config row while a job references it."""
-    seed = await seed_rows(setup)
-    await setup.jobs.create(job_entity(seed))
-    assert await setup.configs.delete_if_unreferenced(seed.config.id) is False
-    loaded = await setup.configs.get(seed.config.id)
-    assert loaded.id == seed.config.id
-
-
 async def test_delete_removes_job(setup: Setup) -> None:
-    """Delete a job and free its config for deletion."""
+    """Delete a job."""
     seed = await seed_rows(setup)
     created = await setup.jobs.create(job_entity(seed))
     await setup.jobs.delete(created.id)
     with pytest.raises(JobNotFound, match=f"Job {created.id} was not found"):
         await setup.jobs.get(created.id)
-    assert await setup.configs.delete_if_unreferenced(seed.config.id) is True
 
 
 async def test_delete_not_found(setup: Setup) -> None:
@@ -450,7 +428,7 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     """Persist runner-side field changes and renew the updated timestamp."""
     seed = await seed_rows(setup)
     created = await setup.jobs.create(job_entity(seed))
-    assert isinstance(created, Replay)
+    assert isinstance(created, ReplayJob)
     result = await setup.sessions.create(
         Session(
             owner_id=setup.owner_id,
@@ -461,21 +439,13 @@ async def test_update_round_trips_runner_fields(setup: Setup) -> None:
     )
     created.start()
     created.link_result_session(result.id)
-    created.enter_scoring()
-    created.complete(
-        ScoringResult(passed=True, score=0.8, scores={"conciseness": 0.8}),
-        diff={"cost_delta": -0.1},
-    )
+    created.complete(None)
     updated = await setup.jobs.update(created)
-    assert isinstance(updated, Replay)
+    assert isinstance(updated, ReplayJob)
     assert updated.status is JobStatus.COMPLETED
     assert updated.result_session_id == result.id
     assert updated.started_at is not None
     assert updated.ended_at is not None
-    assert updated.passed is True
-    assert updated.score == 0.8
-    assert updated.scores == {"conciseness": 0.8}
-    assert updated.diff == {"cost_delta": -0.1}
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
@@ -697,22 +667,91 @@ async def test_delete_parent_cascades_to_children(setup: Setup) -> None:
 
 
 async def test_claim_pending_parent_scope(setup: Setup) -> None:
-    """Claim only the score jobs of the scoped parent."""
+    """Claim only the scoped parent and its own score jobs."""
     seed = await seed_rows(setup)
     parent = await setup.jobs.create(job_entity(seed))
     other_parent = await setup.jobs.create(job_entity(seed))
     child = (await setup.jobs.create_many([score_entity(seed, parent.id)]))[0]
     await setup.jobs.create_many([score_entity(seed, other_parent.id)])
     claimed = await setup.jobs.claim_pending(
-        await seed_worker(setup), 10, parent_job_id=parent.id
+        await seed_worker(setup), 10, WorkerScope(job_id=parent.id)
     )
-    assert [job.id for job in claimed] == [child.id]
+    assert {job.id for job in claimed} == {parent.id, child.id}
 
 
-async def test_claim_pending_agent_scope_matches_registry_score_jobs(
+async def test_claim_pending_job_scope_covers_the_job_itself(setup: Setup) -> None:
+    """Claim the pinned job and its children under one job scope."""
+    seed = await seed_rows(setup)
+    parent = await setup.jobs.create(
+        job_entity(seed, execution_target=ExecutionTarget.ON_DEMAND)
+    )
+    await setup.jobs.create(job_entity(seed))
+    claimed = await setup.jobs.claim_pending(
+        await seed_worker(setup), 10, WorkerScope(job_id=parent.id)
+    )
+    assert [job.id for job in claimed] == [parent.id]
+
+
+async def test_claim_pending_kind_scope(setup: Setup) -> None:
+    """Claim only jobs of the scoped kinds."""
+    seed = await seed_rows(setup)
+    await setup.jobs.create(job_entity(seed))
+    run = await setup.jobs.create(session_run_entity(seed))
+    claimed = await setup.jobs.claim_pending(
+        await seed_worker(setup), 10, WorkerScope(kinds=[JobKind.SESSION_RUN])
+    )
+    assert [job.id for job in claimed] == [run.id]
+
+
+async def test_claim_pending_version_scope_passes_version_less_jobs(
     setup: Setup,
 ) -> None:
-    """Match score jobs without an agent version and skip other agents."""
+    """Match the scoped versions plus every job without a version."""
+    seed = await seed_rows(setup)
+    other = await seed_rows(setup, name="other-bot")
+    mine = await setup.jobs.create(job_entity(seed))
+    await setup.jobs.create(job_entity(other))
+    version = await seed_importer(setup)
+    payload = await seed_payload(setup)
+    unbound = await setup.jobs.create(
+        Import(
+            plugin_version_id=version.id,
+            payload_blob_id=payload.id,
+            agent_id=seed.version.agent_id,
+            execution_target=ExecutionTarget.POOL,
+        )
+    )
+    claimed = await setup.jobs.claim_pending(
+        await seed_worker(setup),
+        10,
+        WorkerScope(agent_version_ids=[seed.version.id]),
+    )
+    assert {job.id for job in claimed} == {mine.id, unbound.id}
+
+
+async def test_list_children_many_groups_by_parent(setup: Setup) -> None:
+    """Group the children of a batch of parents by parent id."""
+    seed = await seed_rows(setup)
+    parent = await setup.jobs.create(job_entity(seed))
+    other_parent = await setup.jobs.create(job_entity(seed))
+    childless = await setup.jobs.create(job_entity(seed))
+    child = (await setup.jobs.create_many([score_entity(seed, parent.id)]))[0]
+    other_child = (await setup.jobs.create_many([score_entity(seed, other_parent.id)]))[
+        0
+    ]
+    children = await setup.jobs.list_children_many(
+        [parent.id, other_parent.id, childless.id]
+    )
+    assert set(children) == {parent.id, other_parent.id}
+    assert [job.id for job in children[parent.id]] == [child.id]
+    assert [job.id for job in children[other_parent.id]] == [other_child.id]
+    assert await setup.jobs.list_children_many([]) == {}
+
+
+async def test_claim_pending_version_scope_matches_registry_score_jobs(
+    setup: Setup,
+) -> None:
+    """Match score jobs without an agent version and skip other versions."""
     seed = await seed_rows(setup)
     other = await seed_rows(setup, name="other-bot")
     parent = await setup.jobs.create(job_entity(seed))
@@ -733,7 +772,7 @@ async def test_claim_pending_agent_scope_matches_registry_score_jobs(
     )[0]
     await setup.jobs.create_many([score_entity(other, other_parent.id)])
     claimed = await setup.jobs.claim_pending(
-        await seed_worker(setup), 10, agent_ids=[seed.session.agent_id]
+        await seed_worker(setup), 10, WorkerScope(agent_version_ids=[seed.version.id])
     )
     assert registry.id in {job.id for job in claimed}
     assert other_parent.id not in {job.id for job in claimed}
@@ -745,13 +784,13 @@ async def test_requeue_stale_reports_resolved_jobs(setup: Setup) -> None:
     job = await setup.jobs.create(
         job_entity(seed, execution_target=ExecutionTarget.POOL)
     )
-    await setup.jobs.claim_pending(await seed_worker(setup), 1)
+    await setup.jobs.claim_pending(await seed_worker(setup), 1, WorkerScope())
     resolved = await setup.jobs.requeue_stale(
-        datetime.now(UTC) + timedelta(seconds=60), 3
+        datetime.now(UTC) + timedelta(seconds=60), 3, WorkerScope()
     )
     assert [entry.id for entry in resolved] == [job.id]
     assert resolved[0].status is JobStatus.PENDING
-    assert await setup.jobs.requeue_stale(datetime.now(UTC), 3) == []
+    assert await setup.jobs.requeue_stale(datetime.now(UTC), 3, WorkerScope()) == []
 
 
 async def seed_importer(setup: Setup, name: str = "langfuse") -> PluginVersion:
@@ -807,7 +846,7 @@ async def seed_payload(setup: Setup) -> Blob:
 
 
 async def test_import_round_trips_all_fields(setup: Setup) -> None:
-    """Store an import job with stats and read every field back."""
+    """Store an import job with a result and read every field back."""
     version = await seed_importer(setup)
     payload = await seed_payload(setup)
     seed = await seed_rows(setup)
@@ -824,15 +863,14 @@ async def test_import_round_trips_all_fields(setup: Setup) -> None:
     assert stored.kind is JobKind.IMPORT
     stored.claim(await seed_worker(setup))
     stored.start()
-    stored.record_stats(
-        ImportStats(
-            created=2,
-            skipped=1,
-            failed=1,
-            failures=[ImportFailure(line=7, external_id="ext-7", error="bad line")],
-        )
+    stored.complete(
+        {
+            "created": 2,
+            "skipped": 1,
+            "failed": 1,
+            "failures": [{"line": 7, "external_id": "ext-7", "error": "bad line"}],
+        }
     )
-    stored.complete()
     await setup.jobs.update(stored)
     loaded = await setup.jobs.get(stored.id)
     assert isinstance(loaded, Import)
@@ -842,9 +880,12 @@ async def test_import_round_trips_all_fields(setup: Setup) -> None:
     assert loaded.inputs == {"project": "demo"}
     assert loaded.agent_version_id is None
     assert loaded.status is JobStatus.COMPLETED
-    assert loaded.stats is not None
-    assert loaded.stats.created == 2
-    assert loaded.stats.failures[0].external_id == "ext-7"
+    assert loaded.result == {
+        "created": 2,
+        "skipped": 1,
+        "failed": 1,
+        "failures": [{"line": 7, "external_id": "ext-7", "error": "bad line"}],
+    }
     assert loaded.created is not None
 
 
@@ -874,7 +915,7 @@ async def test_import_create_unknown_references(setup: Setup) -> None:
 
 
 async def test_claim_pending_matches_unbound_import_jobs(setup: Setup) -> None:
-    """Claim a pool import job under an agent-scoped claim."""
+    """Claim a pool import job under a version-scoped claim."""
     seed = await seed_rows(setup)
     version = await seed_importer(setup)
     payload = await seed_payload(setup)
@@ -888,7 +929,7 @@ async def test_claim_pending_matches_unbound_import_jobs(setup: Setup) -> None:
     )
     worker_id = await seed_worker(setup, name="import-runner")
     claimed = await setup.jobs.claim_pending(
-        worker_id, 10, agent_ids=[seed.version.agent_id]
+        worker_id, 10, WorkerScope(agent_version_ids=[seed.version.id])
     )
     assert [job.id for job in claimed] == [stored.id]
 
@@ -901,8 +942,8 @@ async def test_heartbeat_many_touches_owned_active_jobs(setup: Setup) -> None:
     mine = await setup.jobs.create(session_run_entity(seed))
     foreign = await setup.jobs.create(session_run_entity(seed))
     pending = await setup.jobs.create(session_run_entity(seed))
-    await setup.jobs.claim_pending(worker_id, 1)
-    await setup.jobs.claim_pending(other_worker_id, 1)
+    await setup.jobs.claim_pending(worker_id, 1, WorkerScope())
+    await setup.jobs.claim_pending(other_worker_id, 1, WorkerScope())
     now = datetime.now(UTC)
 
     reached = await setup.jobs.heartbeat_many(
@@ -919,7 +960,7 @@ async def test_heartbeat_many_skips_terminal_jobs(setup: Setup) -> None:
     seed = await seed_rows(setup)
     worker_id = await seed_worker(setup)
     stored = await setup.jobs.create(session_run_entity(seed))
-    await setup.jobs.claim_pending(worker_id, 1)
+    await setup.jobs.claim_pending(worker_id, 1, WorkerScope())
     claimed = await setup.jobs.get(stored.id)
     claimed.cancel()
     await setup.jobs.update(claimed)

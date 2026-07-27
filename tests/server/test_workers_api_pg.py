@@ -33,18 +33,18 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     response = await client.post(
         "/v1/workers",
         json={
             "name": "runner",
-            "agent_ids": [str(agent_id)],
+            "scope": {"agent_version_ids": [str(version_id)]},
             "metadata": {"hostname": "pool-1"},
         },
     )
     assert response.status_code == 200
     created = response.json()
-    assert created["agent_ids"] == [str(agent_id)]
+    assert created["scope"]["agent_version_ids"] == [str(version_id)]
     assert created["live"] is True
 
     response = await client.get(f"/v1/workers/{created['id']}")
@@ -64,19 +64,19 @@ async def test_register_upserts_across_requests(client: httpx.AsyncClient) -> No
     assert response.status_code == 200
     created = response.json()
 
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     response = await client.post(
         "/v1/workers",
         json={
             "name": "runner",
-            "agent_ids": [str(agent_id)],
+            "scope": {"agent_version_ids": [str(version_id)]},
             "metadata": {"hostname": "pool-2"},
         },
     )
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == created["id"]
-    assert body["agent_ids"] == [str(agent_id)]
+    assert body["scope"]["agent_version_ids"] == [str(version_id)]
     assert body["metadata"] == {"hostname": "pool-2"}
     assert body["last_seen_at"] > created["last_seen_at"]
     assert body["updated"] > created["updated"]

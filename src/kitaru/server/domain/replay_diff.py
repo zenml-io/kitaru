@@ -21,7 +21,8 @@ from statistics import fmean, median
 from typing import Any
 
 from kitaru.server.base import FrozenModel
-from kitaru.server.domain.job import JobStatus, Replay
+from kitaru.server.domain.job import JobStatus, ReplayJob
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayOverride, effective_inputs
 from kitaru.server.domain.session import Session, TokenUsage
 from kitaru.server.domain.session_node import NodeType, SessionNode
@@ -422,41 +423,49 @@ def compute_diff_summary(
 
 
 def compute_run_summary(
-    replays: Sequence[Replay], sessions: dict[uuid.UUID, Session]
+    jobs: Sequence[ReplayJob],
+    replays: dict[uuid.UUID, Replay],
+    sessions: dict[uuid.UUID, Session],
 ) -> dict[str, Any]:
     """Compute the aggregate summary stored on a finalized experiment run.
 
     Args:
-        replays: All replays of the run.
-        sessions: Original and result sessions keyed by id.
+        jobs: All replay jobs of the run.
+        replays: Replays of the run keyed by job id.
+        sessions: Input and result sessions keyed by id.
 
     Returns:
         Run summary.
     """
     counts: dict[str, int] = {}
-    for replay in replays:
-        counts[replay.status.value] = counts.get(replay.status.value, 0) + 1
+    for job in jobs:
+        counts[job.status.value] = counts.get(job.status.value, 0) + 1
     finished = [
-        replay
-        for replay in replays
-        if replay.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
+        job
+        for job in jobs
+        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.TIMED_OUT)
     ]
     pass_rate = None
     if finished:
-        pass_rate = sum(1 for replay in finished if replay.passed) / len(finished)
+        passed = sum(
+            1
+            for job in finished
+            if (replay := replays.get(job.id)) is not None and replay.passed
+        )
+        pass_rate = passed / len(finished)
     originals = [
         session
-        for replay in replays
-        if (session := sessions.get(replay.input_session_id)) is not None
+        for job in jobs
+        if (session := sessions.get(job.input_session_id)) is not None
     ]
     results = [
         session
-        for replay in replays
-        if replay.result_session_id is not None
-        and (session := sessions.get(replay.result_session_id)) is not None
+        for job in jobs
+        if job.result_session_id is not None
+        and (session := sessions.get(job.result_session_id)) is not None
     ]
     scorer_names: set[str] = set()
-    for replay in replays:
+    for replay in replays.values():
         scorer_names.update(replay.scores or {})
     scores: dict[str, Any] = {}
     for name in sorted(scorer_names):
@@ -465,7 +474,7 @@ def compute_run_summary(
         ]
         replay_values = [
             replay.scores[name]
-            for replay in replays
+            for replay in replays.values()
             if replay.scores is not None and name in replay.scores
         ]
         scores[name] = {

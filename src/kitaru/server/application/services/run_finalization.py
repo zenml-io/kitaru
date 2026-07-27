@@ -21,12 +21,15 @@ from kitaru.server.application.interfaces.experiment_run_repository import (
 from kitaru.server.application.interfaces.job_repository import (
     JobRepository,
 )
+from kitaru.server.application.interfaces.replay_repository import (
+    ReplayRepository,
+)
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
 from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.experiment_run import TERMINAL_RUN_STATUSES
-from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Replay
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, ReplayJob
 from kitaru.server.domain.replay_diff import compute_run_summary
 from kitaru.server.domain.session import Session
 
@@ -36,7 +39,7 @@ _JOB_RESOLUTION_PAGE_SIZE = 1000
 
 async def load_run_jobs(
     job_repository: JobRepository, run_id: uuid.UUID
-) -> list[Replay]:
+) -> list[ReplayJob]:
     """Load every job of an experiment run across all pages.
 
     Args:
@@ -46,7 +49,7 @@ async def load_run_jobs(
     Returns:
         Jobs of the run.
     """
-    jobs: list[Replay] = []
+    jobs: list[ReplayJob] = []
     page = 1
     while True:
         batch, total = await job_repository.query(
@@ -56,7 +59,7 @@ async def load_run_jobs(
                 page_size=_JOB_RESOLUTION_PAGE_SIZE,
             )
         )
-        jobs.extend(job for job in batch if isinstance(job, Replay))
+        jobs.extend(job for job in batch if isinstance(job, ReplayJob))
         if len(jobs) >= total or not batch:
             return jobs
         page += 1
@@ -65,6 +68,7 @@ async def load_run_jobs(
 async def finalize_run_if_drained(
     run_repository: ExperimentRunRepository,
     job_repository: JobRepository,
+    replay_repository: ReplayRepository,
     session_repository: SessionRepository,
     run_id: uuid.UUID,
 ) -> None:
@@ -72,12 +76,13 @@ async def finalize_run_if_drained(
 
     A canceling run lands on canceled, a run with failed or timed out
     jobs on failed, any other run on completed, with the aggregate
-    summary computed from the jobs and their sessions. Runs with
-    non-terminal jobs stay untouched.
+    summary computed from the jobs, their replays, and their sessions.
+    Runs with non-terminal jobs or fan-out children stay untouched.
 
     Args:
         run_repository: Experiment run repository.
         job_repository: Job repository.
+        replay_repository: Replay repository.
         session_repository: Session repository.
         run_id: Id of the experiment run.
     """
@@ -87,13 +92,21 @@ async def finalize_run_if_drained(
     jobs = await load_run_jobs(job_repository, run_id)
     if any(job.status not in TERMINAL_JOB_STATUSES for job in jobs):
         return
+    children = await job_repository.list_children_many([job.id for job in jobs])
+    if any(
+        child.status not in TERMINAL_JOB_STATUSES
+        for batch in children.values()
+        for child in batch
+    ):
+        return
     sessions: dict[uuid.UUID, Session] = {}
     for job in jobs:
         for session_id in (job.input_session_id, job.result_session_id):
             if session_id is not None and session_id not in sessions:
                 sessions[session_id] = await session_repository.get(session_id)
+    replays = await replay_repository.get_many_by_jobs([job.id for job in jobs])
     run.finalize(
-        compute_run_summary(jobs, sessions),
+        compute_run_summary(jobs, replays, sessions),
         [job.status for job in jobs],
     )
     await run_repository.update(run)

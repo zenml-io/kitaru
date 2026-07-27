@@ -120,7 +120,7 @@ def test_session_node_create_request_rejects_non_finite_outputs() -> None:
         )
 
 
-def test_job_update_request_rejects_non_finite_score() -> None:
-    """Reject a non-finite job score."""
+def test_job_update_request_rejects_a_non_finite_result() -> None:
+    """Reject a non-finite job result."""
     with pytest.raises(ValidationError):
-        JobUpdateRequest(status=JobStatus.COMPLETED, score=math.nan)
+        JobUpdateRequest(status=JobStatus.COMPLETED, result=math.nan)

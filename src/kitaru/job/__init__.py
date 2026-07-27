@@ -32,7 +32,7 @@ def job_id() -> str | None:
 def job_inputs() -> Any:
     """Return the inputs of the job this process executes.
 
-    Reads ``KITARU_JOB_INPUTS`` when the runner set it and fetches the job
+    Reads ``KITARU_JOB_INPUTS`` when the worker set it and fetches the job
     spec from the server otherwise.
 
     Raises:

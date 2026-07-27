@@ -35,14 +35,12 @@ from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.pagination import paginate
-from kitaru.server.adapters.db.schemas.agent_version import AgentVersionSchema
 from kitaru.server.adapters.db.schemas.job import (
     JOB_AGENT_VERSION_ID_FOREIGN_KEY,
     JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY,
     JOB_INPUT_SESSION_ID_FOREIGN_KEY,
     JOB_PAYLOAD_BLOB_ID_FOREIGN_KEY,
     JOB_PLUGIN_VERSION_ID_FOREIGN_KEY,
-    JOB_REPLAY_CONFIG_ID_FOREIGN_KEY,
     JOB_RESULT_SESSION_ID_FOREIGN_KEY,
     JOB_SCORER_UNIQUE_CONSTRAINT,
     JOB_SESSION_UNIQUE_CONSTRAINT,
@@ -60,12 +58,12 @@ from kitaru.server.domain.job import (
     Job,
     JobNotFound,
     JobStatus,
-    Replay,
+    ReplayJob,
     Score,
     SessionRun,
+    WorkerScope,
 )
 from kitaru.server.domain.plugin import PluginVersionIdNotFound
-from kitaru.server.domain.replay_config import ReplayConfigNotFound
 from kitaru.server.domain.session import SessionNotFound
 
 
@@ -83,8 +81,6 @@ def translate_job_integrity_error(exc: IntegrityError, job: Job) -> None:
             session with the scorer.
         ExperimentRunNotFound: No experiment run has the job's
             experiment run id.
-        ReplayConfigNotFound: No replay config has the job's job
-            config id.
         AgentVersionNotFound: No agent version has the job's agent
             version id.
         PluginVersionIdNotFound: No plugin version has the job's plugin
@@ -93,7 +89,7 @@ def translate_job_integrity_error(exc: IntegrityError, job: Job) -> None:
         SessionNotFound: No session has the job's input session id.
     """
     constraint = violated_constraint(exc)
-    if isinstance(job, Replay):
+    if isinstance(job, ReplayJob):
         if constraint == JOB_SESSION_UNIQUE_CONSTRAINT:
             assert job.experiment_run_id is not None
             raise DuplicateReplaySession(
@@ -102,8 +98,6 @@ def translate_job_integrity_error(exc: IntegrityError, job: Job) -> None:
         if constraint == JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY:
             assert job.experiment_run_id is not None
             raise ExperimentRunNotFound(job.experiment_run_id) from exc
-        if constraint == JOB_REPLAY_CONFIG_ID_FOREIGN_KEY:
-            raise ReplayConfigNotFound(job.replay_config_id) from exc
         if constraint == JOB_INPUT_SESSION_ID_FOREIGN_KEY:
             raise SessionNotFound(job.input_session_id) from exc
     if isinstance(job, Score):
@@ -147,8 +141,6 @@ class SQLJobRepository:
         Raises:
             ExperimentRunNotFound: No experiment run has the job's
                 experiment run id.
-            ReplayConfigNotFound: No replay config has the job's job
-                config id.
             AgentVersionNotFound: No agent version has the job's agent
                 version id.
             SessionNotFound: No session has the job's original session
@@ -295,14 +287,10 @@ class SQLJobRepository:
         row.started_at = job.started_at
         row.ended_at = job.ended_at
         row.error = job.error
-        if isinstance(job, Replay):
+        row.result = job.result
+        if isinstance(job, ReplayJob):
             row.experiment_run_id = job.experiment_run_id
-            row.replay_config_id = job.replay_config_id
             row.input_session_id = job.input_session_id
-            row.passed = job.passed
-            row.score = job.score
-            row.scores = job.scores
-            row.diff = job.diff
         elif isinstance(job, SessionRun):
             row.inputs = job.inputs
             row.name = job.name
@@ -312,12 +300,10 @@ class SQLJobRepository:
             row.plugin_version_id = job.plugin_version_id
             row.scorer_name = job.scorer_config.name
             row.scorer_config = job.scorer_config.model_dump(mode="json")
-            row.score = job.score
         elif isinstance(job, Import):
             row.plugin_version_id = job.plugin_version_id
             row.payload_blob_id = job.payload_blob_id
             row.inputs = job.inputs
-            row.stats = None if job.stats is None else job.stats.model_dump(mode="json")
 
     async def update(self, job: Job) -> Job:
         """Persist changes to an existing job.
@@ -380,6 +366,31 @@ class SQLJobRepository:
         rows = (await self._session.scalars(statement)).all()
         return [row.to_domain() for row in rows]
 
+    async def list_children_many(
+        self, parent_job_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Job]]:
+        """Load every job fanned out from a set of parent jobs.
+
+        Args:
+            parent_job_ids: Ids of the parent jobs.
+
+        Returns:
+            Child jobs keyed by parent job id, parents without children
+            omitted.
+        """
+        if not parent_job_ids:
+            return {}
+        statement = (
+            select(JobSchema)
+            .where(col(JobSchema.parent_job_id).in_(parent_job_ids))
+            .order_by(col(JobSchema.id))
+        )
+        children: dict[uuid.UUID, list[Job]] = {}
+        for row in (await self._session.scalars(statement)).all():
+            assert row.parent_job_id is not None
+            children.setdefault(row.parent_job_id, []).append(row.to_domain())
+        return children
+
     async def delete_children(self, parent_job_id: uuid.UUID) -> None:
         """Delete every job fanned out from a parent job.
 
@@ -430,67 +441,59 @@ class SQLJobRepository:
             else_=col(JobSchema.status),
         )
 
-    def _scope_conditions(
-        self,
-        agent_ids: Sequence[uuid.UUID] | None,
-        experiment_run_id: uuid.UUID | None,
-        parent_job_id: uuid.UUID | None,
-    ) -> list[ColumnElement[bool]]:
+    def _scope_conditions(self, scope: WorkerScope) -> list[ColumnElement[bool]]:
         """Build the claim scope conditions.
 
         Args:
-            agent_ids: Ids of the agents to scope to.
-            experiment_run_id: Id of the experiment run to scope to.
-            parent_job_id: Id of the parent job to scope to.
+            scope: Claim scope.
 
         Returns:
             SQL conditions.
         """
         parent = aliased(JobSchema)
-        if parent_job_id is not None:
-            conditions = [col(JobSchema.parent_job_id) == parent_job_id]
-        elif experiment_run_id is not None:
+        if scope.job_id is not None:
             conditions = [
                 or_(
-                    col(JobSchema.experiment_run_id) == experiment_run_id,
+                    col(JobSchema.id) == scope.job_id,
+                    col(JobSchema.parent_job_id) == scope.job_id,
+                )
+            ]
+        elif scope.experiment_run_id is not None:
+            conditions = [
+                or_(
+                    col(JobSchema.experiment_run_id) == scope.experiment_run_id,
                     select(col(parent.id))
                     .where(
                         col(parent.id) == col(JobSchema.parent_job_id),
-                        col(parent.experiment_run_id) == experiment_run_id,
+                        col(parent.experiment_run_id) == scope.experiment_run_id,
                     )
                     .exists(),
                 )
             ]
         else:
             conditions = [col(JobSchema.execution_target) == ExecutionTarget.POOL.value]
-        if agent_ids is not None:
+        if scope.agent_version_ids is not None:
             conditions.append(
                 or_(
                     col(JobSchema.agent_version_id).is_(None),
-                    exists().where(
-                        col(AgentVersionSchema.id) == col(JobSchema.agent_version_id),
-                        col(AgentVersionSchema.agent_id).in_(agent_ids),
-                    ),
+                    col(JobSchema.agent_version_id).in_(scope.agent_version_ids),
                 )
+            )
+        if scope.kinds is not None:
+            conditions.append(
+                col(JobSchema.kind).in_([kind.value for kind in scope.kinds])
             )
         return conditions
 
     async def requeue_stale(
-        self,
-        stale_before: datetime,
-        max_attempts: int,
-        agent_ids: Sequence[uuid.UUID] | None = None,
-        experiment_run_id: uuid.UUID | None = None,
-        parent_job_id: uuid.UUID | None = None,
+        self, stale_before: datetime, max_attempts: int, scope: WorkerScope
     ) -> list[Job]:
         """Requeue or time out jobs with lost heartbeats within a scope.
 
         Args:
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
-            agent_ids: Ids of the agents to scope to.
-            experiment_run_id: Id of the experiment run to scope to.
-            parent_job_id: Id of the parent job to scope to.
+            scope: Claim scope.
 
         Returns:
             Jobs the staleness rule moved.
@@ -498,7 +501,7 @@ class SQLJobRepository:
         statement = (
             select(JobSchema)
             .where(
-                *self._scope_conditions(agent_ids, experiment_run_id, parent_job_id),
+                *self._scope_conditions(scope),
                 self._stale_condition(stale_before),
             )
             .with_for_update(skip_locked=True)
@@ -511,12 +514,7 @@ class SQLJobRepository:
         return [row.to_domain() for row in rows]
 
     async def claim_pending(
-        self,
-        worker_id: uuid.UUID,
-        limit: int,
-        agent_ids: Sequence[uuid.UUID] | None = None,
-        experiment_run_id: uuid.UUID | None = None,
-        parent_job_id: uuid.UUID | None = None,
+        self, worker_id: uuid.UUID, limit: int, scope: WorkerScope
     ) -> list[Job]:
         """Atomically claim pending jobs within a scope for a worker.
 
@@ -526,9 +524,7 @@ class SQLJobRepository:
         Args:
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
-            agent_ids: Ids of the agents to scope to.
-            experiment_run_id: Id of the experiment run to scope to.
-            parent_job_id: Id of the parent job to scope to.
+            scope: Claim scope.
 
         Returns:
             Claimed jobs.
@@ -536,7 +532,7 @@ class SQLJobRepository:
         statement = (
             select(JobSchema)
             .where(
-                *self._scope_conditions(agent_ids, experiment_run_id, parent_job_id),
+                *self._scope_conditions(scope),
                 col(JobSchema.status) == JobStatus.PENDING.value,
             )
             .order_by(col(JobSchema.id))

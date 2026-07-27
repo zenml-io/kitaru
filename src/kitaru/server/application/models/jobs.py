@@ -21,12 +21,7 @@ from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.execution import ExecutionTarget
-from kitaru.server.domain.job import ImportStats, JobKind, JobStatus
-from kitaru.server.domain.replay_config import (
-    ReplayOverride,
-    ScoringPolicy,
-    ToolPolicyConfig,
-)
+from kitaru.server.domain.job import JobKind, JobStatus
 
 
 class JobFilter(FrozenModel):
@@ -43,16 +38,6 @@ class JobFilter(FrozenModel):
     max_attempts: int | None = None
     page: PositiveInt = 1
     page_size: int = Field(default=20, ge=1, le=1000)
-
-
-class ReplayCreate(FrozenModel):
-    """Replay create command."""
-
-    input_session_id: uuid.UUID
-    agent_version_id: uuid.UUID | None = None
-    override: ReplayOverride | None = None
-    tool_policy: ToolPolicyConfig | None = None
-    scoring_policy: ScoringPolicy
 
 
 class SessionRunCreate(FrozenModel):
@@ -80,5 +65,4 @@ class JobUpdate(FrozenModel):
 
     status: JobStatus | None = None
     error: str | None = None
-    score: float | None = None
-    stats: ImportStats | None = None
+    result: Any = None

@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeWorkerRepository, asgi_api_client
+from kitaru.api_models.v1.jobs import WorkerScope
 from kitaru.api_models.v1.workers import WorkerCreateRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
@@ -49,15 +50,17 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
 
 async def test_create(api_client: KitaruAPIClient) -> None:
     """Register a worker through the SDK."""
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     worker = await api_client.workers.create(
         WorkerCreateRequest(
-            name="runner", agent_ids=[agent_id], metadata={"hostname": "pool-1"}
+            name="runner",
+            scope=WorkerScope(agent_version_ids=[version_id]),
+            metadata={"hostname": "pool-1"},
         )
     )
     assert worker.name == "runner"
     assert worker.owner_id == ACCOUNT.id
-    assert worker.agent_ids == [agent_id]
+    assert worker.scope.agent_version_ids == [version_id]
     assert worker.metadata == {"hostname": "pool-1"}
     assert worker.live is True
 
@@ -65,12 +68,14 @@ async def test_create(api_client: KitaruAPIClient) -> None:
 async def test_create_upserts_by_name(api_client: KitaruAPIClient) -> None:
     """Re-register a worker under the same name through the SDK."""
     created = await api_client.workers.create(WorkerCreateRequest(name="runner"))
-    agent_id = uuid.uuid4()
+    version_id = uuid.uuid4()
     registered = await api_client.workers.create(
-        WorkerCreateRequest(name="runner", agent_ids=[agent_id])
+        WorkerCreateRequest(
+            name="runner", scope=WorkerScope(agent_version_ids=[version_id])
+        )
     )
     assert registered.id == created.id
-    assert registered.agent_ids == [agent_id]
+    assert registered.scope.agent_version_ids == [version_id]
     assert registered.last_seen_at > created.last_seen_at
 
 

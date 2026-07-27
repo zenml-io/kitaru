@@ -29,6 +29,7 @@ from kitaru.server.adapters.db.schemas.experiment_run import (
     ExperimentRunSchema,
 )
 from kitaru.server.adapters.db.schemas.job import JobSchema
+from kitaru.server.adapters.db.schemas.replay import ReplaySchema
 from kitaru.server.adapters.db.schemas.tag import TagLinkSchema
 from kitaru.server.adapters.db.tag_filtering import tagged_resource_ids
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
@@ -37,7 +38,8 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunNotFound,
 )
-from kitaru.server.domain.job import Replay
+from kitaru.server.domain.job import ReplayJob
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.tag import TagResourceType
 
 
@@ -52,8 +54,10 @@ class SQLExperimentRunRepository:
         """
         self._session = session
 
-    async def create(self, run: ExperimentRun, jobs: list[Replay]) -> ExperimentRun:
-        """Persist a new experiment run with its jobs as one batch.
+    async def create(
+        self, run: ExperimentRun, jobs: list[ReplayJob], replays: list[Replay]
+    ) -> ExperimentRun:
+        """Persist a new experiment run with its jobs and replays as one batch.
 
         Locks the experiment row to serialize the per-experiment number
         counter against concurrent run creation.
@@ -61,6 +65,7 @@ class SQLExperimentRunRepository:
         Args:
             run: Experiment run to store.
             jobs: Jobs to store with the run.
+            replays: Replays to store with the jobs.
 
         Raises:
             ExperimentNotFound: No experiment has the run's experiment id.
@@ -87,10 +92,13 @@ class SQLExperimentRunRepository:
         row = ExperimentRunSchema.from_domain(run)
         row.number = (max_number or 0) + 1
         job_rows = [JobSchema.from_domain(job) for job in jobs]
+        replay_rows = [ReplaySchema.from_domain(replay) for replay in replays]
         try:
             async with self._session.begin_nested():
                 self._session.add(row)
                 self._session.add_all(job_rows)
+                await self._session.flush()
+                self._session.add_all(replay_rows)
                 await self._session.flush()
         except IntegrityError as exc:
             for job in jobs:

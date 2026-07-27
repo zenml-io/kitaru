@@ -25,6 +25,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
 )
 from kitaru.server.domain.ids import uuid7
+from kitaru.server.domain.job import WorkerScope
 from kitaru.server.domain.names import Name
 
 
@@ -58,7 +59,7 @@ class Worker(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     name: Name
-    agent_ids: list[uuid.UUID] = Field(default_factory=list)
+    scope: WorkerScope = Field(default_factory=WorkerScope)
     last_seen_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
@@ -66,16 +67,16 @@ class Worker(DomainModel):
 
     def refresh(
         self,
-        agent_ids: list[uuid.UUID],
+        scope: WorkerScope,
         metadata: dict[str, Any],
     ) -> None:
-        """Replace the served agents and metadata and record the sighting.
+        """Replace the claim scope and metadata and record the sighting.
 
         Args:
-            agent_ids: Ids of the served agents, empty means all agents.
+            scope: Claim scope.
             metadata: Worker metadata.
         """
-        self.agent_ids = agent_ids
+        self.scope = scope
         self.metadata = metadata
         self.last_seen_at = datetime.now(UTC)
 

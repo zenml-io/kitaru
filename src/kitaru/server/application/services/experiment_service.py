@@ -62,7 +62,8 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunProgress,
     InvalidExperimentRun,
 )
-from kitaru.server.domain.job import Replay
+from kitaru.server.domain.job import ReplayJob
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
     PassthroughPolicy,
     ReplayConfig,
@@ -367,10 +368,11 @@ class ExperimentService:
     ) -> tuple[ExperimentRun, ExperimentRunProgress]:
         """Start an experiment run.
 
-        Creates the run plus one pending job per cohort session, stamped
-        with the experiment's replay config, the resolved agent version, and
-        the resolved execution target. For a pool target a warning is
-        logged when no live worker serves the agent.
+        Creates the run plus one pending job and replay per cohort
+        session, stamped with the experiment's replay config, the resolved
+        agent version, and the resolved execution target. For a pool
+        target a warning is logged when no live worker serves the agent
+        version.
 
         Args:
             experiment_id: Id of the experiment.
@@ -406,7 +408,7 @@ class ExperimentService:
         if target is ExecutionTarget.POOL:
             await warn_if_no_live_worker(
                 self._worker_repository,
-                cohort.agent_id,
+                version.id,
                 self._worker_liveness_timeout_seconds,
             )
         sessions = await self._resolve_members(experiment.cohort_id)
@@ -418,15 +420,24 @@ class ExperimentService:
             execution_target=target,
         )
         jobs = [
-            Replay(
+            ReplayJob(
                 experiment_run_id=run.id,
-                replay_config_id=experiment.replay_config_id,
                 agent_version_id=version.id,
                 input_session_id=session.id,
                 execution_target=target,
             )
             for session in sessions
         ]
-        run = await self._run_repository.create(run, jobs)
+        replays = [
+            Replay(
+                owner_id=actor.account.id,
+                job_id=job.id,
+                experiment_run_id=run.id,
+                replay_config_id=experiment.replay_config_id,
+                input_session_id=job.input_session_id,
+            )
+            for job in jobs
+        ]
+        run = await self._run_repository.create(run, jobs, replays)
         progress = ExperimentRunProgress(pending=len(jobs), total=len(jobs))
         return run, progress

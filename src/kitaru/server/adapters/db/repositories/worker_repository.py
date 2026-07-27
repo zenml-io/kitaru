@@ -107,8 +107,8 @@ class SQLWorkerRepository:
     async def query(self, worker_filter: WorkerFilter) -> tuple[list[Worker], int]:
         """Query workers matching a filter.
 
-        The agent id filter matches workers serving the agent, including
-        workers serving all agents.
+        The agent version id filter matches workers whose scope pins the
+        version, including workers pinning no version.
 
         Args:
             worker_filter: Filter and pagination parameters.
@@ -119,11 +119,13 @@ class SQLWorkerRepository:
         statement = select(WorkerSchema)
         if worker_filter.name is not None:
             statement = statement.where(col(WorkerSchema.name) == worker_filter.name)
-        if worker_filter.agent_id is not None:
+        if worker_filter.agent_version_id is not None:
+            pinned = col(WorkerSchema.scope)["agent_version_ids"]
             statement = statement.where(
                 or_(
-                    col(WorkerSchema.agent_ids).contains([str(worker_filter.agent_id)]),
-                    func.jsonb_array_length(col(WorkerSchema.agent_ids)) == 0,
+                    pinned.is_(None),
+                    func.jsonb_typeof(pinned) == "null",
+                    pinned.contains([str(worker_filter.agent_version_id)]),
                 )
             )
         if worker_filter.seen_after is not None:
@@ -157,7 +159,7 @@ class SQLWorkerRepository:
             raise WorkerNotFound(worker.id)
         row.owner_id = worker.owner_id
         row.name = worker.name
-        row.agent_ids = [str(agent_id) for agent_id in worker.agent_ids]
+        row.scope = worker.scope.model_dump(mode="json")
         row.last_seen_at = worker.last_seen_at
         row.metadata_ = worker.metadata
         try:

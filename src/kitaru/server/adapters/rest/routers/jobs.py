@@ -29,8 +29,6 @@ from kitaru.api_models.v1.jobs import (
     JobSpecResponse,
     JobStatus,
     JobUpdateRequest,
-    ReplayDiffResponse,
-    StandaloneJobClaimRequest,
     ToolLookupRequest,
     ToolLookupResponse,
 )
@@ -47,8 +45,8 @@ from kitaru.server.adapters.rest.mapping.jobs import (
     job_status_to_domain,
     job_to_response,
     job_update_to_command,
-    replay_diff_to_response,
     tool_lookup_to_response,
+    worker_scope_to_domain,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.jobs import JobFilter
@@ -105,7 +103,7 @@ async def list_jobs(
     )
     jobs, total = await service.list_jobs(job_filter, actor=actor)
     return Page[JobResponse](
-        items=[job_to_response(job, config) for job, config in jobs],
+        items=[job_to_response(job) for job in jobs],
         total=total,
         page=page,
         page_size=page_size,
@@ -121,8 +119,8 @@ async def claim_jobs(
     """Atomically claim pending jobs within a scope for a worker.
 
     Stale claimed or running jobs in scope are requeued or timed out
-    first, and the claim bumps the worker's last seen time. An unscoped
-    claim yields only pool-target work. With an experiment run id the
+    first, and the claim bumps the worker's last seen time. An unpinned
+    scope yields only pool-target work. With an experiment run id the
     first claim moves a pending run to running, and canceling and
     terminal runs yield no jobs. Every claimed job ships with the spec the
     runner executes it with, and a job whose spec does not resolve fails
@@ -142,17 +140,15 @@ async def claim_jobs(
     jobs = await service.claim_jobs(
         worker_id=body.worker_id,
         max_jobs=body.max_jobs,
-        agent_ids=body.agent_ids,
-        experiment_run_id=body.experiment_run_id,
-        parent_job_id=body.parent_job_id,
+        scope=worker_scope_to_domain(body.scope),
         actor=actor,
     )
     return JobClaimResponse(
         jobs=[
             ClaimedJobResponse(
-                job=job_to_response(job, config), spec=job_spec_to_response(spec)
+                job=job_to_response(job), spec=job_spec_to_response(spec)
             )
-            for job, config, spec in jobs
+            for job, spec in jobs
         ]
     )
 
@@ -176,8 +172,8 @@ async def get_job(
     Returns:
         Stored job.
     """
-    job, config = await service.get_job(job_id, actor=actor)
-    return job_to_response(job, config)
+    job = await service.get_job(job_id, actor=actor)
+    return job_to_response(job)
 
 
 @router.get("/{job_id}/spec")
@@ -215,14 +211,13 @@ async def update_job(
 ) -> JobResponse:
     """Transition a job through the runner status updates.
 
-    Completing stores the scoring result and the computed diff summary.
-    The transition that makes the last job of a run terminal also
+    A completing replay job fans out its score jobs within the same
+    request. The transition that makes the last job of a run terminal also
     finalizes the run.
 
     Clients observe HTTP 200 on success, 404 when no job has this id,
-    409 when the transition is illegal or completing without a linked
-    result session, and 422 when completing without a scoring result or
-    failing without an error.
+    409 when the transition is illegal or the completion carries no
+    result the kind requires, and 422 when failing without an error.
 
     Args:
         job_id: Id of the job.
@@ -233,10 +228,8 @@ async def update_job(
     Returns:
         Updated job.
     """
-    job, config = await service.update_job(
-        job_id, job_update_to_command(body), actor=actor
-    )
-    return job_to_response(job, config)
+    job = await service.update_job(job_id, job_update_to_command(body), actor=actor)
+    return job_to_response(job)
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -247,7 +240,8 @@ async def delete_job(
 ) -> None:
     """Delete a standalone job.
 
-    Deletes the job's config when nothing else references it.
+    Deletes the replay config of a replay job when nothing else references
+    it.
 
     Clients observe HTTP 204 on success, 404 when no job has this id,
     and 409 when the job belongs to an experiment run or is claimed or
@@ -259,35 +253,6 @@ async def delete_job(
         actor: Caller context.
     """
     await service.delete_job(job_id, actor=actor)
-
-
-@router.post("/{job_id}/claim")
-async def claim_job(
-    job_id: uuid.UUID,
-    body: StandaloneJobClaimRequest,
-    service: Annotated[JobService, Depends(get_job_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> JobResponse:
-    """Claim a standalone job for a worker.
-
-    A stale claim or start is requeued or timed out first, so a job
-    whose worker died is claimable again.
-
-    Clients observe HTTP 200 on success, 404 when no job has this id,
-    409 when the job belongs to an experiment run or is not pending
-    after the staleness resolution, and 422 on invalid input.
-
-    Args:
-        job_id: Id of the job.
-        body: Standalone job claim request.
-        service: Job service.
-        actor: Caller context.
-
-    Returns:
-        Claimed job.
-    """
-    job, config = await service.claim_job(job_id, worker_id=body.worker_id, actor=actor)
-    return job_to_response(job, config)
 
 
 @router.post("/{job_id}/release")
@@ -309,8 +274,8 @@ async def release_job(
     Returns:
         Requeued job.
     """
-    job, config = await service.release_job(job_id, actor=actor)
-    return job_to_response(job, config)
+    job = await service.release_job(job_id, actor=actor)
+    return job_to_response(job)
 
 
 @router.post("/{job_id}/retry")
@@ -320,6 +285,9 @@ async def retry_job(
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> JobResponse:
     """Requeue a finished standalone job for another attempt.
+
+    A replay job drops its score jobs, so the next completion fans out
+    again.
 
     Clients observe HTTP 200 on success, 404 when no job has this id,
     and 409 when the job belongs to an experiment run or is not
@@ -333,8 +301,8 @@ async def retry_job(
     Returns:
         Requeued job.
     """
-    job, config = await service.retry_job(job_id, actor=actor)
-    return job_to_response(job, config)
+    job = await service.retry_job(job_id, actor=actor)
+    return job_to_response(job)
 
 
 @router.post("/{job_id}/tool-lookup")
@@ -368,26 +336,3 @@ async def tool_lookup(
         actor=actor,
     )
     return tool_lookup_to_response(node)
-
-
-@router.get("/{job_id}/diff")
-async def get_job_diff(
-    job_id: uuid.UUID,
-    service: Annotated[JobService, Depends(get_job_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> ReplayDiffResponse:
-    """Compute the full diff between a job's sessions.
-
-    Clients observe HTTP 200 on success, 404 when no job has this id,
-    and 409 when the job has no result session yet.
-
-    Args:
-        job_id: Id of the job.
-        service: Job service.
-        actor: Caller context.
-
-    Returns:
-        Computed replay diff.
-    """
-    diff = await service.compute_diff(job_id, actor=actor)
-    return replay_diff_to_response(diff)
