@@ -27,6 +27,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
+    require_local_account_management,
 )
 from kitaru.server.adapters.rest.mapping.accounts import account_to_response
 from kitaru.server.application.models.accounts import AccountFilter
@@ -36,7 +37,11 @@ from kitaru.server.application.services.account_service import AccountService
 router = APIRouter()
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_local_account_management)],
+)
 async def create_account(
     body: AccountCreateRequest,
     service: Annotated[AccountService, Depends(get_account_service)],
@@ -44,8 +49,8 @@ async def create_account(
 ) -> AccountResponse:
     """Create an account.
 
-    Clients observe HTTP 201 on success, 409 when the name is already
-    registered, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 403 outside the ``local`` auth
+    scheme, 409 when the name is already registered, and 422 on invalid input.
 
     Args:
         body: Account create request.
@@ -124,7 +129,10 @@ async def get_account(
     return account_to_response(account)
 
 
-@router.patch("/{account_id}")
+@router.patch(
+    "/{account_id}",
+    dependencies=[Depends(require_local_account_management)],
+)
 async def update_account(
     account_id: uuid.UUID,
     body: AccountUpdateRequest,
@@ -133,8 +141,8 @@ async def update_account(
 ) -> AccountResponse:
     """Partially update an account.
 
-    Clients observe HTTP 200 on success, 404 when the account does not exist,
-    and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 outside the ``local`` auth
+    scheme, 404 when the account does not exist, and 422 on invalid input.
 
     Args:
         account_id: Id of the account.

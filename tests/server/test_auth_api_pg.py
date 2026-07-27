@@ -18,7 +18,12 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import lifespan_client, local_settings, postgres_available
+from conftest import (
+    drop_test_database,
+    lifespan_client,
+    local_settings,
+    postgres_available,
+)
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -93,15 +98,20 @@ async def test_default_account_bootstrap_idempotent() -> None:
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     settings = pg_settings()
-    await DatabaseService.create_db(settings, force_drop=True)
+    await DatabaseService.create_db(settings)
 
     account_ids = []
-    for _ in range(2):
-        app = create_app(settings)
-        async with app.router.lifespan_context(app):
-            database: DatabaseService = app.state.database
-            async for session in database.get_async_session():
-                repository = SQLAccountRepository(session)
-                account = await repository.get_by_name(settings.DEFAULT_ACCOUNT_NAME)
-                account_ids.append(account.id)
+    try:
+        for _ in range(2):
+            app = create_app(settings)
+            async with app.router.lifespan_context(app):
+                database: DatabaseService = app.state.database
+                async for session in database.get_async_session():
+                    repository = SQLAccountRepository(session)
+                    account = await repository.get_by_name(
+                        settings.DEFAULT_ACCOUNT_NAME
+                    )
+                    account_ids.append(account.id)
+    finally:
+        await drop_test_database(settings)
     assert account_ids[0] == account_ids[1]

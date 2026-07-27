@@ -66,6 +66,23 @@ class AccountRepository(Protocol):
         """
         ...
 
+    async def get_by_external_id(
+        self, external_id: uuid.UUID, is_service_account: bool = False
+    ) -> Account:
+        """Load an account by external id.
+
+        Args:
+            external_id: External id of the account.
+            is_service_account: Whether to look up a service account.
+
+        Raises:
+            AccountNotFound: No account has this external id.
+
+        Returns:
+            Stored account.
+        """
+        ...
+
     async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
         """Query accounts matching a filter.
 

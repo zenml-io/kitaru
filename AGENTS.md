@@ -52,7 +52,15 @@ just test 2>&1 | grep -E "FAILED|ERROR|passed|failed" | tail -20
 - Do not use `from __future__ import annotations`. Pydantic and FastAPI
   inspect annotations at runtime, and string annotations break that
   inspection.
+- Name a function or method for the action it performs, not the value it
+  returns. Write `_get_bearer_credential`, `_get_account_name`,
+  `_get_name_taken_message`, not `_bearer_credential`, `_account_name`,
+  `_name_taken`. A bare noun reads as an attribute at the call site.
 - Follow Google Python style for docstrings.
+- Describe the symbol in a docstring, never its callers. Write "Set the account
+  name and contact email", not "Set the identity fields mirrored from an
+  external account". A caller named in a docstring is wrong as soon as a second
+  caller appears.
 - Keep comments focused on why the code exists or why a trade-off was chosen.
 - Treat leading underscore names as private to their module or class.
 - Prefer Protocols/ABCs or `isinstance` over `getattr`/`hasattr` for capability checks.

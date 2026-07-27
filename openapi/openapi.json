@@ -300,19 +300,40 @@
       },
       "Body_login_v1_login_post": {
         "properties": {
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Type"
+          },
           "password": {
-            "title": "Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           },
           "username": {
-            "title": "Username",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
           }
         },
-        "required": [
-          "username",
-          "password"
-        ],
         "title": "Body_login_v1_login_post",
         "type": "object"
       },
@@ -849,7 +870,7 @@
         ]
       },
       "post": {
-        "description": "Create an account.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "description": "Create an account.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
         "operationId": "create_account_v1_accounts_post",
         "requestBody": {
           "content": {
@@ -933,7 +954,7 @@
         ]
       },
       "patch": {
-        "description": "Partially update an account.\n\nClients observe HTTP 200 on success, 404 when the account does not exist,\nand 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
+        "description": "Partially update an account.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth\nscheme, 404 when the account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
         "operationId": "update_account_v1_accounts__account_id__patch",
         "parameters": [
           {
@@ -1231,7 +1252,7 @@
     },
     "/v1/login": {
       "post": {
-        "description": "Log in with a username and password and receive a bearer token.\n\nClients observe HTTP 200 on success and 401 when password login is not\nenabled or the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    username: Account name.\n    password: Login password.\n\nRaises:\n    HTTPException: Password login is not enabled or the credentials\n        cannot be validated.\n\nReturns:\n    Issued token.",
+        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``control-plane`` grant type\nreads a control plane credential from the authorization header and mirrors\nthe control plane user into a local account. Clients observe HTTP 200 on\nsuccess, 400 when the grant type is not accepted by this server, and 401\nwhen the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
         "operationId": "login_v1_login_post",
         "requestBody": {
           "content": {
@@ -1240,8 +1261,7 @@
                 "$ref": "#/components/schemas/Body_login_v1_login_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {

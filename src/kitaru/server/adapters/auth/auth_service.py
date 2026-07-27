@@ -19,8 +19,13 @@ from datetime import UTC, datetime
 
 from anyio import to_thread
 
+from kitaru.server.adapters.auth.control_plane import (
+    CONTROL_PLANE_API_KEY_PREFIX,
+    ControlPlaneAuthenticator,
+    ControlPlaneError,
+)
 from kitaru.server.adapters.auth.jwt import JWTToken, TokenError
-from kitaru.server.api.config import APISettings
+from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
@@ -57,6 +62,7 @@ class AuthService:
         account_repository: AccountRepository,
         api_key_repository: ApiKeyRepository,
         password_hasher: PasswordHasher,
+        control_plane: ControlPlaneAuthenticator | None = None,
     ) -> None:
         """Create an authentication service.
 
@@ -65,11 +71,14 @@ class AuthService:
             account_repository: Account repository.
             api_key_repository: API key repository.
             password_hasher: Password hasher for login credentials.
+            control_plane: Control plane authenticator, set when the server
+                runs the control plane auth scheme.
         """
         self._settings = settings
         self._account_repository = account_repository
         self._api_key_repository = api_key_repository
         self._password_hasher = password_hasher
+        self._control_plane = control_plane
 
     async def resolve(
         self,
@@ -88,14 +97,12 @@ class AuthService:
         Returns:
             Request context accepted by this server.
         """
-        if credential.startswith(API_KEY_PREFIX):
+        if self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+            context = await self._resolve_control_plane_credential(credential)
+        elif credential.startswith(API_KEY_PREFIX):
             context = await self._authenticate_api_key(credential)
         else:
-            try:
-                token = JWTToken.decode(credential, self._settings)
-            except TokenError as exc:
-                raise AuthenticationError("Invalid bearer credential.") from exc
-            context = await self._resolve_token(token)
+            context = await self._resolve_session_token(credential)
         if context.csrf_token is not None and not secrets.compare_digest(
             csrf_token or "", context.csrf_token
         ):
@@ -148,13 +155,24 @@ class AuthService:
         )
         if not valid or not account.active:
             raise AuthenticationError("Invalid username or password.")
-        csrf_token = None
-        if self._settings.AUTH_COOKIE_NAME:
-            csrf_token = secrets.token_hex(16)
-        token, expires_at = self.issue_token(
-            AuthContext(account=account), csrf_token=csrf_token
-        )
-        return token, expires_at, csrf_token
+        return self._issue_session(AuthContext(account=account))
+
+    async def login_with_control_plane(
+        self, credential: str
+    ) -> tuple[str, datetime, str | None]:
+        """Exchange a control plane credential for a local session token.
+
+        Args:
+            credential: Control plane session token or API key.
+
+        Raises:
+            AuthenticationError: The credential cannot be validated.
+
+        Returns:
+            Encoded bearer token, its expiry time, and the CSRF token when
+            cookie authentication is configured.
+        """
+        return self._issue_session(await self._authenticate_control_plane(credential))
 
     def issue_token(
         self, context: AuthContext, csrf_token: str | None = None
@@ -175,6 +193,42 @@ class AuthService:
         expires_at = token.expires(self._settings)
         token = token.model_copy(update={"expires_at": expires_at})
         return token.encode(self._settings), expires_at
+
+    def _issue_session(self, context: AuthContext) -> tuple[str, datetime, str | None]:
+        csrf_token = None
+        if self._settings.AUTH_COOKIE_NAME:
+            csrf_token = secrets.token_hex(16)
+        token, expires_at = self.issue_token(context, csrf_token=csrf_token)
+        return token, expires_at, csrf_token
+
+    async def _resolve_control_plane_credential(self, credential: str) -> AuthContext:
+        if credential.startswith(CONTROL_PLANE_API_KEY_PREFIX):
+            return await self._authenticate_control_plane(credential)
+        if credential.startswith(API_KEY_PREFIX):
+            raise AuthenticationError(
+                "Local API keys are rejected under control plane authentication."
+            )
+        context = await self._resolve_session_token(credential)
+        if context.account.external_id is None:
+            raise AuthenticationError(
+                "Local accounts are rejected under control plane authentication."
+            )
+        return context
+
+    async def _authenticate_control_plane(self, credential: str) -> AuthContext:
+        if self._control_plane is None:
+            raise AuthenticationError("Control plane authentication is not configured.")
+        try:
+            return await self._control_plane.authenticate(credential)
+        except ControlPlaneError as exc:
+            raise AuthenticationError("Invalid control plane credential.") from exc
+
+    async def _resolve_session_token(self, credential: str) -> AuthContext:
+        try:
+            token = JWTToken.decode(credential, self._settings)
+        except TokenError as exc:
+            raise AuthenticationError("Invalid bearer credential.") from exc
+        return await self._resolve_token(token)
 
     async def _authenticate_api_key(self, credential: str) -> AuthContext:
         try:

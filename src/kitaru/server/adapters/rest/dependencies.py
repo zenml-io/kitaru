@@ -23,6 +23,10 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
 )
+from kitaru.server.adapters.auth.control_plane import (
+    ControlPlaneAuthenticator,
+    ControlPlaneClient,
+)
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -141,11 +145,22 @@ def get_auth_service(
     Returns:
         Authentication service bound to the SQL repositories.
     """
+    settings = get_app_settings(request)
+    account_repository = SQLAccountRepository(session)
+    client: ControlPlaneClient | None = request.app.state.control_plane_client
+    control_plane = None
+    if client is not None:
+        control_plane = ControlPlaneAuthenticator(
+            client=client,
+            account_repository=account_repository,
+            server_id=settings.SERVER_ID,
+        )
     return AuthService(
-        settings=get_app_settings(request),
-        account_repository=SQLAccountRepository(session),
+        settings=settings,
+        account_repository=account_repository,
         api_key_repository=SQLApiKeyRepository(session),
         password_hasher=BcryptPasswordHasher(),
+        control_plane=control_plane,
     )
 
 
@@ -174,6 +189,24 @@ def get_optional_bearer_credential(
         if cookie:
             return cookie, csrf_token
     return None
+
+
+def require_local_account_management(
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> None:
+    """Reject account writes unless this server owns its accounts.
+
+    Args:
+        settings: Service settings governing auth behavior.
+
+    Raises:
+        HTTPException: The local auth scheme is not active.
+    """
+    if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This server does not manage its own accounts.",
+        )
 
 
 async def authorize(

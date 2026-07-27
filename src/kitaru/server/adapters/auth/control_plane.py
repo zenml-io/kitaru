@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Control plane API client used by Kitaru server authentication."""
+"""Control plane API client and the authentication it backs."""
 
 import asyncio
 import logging
@@ -26,8 +26,21 @@ import httpx
 from pydantic import BaseModel, ConfigDict
 
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.account_repository import (
+    AccountRepository,
+)
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.domain.account import (
+    Account,
+    AccountNotFound,
+    DuplicateAccountName,
+)
+from kitaru.server.domain.names import InvalidName, validate_name
 
 logger = logging.getLogger(__name__)
+
+# Distinguishes control plane API keys from locally issued Kitaru API keys.
+CONTROL_PLANE_API_KEY_PREFIX = "ZENPROKEY_"
 
 
 class ControlPlaneError(Exception):
@@ -297,3 +310,91 @@ class ControlPlaneHTTPError(Exception):
         """
         self.status_code = status_code
         super().__init__(f"Control plane API returned HTTP {status_code}.")
+
+
+class ControlPlaneAuthenticator:
+    """Resolve control plane credentials into locally mirrored accounts."""
+
+    def __init__(
+        self,
+        client: ControlPlaneClient,
+        account_repository: AccountRepository,
+        server_id: uuid.UUID,
+    ) -> None:
+        """Create a control plane authenticator.
+
+        Args:
+            client: Control plane API client.
+            account_repository: Account repository holding mirrored accounts.
+            server_id: Server instance this API represents.
+        """
+        self._client = client
+        self._account_repository = account_repository
+        self._server_id = server_id
+
+    async def authenticate(self, credential: str) -> AuthContext:
+        """Authorize a control plane credential and mirror its user.
+
+        Args:
+            credential: Control plane session token or API key.
+
+        Raises:
+            ControlPlaneError: The credential does not identify a user this
+                server accepts.
+
+        Returns:
+            Request context for the mirrored account.
+        """
+        authorization = await self._client.authorize_server(credential, self._server_id)
+        if authorization.user is None:
+            raise ControlPlaneError("Control plane credential identifies no user.")
+        account = await self._mirror_account(authorization.user)
+        return AuthContext(account=account)
+
+    async def _mirror_account(self, user: ControlPlaneUser) -> Account:
+        name = self._get_account_name(user)
+        # An account is external from creation onwards. A local account is
+        # never claimed by a control plane user, not even on a name match.
+        try:
+            account = await self._account_repository.get_by_external_id(
+                user.id, user.is_service_account
+            )
+        except AccountNotFound:
+            return await self._create_account(user, name)
+        account.update_identity(name, user.email)
+        account.update_active(True)
+        try:
+            return await self._account_repository.update(account)
+        except DuplicateAccountName as exc:
+            raise ControlPlaneError(self._get_name_taken_message(name)) from exc
+
+    async def _create_account(self, user: ControlPlaneUser, name: str) -> Account:
+        logger.info("Creating account mirroring control plane user %s.", user.id)
+        try:
+            return await self._account_repository.create(
+                Account(
+                    is_service_account=user.is_service_account,
+                    external_id=user.id,
+                    name=name,
+                    email=user.email,
+                )
+            )
+        except DuplicateAccountName as exc:
+            raise ControlPlaneError(self._get_name_taken_message(name)) from exc
+
+    @staticmethod
+    def _get_name_taken_message(name: str) -> str:
+        return f"Account name '{name}' is already registered to another account."
+
+    @staticmethod
+    def _get_account_name(user: ControlPlaneUser) -> str:
+        if not user.username:
+            raise ControlPlaneError(
+                f"Control plane user {user.id} has no username to mirror."
+            )
+        try:
+            return validate_name(user.username)
+        except InvalidName as exc:
+            raise ControlPlaneError(
+                f"Control plane username '{user.username}' is not a valid account name."
+            ) from exc

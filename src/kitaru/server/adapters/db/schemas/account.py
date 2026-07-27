@@ -13,7 +13,9 @@
 #  permissions and limitations under the License.
 """Account ORM table."""
 
-from sqlalchemy import UniqueConstraint
+import uuid
+
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field
 
 from kitaru.server.adapters.db.schemas.base import (
@@ -21,6 +23,7 @@ from kitaru.server.adapters.db.schemas.base import (
     UUIDPrimaryKeyMixin,
 )
 from kitaru.server.adapters.db.schemas.schema_utils import (
+    index_name,
     unique_constraint_name,
 )
 from kitaru.server.domain.account import Account
@@ -30,6 +33,7 @@ from kitaru.server.domain.names import MAX_NAME_LENGTH
 ACCOUNT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
     "account", ["name", "is_service_account"]
 )
+ACCOUNT_EXTERNAL_ID_INDEX = index_name("account", ["external_id"])
 
 
 class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
@@ -40,9 +44,11 @@ class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         UniqueConstraint(
             "name", "is_service_account", name=ACCOUNT_NAME_UNIQUE_CONSTRAINT
         ),
+        Index(ACCOUNT_EXTERNAL_ID_INDEX, "external_id"),
     )
 
     is_service_account: bool = Field(nullable=False)
+    external_id: uuid.UUID | None = Field(default=None)
     name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
     email: str | None = Field(default=None, max_length=255)
     password_hash: str | None = Field(default=None, max_length=128)
@@ -61,6 +67,7 @@ class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         return cls(
             id=account.id,
             is_service_account=account.is_service_account,
+            external_id=account.external_id,
             name=account.name,
             email=account.email,
             password_hash=account.password_hash,
@@ -76,6 +83,7 @@ class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         return Account(
             id=self.id,
             is_service_account=self.is_service_account,
+            external_id=self.external_id,
             name=self.name,
             email=self.email,
             password_hash=self.password_hash,

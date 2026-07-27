@@ -107,6 +107,30 @@ class SQLAccountRepository:
             raise AccountNotFound(name)
         return row.to_domain()
 
+    async def get_by_external_id(
+        self, external_id: uuid.UUID, is_service_account: bool = False
+    ) -> Account:
+        """Load an account by external id.
+
+        Args:
+            external_id: External id of the account.
+            is_service_account: Whether to look up a service account.
+
+        Raises:
+            AccountNotFound: No account has this external id.
+
+        Returns:
+            Stored account.
+        """
+        statement = select(AccountSchema).where(
+            col(AccountSchema.external_id) == external_id,
+            col(AccountSchema.is_service_account) == is_service_account,
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            raise AccountNotFound(external_id)
+        return row.to_domain()
+
     async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
         """Query accounts matching a filter.
 
@@ -149,6 +173,7 @@ class SQLAccountRepository:
         if row is None:
             raise AccountNotFound(account.id)
         row.is_service_account = account.is_service_account
+        row.external_id = account.external_id
         row.name = account.name
         row.email = account.email
         row.password_hash = account.password_hash
