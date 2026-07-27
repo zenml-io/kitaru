@@ -353,6 +353,7 @@
       "Page_AccountResponse_": {
         "properties": {
           "items": {
+            "description": "Items on this page.",
             "items": {
               "$ref": "#/components/schemas/AccountResponse"
             },
@@ -360,14 +361,17 @@
             "type": "array"
           },
           "page": {
+            "description": "Page number.",
             "title": "Page",
             "type": "integer"
           },
           "page_size": {
+            "description": "Items per page.",
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
+            "description": "Total number of items across all pages.",
             "title": "Total",
             "type": "integer"
           }
@@ -384,6 +388,7 @@
       "Page_ApiKeyResponse_": {
         "properties": {
           "items": {
+            "description": "Items on this page.",
             "items": {
               "$ref": "#/components/schemas/ApiKeyResponse"
             },
@@ -391,14 +396,17 @@
             "type": "array"
           },
           "page": {
+            "description": "Page number.",
             "title": "Page",
             "type": "integer"
           },
           "page_size": {
+            "description": "Items per page.",
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
+            "description": "Total number of items across all pages.",
             "title": "Total",
             "type": "integer"
           }
@@ -415,6 +423,7 @@
       "Page_SecretResponse_": {
         "properties": {
           "items": {
+            "description": "Items on this page.",
             "items": {
               "$ref": "#/components/schemas/SecretResponse"
             },
@@ -422,14 +431,17 @@
             "type": "array"
           },
           "page": {
+            "description": "Page number.",
             "title": "Page",
             "type": "integer"
           },
           "page_size": {
+            "description": "Items per page.",
             "title": "Page Size",
             "type": "integer"
           },
           "total": {
+            "description": "Total number of items across all pages.",
             "title": "Total",
             "type": "integer"
           }

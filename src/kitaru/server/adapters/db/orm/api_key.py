@@ -16,14 +16,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, UniqueConstraint
 from sqlmodel import Field
 
-from kitaru.server.adapters.db.schemas.base import (
+from kitaru.server.adapters.db.orm.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from kitaru.server.adapters.db.schemas.schema_utils import (
+from kitaru.server.adapters.db.orm.orm_utils import (
+    foreign_key_name,
     index_name,
     unique_constraint_name,
 )
@@ -31,19 +32,23 @@ from kitaru.server.domain.api_key import ApiKey
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
 API_KEY_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("api_key", ["name"])
+API_KEY_OWNER_ID_FOREIGN_KEY = foreign_key_name("api_key", ["owner_id"])
 API_KEY_OWNER_ID_INDEX = index_name("api_key", ["owner_id"])
 
 
-class ApiKeySchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     """API key table."""
 
     __tablename__ = "api_key"
     __table_args__ = (
         UniqueConstraint("name", name=API_KEY_NAME_UNIQUE_CONSTRAINT),
+        ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name=API_KEY_OWNER_ID_FOREIGN_KEY
+        ),
         Index(API_KEY_OWNER_ID_INDEX, "owner_id"),
     )
 
-    owner_id: uuid.UUID = Field(foreign_key="account.id", nullable=False)
+    owner_id: uuid.UUID = Field(nullable=False)
     name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
     key_hash: str = Field(max_length=128, nullable=False)
     active: bool = Field(nullable=False)
@@ -53,7 +58,7 @@ class ApiKeySchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     )
 
     @classmethod
-    def from_domain(cls, api_key: ApiKey) -> "ApiKeySchema":
+    def from_domain(cls, api_key: ApiKey) -> "ApiKeyORM":
         """Build a row from a domain API key.
 
         Args:

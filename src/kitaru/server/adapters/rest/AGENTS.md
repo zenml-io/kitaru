@@ -5,6 +5,11 @@
 - Status codes: 201 for create, 200 for read and update, 204 for delete.
 - Updates are partial and use `PATCH /{id}`, never `PUT`. The update body
   carries only the mutable fields.
+- PATCH always flows through `<x>_update_to_command` on `set_fields`, even for
+  one-field bodies, so an absent field and an explicit null stay
+  distinguishable.
+- Every route takes the `authorize` dependency and passes `actor=actor` to the
+  service. Explicit exceptions, such as login, are allowed.
 - Domain errors map to responses in the app-level exception handlers (404 for
   `NotFoundError`, 409 for `ConflictError`, 422 for `ValidationError`).
   Routers never catch domain errors and never raise `HTTPException` for them.

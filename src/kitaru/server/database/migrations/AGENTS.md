@@ -26,5 +26,5 @@ state of `develop`:
    backfills or operations autogenerate cannot detect.
 
 Index and constraint names in the generated script are inherited from the
-schema, which builds them with the `schema_utils` helpers. Do not rename them by
-hand, since the repository string-matches the schema-side constant.
+ORM classes, which build them with the `orm_utils` helpers. Do not rename
+them by hand, since the repository string-matches the ORM-side constant.

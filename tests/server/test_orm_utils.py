@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for schema naming helpers."""
 
-from kitaru.server.adapters.db.schemas.schema_utils import (
+from kitaru.server.adapters.db.orm.orm_utils import (
     index_name,
     unique_constraint_name,
 )

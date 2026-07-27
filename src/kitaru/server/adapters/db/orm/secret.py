@@ -16,14 +16,15 @@
 import uuid
 
 from pydantic import SecretStr
-from sqlalchemy import Index, Text, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, Text, UniqueConstraint
 from sqlmodel import Field
 
-from kitaru.server.adapters.db.schemas.base import (
+from kitaru.server.adapters.db.orm.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from kitaru.server.adapters.db.schemas.schema_utils import (
+from kitaru.server.adapters.db.orm.orm_utils import (
+    foreign_key_name,
     index_name,
     unique_constraint_name,
 )
@@ -31,26 +32,30 @@ from kitaru.server.domain.names import MAX_NAME_LENGTH
 from kitaru.server.domain.secret import MAX_SECRET_TYPE_LENGTH, Secret
 
 SECRET_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("secret", ["name"])
+SECRET_OWNER_ID_FOREIGN_KEY = foreign_key_name("secret", ["owner_id"])
 SECRET_OWNER_ID_INDEX = index_name("secret", ["owner_id"])
 
 
-class SecretSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class SecretORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     """Secret table."""
 
     __tablename__ = "secret"
     __table_args__ = (
         UniqueConstraint("name", name=SECRET_NAME_UNIQUE_CONSTRAINT),
+        ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name=SECRET_OWNER_ID_FOREIGN_KEY
+        ),
         Index(SECRET_OWNER_ID_INDEX, "owner_id"),
     )
 
-    owner_id: uuid.UUID = Field(foreign_key="account.id", nullable=False)
+    owner_id: uuid.UUID = Field(nullable=False)
     name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
     internal: bool = Field(nullable=False)
     type: str | None = Field(default=None, max_length=MAX_SECRET_TYPE_LENGTH)
     values_encrypted: str = Field(sa_type=Text, nullable=False)
 
     @classmethod
-    def from_domain(cls, secret: Secret, values_encrypted: str) -> "SecretSchema":
+    def from_domain(cls, secret: Secret, values_encrypted: str) -> "SecretORM":
         """Build a row from a domain secret.
 
         Args:

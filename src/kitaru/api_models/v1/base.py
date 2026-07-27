@@ -15,7 +15,7 @@
 
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RequestModel(BaseModel):
@@ -34,10 +34,10 @@ ItemT = TypeVar("ItemT", bound=ResponseModel)
 class Page(ResponseModel, Generic[ItemT]):
     """Pagination envelope."""
 
-    items: list[ItemT]
-    total: int
-    page: int
-    page_size: int
+    items: list[ItemT] = Field(description="Items on this page.")
+    total: int = Field(description="Total number of items across all pages.")
+    page: int = Field(description="Page number.")
+    page_size: int = Field(description="Items per page.")
 
 
 class ErrorBody(ResponseModel):

@@ -24,11 +24,11 @@ from sqlmodel import col
 
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.errors import violated_constraint
-from kitaru.server.adapters.db.pagination import paginate
-from kitaru.server.adapters.db.schemas.secret import (
+from kitaru.server.adapters.db.orm.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
-    SecretSchema,
+    SecretORM,
 )
+from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
@@ -86,7 +86,7 @@ class SQLSecretRepository:
         Returns:
             Stored secret with timestamps set.
         """
-        row = SecretSchema.from_domain(secret, self._encrypt_values(secret.values))
+        row = SecretORM.from_domain(secret, self._encrypt_values(secret.values))
         try:
             async with self._session.begin_nested():
                 self._session.add(row)
@@ -109,7 +109,7 @@ class SQLSecretRepository:
         Returns:
             Stored secret.
         """
-        row = await self._session.get(SecretSchema, secret_id)
+        row = await self._session.get(SecretORM, secret_id)
         if row is None:
             raise SecretNotFound(secret_id)
         return row.to_domain(self._decrypt_values(row.values_encrypted))
@@ -123,21 +123,21 @@ class SQLSecretRepository:
         Returns:
             Page of matching secrets and the total match count.
         """
-        statement = select(SecretSchema)
+        statement = select(SecretORM)
         if secret_filter.name is not None:
-            statement = statement.where(col(SecretSchema.name) == secret_filter.name)
+            statement = statement.where(col(SecretORM.name) == secret_filter.name)
         if secret_filter.owner_id is not None:
             statement = statement.where(
-                col(SecretSchema.owner_id) == secret_filter.owner_id
+                col(SecretORM.owner_id) == secret_filter.owner_id
             )
         if secret_filter.internal is not None:
             statement = statement.where(
-                col(SecretSchema.internal) == secret_filter.internal
+                col(SecretORM.internal) == secret_filter.internal
             )
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(SecretSchema.id),
+            order_by=col(SecretORM.id),
             page=secret_filter.page,
             page_size=secret_filter.page_size,
         )
@@ -158,7 +158,7 @@ class SQLSecretRepository:
         Returns:
             Stored secret with the updated timestamp renewed.
         """
-        row = await self._session.get(SecretSchema, secret.id)
+        row = await self._session.get(SecretORM, secret.id)
         if row is None:
             raise SecretNotFound(secret.id)
         row.owner_id = secret.owner_id
@@ -184,7 +184,7 @@ class SQLSecretRepository:
         Raises:
             SecretNotFound: No secret has this id.
         """
-        row = await self._session.get(SecretSchema, secret_id)
+        row = await self._session.get(SecretORM, secret_id)
         if row is None:
             raise SecretNotFound(secret_id)
         await self._session.delete(row)
