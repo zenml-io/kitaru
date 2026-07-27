@@ -17,6 +17,7 @@ import hashlib
 import json
 from collections import defaultdict
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
@@ -35,12 +36,24 @@ from kitaru.importers import (
     ReplayReadiness,
     SessionStatus,
     TokenUsage,
+    parsed_items,
 )
+from kitaru.importing import ParsedSession, ParseFailure
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-_SESSION_FIELDS = ("session_id", "sessionId", "thread_id", "conversation_id")
+_SESSION_FIELDS = (
+    "session_id",
+    "sessionId",
+    "thread_id",
+    "conversation_id",
+    "gen_ai.conversation.id",
+)
 _ALLOWED_METADATA = {
     "conversation_id",
+    "gen_ai.conversation.id",
+    "gen_ai.provider.name",
+    "gen_ai.request.model",
+    "gen_ai.response.model",
     "model",
     "provider",
     "session_id",
@@ -61,6 +74,27 @@ def _digest(value: Any) -> str:
 def _dict(value: Any) -> dict[str, Any]:
     """Return a dictionary or an empty dictionary."""
     return value if isinstance(value, dict) else {}
+
+
+def _decimal(value: Any) -> Decimal | None:
+    """Parse one provider decimal."""
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _contains_tool_activity(value: Any) -> bool:
+    """Detect model output that references tool calls without explicit spans."""
+    if isinstance(value, dict):
+        if any(key in value for key in ("tool_calls", "toolCalls")):
+            return True
+        return any(_contains_tool_activity(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_tool_activity(item) for item in value)
+    return False
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -321,6 +355,7 @@ class BraintrustProjectLogImporter:
 
         turns: list[NormalizedTurn] = []
         nodes: list[NormalizedNode] = []
+        root_by_trace: dict[str, dict[str, Any]] = {}
         missing_parent = False
         for trace_id, rows in trace_records.items():
             ordered = sorted(
@@ -331,6 +366,7 @@ class BraintrustProjectLogImporter:
                 ),
             )
             root = _root_record(ordered, trace_id)
+            root_by_trace[trace_id] = root
             turns.append(
                 NormalizedTurn(
                     trace_id=trace_id,
@@ -365,6 +401,7 @@ class BraintrustProjectLogImporter:
                 node_type = _node_type(row, full_export=full_export)
                 status = _node_status(row)
                 attributes = _dict(row.get("span_attributes"))
+                metadata = _dict(row.get("metadata"))
                 nodes.append(
                     NormalizedNode(
                         source_id=f"{trace_id}:{span_id}",
@@ -382,9 +419,14 @@ class BraintrustProjectLogImporter:
                         ended_at=_ended_at(row),
                         inputs=row.get("input"),
                         outputs=row.get("output"),
-                        model=_dict(row.get("metadata")).get("model"),
-                        provider=_dict(row.get("metadata")).get("provider"),
+                        requested_model=metadata.get("gen_ai.request.model")
+                        or metadata.get("model"),
+                        model=metadata.get("gen_ai.response.model")
+                        or metadata.get("model"),
+                        provider=metadata.get("gen_ai.provider.name")
+                        or metadata.get("provider"),
                         tokens=_token_usage(row),
+                        cost=_decimal(_metrics(row).get("estimated_cost")),
                         tool_name=(
                             str(attributes.get("name") or row.get("name") or "tool")
                             if node_type is NodeType.TOOL_CALL
@@ -412,6 +454,23 @@ class BraintrustProjectLogImporter:
         if missing_parent:
             warnings.append("One or more spans reference a missing parent")
         graph_complete = full_export and not missing_parent
+        llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
+        incomplete_llm_nodes = [
+            node for node in llm_nodes if node.inputs is None or node.outputs is None
+        ]
+        implicit_tool_activity = any(
+            _contains_tool_activity(node.outputs) for node in llm_nodes
+        )
+        if implicit_tool_activity and not any(
+            node.node_type is NodeType.TOOL_CALL for node in nodes
+        ):
+            warnings.append(
+                "Model output contains tool activity but no explicit tool spans"
+            )
+            graph_complete = False
+        if incomplete_llm_nodes:
+            warnings.append("One or more LLM spans lack recorded input or output")
+            graph_complete = False
         tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
         replayable_tools = [
             node
@@ -432,7 +491,19 @@ class BraintrustProjectLogImporter:
             readiness_level = "ready"
         else:
             readiness_level = "partial"
-        failed_nodes = [node for node in nodes if node.status is NodeStatus.FAILED]
+        latest_turn = turns[-1]
+        latest_root = root_by_trace[latest_turn.trace_id]
+        session_status = (
+            SessionStatus.FAILED
+            if _node_status(latest_root) is NodeStatus.FAILED
+            else SessionStatus.COMPLETED
+        )
+        session_error = (
+            str(latest_root["error"])
+            if session_status is SessionStatus.FAILED
+            and latest_root.get("error") not in (None, "")
+            else None
+        )
         inputs = {
             "schema_version": 1,
             "turns": [
@@ -466,12 +537,12 @@ class BraintrustProjectLogImporter:
                 or root.get("name")
                 or source_id
             ),
-            status=(SessionStatus.FAILED if failed_nodes else SessionStatus.COMPLETED),
+            status=session_status,
             turns=turns,
             nodes=nodes,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
-            error=failed_nodes[-1].error if failed_nodes else None,
+            error=session_error,
             started_at=min(
                 (turn.started_at for turn in turns if turn.started_at),
                 default=None,
@@ -498,3 +569,13 @@ class BraintrustProjectLogImporter:
             ),
             content_digest=_digest(digest_payload),
         )
+
+
+def parse(
+    content: bytes,
+    source_instance: str | None = None,
+    filename: str | None = None,
+) -> list[ParsedSession | ParseFailure]:
+    """Parse Braintrust JSON through the unified importer contract."""
+    context = ImportContext(source_instance=source_instance, filename=filename)
+    return parsed_items(BraintrustProjectLogImporter().parse(content, context))

@@ -45,15 +45,14 @@ from kitaru.adapters.pydantic_ai import (
     ToolPolicyError,
     ToolPolicyMissError,
 )
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
+    JobKind,
+    JobSpecResponse,
+    JobSpecRun,
     LLMPolicy,
     PassthroughPolicy,
     ReplayOverride,
-    ReplaySpecResponse,
-    ReplaySpecRun,
-    ScorerConfig,
-    ScoringPolicy,
     StaticCase,
     StaticMatchMode,
     StaticPolicy,
@@ -94,24 +93,24 @@ class _FakeSessionNodes:
         return []
 
 
-class _FakeReplays:
+class _FakeJobs:
     def __init__(self, client: "_FakeClient") -> None:
         self._client = client
         self.lookups: list[tuple[uuid.UUID, Any]] = []
 
-    async def get_spec(self, replay_id: uuid.UUID) -> ReplaySpecResponse:
+    async def get_spec(self, job_id: uuid.UUID) -> JobSpecResponse:
         assert self._client.spec is not None
-        assert replay_id == self._client.spec.replay_id
+        assert job_id == self._client.spec.job_id
         return self._client.spec
 
-    async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
-        self.lookups.append((replay_id, request))
+    async def tool_lookup(self, job_id: uuid.UUID, request: Any) -> Any:
+        self.lookups.append((job_id, request))
         return self._client.lookup_response
 
 
 class _FakeClient:
     instances: ClassVar[list["_FakeClient"]] = []
-    next_spec: ClassVar[ReplaySpecResponse | None] = None
+    next_spec: ClassVar[JobSpecResponse | None] = None
     next_lookup_response: ClassVar[ToolLookupResponse] = ToolLookupResponse(
         found=False, result=None
     )
@@ -123,7 +122,7 @@ class _FakeClient:
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
         self.session_nodes = _FakeSessionNodes(self)
-        self.replays = _FakeReplays(self)
+        self.jobs = _FakeJobs(self)
         self.closed = False
         type(self).instances.append(self)
 
@@ -137,11 +136,11 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "KITARU_API_KEY",
         "KITARU_API_URL",
-        "KITARU_INPUTS",
+        "KITARU_JOB_ID",
+        "KITARU_JOB_INPUTS",
+        "KITARU_JOB_SESSION_NAME",
         "KITARU_OVERRIDE",
-        "KITARU_REPLAY_ID",
         "KITARU_SESSION_ID_FILE",
-        "KITARU_SESSION_NAME",
     ):
         monkeypatch.delenv(name, raising=False)
     _FakeClient.instances.clear()
@@ -150,42 +149,37 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(capability_module, "KitaruAPIClient", _FakeClient)
 
 
-def _scoring_policy() -> ScoringPolicy:
-    return ScoringPolicy(
-        scorers=[ScorerConfig(name="score", source="test:score")],
-        pass_threshold=0.5,
-    )
-
-
 def _replay_spec(
     policy: Any,
     *,
     inputs: Any = "replayed prompt",
     override: ReplayOverride | None = None,
     tools: dict[str, Any] | None = None,
-) -> ReplaySpecResponse:
-    replay_id = uuid.uuid4()
-    return ReplaySpecResponse(
-        replay_id=replay_id,
+) -> JobSpecResponse:
+    job_id = uuid.uuid4()
+    return JobSpecResponse(
+        job_id=job_id,
+        kind=JobKind.REPLAY,
         inputs=inputs,
         override=override,
         tool_policy=ToolPolicyConfig(default=policy, tools=tools or {}),
-        scoring_policy=_scoring_policy(),
-        score_baselines=False,
-        run=ReplaySpecRun(
+        scorer=None,
+        importer=None,
+        run=JobSpecRun(
             command="python agent.py",
             working_dir=None,
             env={},
             timeout_seconds=30,
         ),
         secret_env={},
-        original_session_id=uuid.uuid4(),
+        input_session_id=uuid.uuid4(),
+        name=None,
     )
 
 
-def _set_replay(monkeypatch: pytest.MonkeyPatch, spec: ReplaySpecResponse) -> None:
+def _set_replay(monkeypatch: pytest.MonkeyPatch, spec: JobSpecResponse) -> None:
     _FakeClient.next_spec = spec
-    monkeypatch.setenv("KITARU_REPLAY_ID", str(spec.replay_id))
+    monkeypatch.setenv("KITARU_JOB_ID", str(spec.job_id))
 
 
 def _nodes(client: _FakeClient) -> list[Any]:
@@ -323,7 +317,7 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
         ),
     )
     _set_replay(monkeypatch, spec)
-    monkeypatch.setenv("KITARU_INPUTS", json.dumps("environment prompt"))
+    monkeypatch.setenv("KITARU_JOB_INPUTS", json.dumps("environment prompt"))
     agent = KitaruAgent(
         Agent(
             FunctionModel(model, model_name="original"),
@@ -357,7 +351,7 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
     assert user_prompts == ["environment prompt"]
     client = _FakeClient.instances[0]
     assert client.sessions.created[0].inputs == "environment prompt"
-    assert client.sessions.created[0].replay_id == spec.replay_id
+    assert client.sessions.created[0].job_id == spec.job_id
 
 
 async def test_replay_json_input_is_encoded_and_recorded_original(
@@ -665,7 +659,7 @@ async def test_tool_policies(
     assert tool.outputs == expected_result
     assert tool.attributes.get("mocked", False) is mocked
     if isinstance(policy, HistoryPolicy):
-        lookup = client.replays.lookups[0][1]
+        lookup = client.jobs.lookups[0][1]
         arguments = {"city": "Paris", "units": "metric"}
         assert lookup.inputs == arguments
         assert lookup.cache_key == tool_call_cache_key("lookup", arguments)
@@ -770,7 +764,7 @@ async def test_provider_native_tools_are_observed_but_not_mocked(
     assert native.outputs == {"answer": "recorded"}
     assert native.attributes == {"provider_native": True}
     assert "mocked" not in native.attributes
-    assert client.replays.lookups == []
+    assert client.jobs.lookups == []
 
 
 async def test_unpaired_provider_native_call_rejects_llm_policy(
@@ -839,7 +833,7 @@ async def test_history_policy_normalizes_validated_tool_arguments(
     assert result.output == "finished"
     assert returned_results == [{"source": "history"}]
     client = _FakeClient.instances[0]
-    lookup = client.replays.lookups[0][1]
+    lookup = client.jobs.lookups[0][1]
     json_args = {"day": "2026-07-24"}
     assert lookup.inputs == json_args
     assert lookup.cache_key == tool_call_cache_key("lookup_day", json_args)

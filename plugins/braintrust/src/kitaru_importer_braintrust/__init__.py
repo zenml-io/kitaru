@@ -13,6 +13,6 @@
 #  permissions and limitations under the License.
 """Braintrust project-log importer plugin."""
 
-from kitaru_importer_braintrust.importer import BraintrustProjectLogImporter
+from kitaru_importer_braintrust.importer import BraintrustProjectLogImporter, parse
 
-__all__ = ["BraintrustProjectLogImporter"]
+__all__ = ["BraintrustProjectLogImporter", "parse"]

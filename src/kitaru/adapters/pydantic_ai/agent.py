@@ -51,7 +51,8 @@ class KitaruAgent(
             agent_version_id: Optional Kitaru agent-version identifier.
             api_url: Kitaru API URL, falling back to ``KITARU_API_URL``.
             api_key: Kitaru API key, falling back to ``KITARU_API_KEY``.
-            session_name: Recorded name, falling back to ``KITARU_SESSION_NAME``.
+            session_name: Recorded name, falling back to
+                ``KITARU_JOB_SESSION_NAME``.
             batch_size: Number of child nodes sent per upsert batch.
 
         Raises:
@@ -68,7 +69,7 @@ class KitaruAgent(
             agent_version_id=agent_version_id,
             api_url=resolved_url,
             api_key=api_key or os.environ.get("KITARU_API_KEY"),
-            session_name=session_name or os.environ.get("KITARU_SESSION_NAME"),
+            session_name=session_name or os.environ.get("KITARU_JOB_SESSION_NAME"),
             batch_size=batch_size,
         )
 

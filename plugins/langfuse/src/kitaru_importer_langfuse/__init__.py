@@ -13,6 +13,6 @@
 #  permissions and limitations under the License.
 """Langfuse trace importer plugin."""
 
-from kitaru_importer_langfuse.importer import LangfuseJSONLImporter
+from kitaru_importer_langfuse.importer import LangfuseJSONLImporter, parse
 
-__all__ = ["LangfuseJSONLImporter"]
+__all__ = ["LangfuseJSONLImporter", "parse"]
