@@ -116,65 +116,6 @@ jobs:
             echo "::error::Configure the secret or rerun with dry-run=true."
             exit 1
           fi
-      - name: Validate cloud-plugins tag token
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        env:
-          CLOUD_PLUGINS_REPO_PAT: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
-        run: |
-          set -euo pipefail
-          if [ -z "$CLOUD_PLUGINS_REPO_PAT" ]; then
-            echo "::error::secrets.CLOUD_PLUGINS_REPO_PAT is required for non-dry-run releases."
-            echo "::error::This workflow uses it to create kitaru-$VERSION in zenml-io/zenml-cloud-plugins after Helm publish."
-            echo "::error::The token needs read access to zenml-cloud-plugins/main and permission to create Git tags in zenml-io/zenml-cloud-plugins."
-            echo "::error::Configure the secret or rerun with dry-run=true."
-            exit 1
-          fi
-      # Pin the downstream repo SHA before expensive publish work starts. That
-      # makes the later cloud-plugins tag deterministic, and it fails early if
-      # the token cannot read the repo or an existing tag has already diverged.
-      - name: Pin cloud-plugins release tag target
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          github-token: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
-          script: |-
-            const owner = 'zenml-io';
-            const repo = 'zenml-cloud-plugins';
-            const tagName = `kitaru-${process.env.VERSION}`;
-            const fullRef = `refs/tags/${tagName}`;
-            const getRefName = `tags/${tagName}`;
-            const { data: branch } = await github.rest.repos.getBranch({
-              owner,
-              repo,
-              branch: 'main',
-            });
-            const expectedSha = branch.commit.sha;
-            core.exportVariable('CLOUD_PLUGINS_TAG_NAME', tagName);
-            core.exportVariable('CLOUD_PLUGINS_MAIN_SHA', expectedSha);
-            try {
-              const { data: existingRef } = await github.rest.git.getRef({
-                owner,
-                repo,
-                ref: getRefName,
-              });
-              const existingSha = existingRef.object.sha;
-              if (existingSha === expectedSha) {
-                core.exportVariable('CLOUD_PLUGINS_TAG_EXISTS', 'true');
-                core.info(`${fullRef} already exists at pinned main SHA ${expectedSha} — later tag creation will skip`);
-                return;
-              }
-              throw new Error(
-                `${fullRef} exists at ${existingSha}, but pinned ${owner}/${repo}@main is ${expectedSha}. `
-                + 'Manual investigation is required before PyPI, Docker, or Helm publish.'
-              );
-            } catch (error) {
-              if (error.status !== 404) {
-                throw error;
-              }
-            }
-            core.exportVariable('CLOUD_PLUGINS_TAG_EXISTS', 'false');
-            core.info(`${fullRef} does not exist; later tag creation will use pinned main SHA ${expectedSha}`);
-
       # --- Install uv (needed before version bump to regenerate lockfile) ---
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
@@ -633,63 +574,6 @@ jobs:
           helm push "${REPOSITORY}-${VERSION}.tgz" \
             "oci://${REGISTRY}/${REGISTRY_ALIAS}"
 
-      # This tag is the downstream "Kitaru release is ready for cloud-plugins"
-      # signal, so it runs after Helm publish rather than immediately after the
-      # Docker push. It uses the SHA pinned near the start of the job, so the
-      # downstream tag cannot drift if zenml-cloud-plugins/main moves while this
-      # release is publishing. Recovery follows the rest of this workflow's
-      # identity-based model: create a missing ref, accept an exact match, and
-      # fail loudly if an existing tag points somewhere else.
-      - name: Create cloud-plugins Kitaru release tag
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          github-token: ${{ secrets.CLOUD_PLUGINS_REPO_PAT }}
-          script: |-
-            const owner = 'zenml-io';
-            const repo = 'zenml-cloud-plugins';
-            const tagName = process.env.CLOUD_PLUGINS_TAG_NAME;
-            const expectedSha = process.env.CLOUD_PLUGINS_MAIN_SHA;
-            const fullRef = `refs/tags/${tagName}`;
-            const getRefName = `tags/${tagName}`;
-            async function assertExistingTagMatchesPinnedSha(context) {
-              const { data: existingRef } = await github.rest.git.getRef({
-                owner,
-                repo,
-                ref: getRefName,
-              });
-              const existingSha = existingRef.object.sha;
-              if (existingSha === expectedSha) {
-                core.info(`${fullRef} already exists at pinned main SHA ${expectedSha} — skipping (${context})`);
-                return;
-              }
-              throw new Error(
-                `${fullRef} exists at ${existingSha}, but pinned ${owner}/${repo}@main is ${expectedSha}. `
-                + 'Manual investigation is required; the workflow will not move or overwrite the tag.'
-              );
-            }
-            if (process.env.CLOUD_PLUGINS_TAG_EXISTS === 'true') {
-              await assertExistingTagMatchesPinnedSha('matched during early validation');
-              return;
-            }
-            try {
-              await github.rest.git.createRef({
-                owner,
-                repo,
-                ref: fullRef,
-                sha: expectedSha,
-              });
-              core.info(`Created ${fullRef} at pinned ${owner}/${repo}@main SHA ${expectedSha}`);
-            } catch (error) {
-              // GitHub returns 422 if another actor created the ref after the
-              // early validation step. Treat that race as safe only if the tag
-              // now points at the exact SHA we pinned before publish work began.
-              if (error.status !== 422) {
-                throw error;
-              }
-              await assertExistingTagMatchesPinnedSha('created concurrently after early validation');
-            }
-
       # --- Dry-run summary ---
       - name: Dry-run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
@@ -708,9 +592,6 @@ jobs:
             echo ""
             echo "### Helm chart"
             echo "Built (not pushed): kitaru-${VERSION}.tgz"
-            echo ""
-            echo "### Cloud plugins trigger"
-            echo "Skipped tag creation: zenml-io/zenml-cloud-plugins refs/tags/kitaru-$VERSION"
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"
