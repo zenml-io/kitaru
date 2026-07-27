@@ -32,4 +32,6 @@ renewal on update.
 
 Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and
 `KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test
-recreates its database with `force_drop`, so tests stay independent.
+creates a uniquely named database and drops it on teardown, so tests stay
+independent. A session-scoped fixture reaps databases left behind by a
+killed run.

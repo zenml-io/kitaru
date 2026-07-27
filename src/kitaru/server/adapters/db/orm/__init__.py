@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """ORM table definitions."""
 
-from kitaru.server.adapters.db.schemas.account import AccountSchema
-from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
-from kitaru.server.adapters.db.schemas.secret import SecretSchema
+from kitaru.server.adapters.db.orm.account import AccountORM
+from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
+from kitaru.server.adapters.db.orm.secret import SecretORM
 
-__all__ = ["AccountSchema", "ApiKeySchema", "SecretSchema"]
+__all__ = ["AccountORM", "ApiKeyORM", "SecretORM"]

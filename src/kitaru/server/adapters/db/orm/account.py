@@ -18,11 +18,11 @@ import uuid
 from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field
 
-from kitaru.server.adapters.db.schemas.base import (
+from kitaru.server.adapters.db.orm.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from kitaru.server.adapters.db.schemas.schema_utils import (
+from kitaru.server.adapters.db.orm.orm_utils import (
     index_name,
     unique_constraint_name,
 )
@@ -36,7 +36,7 @@ ACCOUNT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
 ACCOUNT_EXTERNAL_ID_INDEX = index_name("account", ["external_id"])
 
 
-class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     """Account table."""
 
     __tablename__ = "account"
@@ -55,7 +55,7 @@ class AccountSchema(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
     active: bool = Field(nullable=False)
 
     @classmethod
-    def from_domain(cls, account: Account) -> "AccountSchema":
+    def from_domain(cls, account: Account) -> "AccountORM":
         """Build a row from a domain account.
 
         Args:

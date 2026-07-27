@@ -106,7 +106,7 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 ## Architecture
 
-The server follows a layered architecture (API, application, domain, infrastructure adapters). The client SDK and server never import each other and both sit on the shared `api_models` package. The binding conventions, including the new-resource checklist, live in scoped `AGENTS.md` files: `src/kitaru/AGENTS.md`, `src/kitaru/server/AGENTS.md`, the per-layer files under `src/kitaru/server/`, `src/kitaru/api_models/AGENTS.md`, `src/kitaru/client/AGENTS.md`, and `tests/AGENTS.md`.
+The server follows a layered architecture (API, application, domain, infrastructure adapters). The client SDK and server never import each other and both sit on the shared `api_models` package. The binding conventions, including the new-resource checklist, live in scoped `AGENTS.md` files: `src/kitaru/AGENTS.md`, the per-layer files under `src/kitaru/server/`, `src/kitaru/api_models/AGENTS.md`, `src/kitaru/client/AGENTS.md`, and `tests/AGENTS.md`.
 
 ## Code style
 

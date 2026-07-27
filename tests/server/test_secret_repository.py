@@ -21,13 +21,13 @@ from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, pg_session, postgres_available
 from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
-from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
 )
@@ -241,7 +241,7 @@ async def test_values_encrypted_at_rest() -> None:
         created = await repository.create(
             Secret(owner_id=owner.id, name="db", values=VALUES)
         )
-        row = await session.get(SecretSchema, created.id)
+        row = await session.get(SecretORM, created.id)
         assert row is not None
         assert "hunter2" not in row.values_encrypted
         assert "password" not in row.values_encrypted

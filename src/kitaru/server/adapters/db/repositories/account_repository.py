@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
-from kitaru.server.adapters.db.pagination import paginate
-from kitaru.server.adapters.db.schemas.account import (
+from kitaru.server.adapters.db.orm.account import (
     ACCOUNT_NAME_UNIQUE_CONSTRAINT,
-    AccountSchema,
+    AccountORM,
 )
+from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.domain.account import (
     Account,
@@ -57,7 +57,7 @@ class SQLAccountRepository:
         Returns:
             Stored account with timestamps set.
         """
-        row = AccountSchema.from_domain(account)
+        row = AccountORM.from_domain(account)
         try:
             async with self._session.begin_nested():
                 self._session.add(row)
@@ -80,7 +80,7 @@ class SQLAccountRepository:
         Returns:
             Stored account.
         """
-        row = await self._session.get(AccountSchema, account_id)
+        row = await self._session.get(AccountORM, account_id)
         if row is None:
             raise AccountNotFound(account_id)
         return row.to_domain()
@@ -98,9 +98,9 @@ class SQLAccountRepository:
         Returns:
             Stored account.
         """
-        statement = select(AccountSchema).where(
-            col(AccountSchema.name) == name,
-            col(AccountSchema.is_service_account) == is_service_account,
+        statement = select(AccountORM).where(
+            col(AccountORM.name) == name,
+            col(AccountORM.is_service_account) == is_service_account,
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
@@ -122,9 +122,9 @@ class SQLAccountRepository:
         Returns:
             Stored account.
         """
-        statement = select(AccountSchema).where(
-            col(AccountSchema.external_id) == external_id,
-            col(AccountSchema.is_service_account) == is_service_account,
+        statement = select(AccountORM).where(
+            col(AccountORM.external_id) == external_id,
+            col(AccountORM.is_service_account) == is_service_account,
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
@@ -140,17 +140,15 @@ class SQLAccountRepository:
         Returns:
             Page of matching accounts and the total match count.
         """
-        statement = select(AccountSchema)
+        statement = select(AccountORM)
         if account_filter.name is not None:
-            statement = statement.where(col(AccountSchema.name) == account_filter.name)
+            statement = statement.where(col(AccountORM.name) == account_filter.name)
         if account_filter.active is not None:
-            statement = statement.where(
-                col(AccountSchema.active) == account_filter.active
-            )
+            statement = statement.where(col(AccountORM.active) == account_filter.active)
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(AccountSchema.id),
+            order_by=col(AccountORM.id),
             page=account_filter.page,
             page_size=account_filter.page_size,
         )
@@ -169,7 +167,7 @@ class SQLAccountRepository:
         Returns:
             Stored account with the updated timestamp renewed.
         """
-        row = await self._session.get(AccountSchema, account.id)
+        row = await self._session.get(AccountORM, account.id)
         if row is None:
             raise AccountNotFound(account.id)
         row.is_service_account = account.is_service_account

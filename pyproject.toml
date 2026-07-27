@@ -116,6 +116,10 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = ["kitaru"]
 
+[tool.ty.src]
+# TODO: Re-enable once the examples are migrated to the v2 SDK.
+exclude = ["examples/**"]
+
 [tool.ty.environment]
 python-version = "3.11"
 root = ["src", "scripts", "tests"]

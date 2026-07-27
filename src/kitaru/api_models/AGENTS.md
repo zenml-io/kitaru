@@ -8,6 +8,9 @@
   OpenAPI schema, so they are part of the API contract. Use the shortest noun
   phrase that disambiguates and never restate what the type, enum, validator,
   default, or field name already conveys.
+- Discriminated request unions mark the `type` discriminator as set in
+  `model_post_init` so `exclude_unset` dumps keep it. The `type: Literal`
+  discriminator is the one field exempt from the description rule.
 - This package imports neither server nor client code.
 
 ## Datetimes

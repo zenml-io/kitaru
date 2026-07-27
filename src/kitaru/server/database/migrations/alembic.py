@@ -29,7 +29,7 @@ from sqlalchemy.sql.schema import MetaData, SchemaItem
 from sqlmodel import SQLModel
 
 # Register all ORM tables on SQLModel.metadata for autogenerate.
-import kitaru.server.adapters.db.schemas  # noqa: F401
+import kitaru.server.adapters.db.orm  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

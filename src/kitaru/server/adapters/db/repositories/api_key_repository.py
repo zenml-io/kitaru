@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
-from kitaru.server.adapters.db.pagination import paginate
-from kitaru.server.adapters.db.schemas.api_key import (
+from kitaru.server.adapters.db.orm.api_key import (
     API_KEY_NAME_UNIQUE_CONSTRAINT,
-    ApiKeySchema,
+    ApiKeyORM,
 )
+from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.application.models.api_keys import ApiKeyFilter
 from kitaru.server.domain.api_key import (
     ApiKey,
@@ -57,7 +57,7 @@ class SQLApiKeyRepository:
         Returns:
             Stored API key with timestamps set.
         """
-        row = ApiKeySchema.from_domain(api_key)
+        row = ApiKeyORM.from_domain(api_key)
         try:
             async with self._session.begin_nested():
                 self._session.add(row)
@@ -80,7 +80,7 @@ class SQLApiKeyRepository:
         Returns:
             Stored API key.
         """
-        row = await self._session.get(ApiKeySchema, api_key_id)
+        row = await self._session.get(ApiKeyORM, api_key_id)
         if row is None:
             raise ApiKeyNotFound(api_key_id)
         return row.to_domain()
@@ -94,17 +94,17 @@ class SQLApiKeyRepository:
         Returns:
             Page of matching API keys and the total match count.
         """
-        statement = select(ApiKeySchema)
+        statement = select(ApiKeyORM)
         if api_key_filter.name is not None:
-            statement = statement.where(col(ApiKeySchema.name) == api_key_filter.name)
+            statement = statement.where(col(ApiKeyORM.name) == api_key_filter.name)
         if api_key_filter.owner_id is not None:
             statement = statement.where(
-                col(ApiKeySchema.owner_id) == api_key_filter.owner_id
+                col(ApiKeyORM.owner_id) == api_key_filter.owner_id
             )
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(ApiKeySchema.id),
+            order_by=col(ApiKeyORM.id),
             page=api_key_filter.page,
             page_size=api_key_filter.page_size,
         )
@@ -123,7 +123,7 @@ class SQLApiKeyRepository:
         Returns:
             Stored API key with the updated timestamp renewed.
         """
-        row = await self._session.get(ApiKeySchema, api_key.id)
+        row = await self._session.get(ApiKeyORM, api_key.id)
         if row is None:
             raise ApiKeyNotFound(api_key.id)
         row.owner_id = api_key.owner_id
@@ -149,7 +149,7 @@ class SQLApiKeyRepository:
         Raises:
             ApiKeyNotFound: No API key has this id.
         """
-        row = await self._session.get(ApiKeySchema, api_key_id)
+        row = await self._session.get(ApiKeyORM, api_key_id)
         if row is None:
             raise ApiKeyNotFound(api_key_id)
         await self._session.delete(row)

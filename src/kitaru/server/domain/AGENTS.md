@@ -1,7 +1,9 @@
 # Domain layer rules
 
 - The domain layer imports nothing from other layers and contains no
-  persistence concepts, not even abstract ones.
+  persistence concepts, not even abstract ones. Shared primitives from
+  `server/base.py` such as `FrozenModel` are the one exception. Models,
+  services, and adapters from other layers stay off limits.
 - Entities extend `DomainModel` and enforce their own invariants in methods.
   An entity method decides whether an operation is legal. Anemic models with
   rules in services above them are a defect.

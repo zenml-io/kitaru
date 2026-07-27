@@ -18,8 +18,8 @@ half-wired resource that still imports cleanly, so walk the whole list.
 2. `server/application/interfaces/order_repository.py`: repository Protocol.
 3. `server/application/models/orders.py`: filter model.
 4. `server/application/services/order_service.py`: use cases.
-5. `server/adapters/db/schemas/order.py`: ORM table, exported from
-   `server/adapters/db/schemas/__init__.py`.
+5. `server/adapters/db/orm/order.py`: `OrderORM` class, exported from
+   `server/adapters/db/orm/__init__.py`.
 6. New Alembic revision under `server/database/migrations/versions/`.
 7. `server/adapters/db/repositories/order_repository.py`: SQL repository.
 8. `server/adapters/rest/mapping/orders.py`: DTO conversions.
