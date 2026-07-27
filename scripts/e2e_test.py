@@ -20,108 +20,127 @@ import traceback
 import uuid
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-# The runner imports adapter_example.scorers in-process for scoring.
-sys.path.insert(0, str(REPO_ROOT))
-
-from kitaru import Runner  # noqa: E402
-from kitaru.api_models.v1.agent_versions import (  # noqa: E402
+from kitaru import Runner
+from kitaru.api_models.v1.agent_versions import (
     AgentVersionCreateRequest,
     AgentVersionUpdateRequest,
     RunSpec,
 )
-from kitaru.api_models.v1.agents import AgentCreateRequest  # noqa: E402
-from kitaru.api_models.v1.api_keys import ApiKeyCreateRequest  # noqa: E402
-from kitaru.api_models.v1.cohorts import CohortCreateRequest  # noqa: E402
-from kitaru.api_models.v1.experiment_runs import (  # noqa: E402
+from kitaru.api_models.v1.agents import AgentCreateRequest
+from kitaru.api_models.v1.api_keys import ApiKeyCreateRequest
+from kitaru.api_models.v1.cohorts import CohortCreateRequest
+from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunCreateRequest,
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.experiments import (  # noqa: E402
+from kitaru.api_models.v1.experiments import (
     ExperimentCreateRequest,
     ExperimentUpdateRequest,
 )
-from kitaru.api_models.v1.jobs import (  # noqa: E402
+from kitaru.api_models.v1.imports import ImportCreateRequest
+from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
     HistoryScope,
     JobClaimRequest,
     JobResponse,
     JobStatus,
+    RegistryScorerConfig,
     ReplayCreateRequest,
     ReplayOverride,
-    ScorerConfig,
     ScoringPolicy,
+    SourceScorerConfig,
     StaticCase,
     StaticPolicy,
     ToolPolicyConfig,
     ToolPolicyOnMiss,
 )
-from kitaru.api_models.v1.secrets import SecretCreateRequest  # noqa: E402
-from kitaru.api_models.v1.session_nodes import (  # noqa: E402
+from kitaru.api_models.v1.secrets import SecretCreateRequest
+from kitaru.api_models.v1.session_nodes import (
     NodeStatus,
     NodeType,
     SessionNodeResponse,
 )
-from kitaru.api_models.v1.session_runs import (  # noqa: E402
-    SessionRunCreateRequest,
-)
-from kitaru.api_models.v1.sessions import (  # noqa: E402
+from kitaru.api_models.v1.session_runs import SessionRunCreateRequest
+from kitaru.api_models.v1.sessions import (
     SessionOrigin,
+    SessionProvider,
     SessionResponse,
     SessionStatus,
 )
-from kitaru.api_models.v1.workers import WorkerCreateRequest  # noqa: E402
-from kitaru.client import KitaruAPIClient  # noqa: E402
-from kitaru.client.exceptions import APIError  # noqa: E402
+from kitaru.api_models.v1.workers import WorkerCreateRequest
+from kitaru.client import KitaruAPIClient
+from kitaru.client.exceptions import APIError
 
 API_URL = os.environ.get("KITARU_E2E_API_URL", "http://127.0.0.1:8300")
 ACCOUNT_NAME = os.environ.get("KITARU_E2E_ACCOUNT_NAME", "default")
 ACCOUNT_PASSWORD = os.environ.get("KITARU_E2E_ACCOUNT_PASSWORD", "password")
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENT_PYTHON = str(REPO_ROOT / ".venv" / "bin" / "python")
+REGISTRY_SCORER_FILE = REPO_ROOT / "scripts" / "e2e_registry_scorer.py"
+IMPORTER_FILE = REPO_ROOT / "importer_example" / "importer.py"
+TRACE_FILE = REPO_ROOT / "importer_example" / "trace.jsonl"
 ORIGINAL_MODEL = "mock-gpt-4"
 OVERRIDE_MODEL = "mock-claude-opus"
 SECRET_VALUE = "e2e-secret-token-123"
 STATIC_CALC_RESULT = {"expression": "21 * 2", "result": 42.0, "canned": True}
 SCORER_NAMES = ("answer_quality", "tool_efficiency", "token_budget")
+REGISTRY_SCORER_NAME = "e2e-output-length"
+REGISTRY_SCORER_ENTRYPOINT = "output_length"
+IMPORTER_NAME = "e2e-trace-importer"
+IMPORTER_ENTRYPOINT = "parse"
+IMPORTER_PROVIDER = "otlp"
+TRACE_MEDIA_TYPE = "application/x-ndjson"
+IMPORTED_NODE_COUNTS = {
+    "trace-2026-07-20-001": 5,
+    "trace-2026-07-20-002": 3,
+    "trace-2026-07-20-004": 4,
+}
 
 POPULATE_RUNS: list[dict[str, str] | str] = [
     '{"question": "What is the weather in Berlin, and what is 21 * 2?"}',
     "Weather in Berlin plus 21 * 2, please answer briefly.",
-    {"KITARU_INPUTS": '{"question": "Berlin forecast and the answer to 21 * 2?"}'},
+    {"KITARU_JOB_INPUTS": '{"question": "Berlin forecast and the answer to 21 * 2?"}'},
     {
-        "KITARU_INPUTS": '{"question": "Give me Berlin weather and 21 * 2."}',
-        "KITARU_SESSION_NAME": "e2e-run-4",
+        "KITARU_JOB_INPUTS": '{"question": "Give me Berlin weather and 21 * 2."}',
+        "KITARU_JOB_SESSION_NAME": "e2e-run-4",
     },
 ]
 
 
-def scoring_policy() -> ScoringPolicy:
+def scoring_policy(registry_version: int | None = None) -> ScoringPolicy:
     """Build the scoring policy shared by the experiment and standalone job."""
-    return ScoringPolicy(
-        scorers=[
-            ScorerConfig(
-                name="answer_quality",
-                source="adapter_example.scorers:answer_quality",
-                params={"keywords": ["answer"]},
-                weight=2.0,
-            ),
-            ScorerConfig(
-                name="tool_efficiency",
-                source="adapter_example.scorers:tool_efficiency",
-                params={"budget": 4},
-                weight=1.0,
-            ),
-            ScorerConfig(
-                name="token_budget",
-                source="adapter_example.scorers:token_budget",
-                params={"max_tokens": 4000},
+    scorers: list[SourceScorerConfig | RegistryScorerConfig] = [
+        SourceScorerConfig(
+            name="answer_quality",
+            source="adapter_example.scorers:answer_quality",
+            params={"keywords": ["answer"]},
+            weight=2.0,
+        ),
+        SourceScorerConfig(
+            name="tool_efficiency",
+            source="adapter_example.scorers:tool_efficiency",
+            params={"budget": 4},
+            weight=1.0,
+        ),
+        SourceScorerConfig(
+            name="token_budget",
+            source="adapter_example.scorers:token_budget",
+            params={"max_tokens": 4000},
+            weight=0.5,
+        ),
+    ]
+    if registry_version is not None:
+        scorers.append(
+            RegistryScorerConfig(
+                name=REGISTRY_SCORER_NAME,
+                version=registry_version,
+                params={"max_chars": 400},
                 weight=0.5,
-            ),
-        ],
-        pass_threshold=0.4,
-    )
+            )
+        )
+    return ScoringPolicy(scorers=scorers, pass_threshold=0.4)
 
 
 def log(message: str) -> None:
@@ -165,8 +184,8 @@ def populate_env(api_key: str, agent_id: uuid.UUID, version_id: uuid.UUID) -> di
     """Build the base environment for regular agent executions."""
     env = dict(os.environ)
     env.pop("KITARU_JOB_ID", None)
-    env.pop("KITARU_INPUTS", None)
-    env.pop("KITARU_SESSION_NAME", None)
+    env.pop("KITARU_JOB_INPUTS", None)
+    env.pop("KITARU_JOB_SESSION_NAME", None)
     env["KITARU_API_URL"] = API_URL
     env["KITARU_API_KEY"] = api_key
     env["KITARU_E2E_AGENT_ID"] = str(agent_id)
@@ -247,6 +266,7 @@ async def check_replay_result(
     original: SessionResponse,
     expect_model: str,
     expect_calculate_policy: str,
+    scorer_names: tuple[str, ...] = SCORER_NAMES,
 ) -> None:
     """Assert a completed job, its result session, and its node tree."""
     check(
@@ -256,7 +276,7 @@ async def check_replay_result(
     check(job.passed is not None, "job has no passed outcome")
     check(job.score is not None, "job has no score")
     check(
-        job.scores is not None and set(job.scores) == set(SCORER_NAMES),
+        job.scores is not None and set(job.scores) == set(scorer_names),
         f"job scores incomplete: {job.scores}",
     )
     check(job.diff is not None, "job has no diff summary")
@@ -308,10 +328,11 @@ async def check_replay_diff(
     job: JobResponse,
     original_model: str,
     effective_model: str,
+    scorer_names: tuple[str, ...] = SCORER_NAMES,
 ) -> None:
     """Assert the computed diff aligns the node trees and shows the override."""
     diff = await client.jobs.get_diff(job.id)
-    check(diff.original_session_id == job.original_session_id, "diff original id")
+    check(diff.original_session_id == job.input_session_id, "diff original id")
     check(diff.result_session_id == job.result_session_id, "diff result id")
     check(
         len(diff.node_pairs) == 5,
@@ -329,7 +350,7 @@ async def check_replay_diff(
     )
     mocked_pairs = [pair for pair in diff.node_pairs if pair.mocked]
     check(len(mocked_pairs) == 2, f"expected 2 mocked pairs, got {len(mocked_pairs)}")
-    for name in SCORER_NAMES:
+    for name in scorer_names:
         delta = diff.score_deltas.get(name)
         check(delta is not None, f"diff lacks score delta for {name}")
         assert delta is not None
@@ -379,6 +400,61 @@ def check_run_summary(run: ExperimentRunResponse, replay_count: int) -> None:
                 count is not None and count > 0,
                 f"{side} total {kind} {total_tokens}",
             )
+
+
+def check_import_stats(
+    job: JobResponse, created: int, skipped: int, failed: int
+) -> None:
+    """Assert the stats an import job reported."""
+    check(
+        job.status is JobStatus.COMPLETED,
+        f"import job {job.id} is {job.status}: {job.error}",
+    )
+    check(job.stats is not None, "import job has no stats")
+    assert job.stats is not None
+    counts = (job.stats.created, job.stats.skipped, job.stats.failed)
+    check(
+        counts == (created, skipped, failed),
+        f"unexpected import stats {counts}, expected {(created, skipped, failed)}",
+    )
+    check(
+        len(job.stats.failures) == failed,
+        f"unexpected failure sample {job.stats.failures}",
+    )
+
+
+async def check_imported_sessions(client: KitaruAPIClient, agent_id: uuid.UUID) -> None:
+    """Assert the imported sessions and their node trees."""
+    page = await client.sessions.list(
+        agent_id=agent_id, origin=SessionOrigin.IMPORTED, page_size=50
+    )
+    check(page.total == 3, f"expected 3 imported sessions, got {page.total}")
+    by_external_id = {session.external_id: session for session in page.items}
+    check(
+        set(by_external_id) == set(IMPORTED_NODE_COUNTS),
+        f"unexpected imported external ids {sorted(by_external_id)}",
+    )
+    for external_id, expected in IMPORTED_NODE_COUNTS.items():
+        session = by_external_id[external_id]
+        check(
+            session.provider is SessionProvider.OTLP,
+            f"imported session provider {session.provider}",
+        )
+        check(
+            session.status is SessionStatus.COMPLETED,
+            f"imported session {external_id} is {session.status}",
+        )
+        nodes = await client.session_nodes.list(session.id, include_payloads=True)
+        check(
+            len(nodes) == expected,
+            f"imported session {external_id} has {len(nodes)} nodes, "
+            f"expected {expected}",
+        )
+        check(
+            nodes[0].parent_id is None, f"imported root of {external_id} has a parent"
+        )
+        for node in nodes:
+            check(bool(node.key), f"imported node of {external_id} has no key")
 
 
 async def main() -> int:
@@ -465,7 +541,7 @@ async def main() -> int:
             nodes = await client.session_nodes.list(session.id, include_payloads=True)
             check_session_tree(session, nodes)
         named = [session for session in sessions if session.name == "e2e-run-4"]
-        check(len(named) == 1, "KITARU_SESSION_NAME was not recorded")
+        check(len(named) == 1, "KITARU_JOB_SESSION_NAME was not recorded")
         ok("4 recorded sessions completed with node trees and rollups")
 
         # Step d: cohort and experiment with override, tool, and scoring policy.
@@ -520,7 +596,7 @@ async def main() -> int:
             spec.secret_env == {"E2E_SECRET_TOKEN": SECRET_VALUE},
             f"secret env not resolved: {list(spec.secret_env)}",
         )
-        check(spec.score_baselines is True, "spec does not carry score_baselines")
+        check(spec.scorer is None, "replay spec carries a scorer")
         ok("experiment run created with 4 pending jobs and resolved secret env")
 
         # Step f: execute the run with the in-process runner.
@@ -532,7 +608,8 @@ async def main() -> int:
         replays_page = await client.experiment_runs.list_jobs(run.id, page_size=50)
         sessions_by_id = {session.id: session for session in sessions}
         for job in replays_page.items:
-            original = sessions_by_id[job.original_session_id]
+            assert job.input_session_id is not None
+            original = sessions_by_id[job.input_session_id]
             await check_replay_result(
                 client,
                 job,
@@ -551,11 +628,21 @@ async def main() -> int:
             )
         ok("baseline scores written to every original session")
 
-        # Step g: standalone job with the default tool policy.
+        # Step g: standalone job scored by a registered scorer as well.
+        registered = await client.scorers.register(
+            REGISTRY_SCORER_NAME,
+            REGISTRY_SCORER_FILE,
+            REGISTRY_SCORER_ENTRYPOINT,
+        )
+        check(
+            registered.version >= 1,
+            f"unexpected scorer version {registered.version}",
+        )
+        registry_names = (*SCORER_NAMES, REGISTRY_SCORER_NAME)
         standalone = await client.replays.create(
             ReplayCreateRequest(
-                original_session_id=sessions[0].id,
-                scoring_policy=scoring_policy(),
+                input_session_id=sessions[0].id,
+                scoring_policy=scoring_policy(registry_version=registered.version),
             )
         )
         check(standalone.experiment_run_id is None, "standalone job has a run")
@@ -566,9 +653,21 @@ async def main() -> int:
             sessions[0],
             expect_model=ORIGINAL_MODEL,
             expect_calculate_policy="history",
+            scorer_names=registry_names,
         )
-        await check_replay_diff(client, standalone, ORIGINAL_MODEL, ORIGINAL_MODEL)
-        ok("standalone job completed, scored, and diffed")
+        await check_replay_diff(
+            client,
+            standalone,
+            ORIGINAL_MODEL,
+            ORIGINAL_MODEL,
+            scorer_names=registry_names,
+        )
+        check(
+            standalone.scores is not None
+            and standalone.scores[REGISTRY_SCORER_NAME] > 0,
+            f"registered scorer produced no score: {standalone.scores}",
+        )
+        ok("standalone job completed, scored by a registered scorer, and diffed")
 
         # Step h: session run executed as a standalone job.
         live_inputs = {"question": "Live run: Berlin weather and 21 * 2?"}
@@ -628,6 +727,36 @@ async def main() -> int:
         )
         check(claim.jobs == [], "claim on a completed run returned jobs")
         ok("frozen experiment rejects config updates, drained run claims nothing")
+
+        # Step j: import recorded traces through an import job.
+        registered_importer = await client.importers.register(
+            IMPORTER_NAME,
+            IMPORTER_FILE,
+            IMPORTER_ENTRYPOINT,
+            provider=IMPORTER_PROVIDER,
+        )
+        payload = await client.blobs.upload(TRACE_FILE.read_bytes(), TRACE_MEDIA_TYPE)
+        import_request = ImportCreateRequest(
+            importer=IMPORTER_NAME,
+            agent_id=agent.id,
+            version=registered_importer.version,
+            payload_blob_id=payload.id,
+        )
+        import_job = await client.imports.create(import_request)
+        check(import_job.agent_id == agent.id, "import job is not bound to the agent")
+        import_job = await runner.run_job(import_job.id)
+        check_import_stats(import_job, created=3, skipped=0, failed=1)
+        await check_imported_sessions(client, agent.id)
+        ok("import job completed, 3 traces imported with their node trees")
+
+        # Step k: re-importing the same payload skips every session.
+        repeat = await runner.run_job((await client.imports.create(import_request)).id)
+        check_import_stats(repeat, created=0, skipped=3, failed=1)
+        page = await client.sessions.list(
+            agent_id=agent.id, origin=SessionOrigin.IMPORTED, page_size=50
+        )
+        check(page.total == 3, f"re-import changed the session count to {page.total}")
+        ok("re-import skipped all 3 sessions on the duplicate external ids")
 
     print("[e2e] ALL STEPS PASSED", flush=True)
     return 0

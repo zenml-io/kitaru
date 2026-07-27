@@ -35,6 +35,22 @@ class WorkerCreateRequest(RequestModel):
     )
 
 
+class WorkerHeartbeatRequest(RequestModel):
+    """Worker heartbeat request."""
+
+    job_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Ids of the jobs the worker has in flight."
+    )
+
+
+class WorkerHeartbeatResponse(ResponseModel):
+    """Worker heartbeat response."""
+
+    abandon: list[uuid.UUID] = Field(
+        description="Reported job ids the worker should stop working on."
+    )
+
+
 class WorkerResponse(ResponseModel):
     """Worker response."""
 

@@ -21,7 +21,7 @@ from pydantic import Field, PositiveInt
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.execution import ExecutionTarget
-from kitaru.server.domain.job import JobKind, JobStatus
+from kitaru.server.domain.job import ImportStats, JobKind, JobStatus
 from kitaru.server.domain.replay_config import (
     ReplayOverride,
     ScoringPolicy,
@@ -33,7 +33,7 @@ class JobFilter(FrozenModel):
     """Job list filter."""
 
     experiment_run_id: uuid.UUID | None = None
-    original_session_id: uuid.UUID | None = None
+    input_session_id: uuid.UUID | None = None
     kind: JobKind | None = None
     status: JobStatus | None = None
     standalone: bool | None = None
@@ -48,7 +48,7 @@ class JobFilter(FrozenModel):
 class ReplayCreate(FrozenModel):
     """Replay create command."""
 
-    original_session_id: uuid.UUID
+    input_session_id: uuid.UUID
     agent_version_id: uuid.UUID | None = None
     override: ReplayOverride | None = None
     tool_policy: ToolPolicyConfig | None = None
@@ -65,11 +65,20 @@ class SessionRunCreate(FrozenModel):
     execution_target: ExecutionTarget | None = None
 
 
+class ImportCreate(FrozenModel):
+    """Import create command."""
+
+    importer: str
+    agent_id: uuid.UUID
+    version: int | None = None
+    payload_blob_id: uuid.UUID
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class JobUpdate(FrozenModel):
     """Job update command."""
 
-    status: JobStatus
+    status: JobStatus | None = None
     error: str | None = None
-    passed: bool | None = None
     score: float | None = None
-    scores: dict[str, float] | None = None
+    stats: ImportStats | None = None

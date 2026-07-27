@@ -53,6 +53,19 @@ class AgentVersionRepository(Protocol):
         """
         ...
 
+    async def get_many(
+        self, version_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, AgentVersion]:
+        """Load agent versions by id.
+
+        Args:
+            version_ids: Ids of the agent versions.
+
+        Returns:
+            Stored agent versions keyed by id, missing ids omitted.
+        """
+        ...
+
     async def query(
         self, version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], int]:

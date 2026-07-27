@@ -47,7 +47,7 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRunActive,
     ExperimentRunProgress,
 )
-from kitaru.server.domain.job import JobStatus, Replay
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, JobStatus, Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 
 
@@ -191,7 +191,8 @@ class ExperimentRunService:
     ) -> tuple[ExperimentRun, ExperimentRunProgress]:
         """Cancel an experiment run.
 
-        Pending and claimed jobs are canceled immediately, running ones
+        Pending, claimed, and scoring jobs are canceled immediately,
+        together with the score jobs of the scoring ones. Running jobs
         drain through the heartbeat path. The run lands on canceled right
         away when no running job remains.
 
@@ -212,9 +213,19 @@ class ExperimentRunService:
         run = await self._repository.update(run)
         jobs = await load_run_jobs(self._job_repository, run_id)
         for job in jobs:
-            if job.status in (JobStatus.PENDING, JobStatus.CLAIMED):
-                job.cancel()
-                await self._job_repository.update(job)
+            if job.status not in (
+                JobStatus.PENDING,
+                JobStatus.CLAIMED,
+                JobStatus.SCORING,
+            ):
+                continue
+            if job.status is JobStatus.SCORING:
+                for child in await self._job_repository.list_children(job.id):
+                    if child.status not in TERMINAL_JOB_STATUSES:
+                        child.cancel()
+                        await self._job_repository.update(child)
+            job.cancel()
+            await self._job_repository.update(job)
         await finalize_run_if_drained(
             self._repository,
             self._job_repository,

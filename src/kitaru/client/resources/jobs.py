@@ -21,7 +21,6 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.jobs import (
     JobClaimRequest,
     JobClaimResponse,
-    JobHeartbeatResponse,
     JobKind,
     JobResponse,
     JobSpecResponse,
@@ -51,7 +50,7 @@ class JobsResource:
     async def list(
         self,
         experiment_run_id: uuid.UUID | None = None,
-        original_session_id: uuid.UUID | None = None,
+        input_session_id: uuid.UUID | None = None,
         kind: JobKind | None = None,
         status: JobStatus | None = None,
         standalone: bool | None = None,
@@ -64,7 +63,7 @@ class JobsResource:
 
         Args:
             experiment_run_id: Filter on experiment run id.
-            original_session_id: Filter on the replayed session id.
+            input_session_id: Filter on the session the job reads.
             kind: Filter on job kind.
             status: Filter on job status.
             standalone: Filter on standalone jobs.
@@ -82,8 +81,8 @@ class JobsResource:
         params: dict[str, Any] = {"page": page, "page_size": page_size}
         if experiment_run_id is not None:
             params["experiment_run_id"] = str(experiment_run_id)
-        if original_session_id is not None:
-            params["original_session_id"] = str(original_session_id)
+        if input_session_id is not None:
+            params["input_session_id"] = str(input_session_id)
         if kind is not None:
             params["kind"] = kind.value
         if status is not None:
@@ -163,7 +162,7 @@ class JobsResource:
                 worker or scoped experiment run.
 
         Returns:
-            Claimed jobs.
+            Claimed jobs with their specs.
         """
         response = await self._client.request(
             "POST",
@@ -241,24 +240,6 @@ class JobsResource:
                 run or is claimed or running.
         """
         await self._client.request("DELETE", f"/v1/jobs/{job_id}")
-
-    async def heartbeat(self, job_id: uuid.UUID) -> JobHeartbeatResponse:
-        """Record a worker heartbeat on a job.
-
-        Terminal jobs report the stop flag instead of recording.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            APIError: The request failed, including 404 for a missing
-                job and 409 when the job is pending.
-
-        Returns:
-            Heartbeat response with the status and stop flag.
-        """
-        response = await self._client.request("POST", f"/v1/jobs/{job_id}/heartbeat")
-        return JobHeartbeatResponse.model_validate(response.json())
 
     async def tool_lookup(
         self, job_id: uuid.UUID, request: ToolLookupRequest

@@ -245,3 +245,16 @@ async def test_values_encrypted_at_rest() -> None:
         assert row is not None
         assert "hunter2" not in row.values_encrypted
         assert "password" not in row.values_encrypted
+
+
+async def test_get_many(setup: Setup) -> None:
+    """Load secrets by id and omit ids that do not resolve."""
+    repository, owner_id, _ = setup
+    first = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    second = await repository.create(
+        Secret(owner_id=owner_id, name="smtp", values=VALUES)
+    )
+    loaded = await repository.get_many([first.id, second.id, uuid.uuid4()])
+    assert set(loaded) == {first.id, second.id}
+    assert loaded[first.id].values == VALUES
+    assert await repository.get_many([]) == {}

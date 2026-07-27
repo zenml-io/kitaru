@@ -27,7 +27,11 @@ from kitaru.api_models.v1.base import (
     RequestModel,
     ResponseModel,
 )
+from kitaru.api_models.v1.plugins import PluginFormat
 from kitaru.api_models.v1.session_nodes import NodeType
+from kitaru.api_models.v1.sessions import SessionProvider
+
+MAX_IMPORT_FAILURES = 20
 
 SOURCE_REF_PATTERN = r"^[^:\s]+:[^:\s]+$"
 
@@ -37,6 +41,8 @@ class JobKind(StrEnum):
 
     REPLAY = "replay"
     SESSION_RUN = "session_run"
+    SCORE = "score"
+    IMPORT = "import"
 
 
 class JobStatus(StrEnum):
@@ -45,6 +51,7 @@ class JobStatus(StrEnum):
     PENDING = "pending"
     CLAIMED = "claimed"
     RUNNING = "running"
+    SCORING = "scoring"
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
@@ -92,9 +99,23 @@ class ReplayOverride(RequestModel):
     )
 
 
-class ScorerConfig(RequestModel):
-    """Scorer configuration."""
+class ScorerConfigBase(RequestModel):
+    """Scorer config union member base."""
 
+    def model_post_init(self, context: Any) -> None:
+        """Mark the type discriminator as set so exclude_unset dumps keep it.
+
+        Args:
+            context: Pydantic validation context.
+        """
+        _ = context
+        self.model_fields_set.add("type")
+
+
+class SourceScorerConfig(ScorerConfigBase):
+    """Source scorer configuration."""
+
+    type: Literal["source"] = "source"
     name: str = Field(description="Scorer name, unique within the policy.")
     source: str = Field(
         pattern=SOURCE_REF_PATTERN,
@@ -108,6 +129,31 @@ class ScorerConfig(RequestModel):
         default=None,
         description="Score at or below which the job fails outright.",
     )
+
+
+class RegistryScorerConfig(ScorerConfigBase):
+    """Registry scorer configuration."""
+
+    type: Literal["scorer"] = "scorer"
+    name: str = Field(description="Name of the registered scorer.")
+    version: int | None = Field(
+        default=None,
+        description="Registered version to run, the latest one when omitted.",
+    )
+    params: dict[str, JsonValue] = Field(
+        default_factory=dict, description="Keyword arguments for the function."
+    )
+    weight: FiniteFloat = Field(default=1.0, ge=0, description="Weight in the average.")
+    fail_below: FiniteFloat | None = Field(
+        default=None,
+        description="Score at or below which the job fails outright.",
+    )
+
+
+ScorerConfig = Annotated[
+    SourceScorerConfig | RegistryScorerConfig,
+    Field(discriminator="type"),
+]
 
 
 class ScoringPolicy(RequestModel):
@@ -202,7 +248,7 @@ class ToolPolicyConfig(RequestModel):
 class ReplayCreateRequest(RequestModel):
     """Replay create request."""
 
-    original_session_id: uuid.UUID = Field(description="Id of the session to replay.")
+    input_session_id: uuid.UUID = Field(description="Id of the session to replay.")
     agent_version_id: uuid.UUID | None = Field(
         default=None,
         description="Id of the agent version to execute, the latest runnable "
@@ -219,6 +265,33 @@ class ReplayCreateRequest(RequestModel):
     scoring_policy: ScoringPolicy = Field(description="Scoring policy.")
 
 
+class ImportFailure(RequestModel):
+    """Import failure."""
+
+    line: int = Field(
+        ge=0,
+        description="Payload line the failure occurred on, the stream "
+        "position for ingest failures.",
+    )
+    external_id: str | None = Field(
+        default=None, description="External id of the failed session."
+    )
+    error: str = Field(description="Error message.")
+
+
+class ImportStats(RequestModel):
+    """Import stats."""
+
+    created: int = Field(ge=0, description="Number of imported sessions.")
+    skipped: int = Field(ge=0, description="Number of already imported sessions.")
+    failed: int = Field(ge=0, description="Number of sessions that failed to parse.")
+    failures: list[ImportFailure] = Field(
+        default_factory=list,
+        max_length=MAX_IMPORT_FAILURES,
+        description="Sample of the recorded failures.",
+    )
+
+
 class JobResponse(ResponseModel):
     """Job response."""
 
@@ -227,19 +300,36 @@ class JobResponse(ResponseModel):
     experiment_run_id: uuid.UUID | None = Field(
         description="Id of the experiment run, null for standalone jobs."
     )
-    agent_version_id: uuid.UUID = Field(description="Id of the agent version.")
-    original_session_id: uuid.UUID | None = Field(
-        description="Id of the replayed session, null for session runs."
+    agent_version_id: uuid.UUID | None = Field(
+        description="Id of the agent version, null for registry score jobs."
+    )
+    agent_id: uuid.UUID | None = Field(
+        description="Id of the agent, null outside import jobs."
+    )
+    parent_job_id: uuid.UUID | None = Field(
+        description="Id of the job this job was fanned out from."
+    )
+    input_session_id: uuid.UUID | None = Field(
+        description="Id of the session the job reads, null for session runs."
     )
     result_session_id: uuid.UUID | None = Field(description="Id of the result session.")
+    scorer: ScorerConfig | None = Field(
+        description="Scorer configuration, null outside score jobs."
+    )
+    plugin_version_id: uuid.UUID | None = Field(
+        description="Id of the pinned plugin version."
+    )
+    payload_blob_id: uuid.UUID | None = Field(
+        description="Id of the payload blob, null outside import jobs."
+    )
     status: JobStatus = Field(description="Job status.")
     attempt: int = Field(description="Attempt counter.")
     worker_id: uuid.UUID | None = Field(description="Id of the claiming worker.")
-    execution_target: ExecutionTarget | None = Field(
-        description="Execution target, null for run-created jobs."
-    )
+    execution_target: ExecutionTarget = Field(description="Execution target.")
     executor_handle: str | None = Field(description="Executor handle.")
-    inputs: Any = Field(description="Session inputs, null for replay jobs.")
+    inputs: Any = Field(
+        description="Session inputs or importer params, null for replay jobs."
+    )
     name: str | None = Field(description="Session run name.")
     claimed_at: datetime | None = Field(description="Claim time.")
     heartbeat_at: datetime | None = Field(description="Last heartbeat time.")
@@ -247,12 +337,18 @@ class JobResponse(ResponseModel):
     ended_at: datetime | None = Field(description="Execution end time.")
     error: str | None = Field(description="Error message.")
     passed: bool | None = Field(description="Scoring outcome, null until scored.")
-    score: float | None = Field(description="Weighted average, null until scored.")
+    score: float | None = Field(
+        description="Weighted average of a replay or the value a score job "
+        "produced, null until scored."
+    )
     scores: dict[str, float] | None = Field(
         description="Scores by scorer name, null until scored."
     )
     diff: dict[str, Any] | None = Field(
         description="Diff summary, written at completion."
+    )
+    stats: ImportStats | None = Field(
+        description="Import results, null until the importer reports them."
     )
     override: ReplayOverride | None = Field(description="Execution override.")
     tool_policy: ToolPolicyConfig | None = Field(
@@ -268,18 +364,15 @@ class JobResponse(ResponseModel):
 class JobUpdateRequest(RequestModel):
     """Job update request."""
 
-    status: JobStatus = Field(description="Target status.")
+    status: JobStatus | None = Field(default=None, description="Target status.")
     error: str | None = Field(
         default=None, description="Error message, required for failed and timed out."
     )
-    passed: bool | None = Field(
-        default=None, description="Scoring outcome, required for completed."
-    )
     score: FiniteFloat | None = Field(
-        default=None, description="Weighted average, required for completed."
+        default=None, description="Value the scorer produced, score jobs only."
     )
-    scores: dict[str, FiniteFloat] | None = Field(
-        default=None, description="Scores by scorer name, required for completed."
+    stats: ImportStats | None = Field(
+        default=None, description="Results the importer produced, import jobs only."
     )
 
 
@@ -297,27 +390,16 @@ class JobClaimRequest(RequestModel):
         description="Id of the experiment run to claim for, pool-target work "
         "when omitted.",
     )
-
-
-class JobClaimResponse(ResponseModel):
-    """Job claim response."""
-
-    jobs: list[JobResponse] = Field(description="Claimed jobs.")
+    parent_job_id: uuid.UUID | None = Field(
+        default=None,
+        description="Id of the job whose fanned out jobs to claim for.",
+    )
 
 
 class StandaloneJobClaimRequest(RequestModel):
     """Standalone job claim request."""
 
     worker_id: uuid.UUID = Field(description="Id of the claiming worker.")
-
-
-class JobHeartbeatResponse(ResponseModel):
-    """Job heartbeat response."""
-
-    status: JobStatus = Field(description="Job status.")
-    canceled: bool = Field(
-        description="Whether the worker should stop working on the job."
-    )
 
 
 class JobSpecRun(ResponseModel):
@@ -327,6 +409,44 @@ class JobSpecRun(ResponseModel):
     working_dir: str | None = Field(description="Working directory for the command.")
     env: dict[str, str] = Field(description="Literal environment variables.")
     timeout_seconds: int = Field(description="Wall clock limit.")
+
+
+class JobSpecPlugin(ResponseModel):
+    """Job spec plugin code."""
+
+    format: PluginFormat = Field(description="Code format.")
+    entrypoint: str = Field(description="Attribute implementing the plugin.")
+    blob_id: uuid.UUID = Field(description="Id of the code blob.")
+    sha256: str = Field(description="Hash of the code blob content.")
+
+
+class JobSpecScorer(ResponseModel):
+    """Job spec scorer."""
+
+    config: ScorerConfig = Field(description="Scorer configuration.")
+    plugin: JobSpecPlugin | None = Field(
+        description="Registered code, null for source scorers."
+    )
+    input_session_id: uuid.UUID = Field(description="Id of the session to score.")
+
+
+class JobSpecPayload(ResponseModel):
+    """Job spec payload."""
+
+    blob_id: uuid.UUID = Field(description="Id of the payload blob.")
+    sha256: str = Field(description="Hash of the payload blob content.")
+
+
+class JobSpecImporter(ResponseModel):
+    """Job spec importer."""
+
+    plugin: JobSpecPlugin = Field(description="Registered code.")
+    payload: JobSpecPayload = Field(description="Payload to import.")
+    provider: SessionProvider = Field(description="Provider of the imported sessions.")
+    agent_id: uuid.UUID = Field(description="Id of the agent the sessions bind to.")
+    params: dict[str, JsonValue] = Field(
+        description="Keyword arguments for the importer."
+    )
 
 
 class JobSpecResponse(ResponseModel):
@@ -339,23 +459,37 @@ class JobSpecResponse(ResponseModel):
     )
     override: ReplayOverride | None = Field(description="Execution override.")
     tool_policy: ToolPolicyConfig | None = Field(
-        description="Tool policy, null for session runs."
+        description="Tool policy, null outside replays."
     )
-    scoring_policy: ScoringPolicy | None = Field(
-        description="Scoring policy, null for session runs."
+    scorer: JobSpecScorer | None = Field(
+        description="Scorer to run, null outside score jobs."
     )
-    score_baselines: bool | None = Field(
-        description="Whether the runner also scores originals missing scores, "
-        "null for session runs."
+    importer: JobSpecImporter | None = Field(
+        description="Importer to run, null outside import jobs."
     )
-    run: JobSpecRun = Field(description="Run command of the agent version.")
+    run: JobSpecRun | None = Field(
+        description="Run command of the agent version, null for registry score jobs."
+    )
     secret_env: dict[str, str] = Field(
         description="Resolved secret environment variables."
     )
-    original_session_id: uuid.UUID | None = Field(
-        description="Id of the replayed session, null for session runs."
+    input_session_id: uuid.UUID | None = Field(
+        description="Id of the session the job reads, null for session runs."
     )
     name: str | None = Field(description="Session run name.")
+
+
+class ClaimedJobResponse(ResponseModel):
+    """Claimed job."""
+
+    job: JobResponse = Field(description="Claimed job.")
+    spec: JobSpecResponse = Field(description="Spec the runner executes the job with.")
+
+
+class JobClaimResponse(ResponseModel):
+    """Job claim response."""
+
+    jobs: list[ClaimedJobResponse] = Field(description="Claimed jobs.")
 
 
 class ToolLookupRequest(RequestModel):

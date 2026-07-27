@@ -55,6 +55,17 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_many(self, session_ids: list[uuid.UUID]) -> dict[uuid.UUID, Session]:
+        """Load sessions by id.
+
+        Args:
+            session_ids: Ids of the sessions.
+
+        Returns:
+            Stored sessions keyed by id, missing ids omitted.
+        """
+        ...
+
     async def query(self, session_filter: SessionFilter) -> tuple[list[Session], int]:
         """Query sessions matching a filter.
 

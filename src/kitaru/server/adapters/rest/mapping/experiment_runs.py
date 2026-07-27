@@ -80,6 +80,7 @@ def progress_to_response(
         pending=progress.pending,
         claimed=progress.claimed,
         running=progress.running,
+        scoring=progress.scoring,
         completed=progress.completed,
         failed=progress.failed,
         timed_out=progress.timed_out,

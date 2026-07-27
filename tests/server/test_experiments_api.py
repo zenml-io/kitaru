@@ -22,13 +22,20 @@ import pytest
 from conftest import EXPERIMENT_APP_ACCOUNT_ID, experiment_app
 
 SCORING_POLICY = {
-    "scorers": [{"name": "conciseness", "source": "my_pkg.scorers:conciseness"}],
+    "scorers": [
+        {
+            "type": "source",
+            "name": "conciseness",
+            "source": "my_pkg.scorers:conciseness",
+        }
+    ],
     "pass_threshold": 0.5,
 }
 
 SCORING_POLICY_RESPONSE = {
     "scorers": [
         {
+            "type": "source",
             "name": "conciseness",
             "source": "my_pkg.scorers:conciseness",
             "params": {},
@@ -281,7 +288,13 @@ async def test_create_experiment_invalid_source(client: httpx.AsyncClient) -> No
             "name": "swap-model",
             "cohort_id": cohort_id,
             "scoring_policy": {
-                "scorers": [{"name": "conciseness", "source": "conciseness"}],
+                "scorers": [
+                    {
+                        "type": "source",
+                        "name": "conciseness",
+                        "source": "conciseness",
+                    }
+                ],
                 "pass_threshold": 0.5,
             },
         },
@@ -575,6 +588,7 @@ async def test_create_run_fans_out(client: httpx.AsyncClient) -> None:
         "pending": 3,
         "claimed": 0,
         "running": 0,
+        "scoring": 0,
         "completed": 0,
         "failed": 0,
         "timed_out": 0,

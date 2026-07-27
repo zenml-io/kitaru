@@ -521,3 +521,15 @@ async def test_delete_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
         await repository.delete(missing_id)
+
+
+async def test_get_many(setup: Setup) -> None:
+    """Load sessions by id and omit ids that do not resolve."""
+    repository, agents, _, _, owner_id = setup
+    agent = await create_agent(agents, owner_id)
+    first = await repository.create(recorded_session(owner_id, agent.id))
+    second = await repository.create(recorded_session(owner_id, agent.id))
+    loaded = await repository.get_many([first.id, second.id, uuid.uuid4()])
+    assert set(loaded) == {first.id, second.id}
+    assert loaded[first.id] == first
+    assert await repository.get_many([]) == {}

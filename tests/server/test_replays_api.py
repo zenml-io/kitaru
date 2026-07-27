@@ -51,7 +51,7 @@ async def create_replay(
         Created job body.
     """
     body: dict[str, object] = {
-        "original_session_id": session_id,
+        "input_session_id": session_id,
         "scoring_policy": SCORING_POLICY,
         **overrides,
     }
@@ -67,12 +67,12 @@ async def test_create_replay_defaults(client: httpx.AsyncClient) -> None:
     session_id = await create_completed_session(client, agent_id)
     response = await client.post(
         "/v1/replays",
-        json={"original_session_id": session_id, "scoring_policy": SCORING_POLICY},
+        json={"input_session_id": session_id, "scoring_policy": SCORING_POLICY},
     )
     assert response.status_code == 201
     body = response.json()
     assert body["experiment_run_id"] is None
-    assert body["original_session_id"] == session_id
+    assert body["input_session_id"] == session_id
     assert body["result_session_id"] is None
     assert body["agent_version_id"] == version_id
     assert body["status"] == "pending"
@@ -112,7 +112,7 @@ async def test_create_replay_rejects_cohort_scope(client: httpx.AsyncClient) -> 
     response = await client.post(
         "/v1/replays",
         json={
-            "original_session_id": session_id,
+            "input_session_id": session_id,
             "scoring_policy": SCORING_POLICY,
             "tool_policy": {
                 "default": {"type": "history", "scope": "cohort"},
@@ -137,7 +137,7 @@ async def test_create_replay_in_progress_session(client: httpx.AsyncClient) -> N
     session_id = response.json()["id"]
     response = await client.post(
         "/v1/replays",
-        json={"original_session_id": session_id, "scoring_policy": SCORING_POLICY},
+        json={"input_session_id": session_id, "scoring_policy": SCORING_POLICY},
     )
     assert response.status_code == 422
     assert response.json() == {"detail": f"Session {session_id} is in progress"}
@@ -149,7 +149,7 @@ async def test_create_replay_unknown_session(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/v1/replays",
         json={
-            "original_session_id": str(missing_id),
+            "input_session_id": str(missing_id),
             "scoring_policy": SCORING_POLICY,
         },
     )
@@ -163,7 +163,7 @@ async def test_create_replay_no_runnable_version(client: httpx.AsyncClient) -> N
     session_id = await create_completed_session(client, agent_id)
     response = await client.post(
         "/v1/replays",
-        json={"original_session_id": session_id, "scoring_policy": SCORING_POLICY},
+        json={"input_session_id": session_id, "scoring_policy": SCORING_POLICY},
     )
     assert response.status_code == 409
     assert response.json() == {"detail": f"Agent {agent_id} has no runnable version"}
@@ -178,7 +178,7 @@ async def test_create_replay_cross_agent_version(client: httpx.AsyncClient) -> N
     response = await client.post(
         "/v1/replays",
         json={
-            "original_session_id": session_id,
+            "input_session_id": session_id,
             "agent_version_id": other_version_id,
             "scoring_policy": SCORING_POLICY,
         },
@@ -195,7 +195,5 @@ async def test_create_replay_missing_scoring_policy(client: httpx.AsyncClient) -
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
-    response = await client.post(
-        "/v1/replays", json={"original_session_id": session_id}
-    )
+    response = await client.post("/v1/replays", json={"input_session_id": session_id})
     assert response.status_code == 422

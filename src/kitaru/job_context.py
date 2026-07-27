@@ -32,7 +32,7 @@ def job_id() -> str | None:
 def job_inputs() -> Any:
     """Return the inputs of the job this process executes.
 
-    Reads ``KITARU_INPUTS`` when the runner set it and fetches the job
+    Reads ``KITARU_JOB_INPUTS`` when the runner set it and fetches the job
     spec from the server otherwise.
 
     Raises:
@@ -46,7 +46,7 @@ def job_inputs() -> Any:
     current_job_id = os.environ.get("KITARU_JOB_ID")
     if current_job_id is None:
         return None
-    encoded = os.environ.get("KITARU_INPUTS")
+    encoded = os.environ.get("KITARU_JOB_INPUTS")
     if encoded is not None:
         return json.loads(encoded)
     api_url = os.environ.get("KITARU_API_URL")

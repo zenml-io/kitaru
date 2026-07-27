@@ -20,10 +20,12 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeBlobRepository,
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
     FakeJobRepository,
+    FakePluginRepository,
     FakeReplayConfigRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -57,9 +59,9 @@ from kitaru.server.domain.experiment_run import (
 from kitaru.server.domain.job import JobStatus
 from kitaru.server.domain.replay_config import (
     ReplayConfigNotFound,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
 )
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
 from kitaru.server.domain.tag import Tag, TagLink, TagResourceType
@@ -70,7 +72,7 @@ WORKER_ID = uuid.uuid4()
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
-        ScorerConfig(
+        SourceScorerConfig(
             name="conciseness",
             source=SourceRef(module="my_pkg.scorers", attribute="conciseness"),
         )
@@ -186,6 +188,12 @@ def worker_repository() -> FakeWorkerRepository:
 
 
 @pytest.fixture
+def plugin_repository() -> FakePluginRepository:
+    """Provide a fake plugin repository."""
+    return FakePluginRepository(FakeBlobRepository())
+
+
+@pytest.fixture
 def experiment_service(
     experiment_repository: FakeExperimentRepository,
     repository: FakeExperimentRunRepository,
@@ -193,6 +201,7 @@ def experiment_service(
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
 ) -> ExperimentService:
     """Provide an experiment service backed by the fake repositories."""
     return ExperimentService(
@@ -202,6 +211,7 @@ def experiment_service(
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
         worker_liveness_timeout_seconds=60,
     )
 

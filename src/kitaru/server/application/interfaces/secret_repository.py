@@ -51,6 +51,17 @@ class SecretRepository(Protocol):
         """
         ...
 
+    async def get_many(self, secret_ids: list[uuid.UUID]) -> dict[uuid.UUID, Secret]:
+        """Load secrets by id.
+
+        Args:
+            secret_ids: Ids of the secrets.
+
+        Returns:
+            Stored secrets keyed by id, missing ids omitted.
+        """
+        ...
+
     async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
         """Query secrets matching a filter.
 

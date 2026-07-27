@@ -111,8 +111,9 @@ async def test_claim_and_cancel_round_trip(api_client: KitaruAPIClient) -> None:
         JobClaimRequest(worker_id=worker.id, max_jobs=5, experiment_run_id=created.id)
     )
     assert len(claimed.jobs) == 1
-    assert claimed.jobs[0].status is JobStatus.CLAIMED
-    assert claimed.jobs[0].worker_id == worker.id
+    assert claimed.jobs[0].job.status is JobStatus.CLAIMED
+    assert claimed.jobs[0].job.worker_id == worker.id
+    assert claimed.jobs[0].spec.job_id == claimed.jobs[0].job.id
 
     canceled = await api_client.experiment_runs.cancel(created.id)
     assert canceled.status is ExperimentRunStatus.CANCELED

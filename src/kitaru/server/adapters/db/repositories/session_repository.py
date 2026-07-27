@@ -27,7 +27,7 @@ from kitaru.server.adapters.db.schemas.cohort import (
     COHORT_SESSION_SESSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.schemas.job import (
-    JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY,
+    JOB_INPUT_SESSION_ID_FOREIGN_KEY,
     JOB_RESULT_SESSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.schemas.session import (
@@ -130,6 +130,21 @@ class SQLSessionRepository:
         if row is None:
             raise SessionNotFound(session_id)
         return row.to_domain()
+
+    async def get_many(self, session_ids: list[uuid.UUID]) -> dict[uuid.UUID, Session]:
+        """Load sessions by id.
+
+        Args:
+            session_ids: Ids of the sessions.
+
+        Returns:
+            Stored sessions keyed by id, missing ids omitted.
+        """
+        if not session_ids:
+            return {}
+        statement = select(SessionSchema).where(col(SessionSchema.id).in_(session_ids))
+        rows = (await self._session.scalars(statement)).all()
+        return {row.id: row.to_domain() for row in rows}
 
     def _apply_filter(
         self,
@@ -323,7 +338,7 @@ class SQLSessionRepository:
             if constraint == COHORT_SESSION_SESSION_ID_FOREIGN_KEY:
                 raise SessionInUse(session_id, "cohorts") from exc
             if constraint in (
-                JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY,
+                JOB_INPUT_SESSION_ID_FOREIGN_KEY,
                 JOB_RESULT_SESSION_ID_FOREIGN_KEY,
             ):
                 raise SessionInUse(session_id, "jobs") from exc

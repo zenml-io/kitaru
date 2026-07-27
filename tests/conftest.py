@@ -33,14 +33,18 @@ from sqlalchemy.ext.asyncio import (
 from sqlmodel import SQLModel
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.server.adapters.db.blob_storage import DatabaseBlobStorage
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
     get_agent_version_service,
+    get_blob_service,
     get_cohort_service,
     get_experiment_run_service,
     get_experiment_service,
+    get_importer_service,
     get_job_service,
+    get_scorer_service,
     get_session_node_service,
     get_session_service,
     get_tag_service,
@@ -60,6 +64,10 @@ from kitaru.server.application.models.cohorts import (
 from kitaru.server.application.models.experiment_runs import ExperimentRunFilter
 from kitaru.server.application.models.experiments import ExperimentFilter
 from kitaru.server.application.models.jobs import JobFilter
+from kitaru.server.application.models.plugins import (
+    PluginFilter,
+    PluginVersionFilter,
+)
 from kitaru.server.application.models.secrets import SecretFilter
 from kitaru.server.application.models.sessions import SessionFilter
 from kitaru.server.application.models.tags import TagFilter
@@ -68,6 +76,7 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -76,6 +85,7 @@ from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
 from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -108,6 +118,11 @@ from kitaru.server.domain.api_key import (
     generate_secret,
     hash_secret,
 )
+from kitaru.server.domain.blob import (
+    Blob,
+    BlobNotFound,
+    DuplicateBlobContent,
+)
 from kitaru.server.domain.cohort import (
     Cohort,
     CohortInUse,
@@ -127,10 +142,22 @@ from kitaru.server.domain.experiment_run import (
 )
 from kitaru.server.domain.job import (
     DuplicateReplaySession,
+    DuplicateScoreJob,
+    Import,
     Job,
     JobNotFound,
     JobStatus,
     Replay,
+    Score,
+)
+from kitaru.server.domain.plugin import (
+    DuplicatePluginName,
+    Plugin,
+    PluginKind,
+    PluginNotFound,
+    PluginVersion,
+    PluginVersionIdNotFound,
+    PluginVersionNotFound,
 )
 from kitaru.server.domain.replay_config import (
     ReplayConfig,
@@ -653,6 +680,21 @@ class FakeSecretRepository:
         if secret is None:
             raise SecretNotFound(secret_id)
         return secret.model_copy()
+
+    async def get_many(self, secret_ids: list[uuid.UUID]) -> dict[uuid.UUID, Secret]:
+        """Load secrets by id.
+
+        Args:
+            secret_ids: Ids of the secrets.
+
+        Returns:
+            Stored secrets keyed by id, missing ids omitted.
+        """
+        return {
+            secret_id: self._secrets[secret_id].model_copy()
+            for secret_id in secret_ids
+            if secret_id in self._secrets
+        }
 
     async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
         """Query secrets matching a filter.
@@ -1341,6 +1383,23 @@ class FakeAgentVersionRepository:
             raise AgentVersionNotFound(version_id)
         return version.model_copy()
 
+    async def get_many(
+        self, version_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, AgentVersion]:
+        """Load agent versions by id.
+
+        Args:
+            version_ids: Ids of the agent versions.
+
+        Returns:
+            Stored agent versions keyed by id, missing ids omitted.
+        """
+        return {
+            version_id: self._versions[version_id].model_copy()
+            for version_id in version_ids
+            if version_id in self._versions
+        }
+
     async def query(
         self, version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], int]:
@@ -1548,6 +1607,21 @@ class FakeSessionRepository:
         if session is None:
             raise SessionNotFound(session_id)
         return session.model_copy()
+
+    async def get_many(self, session_ids: list[uuid.UUID]) -> dict[uuid.UUID, Session]:
+        """Load sessions by id.
+
+        Args:
+            session_ids: Ids of the sessions.
+
+        Returns:
+            Stored sessions keyed by id, missing ids omitted.
+        """
+        return {
+            session_id: self._sessions[session_id].model_copy()
+            for session_id in session_ids
+            if session_id in self._sessions
+        }
 
     def _matches(self, session: Session, session_filter: SessionFilter) -> bool:
         if (
@@ -2060,6 +2134,317 @@ class FakeCohortRepository:
             )
 
 
+class FakeBlobRepository:
+    """In-memory blob repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._blobs: dict[uuid.UUID, Blob] = {}
+
+    def _find_by_sha256(self, sha256: str) -> Blob | None:
+        for blob in self._blobs.values():
+            if blob.sha256 == sha256:
+                return blob
+        return None
+
+    async def create(self, blob: Blob) -> Blob:
+        """Persist a new blob.
+
+        Args:
+            blob: Blob to store.
+
+        Raises:
+            DuplicateBlobContent: The content hash is already stored.
+
+        Returns:
+            Stored blob with timestamps set.
+        """
+        if self._find_by_sha256(blob.sha256) is not None:
+            raise DuplicateBlobContent(blob.sha256)
+        stored = blob.model_copy(update={"created": datetime.now(UTC)})
+        self._blobs[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, blob_id: uuid.UUID) -> Blob:
+        """Load a blob by id.
+
+        Args:
+            blob_id: Id of the blob.
+
+        Raises:
+            BlobNotFound: No blob has this id.
+
+        Returns:
+            Stored blob.
+        """
+        blob = self._blobs.get(blob_id)
+        if blob is None:
+            raise BlobNotFound(blob_id)
+        return blob.model_copy()
+
+    async def get_hashes(self, blob_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """Load blob content hashes by id, without reading the content.
+
+        Args:
+            blob_ids: Ids of the blobs.
+
+        Returns:
+            Content hashes keyed by blob id, missing ids omitted.
+        """
+        return {
+            blob_id: self._blobs[blob_id].sha256
+            for blob_id in blob_ids
+            if blob_id in self._blobs
+        }
+
+    async def get_by_sha256(self, sha256: str) -> Blob | None:
+        """Load a blob by content hash.
+
+        Args:
+            sha256: Hash of the content.
+
+        Returns:
+            Stored blob, ``None`` when the content is not stored.
+        """
+        blob = self._find_by_sha256(sha256)
+        if blob is None:
+            return None
+        return blob.model_copy()
+
+
+class FakePluginRepository:
+    """In-memory plugin repository."""
+
+    def __init__(self, blob_repository: FakeBlobRepository | None = None) -> None:
+        """Initialize the repository and wire the reference checks.
+
+        Args:
+            blob_repository: Fake blob repository backing the blob ids.
+        """
+        self._plugins: dict[uuid.UUID, Plugin] = {}
+        self._versions: dict[uuid.UUID, PluginVersion] = {}
+        self._blob_repository = blob_repository
+
+    def _check_duplicate_name(self, plugin: Plugin) -> None:
+        for other in self._plugins.values():
+            if (
+                other.id != plugin.id
+                and other.kind is plugin.kind
+                and other.name == plugin.name
+            ):
+                raise DuplicatePluginName(plugin.name)
+
+    async def create(self, plugin: Plugin) -> Plugin:
+        """Persist a new plugin.
+
+        Args:
+            plugin: Plugin to store.
+
+        Raises:
+            DuplicatePluginName: The plugin name is already registered for
+                the kind.
+
+        Returns:
+            Stored plugin with timestamps set.
+        """
+        self._check_duplicate_name(plugin)
+        now = datetime.now(UTC)
+        stored = plugin.model_copy(update={"created": now, "updated": now})
+        self._plugins[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, plugin_id: uuid.UUID) -> Plugin:
+        """Load a plugin by id.
+
+        Args:
+            plugin_id: Id of the plugin.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+
+        Returns:
+            Stored plugin.
+        """
+        plugin = self._plugins.get(plugin_id)
+        if plugin is None:
+            raise PluginNotFound(plugin_id)
+        return plugin.model_copy()
+
+    async def get_many(self, plugin_ids: list[uuid.UUID]) -> dict[uuid.UUID, Plugin]:
+        """Load plugins by id.
+
+        Args:
+            plugin_ids: Ids of the plugins.
+
+        Returns:
+            Stored plugins keyed by id, missing ids omitted.
+        """
+        return {
+            plugin_id: self._plugins[plugin_id].model_copy()
+            for plugin_id in plugin_ids
+            if plugin_id in self._plugins
+        }
+
+    async def query(self, plugin_filter: PluginFilter) -> tuple[list[Plugin], int]:
+        """Query plugins matching a filter.
+
+        Args:
+            plugin_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching plugins and the total match count.
+        """
+        plugins = sorted(self._plugins.values(), key=lambda plugin: plugin.id.int)
+        plugins = [plugin for plugin in plugins if plugin.kind is plugin_filter.kind]
+        if plugin_filter.name is not None:
+            plugins = [
+                plugin for plugin in plugins if plugin.name == plugin_filter.name
+            ]
+        if plugin_filter.provider is not None:
+            plugins = [
+                plugin
+                for plugin in plugins
+                if plugin.provider == plugin_filter.provider
+            ]
+        if plugin_filter.owner_id is not None:
+            plugins = [
+                plugin
+                for plugin in plugins
+                if plugin.owner_id == plugin_filter.owner_id
+            ]
+        total = len(plugins)
+        start = (plugin_filter.page - 1) * plugin_filter.page_size
+        page = plugins[start : start + plugin_filter.page_size]
+        return [plugin.model_copy() for plugin in page], total
+
+    async def delete(self, plugin_id: uuid.UUID) -> None:
+        """Delete a plugin by id, including its versions.
+
+        Args:
+            plugin_id: Id of the plugin.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+        """
+        if plugin_id not in self._plugins:
+            raise PluginNotFound(plugin_id)
+        del self._plugins[plugin_id]
+        for version_id in [
+            version.id
+            for version in self._versions.values()
+            if version.plugin_id == plugin_id
+        ]:
+            del self._versions[version_id]
+
+    async def create_version(self, version: PluginVersion) -> PluginVersion:
+        """Persist a new plugin version under the next version number.
+
+        Args:
+            version: Plugin version to store.
+
+        Raises:
+            PluginNotFound: No plugin has the version's plugin id.
+            BlobNotFound: No blob has the version's blob id.
+
+        Returns:
+            Stored plugin version with the version number and timestamp
+            set.
+        """
+        plugin = self._plugins.get(version.plugin_id)
+        if plugin is None:
+            raise PluginNotFound(version.plugin_id)
+        if self._blob_repository is not None:
+            await self._blob_repository.get(version.blob_id)
+        allocated = plugin.latest_version + 1
+        self._plugins[plugin.id] = plugin.model_copy(
+            update={
+                "latest_version": allocated,
+                "updated": _renewed_timestamp(plugin.updated),
+            }
+        )
+        stored = version.model_copy(
+            update={"version": allocated, "created": datetime.now(UTC)}
+        )
+        self._versions[stored.id] = stored
+        return stored.model_copy()
+
+    async def get_version(self, plugin_id: uuid.UUID, version: int) -> PluginVersion:
+        """Load a plugin version by version number.
+
+        Args:
+            plugin_id: Id of the plugin.
+            version: Version number.
+
+        Raises:
+            PluginVersionNotFound: The plugin has no such version.
+
+        Returns:
+            Stored plugin version.
+        """
+        for stored in self._versions.values():
+            if stored.plugin_id == plugin_id and stored.version == version:
+                return stored.model_copy()
+        raise PluginVersionNotFound(plugin_id, version)
+
+    async def get_version_by_id(self, version_id: uuid.UUID) -> PluginVersion:
+        """Load a plugin version by id.
+
+        Args:
+            version_id: Id of the plugin version.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has this id.
+
+        Returns:
+            Stored plugin version.
+        """
+        stored = self._versions.get(version_id)
+        if stored is None:
+            raise PluginVersionIdNotFound(version_id)
+        return stored.model_copy()
+
+    async def get_versions_by_ids(
+        self, version_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, PluginVersion]:
+        """Load plugin versions by id.
+
+        Args:
+            version_ids: Ids of the plugin versions.
+
+        Returns:
+            Stored plugin versions keyed by id, missing ids omitted.
+        """
+        return {
+            version_id: self._versions[version_id].model_copy()
+            for version_id in version_ids
+            if version_id in self._versions
+        }
+
+    async def query_versions(
+        self, version_filter: PluginVersionFilter
+    ) -> tuple[list[PluginVersion], int]:
+        """Query plugin versions matching a filter.
+
+        Args:
+            version_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching plugin versions and the total match count.
+        """
+        versions = sorted(
+            (
+                version
+                for version in self._versions.values()
+                if version.plugin_id == version_filter.plugin_id
+            ),
+            key=lambda version: version.version,
+        )
+        total = len(versions)
+        start = (version_filter.page - 1) * version_filter.page_size
+        page = versions[start : start + version_filter.page_size]
+        return [version.model_copy() for version in page], total
+
+
 class FakeReplayConfigRepository:
     """In-memory replay config repository."""
 
@@ -2337,6 +2722,8 @@ class FakeJobRepository:
         session_repository: FakeSessionRepository,
         agent_version_repository: FakeAgentVersionRepository,
         replay_config_repository: FakeReplayConfigRepository,
+        plugin_repository: "FakePluginRepository | None" = None,
+        blob_repository: FakeBlobRepository | None = None,
     ) -> None:
         """Initialize the repository and wire the reference checks.
 
@@ -2347,11 +2734,17 @@ class FakeJobRepository:
                 the agent version ids.
             replay_config_repository: Fake replay config repository backing
                 the config ids.
+            plugin_repository: Fake plugin repository backing the plugin
+                version ids.
+            blob_repository: Fake blob repository backing the payload blob
+                ids.
         """
         self._jobs: dict[uuid.UUID, Job] = {}
         self._session_repository = session_repository
         self.agent_version_repository = agent_version_repository
         self._replay_config_repository = replay_config_repository
+        self._plugin_repository = plugin_repository
+        self._blob_repository = blob_repository
         self.run_repository: FakeExperimentRunRepository | None = None
         session_repository.job_repository = self
         agent_version_repository.job_repository = self
@@ -2368,7 +2761,7 @@ class FakeJobRepository:
         """
         return any(
             job.result_session_id == session_id
-            or (isinstance(job, Replay) and job.original_session_id == session_id)
+            or (isinstance(job, Replay | Score) and job.input_session_id == session_id)
             for job in self._jobs.values()
         )
 
@@ -2406,10 +2799,27 @@ class FakeJobRepository:
                 other.id != job.id
                 and isinstance(other, Replay)
                 and other.experiment_run_id == job.experiment_run_id
-                and other.original_session_id == job.original_session_id
+                and other.input_session_id == job.input_session_id
             ):
                 raise DuplicateReplaySession(
-                    job.experiment_run_id, job.original_session_id
+                    job.experiment_run_id, job.input_session_id
+                )
+
+    def _check_duplicate_scorer(self, job: Job) -> None:
+        if not isinstance(job, Score) or job.parent_job_id is None:
+            return
+        for other in self._jobs.values():
+            if (
+                other.id != job.id
+                and isinstance(other, Score)
+                and other.parent_job_id == job.parent_job_id
+                and other.input_session_id == job.input_session_id
+                and other.scorer_config.name == job.scorer_config.name
+            ):
+                raise DuplicateScoreJob(
+                    job.parent_job_id,
+                    job.input_session_id,
+                    job.scorer_config.name,
                 )
 
     async def create(self, job: Job) -> Job:
@@ -2433,23 +2843,90 @@ class FakeJobRepository:
         Returns:
             Stored job with timestamps set.
         """
-        if isinstance(job, Replay):
-            if job.experiment_run_id is not None and self.run_repository is not None:
-                await self.run_repository.get(job.experiment_run_id)
-            await self._replay_config_repository.get(job.replay_config_id)
-            await self._session_repository.get(job.original_session_id)
-        await self.agent_version_repository.get(job.agent_version_id)
-        self._check_duplicate_session(job)
+        await self._check_references(job)
         now = datetime.now(UTC)
         stored = job.model_copy(update={"created": now, "updated": now})
         self._jobs[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, job_id: uuid.UUID) -> Job:
+    async def _check_references(self, job: Job) -> None:
+        """Check the referenced rows and uniqueness of a job.
+
+        Args:
+            job: Job to store.
+
+        Raises:
+            ExperimentRunNotFound: No experiment run has the job's
+                experiment run id.
+            ReplayConfigNotFound: No replay config has the job's job
+                config id.
+            AgentVersionNotFound: No agent version has the job's agent
+                version id.
+            PluginVersionIdNotFound: No plugin version has the job's
+                plugin version id.
+            BlobNotFound: No blob has the job's payload blob id.
+            SessionNotFound: No session has the job's input session id.
+        """
+        if isinstance(job, Import):
+            if self._plugin_repository is not None:
+                await self._plugin_repository.get_version_by_id(job.plugin_version_id)
+            if self._blob_repository is not None:
+                await self._blob_repository.get(job.payload_blob_id)
+        if isinstance(job, Replay):
+            if job.experiment_run_id is not None and self.run_repository is not None:
+                await self.run_repository.get(job.experiment_run_id)
+            await self._replay_config_repository.get(job.replay_config_id)
+            await self._session_repository.get(job.input_session_id)
+        if isinstance(job, Score):
+            await self._session_repository.get(job.input_session_id)
+            if (
+                job.plugin_version_id is not None
+                and self._plugin_repository is not None
+            ):
+                await self._plugin_repository.get_version_by_id(job.plugin_version_id)
+        if job.agent_version_id is not None:
+            await self.agent_version_repository.get(job.agent_version_id)
+        self._check_duplicate_session(job)
+        self._check_duplicate_scorer(job)
+
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist new jobs as one batch.
+
+        Args:
+            jobs: Jobs to store.
+
+        Raises:
+            DuplicateScoreJob: A parent job already scores an input
+                session with a scorer.
+            AgentVersionNotFound: No agent version has a job's agent
+                version id.
+            PluginVersionIdNotFound: No plugin version has a job's plugin
+                version id.
+            SessionNotFound: No session has a job's input session id.
+
+        Returns:
+            Stored jobs with timestamps set.
+        """
+        stored: list[Job] = []
+        snapshot = dict(self._jobs)
+        try:
+            for job in jobs:
+                await self._check_references(job)
+                now = datetime.now(UTC)
+                row = job.model_copy(update={"created": now, "updated": now})
+                self._jobs[row.id] = row
+                stored.append(row.model_copy())
+        except Exception:
+            self._jobs = snapshot
+            raise
+        return stored
+
+    async def get(self, job_id: uuid.UUID, for_update: bool = False) -> Job:
         """Load a job by id.
 
         Args:
             job_id: Id of the job.
+            for_update: Lock the row for the transaction.
 
         Raises:
             JobNotFound: No job has this id.
@@ -2457,6 +2934,7 @@ class FakeJobRepository:
         Returns:
             Stored job.
         """
+        _ = for_update
         job = self._jobs.get(job_id)
         if job is None:
             raise JobNotFound(job_id)
@@ -2499,12 +2977,12 @@ class FakeJobRepository:
                 if isinstance(job, Replay)
                 and job.experiment_run_id == job_filter.experiment_run_id
             ]
-        if job_filter.original_session_id is not None:
+        if job_filter.input_session_id is not None:
             jobs = [
                 job
                 for job in jobs
-                if isinstance(job, Replay)
-                and job.original_session_id == job_filter.original_session_id
+                if isinstance(job, Replay | Score)
+                and job.input_session_id == job_filter.input_session_id
             ]
         if job_filter.kind is not None:
             jobs = [job for job in jobs if job.kind == job_filter.kind]
@@ -2548,6 +3026,7 @@ class FakeJobRepository:
         if job.result_session_id is not None:
             await self._session_repository.get(job.result_session_id)
         self._check_duplicate_session(job)
+        self._check_duplicate_scorer(job)
         now = _renewed_timestamp(stored.updated)
         updated = job.model_copy(update={"created": stored.created, "updated": now})
         self._jobs[job.id] = updated
@@ -2565,12 +3044,52 @@ class FakeJobRepository:
         if job_id not in self._jobs:
             raise JobNotFound(job_id)
         del self._jobs[job_id]
+        self._delete_children(job_id)
+
+    def _delete_children(self, parent_job_id: uuid.UUID) -> None:
+        """Remove every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+        """
+        for job_id in [
+            job.id
+            for job in self._jobs.values()
+            if isinstance(job, Score) and job.parent_job_id == parent_job_id
+        ]:
+            del self._jobs[job_id]
+
+    async def list_children(self, parent_job_id: uuid.UUID) -> list[Job]:
+        """Load every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+
+        Returns:
+            Child jobs in id order.
+        """
+        children = [
+            job
+            for job in self._jobs.values()
+            if isinstance(job, Score) and job.parent_job_id == parent_job_id
+        ]
+        children.sort(key=lambda job: job.id.int)
+        return [job.model_copy() for job in children]
+
+    async def delete_children(self, parent_job_id: uuid.UUID) -> None:
+        """Delete every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+        """
+        self._delete_children(parent_job_id)
 
     def _in_scope(
         self,
         job: Job,
         agent_ids: Sequence[uuid.UUID] | None,
         experiment_run_id: uuid.UUID | None,
+        parent_job_id: uuid.UUID | None,
     ) -> bool:
         """Report whether a job is within the claim scope.
 
@@ -2578,30 +3097,44 @@ class FakeJobRepository:
             job: Stored job.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
 
         Returns:
             ``True`` when the job is in scope.
         """
-        if experiment_run_id is not None:
-            if not (
-                isinstance(job, Replay) and job.experiment_run_id == experiment_run_id
-            ):
+        if parent_job_id is not None:
+            if not (isinstance(job, Score) and job.parent_job_id == parent_job_id):
+                return False
+        elif experiment_run_id is not None:
+            if not self._belongs_to_run(job, experiment_run_id):
                 return False
         elif job.execution_target is not ExecutionTarget.POOL:
-            if not (
-                isinstance(job, Replay)
-                and job.experiment_run_id is not None
-                and self.run_repository is not None
-            ):
-                return False
-            target = self.run_repository.execution_target_of(job.experiment_run_id)
-            if target is not ExecutionTarget.POOL:
-                return False
-        if agent_ids is not None:
+            return False
+        if agent_ids is not None and job.agent_version_id is not None:
             agent_id = self.agent_version_repository.agent_id_of(job.agent_version_id)
             if agent_id not in agent_ids:
                 return False
         return True
+
+    def _belongs_to_run(self, job: Job, experiment_run_id: uuid.UUID) -> bool:
+        """Report whether a job or its parent belongs to an experiment run.
+
+        Args:
+            job: Stored job.
+            experiment_run_id: Id of the experiment run.
+
+        Returns:
+            ``True`` when the job is part of the run.
+        """
+        if isinstance(job, Replay):
+            return job.experiment_run_id == experiment_run_id
+        if isinstance(job, Score) and job.parent_job_id is not None:
+            parent = self._jobs.get(job.parent_job_id)
+            return (
+                isinstance(parent, Replay)
+                and parent.experiment_run_id == experiment_run_id
+            )
+        return False
 
     async def requeue_stale(
         self,
@@ -2609,7 +3142,8 @@ class FakeJobRepository:
         max_attempts: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
-    ) -> None:
+        parent_job_id: uuid.UUID | None = None,
+    ) -> list[Job]:
         """Requeue or time out jobs with lost heartbeats within a scope.
 
         Args:
@@ -2617,16 +3151,24 @@ class FakeJobRepository:
             max_attempts: Attempt count at which a stale job times out.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
+
+        Returns:
+            Jobs the staleness rule moved.
         """
+        resolved: list[Job] = []
         for job_id, job in list(self._jobs.items()):
-            if not self._in_scope(job, agent_ids, experiment_run_id):
+            if not self._in_scope(job, agent_ids, experiment_run_id, parent_job_id):
                 continue
             changed = job.with_staleness(stale_before, max_attempts)
             if changed is job:
                 continue
-            self._jobs[job_id] = changed.model_copy(
+            stored = changed.model_copy(
                 update={"updated": _renewed_timestamp(job.updated)}
             )
+            self._jobs[job_id] = stored
+            resolved.append(stored.model_copy())
+        return resolved
 
     async def claim_pending(
         self,
@@ -2634,6 +3176,7 @@ class FakeJobRepository:
         limit: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
+        parent_job_id: uuid.UUID | None = None,
     ) -> list[Job]:
         """Atomically claim pending jobs within a scope for a worker.
 
@@ -2642,6 +3185,7 @@ class FakeJobRepository:
             limit: Maximum number of jobs to claim.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
 
         Returns:
             Claimed jobs.
@@ -2651,7 +3195,7 @@ class FakeJobRepository:
                 job
                 for job in self._jobs.values()
                 if job.status is JobStatus.PENDING
-                and self._in_scope(job, agent_ids, experiment_run_id)
+                and self._in_scope(job, agent_ids, experiment_run_id, parent_job_id)
             ),
             key=lambda job: job.id.int,
         )
@@ -2665,6 +3209,39 @@ class FakeJobRepository:
             self._jobs[job.id] = stored
             claimed.append(stored.model_copy())
         return claimed
+
+    async def heartbeat_many(
+        self,
+        worker_id: uuid.UUID,
+        job_ids: Sequence[uuid.UUID],
+        heartbeat_at: datetime,
+    ) -> list[Job]:
+        """Record one worker heartbeat on every claimed or running job it owns.
+
+        Args:
+            worker_id: Id of the heartbeating worker.
+            job_ids: Ids of the jobs the worker reports.
+            heartbeat_at: Time of the heartbeat.
+
+        Returns:
+            Jobs the heartbeat reached.
+        """
+        reached: list[Job] = []
+        for job_id in job_ids:
+            job = self._jobs.get(job_id)
+            if job is None or job.worker_id != worker_id:
+                continue
+            if job.status not in (JobStatus.CLAIMED, JobStatus.RUNNING):
+                continue
+            stored = job.model_copy(
+                update={
+                    "heartbeat_at": heartbeat_at,
+                    "updated": _renewed_timestamp(job.updated),
+                }
+            )
+            self._jobs[job_id] = stored
+            reached.append(stored.model_copy())
+        return reached
 
     async def count_by_status(
         self, run_ids: list[uuid.UUID], stale_before: datetime, max_attempts: int
@@ -2740,20 +3317,6 @@ class FakeExperimentRunRepository:
             ``True`` when a stored run references the version.
         """
         return any(run.agent_version_id == version_id for run in self._runs.values())
-
-    def execution_target_of(self, run_id: uuid.UUID) -> ExecutionTarget | None:
-        """Resolve the execution target of a stored run.
-
-        Args:
-            run_id: Id of the experiment run.
-
-        Returns:
-            Execution target, ``None`` when no run has this id.
-        """
-        run = self._runs.get(run_id)
-        if run is None:
-            return None
-        return run.execution_target
 
     async def create(self, run: ExperimentRun, jobs: list[Replay]) -> ExperimentRun:
         """Persist a new experiment run with its jobs as one batch.
@@ -2920,8 +3483,14 @@ def experiment_app(
     experiment_repository = FakeExperimentRepository(
         cohort_repository, config_repository, tag_repository
     )
+    blob_repository = FakeBlobRepository()
+    plugin_repository = FakePluginRepository(blob_repository)
     job_repository = FakeJobRepository(
-        session_repository, version_repository, config_repository
+        session_repository,
+        version_repository,
+        config_repository,
+        plugin_repository,
+        blob_repository,
     )
     run_repository = FakeExperimentRunRepository(
         experiment_repository, job_repository, tag_repository
@@ -2953,6 +3522,7 @@ def experiment_app(
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
         worker_liveness_timeout_seconds=60,
     )
     run_service = ExperimentRunService(
@@ -2968,6 +3538,7 @@ def experiment_app(
         repository=job_repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
+        agent_repository=agent_repository,
         agent_version_repository=version_repository,
         session_node_repository=node_repository,
         experiment_run_repository=run_repository,
@@ -2975,6 +3546,8 @@ def experiment_app(
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
+        blob_repository=blob_repository,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
         max_attempts=max_attempts,
         worker_liveness_timeout_seconds=60,
@@ -2987,6 +3560,21 @@ def experiment_app(
     worker_service = WorkerService(
         repository=worker_repository, liveness_timeout_seconds=60
     )
+    scorer_service = PluginService(
+        repository=plugin_repository,
+        blob_repository=blob_repository,
+        kind=PluginKind.SCORER,
+    )
+    importer_service = PluginService(
+        repository=plugin_repository,
+        blob_repository=blob_repository,
+        kind=PluginKind.IMPORTER,
+    )
+    blob_service = BlobService(
+        repository=blob_repository,
+        storage=DatabaseBlobStorage(),
+        max_size_bytes=APISettings.model_fields["MAX_BLOB_SIZE_BYTES"].default,
+    )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[get_session_service] = lambda: session_service
@@ -2997,6 +3585,9 @@ def experiment_app(
     app.dependency_overrides[get_job_service] = lambda: job_service
     app.dependency_overrides[get_tag_service] = lambda: tag_service
     app.dependency_overrides[get_worker_service] = lambda: worker_service
+    app.dependency_overrides[get_scorer_service] = lambda: scorer_service
+    app.dependency_overrides[get_importer_service] = lambda: importer_service
+    app.dependency_overrides[get_blob_service] = lambda: blob_service
     app.dependency_overrides[authorize] = lambda: AuthContext(
         account=Account(id=EXPERIMENT_APP_ACCOUNT_ID, name="ann")
     )

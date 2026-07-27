@@ -58,8 +58,10 @@ async def test_create_and_claim_round_trip(api_client: KitaruAPIClient) -> None:
     claim = await api_client.jobs.claim(
         JobClaimRequest(worker_id=worker.id, max_jobs=5)
     )
-    assert [job.id for job in claim.jobs] == [created.id]
-    assert claim.jobs[0].worker_id == worker.id
+    assert [claimed.job.id for claimed in claim.jobs] == [created.id]
+    assert claim.jobs[0].job.worker_id == worker.id
+    assert claim.jobs[0].spec.inputs == {"prompt": "hi"}
+    assert claim.jobs[0].spec.name == "smoke"
 
 
 def test_create_request_requires_agent_reference() -> None:

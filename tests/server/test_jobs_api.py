@@ -19,7 +19,6 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 from test_experiments_api import (
-    SCORING_POLICY_RESPONSE,
     create_agent,
     create_cohort,
     create_completed_session,
@@ -87,9 +86,7 @@ async def test_list_jobs_filters(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     assert response.json()["total"] == 2
 
-    response = await client.get(
-        "/v1/jobs", params={"original_session_id": first_session}
-    )
+    response = await client.get("/v1/jobs", params={"input_session_id": first_session})
     assert response.status_code == 200
     body = response.json()
     assert body["total"] == 1
@@ -133,7 +130,7 @@ async def test_list_jobs_by_run_and_worker(client: httpx.AsyncClient) -> None:
         json={"worker_id": worker_id, "max_jobs": 1, "experiment_run_id": run_id},
     )
     assert response.status_code == 200
-    claimed_id = response.json()["jobs"][0]["id"]
+    claimed_id = response.json()["jobs"][0]["job"]["id"]
 
     response = await client.get("/v1/jobs", params={"experiment_run_id": run_id})
     assert response.status_code == 200
@@ -174,7 +171,7 @@ async def test_list_jobs_stale_claim_matches_pending() -> None:
             json={"worker_id": worker_id, "max_jobs": 1, "experiment_run_id": run_id},
         )
         assert response.status_code == 200
-        job_id = response.json()["jobs"][0]["id"]
+        job_id = response.json()["jobs"][0]["job"]["id"]
 
         response = await client.get("/v1/jobs", params={"status": "pending"})
         assert response.status_code == 200
@@ -231,7 +228,7 @@ async def link_result_session(client: httpx.AsyncClient, job_id: str) -> str:
     response = await client.get(f"/v1/jobs/{job_id}")
     assert response.status_code == 200
     job = response.json()
-    original = await client.get(f"/v1/sessions/{job['original_session_id']}")
+    original = await client.get(f"/v1/sessions/{job['input_session_id']}")
     assert original.status_code == 200
     response = await client.post(
         "/v1/sessions",
@@ -243,6 +240,34 @@ async def link_result_session(client: httpx.AsyncClient, job_id: str) -> str:
     )
     assert response.status_code == 201
     return response.json()["id"]
+
+
+async def run_score_jobs(
+    client: httpx.AsyncClient, job_id: str, scores: dict[str, float]
+) -> None:
+    """Run every score job of a replay to completion through the API.
+
+    Args:
+        client: HTTP client for the app.
+        job_id: Id of the parent replay.
+        scores: Score values by scorer name.
+    """
+    response = await client.get("/v1/jobs", params={"kind": "score"})
+    assert response.status_code == 200
+    children = [
+        job for job in response.json()["items"] if job["parent_job_id"] == job_id
+    ]
+    assert children
+    for child in children:
+        response = await client.patch(
+            f"/v1/jobs/{child['id']}", json={"status": "running"}
+        )
+        assert response.status_code == 200
+        response = await client.patch(
+            f"/v1/jobs/{child['id']}",
+            json={"status": "completed", "score": scores[child["scorer"]["name"]]},
+        )
+        assert response.status_code == 200
 
 
 async def test_get_spec(client: httpx.AsyncClient) -> None:
@@ -270,8 +295,8 @@ async def test_get_spec(client: httpx.AsyncClient) -> None:
         "inputs": {"prompt": "hi"},
         "override": None,
         "tool_policy": created["tool_policy"],
-        "scoring_policy": SCORING_POLICY_RESPONSE,
-        "score_baselines": True,
+        "scorer": None,
+        "importer": None,
         "run": {
             "command": "python agent.py",
             "working_dir": None,
@@ -279,7 +304,7 @@ async def test_get_spec(client: httpx.AsyncClient) -> None:
             "timeout_seconds": 600,
         },
         "secret_env": {},
-        "original_session_id": session_id,
+        "input_session_id": session_id,
         "name": None,
     }
 
@@ -305,23 +330,16 @@ async def test_runner_flow_completes_job(client: httpx.AsyncClient) -> None:
     response = await client.get(f"/v1/jobs/{job_id}")
     assert response.json()["result_session_id"] == result_session_id
 
-    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
-    assert response.status_code == 200
-    assert response.json() == {"status": "running", "canceled": False}
-
     response = await client.patch(
         f"/v1/sessions/{result_session_id}", json={"status": "completed"}
     )
     assert response.status_code == 200
-    response = await client.patch(
-        f"/v1/jobs/{job_id}",
-        json={
-            "status": "completed",
-            "passed": True,
-            "score": 0.8,
-            "scores": {"conciseness": 0.8},
-        },
-    )
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "scoring"
+
+    await run_score_jobs(client, job_id, {"conciseness": 0.8})
+    response = await client.get(f"/v1/jobs/{job_id}")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
@@ -347,10 +365,6 @@ async def test_runner_flow_completes_job(client: httpx.AsyncClient) -> None:
     assert diff["added_nodes"] == []
     assert diff["removed_nodes"] == []
 
-    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
-    assert response.status_code == 200
-    assert response.json() == {"status": "completed", "canceled": True}
-
 
 async def test_patch_job_illegal_transition(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for an illegal runner transition."""
@@ -359,27 +373,25 @@ async def test_patch_job_illegal_transition(client: httpx.AsyncClient) -> None:
     session_id = await create_completed_session(client, agent_id)
     created = await create_replay(client, session_id)
     response = await client.patch(
-        f"/v1/jobs/{created['id']}",
-        json={"status": "completed", "passed": True, "score": 1.0, "scores": {}},
+        f"/v1/jobs/{created['id']}", json={"status": "scoring"}
     )
     assert response.status_code == 409
     assert response.json() == {
-        "detail": f"Job {created['id']} cannot transition from 'pending' to 'completed'"
+        "detail": f"Job {created['id']} cannot transition from 'pending' to 'scoring'"
     }
 
 
-async def test_patch_job_completed_without_result_session(
+async def test_patch_job_scoring_without_result_session(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 409 when completing an unlinked job."""
+    """Observe HTTP 409 when scoring an unlinked job."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
     created = await create_replay(client, session_id)
     await start_job(client, created["id"])
     response = await client.patch(
-        f"/v1/jobs/{created['id']}",
-        json={"status": "completed", "passed": True, "score": 1.0, "scores": {}},
+        f"/v1/jobs/{created['id']}", json={"status": "scoring"}
     )
     assert response.status_code == 409
     assert response.json() == {"detail": f"Job {created['id']} has no result session"}
@@ -408,42 +420,71 @@ async def test_patch_job_failed_requires_error(client: httpx.AsyncClient) -> Non
     assert body["error"] == "agent exited with code 1"
 
 
-async def test_heartbeat_canceled_job(client: httpx.AsyncClient) -> None:
-    """Report cancellation through the heartbeat."""
+async def test_worker_heartbeat_touches_owned_active_jobs(
+    client: httpx.AsyncClient,
+) -> None:
+    """Record a heartbeat on a claimed job and abandon nothing."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
     session_id = await create_completed_session(client, agent_id)
     created = await create_replay(client, session_id)
-
-    response = await client.post(f"/v1/jobs/{created['id']}/heartbeat")
-    assert response.status_code == 409
-
-    await start_job(client, created["id"])
-    response = await client.patch(
-        f"/v1/jobs/{created['id']}", json={"status": "canceled"}
+    worker_id = await register_worker(client)
+    response = await client.post(
+        f"/v1/jobs/{created['id']}/claim", json={"worker_id": worker_id}
     )
     assert response.status_code == 200
-    response = await client.post(f"/v1/jobs/{created['id']}/heartbeat")
+
+    response = await client.post(
+        f"/v1/workers/{worker_id}/heartbeat", json={"job_ids": [created["id"]]}
+    )
     assert response.status_code == 200
-    assert response.json() == {"status": "canceled", "canceled": True}
+    assert response.json() == {"abandon": []}
+
+    response = await client.get(f"/v1/jobs/{created['id']}")
+    assert response.json()["heartbeat_at"] is not None
 
 
-async def test_heartbeat_stops_on_terminal_jobs(client: httpx.AsyncClient) -> None:
-    """Report the stop flag for failed and timed out jobs."""
+async def test_worker_heartbeat_abandons_terminal_and_foreign_jobs(
+    client: httpx.AsyncClient,
+) -> None:
+    """Abandon reported jobs that are terminal, foreign, or unknown."""
     agent_id = await create_agent(client)
     await create_runnable_version(client, agent_id)
-    for status, body in (
-        ("failed", {"status": "failed", "error": "agent exited with code 1"}),
-        ("timed_out", {"status": "timed_out", "error": "wall clock limit exceeded"}),
-    ):
-        session_id = await create_completed_session(client, agent_id)
-        created = await create_replay(client, session_id)
-        await start_job(client, created["id"])
-        response = await client.patch(f"/v1/jobs/{created['id']}", json=body)
-        assert response.status_code == 200
-        response = await client.post(f"/v1/jobs/{created['id']}/heartbeat")
-        assert response.status_code == 200
-        assert response.json() == {"status": status, "canceled": True}
+    worker_id = await register_worker(client)
+    other_worker_id = await register_worker(client, name="worker-2")
+    canceled = await create_replay(
+        client, await create_completed_session(client, agent_id)
+    )
+    await start_job(client, canceled["id"])
+    response = await client.patch(
+        f"/v1/jobs/{canceled['id']}", json={"status": "canceled"}
+    )
+    assert response.status_code == 200
+    foreign = await create_replay(
+        client, await create_completed_session(client, agent_id)
+    )
+    response = await client.post(
+        f"/v1/jobs/{foreign['id']}/claim", json={"worker_id": other_worker_id}
+    )
+    assert response.status_code == 200
+    missing_id = str(uuid.uuid4())
+
+    response = await client.post(
+        f"/v1/workers/{worker_id}/heartbeat",
+        json={"job_ids": [canceled["id"], foreign["id"], missing_id]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"abandon": [canceled["id"], foreign["id"], missing_id]}
+
+
+async def test_worker_heartbeat_unknown_worker(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown worker id."""
+    missing_id = uuid.uuid4()
+    response = await client.post(
+        f"/v1/workers/{missing_id}/heartbeat", json={"job_ids": []}
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Worker {missing_id} was not found"}
 
 
 async def create_run_job(client: httpx.AsyncClient) -> str:
@@ -803,3 +844,134 @@ async def test_session_link_conflicts(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 404
     assert response.json() == {"detail": f"Job {missing_id} was not found"}
+
+
+REGISTRY_SCORING_POLICY = {
+    "scorers": [{"type": "scorer", "name": "relevance"}],
+    "pass_threshold": 0.5,
+}
+
+
+async def register_scorer(client: httpx.AsyncClient, name: str = "relevance") -> str:
+    """Register a scorer with one code version through the API.
+
+    Args:
+        client: HTTP client for the app.
+        name: Scorer name.
+
+    Returns:
+        Id of the scorer.
+    """
+    response = await client.post(
+        "/v1/blobs", files={"file": (f"{name}.py", b"def score(session): ...")}
+    )
+    assert response.status_code in (200, 201)
+    blob_id = response.json()["id"]
+    response = await client.post("/v1/scorers", json={"name": name})
+    assert response.status_code == 201
+    scorer_id = response.json()["id"]
+    response = await client.post(
+        f"/v1/scorers/{scorer_id}/versions",
+        json={"blob_id": blob_id, "entrypoint": "score"},
+    )
+    assert response.status_code == 201
+    return scorer_id
+
+
+async def test_create_replay_rejects_unregistered_scorer(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 404 for a replay naming an unregistered scorer."""
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    response = await client.post(
+        "/v1/replays",
+        json={
+            "input_session_id": session_id,
+            "scoring_policy": REGISTRY_SCORING_POLICY,
+        },
+    )
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Plugin 'relevance' of kind 'scorer' was not found"
+    }
+
+
+async def test_score_job_spec_and_lifecycle(client: httpx.AsyncClient) -> None:
+    """Walk a registry score job from claim through its spec to completed."""
+    await register_scorer(client)
+    agent_id = await create_agent(client)
+    await create_runnable_version(client, agent_id)
+    session_id = await create_completed_session(client, agent_id)
+    created = await create_replay(
+        client, session_id, scoring_policy=REGISTRY_SCORING_POLICY
+    )
+    job_id = created["id"]
+    await start_job(client, job_id)
+    result_session_id = await link_result_session(client, job_id)
+    response = await client.patch(
+        f"/v1/sessions/{result_session_id}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    assert response.status_code == 200
+
+    worker_id = await register_worker(client)
+    response = await client.post(
+        "/v1/jobs/claim",
+        json={"worker_id": worker_id, "max_jobs": 5, "parent_job_id": job_id},
+    )
+    assert response.status_code == 200
+    children = [claimed["job"] for claimed in response.json()["jobs"]]
+    assert len(children) == 2
+    child = next(
+        entry for entry in children if entry["input_session_id"] == result_session_id
+    )
+    assert child["kind"] == "score"
+    assert child["agent_version_id"] is None
+    assert child["scorer"] == {
+        "type": "scorer",
+        "name": "relevance",
+        "version": 1,
+        "params": {},
+        "weight": 1.0,
+        "fail_below": None,
+    }
+
+    response = await client.get(f"/v1/jobs/{child['id']}/spec")
+    assert response.status_code == 200
+    spec = response.json()
+    assert spec["kind"] == "score"
+    assert spec["run"] is None
+    assert spec["input_session_id"] == result_session_id
+    assert spec["scorer"]["input_session_id"] == result_session_id
+    assert spec["scorer"]["plugin"]["format"] == "inline"
+    assert spec["scorer"]["plugin"]["entrypoint"] == "score"
+    assert len(spec["scorer"]["plugin"]["sha256"]) == 64
+
+    for entry in children:
+        response = await client.patch(
+            f"/v1/jobs/{entry['id']}", json={"status": "running"}
+        )
+        assert response.status_code == 200
+        response = await client.patch(f"/v1/jobs/{entry['id']}", json={"score": 0.9})
+        assert response.status_code == 200
+        assert response.json()["score"] == 0.9
+        response = await client.patch(
+            f"/v1/jobs/{entry['id']}", json={"status": "completed"}
+        )
+        assert response.status_code == 200
+
+    response = await client.get(f"/v1/jobs/{job_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["passed"] is True
+    assert body["score"] == 0.9
+    assert body["scores"] == {"relevance": 0.9}
+
+    response = await client.get(f"/v1/sessions/{session_id}")
+    assert response.json()["scores"] == {"relevance": 0.9}
+    response = await client.get(f"/v1/sessions/{result_session_id}")
+    assert response.json()["scores"] == {"relevance": 0.9}

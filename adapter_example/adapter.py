@@ -16,9 +16,7 @@
 import asyncio
 import json
 import os
-import secrets
 import threading
-import time
 import uuid
 from collections.abc import Coroutine
 from dataclasses import dataclass
@@ -59,6 +57,7 @@ from kitaru.api_models.v1.sessions import (
 )
 from kitaru.client import KitaruAPIClient
 from kitaru.hashing import tool_call_cache_key
+from kitaru.ids import uuid7
 
 ADAPTER_VERSION = "0.1.0"
 FRAMEWORK = "mock"
@@ -72,16 +71,6 @@ class ToolPolicyMissError(RuntimeError):
 
 class ToolPolicyError(RuntimeError):
     """Raised when a tool policy cannot be applied."""
-
-
-def _uuid7() -> uuid.UUID:
-    """Generate a UUIDv7 node id."""
-    value = (time.time_ns() // 1_000_000) << 80
-    value |= 0x7 << 76
-    value |= secrets.randbits(12) << 64
-    value |= 0b10 << 62
-    value |= secrets.randbits(62)
-    return uuid.UUID(int=value)
 
 
 def _case_matches(case: StaticCase, arguments: dict[str, Any]) -> bool:
@@ -123,7 +112,7 @@ class KitaruAdapter(AgentHooks):
         self._agent = agent
         self._agent_id = agent_id
         self._agent_version_id = agent_version_id
-        self._session_name = session_name or os.environ.get("KITARU_SESSION_NAME")
+        self._session_name = session_name or os.environ.get("KITARU_JOB_SESSION_NAME")
         self._batch_size = batch_size
         if job_id is None:
             job_env = os.environ.get("KITARU_JOB_ID")
@@ -176,7 +165,7 @@ class KitaruAdapter(AgentHooks):
 
     def resolve_inputs(self, default: Any = None) -> Any:
         """Resolve run inputs from the environment, the job spec, or a default."""
-        raw = os.environ.get("KITARU_INPUTS")
+        raw = os.environ.get("KITARU_JOB_INPUTS")
         if raw is not None:
             return json.loads(raw)
         if self._spec is not None:
@@ -285,7 +274,7 @@ class KitaruAdapter(AgentHooks):
             )
         )
         self._session_id = session.id
-        self._root_id = _uuid7()
+        self._root_id = uuid7()
         self._last_llm_id = None
         self._sequence = 0
         self._run_started_at = started_at
@@ -310,7 +299,7 @@ class KitaruAdapter(AgentHooks):
 
     def on_llm_call_end(self, call: LLMCall) -> None:
         """Buffer an llm_call node."""
-        node_id = _uuid7()
+        node_id = uuid7()
         self._buffer_node(
             SessionNodeCreateRequest(
                 id=node_id,
@@ -355,7 +344,7 @@ class KitaruAdapter(AgentHooks):
             status = NodeStatus.FAILED
         self._buffer_node(
             SessionNodeCreateRequest(
-                id=_uuid7(),
+                id=uuid7(),
                 parent_id=self._last_llm_id or self._root_id,
                 sequence=self._next_sequence(),
                 node_type=NodeType.TOOL_CALL,

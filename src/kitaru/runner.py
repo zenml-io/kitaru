@@ -19,17 +19,22 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import socket
+import sys
+import tomllib
 import uuid
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
+from typing import Any, NamedTuple
 
 from kitaru.api_models.v1.experiment_runs import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
 from kitaru.api_models.v1.jobs import (
+    ClaimedJobResponse,
     JobClaimRequest,
     JobKind,
     JobResponse,
@@ -38,19 +43,14 @@ from kitaru.api_models.v1.jobs import (
     JobUpdateRequest,
     StandaloneJobClaimRequest,
 )
-from kitaru.api_models.v1.sessions import (
-    SessionScoresRequest,
-    SessionStatus,
+from kitaru.api_models.v1.sessions import SessionStatus
+from kitaru.api_models.v1.workers import (
+    WorkerCreateRequest,
+    WorkerHeartbeatRequest,
 )
-from kitaru.api_models.v1.workers import WorkerCreateRequest
+from kitaru.blob_cache import DEFAULT_PAYLOAD_CACHE_ROOT, BlobCache
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
-from kitaru.scoring import (
-    ScoringError,
-    SessionView,
-    evaluate_scoring_policy,
-    run_scorer,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,9 @@ LOG_TAIL_MAX_BYTES = 8192
 # TODO: Serve this threshold from the server via the job spec.
 MAX_INPUTS_ENV_BYTES = 32768
 RUN_POLL_INTERVAL_SECONDS = 2.0
+SCORE_TIMEOUT_SECONDS = 300
+IMPORT_TIMEOUT_SECONDS = 600
+PAYLOAD_CACHE_MAX_BYTES = 1024**3
 
 _TERMINAL_RUN_STATUSES = frozenset(
     {
@@ -68,12 +71,32 @@ _TERMINAL_RUN_STATUSES = frozenset(
     }
 )
 
+_TERMINAL_JOB_STATUSES = frozenset(
+    {
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.TIMED_OUT,
+        JobStatus.CANCELED,
+    }
+)
+
 # Contract variables the runner controls, cleared from the inherited
-# environment before each agent process.
+# environment before each job process.
 _CONTRACT_ENV_VARS = (
     "KITARU_JOB_ID",
-    "KITARU_INPUTS",
-    "KITARU_SESSION_NAME",
+    "KITARU_JOB_INPUTS",
+    "KITARU_JOB_SESSION_NAME",
+    "KITARU_JOB_PLUGIN_PATH",
+    "KITARU_JOB_PAYLOAD_PATH",
+)
+
+# Label of the process a job kind runs, used in exit code errors.
+_PROCESS_LABELS = {JobKind.SCORE: "Scorer", JobKind.IMPORT: "Importer"}
+
+# PEP 723 inline script metadata, the regular expression of the
+# specification.
+_INLINE_METADATA_PATTERN = re.compile(
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
 )
 
 
@@ -118,10 +141,10 @@ async def _drain_stream(stream: asyncio.StreamReader, tail: _TailBuffer) -> None
 
 
 def _kill_process_group(process: asyncio.subprocess.Process) -> None:
-    """Kill the process group of a running agent process.
+    """Kill the process group of a running job process.
 
     Args:
-        process: Agent process started in its own session.
+        process: Job process started in its own session.
     """
     if process.returncode is not None:
         return
@@ -175,6 +198,80 @@ def _default_worker_name() -> str:
     return f"{hostname}-{os.getpid()}".strip("-_")
 
 
+def inline_dependencies(path: Path) -> list[str]:
+    """Read the dependencies a file declares as PEP 723 inline metadata.
+
+    Args:
+        path: Path of the file.
+
+    Raises:
+        ValueError: The file declares more than one script block.
+
+    Returns:
+        Declared dependencies, empty without a script block.
+    """
+    blocks = [
+        match
+        for match in _INLINE_METADATA_PATTERN.finditer(path.read_text(encoding="utf-8"))
+        if match.group("type") == "script"
+    ]
+    if not blocks:
+        return []
+    if len(blocks) > 1:
+        raise ValueError(f"{path} declares multiple inline script blocks")
+    content = "".join(
+        line[2:] if line.startswith("# ") else line[1:]
+        for line in blocks[0].group("content").splitlines(keepends=True)
+    )
+    return [str(entry) for entry in tomllib.loads(content).get("dependencies", [])]
+
+
+def _harness_command(module: str, dependencies: list[str]) -> str:
+    """Build the command running a harness module.
+
+    Dependencies are resolved by uv, which needs a project or an
+    interpreter of its own.
+
+    Args:
+        module: Harness module to run.
+        dependencies: Dependencies of the registered code.
+
+    Returns:
+        Bash command starting the harness.
+    """
+    if not dependencies:
+        return shlex.join([sys.executable, "-m", module])
+    args = ["uv", "run"]
+    for dependency in dependencies:
+        args.extend(["--with", dependency])
+    args.extend(["python", "-m", module])
+    return shlex.join(args)
+
+
+def score_command(dependencies: list[str]) -> str:
+    """Build the command running the score harness.
+
+    Args:
+        dependencies: Dependencies of the scorer code.
+
+    Returns:
+        Bash command starting the harness.
+    """
+    return _harness_command("kitaru.score", dependencies)
+
+
+def import_command(dependencies: list[str]) -> str:
+    """Build the command running the import harness.
+
+    Args:
+        dependencies: Dependencies of the importer code.
+
+    Returns:
+        Bash command starting the harness.
+    """
+    return _harness_command("kitaru.imports", dependencies)
+
+
 def _encode_inputs(inputs: Any) -> tuple[str, bool]:
     """JSON-encode inputs and report whether they fit the env threshold.
 
@@ -188,6 +285,79 @@ def _encode_inputs(inputs: Any) -> tuple[str, bool]:
     return encoded, len(encoded.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES
 
 
+class JobProcess(NamedTuple):
+    """Subprocess invocation of a job."""
+
+    command: str
+    working_dir: str | None
+    env: dict[str, str]
+    timeout_seconds: int
+
+
+class WorkerHeartbeat:
+    """Batched heartbeat of a worker's in-flight jobs."""
+
+    def __init__(
+        self,
+        client: KitaruAPIClient,
+        worker_id: uuid.UUID,
+        interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+    ) -> None:
+        """Initialize the heartbeat.
+
+        Args:
+            client: API client.
+            worker_id: Id of the registered worker.
+            interval: Seconds between heartbeats.
+        """
+        self._client = client
+        self._worker_id = worker_id
+        self._interval = interval
+        self._canceled: dict[uuid.UUID, asyncio.Event] = {}
+
+    def register(self, job_id: uuid.UUID) -> asyncio.Event:
+        """Report a job as in flight until it is unregistered.
+
+        Args:
+            job_id: Id of the job.
+
+        Returns:
+            Event set once the server asks the worker to abandon the job.
+        """
+        canceled = asyncio.Event()
+        self._canceled[job_id] = canceled
+        return canceled
+
+    def unregister(self, job_id: uuid.UUID) -> None:
+        """Stop reporting a job as in flight.
+
+        Args:
+            job_id: Id of the job.
+        """
+        self._canceled.pop(job_id, None)
+
+    async def run(self) -> None:
+        """Send one heartbeat per interval until cancellation."""
+        while True:
+            await asyncio.sleep(self._interval)
+            job_ids = list(self._canceled)
+            if not job_ids:
+                continue
+            try:
+                response = await self._client.workers.heartbeat(
+                    self._worker_id, WorkerHeartbeatRequest(job_ids=job_ids)
+                )
+            except APIError as exc:
+                logger.warning(
+                    "Heartbeat for worker %s failed: %s", self._worker_id, exc
+                )
+                continue
+            for job_id in response.abandon:
+                canceled = self._canceled.get(job_id)
+                if canceled is not None:
+                    canceled.set()
+
+
 class JobRunner:
     """Runner of one claimed job."""
 
@@ -195,92 +365,106 @@ class JobRunner:
         self,
         api_url: str,
         api_key: str,
-        heartbeat_interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
+        blob_cache: BlobCache | None = None,
+        payload_cache: BlobCache | None = None,
     ) -> None:
         """Initialize the job runner.
 
         Args:
             api_url: Server base URL.
             api_key: API key sent as a bearer token.
-            heartbeat_interval: Seconds between heartbeats.
+            blob_cache: Cache the plugin code is materialized into.
+            payload_cache: Cache the import payloads are materialized into.
         """
         self._api_url = api_url
         self._api_key = api_key
-        self._heartbeat_interval = heartbeat_interval
+        self._blob_cache = blob_cache or BlobCache()
+        self._payload_cache = payload_cache or BlobCache(
+            DEFAULT_PAYLOAD_CACHE_ROOT, max_bytes=PAYLOAD_CACHE_MAX_BYTES
+        )
 
-    async def execute(self, client: KitaruAPIClient, job_id: uuid.UUID) -> JobResponse:
-        """Execute a claimed job from spec fetch to its terminal status.
+    async def execute(
+        self,
+        client: KitaruAPIClient,
+        job_id: uuid.UUID,
+        heartbeat: WorkerHeartbeat,
+        spec: JobSpecResponse | None = None,
+    ) -> JobResponse:
+        """Execute a claimed job from its spec to its next status.
+
+        Replays hand over to their score jobs instead of completing.
 
         Args:
             client: API client.
             job_id: Id of the job.
+            heartbeat: Heartbeat reporting the job while it runs.
+            spec: Spec the claim shipped, fetched when omitted.
 
         Raises:
             APIError: The spec does not resolve or a status update was
                 rejected.
 
         Returns:
-            Terminal job.
+            Job in the status the run produced.
         """
-        try:
-            spec = await client.jobs.get_spec(job_id)
-        except APIError as exc:
-            with contextlib.suppress(APIError):
-                await self._fail(
-                    client, job_id, f"Failed to resolve the job spec: {exc}"
-                )
-            raise
-        canceled = asyncio.Event()
-        heartbeat_task = asyncio.create_task(
-            self._heartbeat_loop(client, job_id, canceled)
-        )
+        if spec is None:
+            try:
+                spec = await client.jobs.get_spec(job_id)
+            except APIError as exc:
+                with contextlib.suppress(APIError):
+                    await self._fail(
+                        client, job_id, f"Failed to resolve the job spec: {exc}"
+                    )
+                raise
+        canceled = heartbeat.register(job_id)
         try:
             await client.jobs.update(job_id, JobUpdateRequest(status=JobStatus.RUNNING))
-            returncode, tail = await self._run_agent_process(
-                spec.run.command,
-                spec.run.working_dir,
-                self._build_env(job_id, spec),
-                spec.run.timeout_seconds,
-                canceled,
-            )
+            if spec.kind is JobKind.SCORE:
+                try:
+                    process = await self._score_process(client, job_id, spec)
+                except Exception as exc:
+                    return await self._fail(
+                        client, job_id, f"Failed to prepare the scorer process: {exc}"
+                    )
+            elif spec.kind is JobKind.IMPORT:
+                try:
+                    process = await self._import_process(client, job_id, spec)
+                except Exception as exc:
+                    return await self._fail(
+                        client, job_id, f"Failed to prepare the importer process: {exc}"
+                    )
+            else:
+                process = self._agent_process(job_id, spec)
+            returncode, tail = await self._run_process(process, canceled)
             if returncode is not None:
                 if returncode == 0:
-                    if spec.kind is JobKind.SESSION_RUN:
-                        return await self._complete_session_run(client, job_id)
-                    return await self._score_and_complete(client, job_id, spec)
-                error = f"Agent process exited with code {returncode}."
+                    return await self._finalize(client, job_id, spec)
+                label = _PROCESS_LABELS.get(spec.kind, "Agent")
+                error = f"{label} process exited with code {returncode}."
                 return await self._fail(client, job_id, _with_tail(error, tail))
             if canceled.is_set():
                 return await client.jobs.update(
                     job_id, JobUpdateRequest(status=JobStatus.CANCELED)
                 )
             error = _with_tail(
-                f"Job timed out after {spec.run.timeout_seconds} seconds.", tail
+                f"Job timed out after {process.timeout_seconds} seconds.", tail
             )
             return await client.jobs.update(
                 job_id,
                 JobUpdateRequest(status=JobStatus.TIMED_OUT, error=error),
             )
         finally:
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
+            heartbeat.unregister(job_id)
 
-    async def _run_agent_process(
+    async def _run_process(
         self,
-        command: str,
-        working_dir: str | None,
-        env: dict[str, str],
-        timeout_seconds: int,
+        job_process: JobProcess,
         canceled: asyncio.Event | None = None,
     ) -> tuple[int | None, str]:
-        """Run the agent process until exit, timeout, or cancellation.
+        """Run a job process until exit, timeout, or cancellation.
 
         Args:
-            command: Bash command starting the agent.
-            working_dir: Working directory for the command.
-            env: Environment variables for the agent process.
-            timeout_seconds: Wall clock limit.
+            job_process: Subprocess invocation.
             canceled: Event whose set kills the process.
 
         Returns:
@@ -292,9 +476,9 @@ class JobRunner:
         process = await asyncio.create_subprocess_exec(
             "sh",
             "-c",
-            command,
-            cwd=working_dir,
-            env=env,
+            job_process.command,
+            cwd=job_process.working_dir,
+            env=job_process.env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
@@ -314,7 +498,7 @@ class JobRunner:
             try:
                 done, _ = await asyncio.wait(
                     {exit_task, cancel_task},
-                    timeout=timeout_seconds,
+                    timeout=job_process.timeout_seconds,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
             finally:
@@ -334,47 +518,43 @@ class JobRunner:
                 drain.cancel()
             await asyncio.gather(*drains, return_exceptions=True)
 
-    async def _complete_session_run(
+    async def _result_session_error(
         self, client: KitaruAPIClient, job_id: uuid.UUID
-    ) -> JobResponse:
-        """Complete a session run job without scoring.
+    ) -> str | None:
+        """Report why the result session of a job does not hold up.
 
         Args:
             client: API client.
             job_id: Id of the job.
 
         Raises:
-            APIError: A read or status update failed.
+            APIError: A read failed.
 
         Returns:
-            Terminal job.
+            Error message, ``None`` when the session is completed.
         """
         job = await client.jobs.get(job_id)
         if job.result_session_id is None:
-            return await self._fail(
-                client,
-                job_id,
-                "Agent process exited successfully without recording a result session.",
+            return (
+                "Agent process exited successfully without recording a result session."
             )
         result_session = await client.sessions.get(job.result_session_id)
         if result_session.status is not SessionStatus.COMPLETED:
-            return await self._fail(
-                client,
-                job_id,
+            return (
                 f"Result session {result_session.id} is {result_session.status}, "
-                "not completed.",
+                "not completed."
             )
-        return await client.jobs.update(
-            job_id, JobUpdateRequest(status=JobStatus.COMPLETED)
-        )
+        return None
 
-    async def _score_and_complete(
+    async def _finalize(
         self,
         client: KitaruAPIClient,
         job_id: uuid.UUID,
         spec: JobSpecResponse,
     ) -> JobResponse:
-        """Score the result session and complete the job.
+        """Move a job whose process succeeded to its next status.
+
+        A replay hands over to its score jobs, the other kinds complete.
 
         Args:
             client: API client.
@@ -385,97 +565,21 @@ class JobRunner:
             APIError: A read or status update failed.
 
         Returns:
-            Terminal job.
+            Updated job.
         """
-        job = await client.jobs.get(job_id)
-        if job.result_session_id is None:
-            return await self._fail(
-                client,
-                job_id,
-                "Agent process exited successfully without recording a result session.",
+        if spec.kind in (JobKind.SCORE, JobKind.IMPORT):
+            return await client.jobs.update(
+                job_id, JobUpdateRequest(status=JobStatus.COMPLETED)
             )
-        result_session = await client.sessions.get(job.result_session_id)
-        if result_session.status is not SessionStatus.COMPLETED:
-            return await self._fail(
-                client,
-                job_id,
-                f"Result session {result_session.id} is {result_session.status}, "
-                "not completed.",
-            )
-        nodes = await client.session_nodes.list(
-            job.result_session_id, include_payloads=True
+        error = await self._result_session_error(client, job_id)
+        if error is not None:
+            return await self._fail(client, job_id, error)
+        status = (
+            JobStatus.COMPLETED
+            if spec.kind is JobKind.SESSION_RUN
+            else JobStatus.SCORING
         )
-        view = SessionView(session=result_session, nodes=nodes)
-        assert spec.scoring_policy is not None
-        try:
-            result = evaluate_scoring_policy(spec.scoring_policy, view)
-            if spec.score_baselines:
-                await self._score_baselines(client, spec)
-        except ScoringError as exc:
-            return await self._fail(client, job_id, str(exc))
-        return await client.jobs.update(
-            job_id,
-            JobUpdateRequest(
-                status=JobStatus.COMPLETED,
-                passed=result.passed,
-                score=result.score,
-                scores=result.scores,
-            ),
-        )
-
-    async def _score_baselines(
-        self, client: KitaruAPIClient, spec: JobSpecResponse
-    ) -> None:
-        """Score the original session for scorers missing from its scores map.
-
-        Args:
-            client: API client.
-            spec: Job spec.
-
-        Raises:
-            ScoringError: A scorer failed to load, raised, or returned an
-                invalid score.
-        """
-        assert spec.original_session_id is not None
-        assert spec.scoring_policy is not None
-        original = await client.sessions.get(spec.original_session_id)
-        missing = [
-            config
-            for config in spec.scoring_policy.scorers
-            if config.name not in original.scores
-        ]
-        if not missing:
-            return
-        nodes = await client.session_nodes.list(original.id, include_payloads=True)
-        view = SessionView(session=original, nodes=nodes)
-        scores = {config.name: run_scorer(config, view) for config in missing}
-        await client.sessions.merge_scores(
-            original.id, SessionScoresRequest(scores=scores)
-        )
-
-    async def _heartbeat_loop(
-        self,
-        client: KitaruAPIClient,
-        job_id: uuid.UUID,
-        canceled: asyncio.Event,
-    ) -> None:
-        """Send heartbeats until the job is canceled server-side.
-
-        Args:
-            client: API client.
-            job_id: Id of the job.
-            canceled: Event set when the server reports cancellation.
-        """
-        while True:
-            await asyncio.sleep(self._heartbeat_interval)
-            try:
-                response = await client.jobs.heartbeat(job_id)
-            except APIError as exc:
-                logger.warning("Heartbeat for job %s failed: %s", job_id, exc)
-                continue
-            if response.canceled:
-                canceled.set()
-                return
+        return await client.jobs.update(job_id, JobUpdateRequest(status=status))
 
     async def _fail(
         self, client: KitaruAPIClient, job_id: uuid.UUID, error: str
@@ -498,21 +602,22 @@ class JobRunner:
             JobUpdateRequest(status=JobStatus.FAILED, error=error),
         )
 
-    def _agent_env(
-        self, run_env: dict[str, str], secret_env: dict[str, str]
+    def _process_env(
+        self, job_id: uuid.UUID, run_env: dict[str, str], secret_env: dict[str, str]
     ) -> dict[str, str]:
-        """Build the base agent process environment.
+        """Build the base job process environment.
 
         Layers the run spec env and secret env over the process
         environment, sets the API contract variables, and clears inherited
         contract variables.
 
         Args:
+            job_id: Id of the job.
             run_env: Literal environment variables of the run spec.
             secret_env: Resolved secret environment variables.
 
         Returns:
-            Environment variables for the agent process.
+            Environment variables for the job process.
         """
         env = dict(os.environ)
         env.update(run_env)
@@ -521,29 +626,163 @@ class JobRunner:
             env.pop(name, None)
         env["KITARU_API_URL"] = self._api_url
         env["KITARU_API_KEY"] = self._api_key
+        env["KITARU_JOB_ID"] = str(job_id)
         return env
 
-    def _build_env(self, job_id: uuid.UUID, spec: JobSpecResponse) -> dict[str, str]:
-        """Build the job agent process environment.
+    def _agent_process(self, job_id: uuid.UUID, spec: JobSpecResponse) -> JobProcess:
+        """Build the agent process invocation of a replay or session run.
 
-        ``KITARU_INPUTS`` is set only when the JSON-encoded inputs fit the
-        threshold.
+        ``KITARU_JOB_INPUTS`` is set only when the JSON-encoded inputs fit
+        the threshold.
 
         Args:
             job_id: Id of the job.
             spec: Job spec.
 
         Returns:
-            Environment variables for the agent process.
+            Subprocess invocation.
         """
-        env = self._agent_env(spec.run.env, spec.secret_env)
-        env["KITARU_JOB_ID"] = str(job_id)
+        assert spec.run is not None
+        env = self._process_env(job_id, spec.run.env, spec.secret_env)
         if spec.name is not None:
-            env["KITARU_SESSION_NAME"] = spec.name
+            env["KITARU_JOB_SESSION_NAME"] = spec.name
         encoded_inputs, fits = _encode_inputs(spec.inputs)
         if fits:
-            env["KITARU_INPUTS"] = encoded_inputs
-        return env
+            env["KITARU_JOB_INPUTS"] = encoded_inputs
+        return JobProcess(
+            command=spec.run.command,
+            working_dir=spec.run.working_dir,
+            env=env,
+            timeout_seconds=spec.run.timeout_seconds,
+        )
+
+    async def _materialize_blob(
+        self,
+        client: KitaruAPIClient,
+        cache: BlobCache,
+        blob_id: uuid.UUID,
+        sha256: str,
+    ) -> Path:
+        """Return the cached path of a blob, downloading it once.
+
+        Args:
+            client: API client.
+            cache: Cache the content is materialized into.
+            blob_id: Id of the blob.
+            sha256: Hash of the blob content.
+
+        Raises:
+            APIError: The download failed.
+            BlobCacheError: The downloaded content has another hash.
+
+        Returns:
+            Path of the cached file.
+        """
+        cached = cache.get(sha256)
+        if cached is not None:
+            return cached
+        content = await client.blobs.download(blob_id)
+        return cache.put(sha256, content)
+
+    async def _score_process(
+        self,
+        client: KitaruAPIClient,
+        job_id: uuid.UUID,
+        spec: JobSpecResponse,
+    ) -> JobProcess:
+        """Build the harness process invocation of a score job.
+
+        Registered code runs from the blob cache on any worker, a source
+        reference runs in the run environment of the agent version.
+
+        Args:
+            client: API client.
+            job_id: Id of the job.
+            spec: Job spec.
+
+        Raises:
+            APIError: The code download failed.
+            BlobCacheError: The downloaded code has another hash.
+
+        Returns:
+            Subprocess invocation.
+        """
+        assert spec.scorer is not None
+        run = spec.run
+        env = self._process_env(
+            job_id, run.env if run is not None else {}, spec.secret_env
+        )
+        if spec.scorer.plugin is None:
+            assert run is not None
+            return JobProcess(
+                command=score_command([]),
+                working_dir=run.working_dir,
+                env=env,
+                timeout_seconds=run.timeout_seconds,
+            )
+        path = await self._materialize_blob(
+            client,
+            self._blob_cache,
+            spec.scorer.plugin.blob_id,
+            spec.scorer.plugin.sha256,
+        )
+        env["KITARU_JOB_PLUGIN_PATH"] = str(path)
+        return JobProcess(
+            command=score_command(inline_dependencies(path)),
+            working_dir=None,
+            env=env,
+            timeout_seconds=(
+                run.timeout_seconds if run is not None else SCORE_TIMEOUT_SECONDS
+            ),
+        )
+
+    async def _import_process(
+        self,
+        client: KitaruAPIClient,
+        job_id: uuid.UUID,
+        spec: JobSpecResponse,
+    ) -> JobProcess:
+        """Build the harness process invocation of an import job.
+
+        The importer code and the payload are materialized into their
+        caches, the harness reads both from disk.
+
+        Args:
+            client: API client.
+            job_id: Id of the job.
+            spec: Job spec.
+
+        Raises:
+            APIError: A download failed.
+            BlobCacheError: A download has another hash.
+
+        Returns:
+            Subprocess invocation.
+        """
+        assert spec.importer is not None
+        env = self._process_env(job_id, {}, spec.secret_env)
+        code, payload = await asyncio.gather(
+            self._materialize_blob(
+                client,
+                self._blob_cache,
+                spec.importer.plugin.blob_id,
+                spec.importer.plugin.sha256,
+            ),
+            self._materialize_blob(
+                client,
+                self._payload_cache,
+                spec.importer.payload.blob_id,
+                spec.importer.payload.sha256,
+            ),
+        )
+        env["KITARU_JOB_PLUGIN_PATH"] = str(code)
+        env["KITARU_JOB_PAYLOAD_PATH"] = str(payload)
+        return JobProcess(
+            command=import_command(inline_dependencies(code)),
+            working_dir=None,
+            env=env,
+            timeout_seconds=IMPORT_TIMEOUT_SECONDS,
+        )
 
 
 class Runner:
@@ -579,12 +818,33 @@ class Runner:
         self._concurrency = concurrency
         self._claim_batch_size = claim_batch_size or concurrency
         self._poll_interval = poll_interval
-        self._job_runner = JobRunner(
-            api_url=api_url, api_key=api_key, heartbeat_interval=heartbeat_interval
-        )
+        self._heartbeat_interval = heartbeat_interval
+        self._job_runner = JobRunner(api_url=api_url, api_key=api_key)
+
+    @contextlib.asynccontextmanager
+    async def _heartbeating(
+        self, client: KitaruAPIClient, worker_id: uuid.UUID
+    ) -> AsyncIterator[WorkerHeartbeat]:
+        """Run one worker heartbeat for the duration of the block.
+
+        Args:
+            client: API client.
+            worker_id: Id of the registered worker.
+
+        Yields:
+            Heartbeat the executed jobs register with.
+        """
+        heartbeat = WorkerHeartbeat(client, worker_id, self._heartbeat_interval)
+        task = asyncio.create_task(heartbeat.run())
+        try:
+            yield heartbeat
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     async def run_job(self, job_id: uuid.UUID) -> JobResponse:
-        """Claim and execute a standalone job.
+        """Claim and execute a standalone job, including its score jobs.
 
         Args:
             job_id: Id of the job.
@@ -604,7 +864,37 @@ class Runner:
             await client.jobs.claim_standalone(
                 job_id, StandaloneJobClaimRequest(worker_id=worker_id)
             )
-            return await self._job_runner.execute(client, job_id)
+            async with self._heartbeating(client, worker_id) as heartbeat:
+                job = await self._job_runner.execute(client, job_id, heartbeat)
+            if job.status is not JobStatus.SCORING:
+                return job
+            return await self._run_children(client, worker_id, job_id)
+
+    async def _run_children(
+        self, client: KitaruAPIClient, worker_id: uuid.UUID, job_id: uuid.UUID
+    ) -> JobResponse:
+        """Execute the jobs fanned out from a job until it is terminal.
+
+        Args:
+            client: API client.
+            worker_id: Id of the registered worker.
+            job_id: Id of the parent job.
+
+        Raises:
+            APIError: A claim or job read failed.
+
+        Returns:
+            Terminal parent job.
+        """
+
+        async def parent_is_terminal() -> bool:
+            job = await client.jobs.get(job_id)
+            return job.status in _TERMINAL_JOB_STATUSES
+
+        await self._claim_loop(
+            client, worker_id, parent_is_terminal, parent_job_id=job_id
+        )
+        return await client.jobs.get(job_id)
 
     async def run_experiment_run(self, run_id: uuid.UUID) -> ExperimentRunResponse:
         """Execute the jobs of an experiment run until it is terminal.
@@ -665,6 +955,7 @@ class Runner:
         should_stop: Callable[[], Awaitable[bool]],
         agent_ids: list[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
+        parent_job_id: uuid.UUID | None = None,
     ) -> None:
         """Claim and execute jobs until an empty claim meets the stop condition.
 
@@ -674,50 +965,58 @@ class Runner:
             should_stop: Condition checked after an empty claim.
             agent_ids: Ids of the agents to claim for.
             experiment_run_id: Id of the experiment run to claim for.
+            parent_job_id: Id of the job whose fanned out jobs to claim
+                for.
 
         Raises:
             APIError: A claim or stop condition read failed.
         """
         semaphore = asyncio.Semaphore(self._concurrency)
-        while True:
-            claim = await client.jobs.claim(
-                JobClaimRequest(
-                    worker_id=worker_id,
-                    max_jobs=self._claim_batch_size,
-                    agent_ids=agent_ids,
-                    experiment_run_id=experiment_run_id,
-                )
-            )
-            if claim.jobs:
-                await asyncio.gather(
-                    *(
-                        self._execute_claimed(client, semaphore, job.id)
-                        for job in claim.jobs
+        async with self._heartbeating(client, worker_id) as heartbeat:
+            while True:
+                claim = await client.jobs.claim(
+                    JobClaimRequest(
+                        worker_id=worker_id,
+                        max_jobs=self._claim_batch_size,
+                        agent_ids=agent_ids,
+                        experiment_run_id=experiment_run_id,
+                        parent_job_id=parent_job_id,
                     )
                 )
-                continue
-            if await should_stop():
-                return
-            await asyncio.sleep(self._poll_interval)
+                if claim.jobs:
+                    await asyncio.gather(
+                        *(
+                            self._execute_claimed(client, semaphore, heartbeat, claimed)
+                            for claimed in claim.jobs
+                        )
+                    )
+                    continue
+                if await should_stop():
+                    return
+                await asyncio.sleep(self._poll_interval)
 
     async def _execute_claimed(
         self,
         client: KitaruAPIClient,
         semaphore: asyncio.Semaphore,
-        job_id: uuid.UUID,
+        heartbeat: WorkerHeartbeat,
+        claimed: ClaimedJobResponse,
     ) -> None:
         """Execute a claimed job within the concurrency bound.
 
         Args:
             client: API client.
             semaphore: Concurrency bound.
-            job_id: Id of the job.
+            heartbeat: Heartbeat reporting the job while it runs.
+            claimed: Claimed job and its spec.
         """
         async with semaphore:
             try:
-                await self._job_runner.execute(client, job_id)
+                await self._job_runner.execute(
+                    client, claimed.job.id, heartbeat, spec=claimed.spec
+                )
             except Exception:
-                logger.exception("Job %s failed", job_id)
+                logger.exception("Job %s failed", claimed.job.id)
 
     async def _register_worker(
         self, client: KitaruAPIClient, agent_ids: list[uuid.UUID] | None = None

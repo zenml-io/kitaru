@@ -172,7 +172,8 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     jobs = response.json()["jobs"]
     assert len(jobs) == 1
-    job_id = jobs[0]["id"]
+    job_id = jobs[0]["job"]["id"]
+    assert jobs[0]["spec"]["job_id"] == job_id
     response = await client.get(f"/v1/experiment-runs/{run_id}")
     assert response.json()["status"] == "running"
 
@@ -180,16 +181,18 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     spec = response.json()
     assert spec["inputs"] == {"prompt": "weather?"}
-    assert spec["score_baselines"] is True
+    assert spec["scorer"] is None
     assert spec["run"]["env"] == {"MODE": "replay"}
     assert spec["secret_env"] == {"OPENAI_API_KEY": "sk-1"}
     assert spec["tool_policy"]["default"]["type"] == "history"
 
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
-    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
+    response = await client.post(
+        f"/v1/workers/{worker_id}/heartbeat", json={"job_ids": [job_id]}
+    )
     assert response.status_code == 200
-    assert response.json() == {"status": "running", "canceled": False}
+    assert response.json() == {"abandon": []}
 
     response = await client.post(
         "/v1/sessions",
@@ -232,15 +235,30 @@ async def test_runner_loop_end_to_end(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
 
-    response = await client.patch(
-        f"/v1/jobs/{job_id}",
-        json={
-            "status": "completed",
-            "passed": True,
-            "score": 0.8,
-            "scores": {"conciseness": 0.8},
-        },
+    response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "scoring"
+
+    response = await client.post(
+        "/v1/jobs/claim",
+        json={"worker_id": worker_id, "max_jobs": 5, "experiment_run_id": run_id},
     )
+    assert response.status_code == 200
+    children = [claimed["job"] for claimed in response.json()["jobs"]]
+    assert len(children) == 2
+    assert all(child["kind"] == "score" for child in children)
+    assert all(child["parent_job_id"] == job_id for child in children)
+    for child in children:
+        response = await client.patch(
+            f"/v1/jobs/{child['id']}", json={"status": "running"}
+        )
+        assert response.status_code == 200
+        response = await client.patch(
+            f"/v1/jobs/{child['id']}", json={"status": "completed", "score": 0.8}
+        )
+        assert response.status_code == 200
+
+    response = await client.get(f"/v1/jobs/{job_id}")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
 
+    MAX_BLOB_SIZE_BYTES: int = 104_857_600
+
     DB_HOST: str | None = None
     DB_PORT: int = 5432
     DB_USER: str = "postgres"

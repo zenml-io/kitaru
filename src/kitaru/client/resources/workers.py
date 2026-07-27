@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.workers import (
     WorkerCreateRequest,
+    WorkerHeartbeatRequest,
+    WorkerHeartbeatResponse,
     WorkerResponse,
 )
 
@@ -99,6 +101,29 @@ class WorkersResource:
             params["name"] = name
         response = await self._client.request("GET", "/v1/workers", params=params)
         return Page[WorkerResponse].model_validate(response.json())
+
+    async def heartbeat(
+        self, worker_id: uuid.UUID, request: WorkerHeartbeatRequest
+    ) -> WorkerHeartbeatResponse:
+        """Record one worker heartbeat on the jobs it reports as in flight.
+
+        Args:
+            worker_id: Id of the worker.
+            request: Worker heartbeat request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                worker.
+
+        Returns:
+            Job ids the worker should stop working on.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/workers/{worker_id}/heartbeat",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return WorkerHeartbeatResponse.model_validate(response.json())
 
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker.

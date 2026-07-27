@@ -49,7 +49,7 @@ async def test_create_session_run(client: httpx.AsyncClient) -> None:
     assert body["status"] == "pending"
     assert body["execution_target"] == "pool"
     assert body["experiment_run_id"] is None
-    assert body["original_session_id"] is None
+    assert body["input_session_id"] is None
     assert body["tool_policy"] is None
     assert body["scoring_policy"] is None
 
@@ -123,8 +123,9 @@ async def test_session_run_lifecycle_through_job_routes(
     )
     assert response.status_code == 200
     claimed = response.json()["jobs"]
-    assert [job["id"] for job in claimed] == [job_id]
-    assert claimed[0]["worker_id"] == worker_id
+    assert [entry["job"]["id"] for entry in claimed] == [job_id]
+    assert claimed[0]["job"]["worker_id"] == worker_id
+    assert claimed[0]["spec"]["inputs"] == {"prompt": "hi"}
 
     response = await client.get(f"/v1/jobs/{job_id}/spec")
     assert response.status_code == 200
@@ -135,8 +136,8 @@ async def test_session_run_lifecycle_through_job_routes(
         "inputs": {"prompt": "hi"},
         "override": None,
         "tool_policy": None,
-        "scoring_policy": None,
-        "score_baselines": None,
+        "scorer": None,
+        "importer": None,
         "run": {
             "command": "python agent.py",
             "working_dir": None,
@@ -144,7 +145,7 @@ async def test_session_run_lifecycle_through_job_routes(
             "timeout_seconds": 600,
         },
         "secret_env": {},
-        "original_session_id": None,
+        "input_session_id": None,
         "name": "smoke",
     }
 

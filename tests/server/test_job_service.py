@@ -18,15 +18,17 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeBlobRepository,
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
     FakeJobRepository,
+    FakePluginRepository,
     FakeReplayConfigRepository,
     FakeSecretRepository,
     FakeSessionNodeRepository,
@@ -37,6 +39,7 @@ from conftest import (
 from kitaru.hashing import tool_call_cache_key
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.jobs import (
+    ImportCreate,
     JobFilter,
     JobUpdate,
     ReplayCreate,
@@ -44,7 +47,7 @@ from kitaru.server.application.models.jobs import (
 )
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent import Agent, AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionNotRunnable,
@@ -52,6 +55,7 @@ from kitaru.server.domain.agent_version import (
     NoRunnableAgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.blob import Blob, BlobNotFound
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import Experiment
@@ -62,6 +66,11 @@ from kitaru.server.domain.experiment_run import (
 )
 from kitaru.server.domain.job import (
     HEARTBEAT_TIMEOUT_ERROR,
+    MAX_IMPORT_FAILURES,
+    DuplicateScoreJob,
+    Import,
+    ImportFailure,
+    ImportStats,
     InvalidJob,
     InvalidJobTransition,
     InvalidToolLookup,
@@ -70,24 +79,36 @@ from kitaru.server.domain.job import (
     JobKind,
     JobKindMismatch,
     JobMissingResultSession,
+    JobMissingScore,
+    JobMissingStats,
     JobNotActive,
     JobNotFound,
     JobNotStandalone,
     JobStatus,
     Replay,
+    Score,
+)
+from kitaru.server.domain.plugin import (
+    Plugin,
+    PluginFormat,
+    PluginKind,
+    PluginNameNotFound,
+    PluginVersion,
+    PluginVersionNotFound,
 )
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     HistoryScope,
     InvalidReplayConfig,
     PassthroughPolicy,
+    RegistryScorerConfig,
     ReplayConfig,
     ReplayConfigNotFound,
     ReplayOverride,
-    ScorerConfig,
     ScoringPolicy,
     ScoringResult,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.secret import Secret, SecretNotFound
@@ -95,6 +116,7 @@ from kitaru.server.domain.session import (
     Session,
     SessionNotFound,
     SessionOrigin,
+    SessionProvider,
     SessionStatus,
 )
 from kitaru.server.domain.session_node import (
@@ -111,7 +133,7 @@ OTHER_WORKER_ID = uuid.uuid4()
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
-        ScorerConfig(
+        SourceScorerConfig(
             name="conciseness",
             source=SourceRef(module="my_pkg.scorers", attribute="conciseness"),
         )
@@ -154,9 +176,17 @@ def repository(
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(session_repository, version_repository, config_repository)
+    return FakeJobRepository(
+        session_repository,
+        version_repository,
+        config_repository,
+        plugin_repository,
+        blob_repository,
+    )
 
 
 @pytest.fixture
@@ -201,6 +231,18 @@ def secret_repository() -> FakeSecretRepository:
 
 
 @pytest.fixture
+def blob_repository() -> FakeBlobRepository:
+    """Provide a fake blob repository."""
+    return FakeBlobRepository()
+
+
+@pytest.fixture
+def plugin_repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
+    """Provide a fake plugin repository."""
+    return FakePluginRepository(blob_repository)
+
+
+@pytest.fixture
 def worker_repository() -> FakeWorkerRepository:
     """Provide a fake worker repository."""
     return FakeWorkerRepository()
@@ -223,6 +265,7 @@ def service(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -230,12 +273,15 @@ def service(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> JobService:
     """Provide a job service backed by the fake repositories."""
     return JobService(
         repository=repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
+        agent_repository=agent_repository,
         agent_version_repository=version_repository,
         session_node_repository=node_repository,
         experiment_run_repository=run_repository,
@@ -243,6 +289,8 @@ def service(
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
+        blob_repository=blob_repository,
         heartbeat_timeout_seconds=60,
         max_attempts=3,
         worker_liveness_timeout_seconds=60,
@@ -308,7 +356,7 @@ def replay_create(session_id: uuid.UUID, **overrides: object) -> ReplayCreate:
         Replay create command.
     """
     values: dict[str, object] = {
-        "original_session_id": session_id,
+        "input_session_id": session_id,
         "scoring_policy": SCORING_POLICY,
         **overrides,
     }
@@ -325,7 +373,7 @@ async def test_create_replay_defaults(
     session = await create_session(session_repository, agent.id)
     job, config = await service.create_replay(replay_create(session.id), actor=ACTOR)
     assert job.experiment_run_id is None
-    assert job.original_session_id == session.id
+    assert job.input_session_id == session.id
     assert job.result_session_id is None
     assert job.agent_version_id == version.id
     assert job.replay_config_id == config.id
@@ -506,7 +554,7 @@ async def test_list_jobs_filters(
     assert total == 2
 
     jobs, total = await service.list_jobs(
-        JobFilter(original_session_id=first.id), actor=ACTOR
+        JobFilter(input_session_id=first.id), actor=ACTOR
     )
     assert total == 1
     assert jobs[0][0].id == job_one.id
@@ -543,7 +591,8 @@ def run_job(**overrides: object) -> Replay:
         "experiment_run_id": uuid.uuid4(),
         "replay_config_id": uuid.uuid4(),
         "agent_version_id": uuid.uuid4(),
-        "original_session_id": uuid.uuid4(),
+        "input_session_id": uuid.uuid4(),
+        "execution_target": ExecutionTarget.POOL,
         **overrides,
     }
     return Replay.model_validate(values)
@@ -667,6 +716,7 @@ def test_job_retry_requires_finished() -> None:
     completed = run_job(experiment_run_id=None)
     completed.start()
     completed.link_result_session(uuid.uuid4())
+    completed.enter_scoring()
     completed.complete(ScoringResult(passed=True, score=1.0, scores={}), diff=None)
     with pytest.raises(InvalidJobTransition):
         completed.retry()
@@ -678,6 +728,7 @@ def test_job_complete_records_result() -> None:
     job.claim(WORKER_ID)
     job.start()
     job.link_result_session(uuid.uuid4())
+    job.enter_scoring()
     job.complete(
         ScoringResult(passed=True, score=0.8, scores={"conciseness": 0.8}),
         diff={"cost_delta": "-0.1"},
@@ -723,17 +774,10 @@ def test_job_cancel() -> None:
         job.cancel()
 
 
-def test_job_heartbeat_and_link() -> None:
-    """Record heartbeats and link the result session while active."""
+def test_job_link_result_session() -> None:
+    """Link the result session while active, once."""
     job = run_job()
-    with pytest.raises(JobNotActive):
-        job.heartbeat()
     job.claim(WORKER_ID)
-    before = job.heartbeat_at
-    job.heartbeat()
-    assert job.heartbeat_at is not None
-    assert before is not None
-    assert job.heartbeat_at >= before
 
     session_id = uuid.uuid4()
     job.link_result_session(session_id)
@@ -843,7 +887,8 @@ async def seed_run(
             experiment_run_id=run.id,
             replay_config_id=config.id,
             agent_version_id=version.id,
-            original_session_id=session.id,
+            input_session_id=session.id,
+            execution_target=run.execution_target,
         )
         for session in sessions
     ]
@@ -909,10 +954,9 @@ async def test_get_spec_standalone(
     assert spec.inputs == {"prompt": "hi"}
     assert spec.override == override
     assert spec.tool_policy == config.tool_policy
-    assert spec.scoring_policy == SCORING_POLICY
-    assert spec.score_baselines is True
+    assert spec.scorer is None
     assert spec.run_spec == version.run_spec
-    assert spec.original_session_id == session.id
+    assert spec.input_session_id == session.id
     assert {
         name: value.get_secret_value() for name, value in spec.secret_env.items()
     } == {"OPENAI_API_KEY": "sk-1", "SHARED": "second"}
@@ -941,35 +985,6 @@ async def test_get_spec_applies_prompt_override(
     spec = await service.get_spec(job.id, actor=ACTOR)
     assert spec.inputs == "rewritten task"
     assert spec.run_spec == version.run_spec
-
-
-async def test_get_spec_run_job_carries_score_baselines(
-    service: JobService,
-    repository: FakeJobRepository,
-    session_repository: FakeSessionRepository,
-    cohort_repository: FakeCohortRepository,
-    config_repository: FakeReplayConfigRepository,
-    experiment_repository: FakeExperimentRepository,
-    run_repository: FakeExperimentRunRepository,
-    agent: Agent,
-    version: AgentVersion,
-) -> None:
-    """Resolve a run job spec with the run's baseline scoring flag."""
-    session = await create_session(session_repository, agent.id)
-    _, jobs = await seed_run(
-        session_repository,
-        cohort_repository,
-        config_repository,
-        experiment_repository,
-        run_repository,
-        repository,
-        agent,
-        version,
-        [session],
-        score_baselines=False,
-    )
-    spec = await service.get_spec(jobs[0].id, actor=ACTOR)
-    assert spec.score_baselines is False
 
 
 async def test_get_spec_version_without_run_spec(
@@ -1046,6 +1061,35 @@ async def link_result_session(
     return result
 
 
+async def run_score_jobs(
+    service: JobService,
+    repository: FakeJobRepository,
+    job_id: uuid.UUID,
+    scores: dict[str, float],
+) -> None:
+    """Run every score job of a replay to completion.
+
+    Args:
+        service: Job service.
+        repository: Fake job repository.
+        job_id: Id of the parent replay.
+        scores: Score values by scorer name.
+    """
+    for child in await repository.list_children(job_id):
+        assert isinstance(child, Score)
+        await service.update_job(
+            child.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR
+        )
+        await service.update_job(
+            child.id,
+            JobUpdate(
+                status=JobStatus.COMPLETED,
+                score=scores[child.scorer_config.name],
+            ),
+            actor=ACTOR,
+        )
+
+
 async def test_update_job_standalone_lifecycle(
     service: JobService,
     repository: FakeJobRepository,
@@ -1063,16 +1107,13 @@ async def test_update_job_standalone_lifecycle(
     assert updated.started_at is not None
 
     result = await link_result_session(repository, session_repository, job.id, agent.id)
-    completed, _ = await service.update_job(
-        job.id,
-        JobUpdate(
-            status=JobStatus.COMPLETED,
-            passed=True,
-            score=0.8,
-            scores={"conciseness": 0.8},
-        ),
-        actor=ACTOR,
+    scoring, _ = await service.update_job(
+        job.id, JobUpdate(status=JobStatus.SCORING), actor=ACTOR
     )
+    assert scoring.status is JobStatus.SCORING
+
+    await run_score_jobs(service, repository, job.id, {"conciseness": 0.8})
+    completed = await repository.get(job.id)
     assert isinstance(completed, Replay)
     assert completed.status is JobStatus.COMPLETED
     assert completed.result_session_id == result.id
@@ -1090,14 +1131,14 @@ async def test_update_job_standalone_lifecycle(
     }
 
 
-async def test_update_job_completed_requires_scoring_result(
+async def test_update_job_rejects_worker_completion(
     service: JobService,
     repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject completing without the full scoring result."""
+    """Reject completing a replay from the worker."""
     session = await create_session(session_repository, agent.id)
     job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
@@ -1105,22 +1146,20 @@ async def test_update_job_completed_requires_scoring_result(
     running.link_result_session(session.id)
     await repository.update(running)
     with pytest.raises(
-        InvalidJob, match="Completing a replay requires passed, score, and scores"
+        InvalidJob, match="Replays complete once their score jobs finish"
     ):
         await service.update_job(
-            job.id,
-            JobUpdate(status=JobStatus.COMPLETED, passed=True),
-            actor=ACTOR,
+            job.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
         )
 
 
-async def test_update_job_completed_requires_result_session(
+async def test_update_job_scoring_requires_result_session(
     service: JobService,
     session_repository: FakeSessionRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Reject completing an unlinked job."""
+    """Reject entering scoring on an unlinked job."""
     session = await create_session(session_repository, agent.id)
     job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
@@ -1129,9 +1168,7 @@ async def test_update_job_completed_requires_result_session(
         match=f"Job {job.id} has no result session",
     ):
         await service.update_job(
-            job.id,
-            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
-            actor=ACTOR,
+            job.id, JobUpdate(status=JobStatus.SCORING), actor=ACTOR
         )
 
 
@@ -1146,12 +1183,10 @@ async def test_update_job_illegal_transitions(
     job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
     with pytest.raises(
         InvalidJobTransition,
-        match=f"Job {job.id} cannot transition from 'pending' to 'completed'",
+        match=f"Job {job.id} cannot transition from 'pending' to 'scoring'",
     ):
         await service.update_job(
-            job.id,
-            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
-            actor=ACTOR,
+            job.id, JobUpdate(status=JobStatus.SCORING), actor=ACTOR
         )
     with pytest.raises(InvalidJobTransition):
         await service.update_job(
@@ -1218,15 +1253,9 @@ async def test_update_job_finalizes_run(
     running.link_result_session(result.id)
     await repository.update(running)
     await service.update_job(
-        second.id,
-        JobUpdate(
-            status=JobStatus.COMPLETED,
-            passed=True,
-            score=0.9,
-            scores={"conciseness": 0.9},
-        ),
-        actor=ACTOR,
+        second.id, JobUpdate(status=JobStatus.SCORING), actor=ACTOR
     )
+    await run_score_jobs(service, repository, second.id, {"conciseness": 0.9})
     finalized = await run_repository.get(run.id)
     assert finalized.status is ExperimentRunStatus.FAILED
     assert finalized.error == "1 of 2 jobs failed"
@@ -1240,7 +1269,7 @@ async def test_update_job_finalizes_run(
     assert finalized.summary["total_cost"]["replay"] == pytest.approx(0.1)
 
 
-async def test_heartbeat_job(
+async def test_heartbeat_worker_touches_owned_active_jobs(
     service: JobService,
     repository: FakeJobRepository,
     session_repository: FakeSessionRepository,
@@ -1248,10 +1277,76 @@ async def test_heartbeat_job(
     config_repository: FakeReplayConfigRepository,
     experiment_repository: FakeExperimentRepository,
     run_repository: FakeExperimentRunRepository,
+    worker_repository: FakeWorkerRepository,
+    worker: Worker,
+    other_worker: Worker,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
-    """Record heartbeats and report cancellation."""
+    """Record one heartbeat per owned active job and bump the worker."""
+    sessions = [await create_session(session_repository, agent.id) for _ in range(2)]
+    run, jobs = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        sessions,
+    )
+    owned, foreign = jobs
+    await repository.claim_pending(worker.id, 1, experiment_run_id=run.id)
+    await repository.claim_pending(other_worker.id, 1, experiment_run_id=run.id)
+    before = worker.last_seen_at
+
+    abandon = await service.heartbeat_worker(
+        worker.id, [owned.id, foreign.id], actor=ACTOR
+    )
+
+    assert abandon == [foreign.id]
+    assert (await repository.get(owned.id)).heartbeat_at is not None
+    assert (await worker_repository.get(worker.id)).last_seen_at > before
+
+
+async def test_heartbeat_worker_abandons_terminal_and_unknown_jobs(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Abandon reported jobs the heartbeat does not reach."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await repository.claim_pending(worker.id, 1)
+    terminal = await repository.get(job.id)
+    terminal.cancel()
+    await repository.update(terminal)
+    missing_id = uuid.uuid4()
+
+    abandon = await service.heartbeat_worker(
+        worker.id, [job.id, missing_id], actor=ACTOR
+    )
+
+    assert abandon == [job.id, missing_id]
+
+
+async def test_heartbeat_worker_abandons_jobs_of_a_canceling_run(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Abandon a reached job whose experiment run is canceling."""
     session = await create_session(session_repository, agent.id)
     run, jobs = await seed_run(
         session_repository,
@@ -1265,61 +1360,30 @@ async def test_heartbeat_job(
         [session],
     )
     job = jobs[0]
-    with pytest.raises(JobNotActive, match=f"Job {job.id} is not claimed or running"):
-        await service.heartbeat_job(job.id, actor=ACTOR)
-
-    await repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
-    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
-        JobStatus.CLAIMED,
-        False,
-    )
-    heartbeat_at = (await repository.get(job.id)).heartbeat_at
-    assert heartbeat_at is not None
+    await repository.claim_pending(worker.id, 1, experiment_run_id=run.id)
+    assert await service.heartbeat_worker(worker.id, [job.id], actor=ACTOR) == []
 
     canceling = await run_repository.get(run.id)
     canceling.cancel()
     await run_repository.update(canceling)
-    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
-        JobStatus.CLAIMED,
-        True,
-    )
 
-    canceled = await repository.get(job.id)
-    canceled.cancel()
-    await repository.update(canceled)
-    assert await service.heartbeat_job(job.id, actor=ACTOR) == (
-        JobStatus.CANCELED,
-        True,
-    )
+    assert await service.heartbeat_worker(worker.id, [job.id], actor=ACTOR) == [job.id]
 
 
-async def test_heartbeat_job_stops_on_terminal_statuses(
+async def test_heartbeat_worker_requires_a_registered_worker(
     service: JobService,
-    repository: FakeJobRepository,
-    session_repository: FakeSessionRepository,
-    agent: Agent,
-    version: AgentVersion,
 ) -> None:
-    """Report the stop flag for every terminal status without recording."""
-    for status in (
-        JobStatus.COMPLETED,
-        JobStatus.FAILED,
-        JobStatus.TIMED_OUT,
-        JobStatus.CANCELED,
-    ):
-        session = await create_session(session_repository, agent.id)
-        job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
-        stored = await repository.get(job.id)
-        stored = stored.model_copy(update={"status": status})
-        stored = await repository.update(stored)
-        assert await service.heartbeat_job(job.id, actor=ACTOR) == (status, True)
-        assert (await repository.get(job.id)).heartbeat_at is None
+    """Reject a heartbeat from an unknown worker."""
+    worker_id = uuid.uuid4()
+    with pytest.raises(WorkerNotFound, match=f"Worker {worker_id} was not found"):
+        await service.heartbeat_worker(worker_id, [], actor=ACTOR)
 
 
 def build_service(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -1327,6 +1391,8 @@ def build_service(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
     heartbeat_timeout_seconds: int = 60,
     max_attempts: int = 3,
 ) -> JobService:
@@ -1336,6 +1402,7 @@ def build_service(
         repository: Fake job repository.
         config_repository: Fake replay config repository.
         session_repository: Fake session repository.
+        agent_repository: Fake agent repository.
         version_repository: Fake agent version repository.
         node_repository: Fake session node repository.
         run_repository: Fake experiment run repository.
@@ -1343,6 +1410,8 @@ def build_service(
         cohort_repository: Fake cohort repository.
         secret_repository: Fake secret repository.
         worker_repository: Fake worker repository.
+        plugin_repository: Fake plugin repository.
+        blob_repository: Fake blob repository.
         heartbeat_timeout_seconds: Heartbeat timeout, negative values mark
             every claim stale immediately.
         max_attempts: Attempt count at which a stale job times out.
@@ -1354,6 +1423,7 @@ def build_service(
         repository=repository,
         replay_config_repository=config_repository,
         session_repository=session_repository,
+        agent_repository=agent_repository,
         agent_version_repository=version_repository,
         session_node_repository=node_repository,
         experiment_run_repository=run_repository,
@@ -1361,6 +1431,8 @@ def build_service(
         cohort_repository=cohort_repository,
         secret_repository=secret_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
+        blob_repository=blob_repository,
         heartbeat_timeout_seconds=heartbeat_timeout_seconds,
         max_attempts=max_attempts,
         worker_liveness_timeout_seconds=60,
@@ -1441,6 +1513,7 @@ async def test_claim_job_resolves_stale_claim(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -1448,6 +1521,8 @@ async def test_claim_job_resolves_stale_claim(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
     worker: Worker,
     other_worker: Worker,
     agent: Agent,
@@ -1458,6 +1533,7 @@ async def test_claim_job_resolves_stale_claim(
         repository,
         config_repository,
         session_repository,
+        agent_repository,
         version_repository,
         node_repository,
         run_repository,
@@ -1465,6 +1541,8 @@ async def test_claim_job_resolves_stale_claim(
         cohort_repository,
         secret_repository,
         worker_repository,
+        plugin_repository,
+        blob_repository,
         heartbeat_timeout_seconds=-60,
     )
     session = await create_session(session_repository, agent.id)
@@ -1483,6 +1561,7 @@ async def test_claim_job_times_out_exhausted_stale_claim(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -1490,6 +1569,8 @@ async def test_claim_job_times_out_exhausted_stale_claim(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
     worker: Worker,
     other_worker: Worker,
     agent: Agent,
@@ -1500,6 +1581,7 @@ async def test_claim_job_times_out_exhausted_stale_claim(
         repository,
         config_repository,
         session_repository,
+        agent_repository,
         version_repository,
         node_repository,
         run_repository,
@@ -1507,6 +1589,8 @@ async def test_claim_job_times_out_exhausted_stale_claim(
         cohort_repository,
         secret_repository,
         worker_repository,
+        plugin_repository,
+        blob_repository,
         heartbeat_timeout_seconds=-60,
         max_attempts=1,
     )
@@ -1867,7 +1951,7 @@ async def test_tool_lookup_cohort_scope(
         sessions,
         tool_policy=ToolPolicyConfig(default=HistoryPolicy(scope=HistoryScope.COHORT)),
     )
-    job = next(entry for entry in jobs if entry.original_session_id == sessions[0].id)
+    job = next(entry for entry in jobs if entry.input_session_id == sessions[0].id)
     found = await service.tool_lookup(
         job.id,
         "get_weather",
@@ -1912,7 +1996,8 @@ async def test_tool_lookup_cohort_scope_standalone(
         Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
-            original_session_id=session.id,
+            input_session_id=session.id,
+            execution_target=ExecutionTarget.POOL,
         )
     )
     inputs = {"city": "Berlin"}
@@ -2029,6 +2114,7 @@ async def test_get_job_reports_staleness(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -2036,6 +2122,8 @@ async def test_get_job_reports_staleness(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
     agent: Agent,
     version: AgentVersion,
 ) -> None:
@@ -2044,6 +2132,7 @@ async def test_get_job_reports_staleness(
         repository,
         config_repository,
         session_repository,
+        agent_repository,
         version_repository,
         node_repository,
         run_repository,
@@ -2051,6 +2140,8 @@ async def test_get_job_reports_staleness(
         cohort_repository,
         secret_repository,
         worker_repository,
+        plugin_repository,
+        blob_repository,
         heartbeat_timeout_seconds=-60,
     )
     session = await create_session(session_repository, agent.id)
@@ -2275,9 +2366,8 @@ async def test_get_spec_session_run(
     assert spec.name == "smoke"
     assert spec.override is None
     assert spec.tool_policy is None
-    assert spec.scoring_policy is None
-    assert spec.score_baselines is None
-    assert spec.original_session_id is None
+    assert spec.scorer is None
+    assert spec.input_session_id is None
     assert spec.run_spec == version.run_spec
 
 
@@ -2322,13 +2412,10 @@ async def test_update_session_run_lifecycle(
         )
 
     await link_result_session(repository, session_repository, job.id, agent.id)
-    with pytest.raises(
-        InvalidJob,
-        match="Completing a session run rejects passed, score, and scores",
-    ):
+    with pytest.raises(InvalidJob, match="Only score jobs record a score"):
         await service.update_job(
             job.id,
-            JobUpdate(status=JobStatus.COMPLETED, passed=True, score=1.0, scores={}),
+            JobUpdate(status=JobStatus.COMPLETED, score=1.0),
             actor=ACTOR,
         )
 
@@ -2420,15 +2507,19 @@ async def test_claim_jobs_run_scope(
         max_jobs=1,
         agent_ids=None,
         experiment_run_id=run.id,
+        parent_job_id=None,
         actor=ACTOR,
     )
     assert len(claimed) == 1
-    job, config = claimed[0]
+    job, config, spec = claimed[0]
     assert job.status is JobStatus.CLAIMED
     assert job.worker_id == worker.id
     assert job.claimed_at is not None
     assert config is not None
     assert config.scoring_policy == SCORING_POLICY
+    assert spec.job_id == job.id
+    assert spec.kind is JobKind.REPLAY
+    assert spec.run_spec is not None
     started = await run_repository.get(run.id)
     assert started.status is ExperimentRunStatus.RUNNING
     assert started.started_at is not None
@@ -2439,6 +2530,7 @@ async def test_claim_jobs_run_scope(
         max_jobs=5,
         agent_ids=None,
         experiment_run_id=run.id,
+        parent_job_id=None,
         actor=ACTOR,
     )
     assert len(remaining) == 1
@@ -2450,6 +2542,7 @@ async def test_claim_jobs_run_scope(
             max_jobs=5,
             agent_ids=None,
             experiment_run_id=run.id,
+            parent_job_id=None,
             actor=ACTOR,
         )
         == []
@@ -2465,6 +2558,7 @@ async def test_claim_jobs_unknown_worker(service: JobService) -> None:
             max_jobs=1,
             agent_ids=None,
             experiment_run_id=None,
+            parent_job_id=None,
             actor=ACTOR,
         )
 
@@ -2480,6 +2574,7 @@ async def test_claim_jobs_unknown_run(service: JobService, worker: Worker) -> No
             max_jobs=1,
             agent_ids=None,
             experiment_run_id=missing_id,
+            parent_job_id=None,
             actor=ACTOR,
         )
 
@@ -2518,6 +2613,7 @@ async def test_claim_jobs_canceling_run_returns_empty(
             max_jobs=5,
             agent_ids=None,
             experiment_run_id=run.id,
+            parent_job_id=None,
             actor=ACTOR,
         )
         == []
@@ -2528,6 +2624,7 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
     repository: FakeJobRepository,
     config_repository: FakeReplayConfigRepository,
     session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
     version_repository: FakeAgentVersionRepository,
     node_repository: FakeSessionNodeRepository,
     run_repository: FakeExperimentRunRepository,
@@ -2535,6 +2632,8 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
     cohort_repository: FakeCohortRepository,
     secret_repository: FakeSecretRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
     worker: Worker,
     other_worker: Worker,
     agent: Agent,
@@ -2545,6 +2644,7 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
         repository,
         config_repository,
         session_repository,
+        agent_repository,
         version_repository,
         node_repository,
         run_repository,
@@ -2552,6 +2652,8 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
         cohort_repository,
         secret_repository,
         worker_repository,
+        plugin_repository,
+        blob_repository,
         heartbeat_timeout_seconds=-60,
         max_attempts=2,
     )
@@ -2572,6 +2674,7 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
         max_jobs=5,
         agent_ids=None,
         experiment_run_id=run.id,
+        parent_job_id=None,
         actor=ACTOR,
     )
     assert len(first) == 2
@@ -2580,10 +2683,11 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
         max_jobs=5,
         agent_ids=None,
         experiment_run_id=run.id,
+        parent_job_id=None,
         actor=ACTOR,
     )
     assert len(second) == 2
-    for job, _ in second:
+    for job, _, _ in second:
         assert job.worker_id == other_worker.id
         assert job.attempt == 2
 
@@ -2593,6 +2697,7 @@ async def test_claim_jobs_requeues_and_times_out_stale_jobs(
             max_jobs=5,
             agent_ids=None,
             experiment_run_id=run.id,
+            parent_job_id=None,
             actor=ACTOR,
         )
         == []
@@ -2656,9 +2761,10 @@ async def test_claim_jobs_unfiltered_yields_pool_work_only(
         max_jobs=10,
         agent_ids=None,
         experiment_run_id=None,
+        parent_job_id=None,
         actor=ACTOR,
     )
-    claimed_ids = {job.id for job, _ in claimed}
+    claimed_ids = {job.id for job, _, _ in claimed}
     assert claimed_ids == {pool_job.id, run_jobs[0].id}
     assert on_demand_job.id not in claimed_ids
 
@@ -2694,9 +2800,10 @@ async def test_claim_jobs_agent_scope(
         max_jobs=10,
         agent_ids=[agent.id],
         experiment_run_id=None,
+        parent_job_id=None,
         actor=ACTOR,
     )
-    assert {job.id for job, _ in claimed} == {mine.id}
+    assert {job.id for job, _, _ in claimed} == {mine.id}
 
 
 async def test_list_jobs_kind_and_target_filters(
@@ -2729,3 +2836,1408 @@ async def test_list_jobs_kind_and_target_filters(
         JobFilter(execution_target=ExecutionTarget.ON_DEMAND), actor=ACTOR
     )
     assert total == 0
+
+
+async def register_scorer(
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    name: str,
+    versions: int = 1,
+) -> Plugin:
+    """Register a scorer plugin with code versions.
+
+    Args:
+        plugin_repository: Fake plugin repository.
+        blob_repository: Fake blob repository.
+        name: Scorer name.
+        versions: Number of versions to register.
+
+    Returns:
+        Stored plugin with the latest version counter set.
+    """
+    plugin = await plugin_repository.create(
+        Plugin(owner_id=ACTOR.account.id, kind=PluginKind.SCORER, name=name)
+    )
+    for index in range(versions):
+        blob = await blob_repository.create(
+            Blob(
+                owner_id=ACTOR.account.id,
+                sha256=f"{name}{index}".ljust(64, "0"),
+                size=4,
+                media_type="text/x-python",
+                data=b"code",
+            )
+        )
+        await plugin_repository.create_version(
+            PluginVersion(
+                plugin_id=plugin.id,
+                format=PluginFormat.INLINE,
+                blob_id=blob.id,
+                entrypoint="score",
+            )
+        )
+    return await plugin_repository.get(plugin.id)
+
+
+def registry_policy(
+    name: str = "relevance", version: int | None = None
+) -> ScoringPolicy:
+    """Build a scoring policy with one registry scorer.
+
+    Args:
+        name: Scorer name.
+        version: Registered version to run.
+
+    Returns:
+        Scoring policy.
+    """
+    return ScoringPolicy(
+        scorers=[RegistryScorerConfig(name=name, version=version)],
+        pass_threshold=0.5,
+    )
+
+
+async def enter_scoring(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    job_id: uuid.UUID,
+    agent_id: uuid.UUID,
+) -> Session:
+    """Run a replay up to the scoring hand-over.
+
+    Args:
+        service: Job service.
+        repository: Fake job repository.
+        session_repository: Fake session repository.
+        job_id: Id of the replay.
+        agent_id: Id of the agent.
+
+    Returns:
+        Linked result session.
+    """
+    await service.update_job(job_id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    result = await link_result_session(repository, session_repository, job_id, agent_id)
+    await service.update_job(job_id, JobUpdate(status=JobStatus.SCORING), actor=ACTOR)
+    return result
+
+
+def test_scoring_policy_evaluates_weighted_average() -> None:
+    """Weigh the scores and report the pass verdict."""
+    policy = ScoringPolicy(
+        scorers=[
+            SourceScorerConfig(
+                name="a", source=SourceRef(module="m", attribute="a"), weight=3
+            ),
+            SourceScorerConfig(
+                name="b", source=SourceRef(module="m", attribute="b"), weight=1
+            ),
+        ],
+        pass_threshold=0.5,
+    )
+    result = policy.evaluate({"a": 1.0, "b": 0.0})
+    assert result.score == pytest.approx(0.75)
+    assert result.passed is True
+    assert result.scores == {"a": 1.0, "b": 0.0}
+
+
+def test_scoring_policy_hard_fails_below_threshold() -> None:
+    """Fail outright when a scorer lands at or below its floor."""
+    policy = ScoringPolicy(
+        scorers=[
+            SourceScorerConfig(
+                name="a", source=SourceRef(module="m", attribute="a"), fail_below=0.5
+            )
+        ],
+        pass_threshold=0.1,
+    )
+    assert policy.evaluate({"a": 0.5}).passed is False
+    assert policy.evaluate({"a": 0.6}).passed is True
+
+
+def test_scoring_policy_rejects_zero_weight_and_missing_scores() -> None:
+    """Reject evaluating without weight or without every score."""
+    policy = ScoringPolicy(
+        scorers=[
+            SourceScorerConfig(
+                name="a", source=SourceRef(module="m", attribute="a"), weight=0
+            )
+        ],
+        pass_threshold=0.5,
+    )
+    with pytest.raises(
+        InvalidReplayConfig, match="Scoring policy has a total scorer weight of 0"
+    ):
+        policy.evaluate({"a": 1.0})
+    with pytest.raises(InvalidReplayConfig, match=r"Scorers \['a'\] have no score"):
+        policy.evaluate({})
+
+
+def test_replay_enter_scoring_requires_running_and_result_session() -> None:
+    """Hand a running replay with a result session over to scoring."""
+    job = run_job()
+    with pytest.raises(InvalidJobTransition):
+        job.enter_scoring()
+    job.claim(WORKER_ID)
+    job.start()
+    with pytest.raises(JobMissingResultSession):
+        job.enter_scoring()
+    job.link_result_session(uuid.uuid4())
+    job.enter_scoring()
+    assert job.status is JobStatus.SCORING
+
+
+def test_replay_scoring_is_never_stale() -> None:
+    """Leave a scoring replay untouched by the staleness rule."""
+    job = run_job()
+    job.claim(WORKER_ID)
+    job.start()
+    job.link_result_session(uuid.uuid4())
+    job.enter_scoring()
+    stale = datetime.now(UTC) + timedelta(seconds=60)
+    assert job.is_stale(stale) is False
+    assert job.with_staleness(stale, 3) is job
+
+
+def score_job(**overrides: object) -> Score:
+    """Build a score job entity.
+
+    Args:
+        **overrides: Field overrides.
+
+    Returns:
+        Score entity.
+    """
+    values: dict[str, object] = {
+        "parent_job_id": uuid.uuid4(),
+        "input_session_id": uuid.uuid4(),
+        "plugin_version_id": uuid.uuid4(),
+        "scorer_config": RegistryScorerConfig(name="relevance", version=1),
+        "execution_target": ExecutionTarget.POOL,
+        **overrides,
+    }
+    return Score.model_validate(values)
+
+
+def test_score_completes_with_a_recorded_score() -> None:
+    """Record a score on a running score job and complete it."""
+    job = score_job()
+    with pytest.raises(JobNotActive):
+        job.record_score(0.7)
+    job.claim(WORKER_ID)
+    job.start()
+    with pytest.raises(JobMissingScore, match=f"Job {job.id} has no score"):
+        job.complete()
+    job.record_score(0.7)
+    job.complete()
+    assert job.status is JobStatus.COMPLETED
+    assert job.score == 0.7
+    assert job.ended_at is not None
+
+
+def test_score_arm_invariants() -> None:
+    """Bind a score job to exactly one code reference."""
+    with pytest.raises(InvalidJob, match="Registry scorers carry no agent version"):
+        score_job(agent_version_id=uuid.uuid4())
+    with pytest.raises(InvalidJob, match="Registry scorers require a plugin version"):
+        score_job(plugin_version_id=None)
+    with pytest.raises(InvalidJob, match="Source scorers require an agent version"):
+        score_job(
+            plugin_version_id=None,
+            scorer_config=SourceScorerConfig(
+                name="conciseness", source=SourceRef(module="m", attribute="a")
+            ),
+        )
+    with pytest.raises(InvalidJob, match="Source scorers carry no plugin version"):
+        score_job(
+            agent_version_id=uuid.uuid4(),
+            scorer_config=SourceScorerConfig(
+                name="conciseness", source=SourceRef(module="m", attribute="a")
+            ),
+        )
+
+
+def test_score_retry_clears_the_score() -> None:
+    """Drop the recorded score when a score job goes back to pending."""
+    job = score_job()
+    job.claim(WORKER_ID)
+    job.start()
+    job.record_score(0.7)
+    job.fail("scorer crashed")
+    job.retry()
+    assert job.status is JobStatus.PENDING
+    assert job.score is None
+
+
+async def test_fan_out_creates_one_child_per_scorer(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Fan a scoring replay out to a result and a baseline score job."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    children = await repository.list_children(job.id)
+    assert len(children) == 2
+    for child in children:
+        assert isinstance(child, Score)
+        assert child.status is JobStatus.PENDING
+        assert child.scorer_config.name == "conciseness"
+        assert child.agent_version_id == version.id
+        assert child.plugin_version_id is None
+        assert child.execution_target is ExecutionTarget.POOL
+    assert {
+        child.input_session_id for child in children if isinstance(child, Score)
+    } == {result.id, session.id}
+
+
+async def test_fan_out_skips_baselines_with_stored_scores(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Skip the baseline score job for a scorer the session already has."""
+    session = await create_session(session_repository, agent.id)
+    session.merge_scores({"conciseness": 0.4})
+    await session_repository.update(session)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    children = await repository.list_children(job.id)
+    assert [
+        child.input_session_id for child in children if isinstance(child, Score)
+    ] == [result.id]
+
+
+async def test_fan_out_skips_baselines_when_the_run_opts_out(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Skip baseline score jobs for a run created without baselines."""
+    session = await create_session(session_repository, agent.id)
+    _, jobs = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        [session],
+        score_baselines=False,
+    )
+    await repository.claim_pending(WORKER_ID, 1)
+    result = await enter_scoring(
+        service, repository, session_repository, jobs[0].id, agent.id
+    )
+    children = await repository.list_children(jobs[0].id)
+    assert [
+        child.input_session_id for child in children if isinstance(child, Score)
+    ] == [result.id]
+
+
+async def test_fan_out_pins_the_latest_registry_version(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve an unpinned registry scorer to its latest version."""
+    plugin = await register_scorer(
+        plugin_repository, blob_repository, "relevance", versions=2
+    )
+    latest = await plugin_repository.get_version(plugin.id, plugin.latest_version)
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(
+        replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+    )
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    children = await repository.list_children(job.id)
+    for child in children:
+        assert isinstance(child, Score)
+        assert child.plugin_version_id == latest.id
+        assert child.agent_version_id is None
+        assert isinstance(child.scorer_config, RegistryScorerConfig)
+        assert child.scorer_config.version == 2
+
+
+async def test_fan_out_is_idempotent(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject a second score job for the same parent, session, and scorer."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    existing = (await repository.list_children(job.id))[0]
+    assert isinstance(existing, Score)
+    with pytest.raises(
+        DuplicateScoreJob,
+        match=(
+            f"Session {existing.input_session_id} is already scored by "
+            f"'conciseness' for job {job.id}"
+        ),
+    ):
+        await repository.create_many(
+            [
+                Score(
+                    parent_job_id=job.id,
+                    input_session_id=existing.input_session_id,
+                    agent_version_id=version.id,
+                    scorer_config=existing.scorer_config,
+                    execution_target=ExecutionTarget.POOL,
+                )
+            ]
+        )
+    assert len(await repository.list_children(job.id)) == 2
+    assert result.id in {
+        child.input_session_id
+        for child in await repository.list_children(job.id)
+        if isinstance(child, Score)
+    }
+
+
+async def test_aggregation_completes_the_replay(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Merge the scores, evaluate the policy, and store the diff."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    for child in await repository.list_children(job.id):
+        assert isinstance(child, Score)
+        await service.update_job(
+            child.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR
+        )
+        score = 0.8 if child.input_session_id == result.id else 0.4
+        await service.update_job(
+            child.id,
+            JobUpdate(status=JobStatus.COMPLETED, score=score),
+            actor=ACTOR,
+        )
+    completed = await repository.get(job.id)
+    assert isinstance(completed, Replay)
+    assert completed.status is JobStatus.COMPLETED
+    assert completed.passed is True
+    assert completed.score == pytest.approx(0.8)
+    assert completed.scores == {"conciseness": 0.8}
+    assert (await session_repository.get(session.id)).scores == {"conciseness": 0.4}
+    assert (await session_repository.get(result.id)).scores == {"conciseness": 0.8}
+    assert completed.diff is not None
+    assert completed.diff["score_deltas"]["conciseness"] == pytest.approx(0.4)
+
+
+async def test_aggregation_fails_the_replay_and_cancels_siblings(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Fail the replay and cancel the remaining score jobs."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    first, second = await repository.list_children(job.id)
+    await service.update_job(first.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    await service.update_job(
+        first.id,
+        JobUpdate(status=JobStatus.FAILED, error="scorer crashed"),
+        actor=ACTOR,
+    )
+    failed = await repository.get(job.id)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error == "Scorer 'conciseness' did not complete"
+    assert (await repository.get(second.id)).status is JobStatus.CANCELED
+
+
+async def test_aggregation_fails_the_replay_on_a_timed_out_child(
+    repository: FakeJobRepository,
+    config_repository: FakeReplayConfigRepository,
+    session_repository: FakeSessionRepository,
+    agent_repository: FakeAgentRepository,
+    version_repository: FakeAgentVersionRepository,
+    node_repository: FakeSessionNodeRepository,
+    run_repository: FakeExperimentRunRepository,
+    experiment_repository: FakeExperimentRepository,
+    cohort_repository: FakeCohortRepository,
+    secret_repository: FakeSecretRepository,
+    worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Fail the replay when a score job exhausts its attempts."""
+    service = build_service(
+        repository,
+        config_repository,
+        session_repository,
+        agent_repository,
+        version_repository,
+        node_repository,
+        run_repository,
+        experiment_repository,
+        cohort_repository,
+        secret_repository,
+        worker_repository,
+        plugin_repository,
+        blob_repository,
+    )
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    for child in await repository.list_children(job.id):
+        claimed = await repository.get(child.id)
+        claimed.attempt = 3
+        claimed.claim(WORKER_ID)
+        await repository.update(claimed)
+    stale_service = build_service(
+        repository,
+        config_repository,
+        session_repository,
+        agent_repository,
+        version_repository,
+        node_repository,
+        run_repository,
+        experiment_repository,
+        cohort_repository,
+        secret_repository,
+        worker_repository,
+        plugin_repository,
+        blob_repository,
+        heartbeat_timeout_seconds=-60,
+    )
+    await stale_service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=5,
+        agent_ids=None,
+        experiment_run_id=None,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+    failed = await repository.get(job.id)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error == "Scorer 'conciseness' did not complete"
+
+
+async def test_score_only_patch_records_the_value(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Record a score without a status and finalize afterwards."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    child = (await repository.list_children(job.id))[0]
+    await service.update_job(child.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    scored, config = await service.update_job(
+        child.id, JobUpdate(score=0.6), actor=ACTOR
+    )
+    assert isinstance(scored, Score)
+    assert scored.status is JobStatus.RUNNING
+    assert scored.score == 0.6
+    assert config is None
+
+    finished, _ = await service.update_job(
+        child.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
+    )
+    assert finished.status is JobStatus.COMPLETED
+
+
+async def test_update_job_requires_a_status_a_score_or_stats(
+    service: JobService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject an empty job update."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    with pytest.raises(
+        InvalidJob, match="Updating a job requires a status, a score, or stats"
+    ):
+        await service.update_job(job.id, JobUpdate(), actor=ACTOR)
+
+
+async def test_cancel_scoring_replay_cancels_children(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Cascade a replay cancellation to its score jobs."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.CANCELED), actor=ACTOR)
+    children = await repository.list_children(job.id)
+    assert children
+    assert all(child.status is JobStatus.CANCELED for child in children)
+
+
+async def test_retry_replay_drops_its_children(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Clear the score jobs of a retried replay."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.CANCELED), actor=ACTOR)
+    await service.retry_job(job.id, actor=ACTOR)
+    assert await repository.list_children(job.id) == []
+
+
+async def test_claim_jobs_parent_scope(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim the score jobs of one replay through the parent scope."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+    other = await create_session(session_repository, agent.id)
+    other_job, _ = await service.create_replay(replay_create(other.id), actor=ACTOR)
+    await enter_scoring(service, repository, session_repository, other_job.id, agent.id)
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=None,
+        parent_job_id=job.id,
+        actor=ACTOR,
+    )
+    children = {child.id for child in await repository.list_children(job.id)}
+    assert {claimed_job.id for claimed_job, _, _ in claimed} == children
+
+
+async def test_claim_jobs_run_scope_picks_up_children(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    cohort_repository: FakeCohortRepository,
+    config_repository: FakeReplayConfigRepository,
+    experiment_repository: FakeExperimentRepository,
+    run_repository: FakeExperimentRunRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Claim the score jobs of a run's replay under the run scope."""
+    session = await create_session(session_repository, agent.id)
+    run, jobs = await seed_run(
+        session_repository,
+        cohort_repository,
+        config_repository,
+        experiment_repository,
+        run_repository,
+        repository,
+        agent,
+        version,
+        [session],
+    )
+    await repository.claim_pending(WORKER_ID, 1, experiment_run_id=run.id)
+    await enter_scoring(service, repository, session_repository, jobs[0].id, agent.id)
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=run.id,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+    children = {child.id for child in await repository.list_children(jobs[0].id)}
+    assert {claimed_job.id for claimed_job, _, _ in claimed} == children
+
+
+async def test_claim_jobs_agent_scope_matches_registry_score_jobs(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent_repository: FakeAgentRepository,
+    version_repository: FakeAgentVersionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Match registry score jobs and skip score jobs of other agents."""
+    await register_scorer(plugin_repository, blob_repository, "relevance")
+    session = await create_session(session_repository, agent.id)
+    registry_job, _ = await service.create_replay(
+        replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+    )
+    await enter_scoring(
+        service, repository, session_repository, registry_job.id, agent.id
+    )
+    other_agent = await agent_repository.create(
+        Agent(owner_id=ACTOR.account.id, name="other-bot")
+    )
+    other_version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=other_agent.id,
+            version="v1",
+            run_spec=RunSpec(command="python agent.py", timeout_seconds=600),
+        )
+    )
+    other_session = await create_session(session_repository, other_agent.id)
+    other_job, _ = await service.create_replay(
+        replay_create(other_session.id), actor=ACTOR
+    )
+    await enter_scoring(
+        service, repository, session_repository, other_job.id, other_agent.id
+    )
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=[agent.id],
+        experiment_run_id=None,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+    claimed_ids = {claimed_job.id for claimed_job, _, _ in claimed}
+    assert claimed_ids == {
+        child.id for child in await repository.list_children(registry_job.id)
+    }
+    assert other_version.id not in {
+        claimed_job.agent_version_id for claimed_job, _, _ in claimed
+    }
+
+
+async def test_get_spec_registry_score_job(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve the plugin code of a registry score job."""
+    plugin = await register_scorer(plugin_repository, blob_repository, "relevance")
+    plugin_version = await plugin_repository.get_version(plugin.id, 1)
+    blob = await blob_repository.get(plugin_version.blob_id)
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(
+        replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+    )
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    child = next(
+        candidate
+        for candidate in await repository.list_children(job.id)
+        if isinstance(candidate, Score) and candidate.input_session_id == result.id
+    )
+    spec = await service.get_spec(child.id, actor=ACTOR)
+    assert spec.kind is JobKind.SCORE
+    assert spec.run_spec is None
+    assert spec.secret_env == {}
+    assert spec.input_session_id == result.id
+    assert spec.scorer is not None
+    assert spec.scorer.input_session_id == result.id
+    assert spec.scorer.config == child.scorer_config
+    assert spec.scorer.plugin is not None
+    assert spec.scorer.plugin.format is PluginFormat.INLINE
+    assert spec.scorer.plugin.entrypoint == "score"
+    assert spec.scorer.plugin.blob_id == blob.id
+    assert spec.scorer.plugin.sha256 == blob.sha256
+
+
+async def test_get_spec_source_score_job(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Resolve the agent run environment of a source score job."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    result = await enter_scoring(
+        service, repository, session_repository, job.id, agent.id
+    )
+    child = next(
+        candidate
+        for candidate in await repository.list_children(job.id)
+        if isinstance(candidate, Score) and candidate.input_session_id == result.id
+    )
+    spec = await service.get_spec(child.id, actor=ACTOR)
+    assert spec.kind is JobKind.SCORE
+    assert spec.run_spec == version.run_spec
+    assert spec.scorer is not None
+    assert spec.scorer.plugin is None
+    assert spec.scorer.config == child.scorer_config
+    assert spec.scorer.input_session_id == result.id
+
+
+async def test_create_replay_validates_registry_scorers(
+    service: JobService,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject a replay naming an unregistered scorer or version."""
+    session = await create_session(session_repository, agent.id)
+    with pytest.raises(
+        PluginNameNotFound, match="Plugin 'relevance' of kind 'scorer' was not found"
+    ):
+        await service.create_replay(
+            replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+        )
+    plugin = await register_scorer(plugin_repository, blob_repository, "relevance")
+    with pytest.raises(
+        PluginVersionNotFound, match=f"Plugin {plugin.id} has no version 4"
+    ):
+        await service.create_replay(
+            replay_create(session.id, scoring_policy=registry_policy(version=4)),
+            actor=ACTOR,
+        )
+    job, _ = await service.create_replay(
+        replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+    )
+    assert job.status is JobStatus.PENDING
+
+
+async def register_importer(
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    name: str,
+    versions: int = 1,
+    provider: str | None = "langfuse",
+) -> Plugin:
+    """Register an importer plugin with code versions.
+
+    Args:
+        plugin_repository: Fake plugin repository.
+        blob_repository: Fake blob repository.
+        name: Importer name.
+        versions: Number of versions to register.
+        provider: Provider the importer reads from.
+
+    Returns:
+        Stored plugin with the latest version counter set.
+    """
+    plugin = await plugin_repository.create(
+        Plugin(
+            owner_id=ACTOR.account.id,
+            kind=PluginKind.IMPORTER,
+            name=name,
+            provider=provider,
+        )
+    )
+    for index in range(versions):
+        blob = await blob_repository.create(
+            Blob(
+                owner_id=ACTOR.account.id,
+                sha256=f"importer{name}{index}".ljust(64, "0"),
+                size=4,
+                media_type="text/x-python",
+                data=b"code",
+            )
+        )
+        await plugin_repository.create_version(
+            PluginVersion(
+                plugin_id=plugin.id,
+                format=PluginFormat.INLINE,
+                blob_id=blob.id,
+                entrypoint="parse",
+            )
+        )
+    return await plugin_repository.get(plugin.id)
+
+
+async def create_payload(blob_repository: FakeBlobRepository) -> Blob:
+    """Store a payload blob for import tests.
+
+    Args:
+        blob_repository: Fake blob repository.
+
+    Returns:
+        Stored blob.
+    """
+    return await blob_repository.create(
+        Blob(
+            owner_id=ACTOR.account.id,
+            sha256="payload".ljust(64, "0"),
+            size=7,
+            media_type="application/jsonl",
+            data=b"payload",
+        )
+    )
+
+
+def test_import_rejects_agent_version() -> None:
+    """Reject an import bound to an agent version."""
+    with pytest.raises(InvalidJob, match="Imports carry no agent version"):
+        Import(
+            plugin_version_id=uuid.uuid4(),
+            payload_blob_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            agent_version_id=uuid.uuid4(),
+            execution_target=ExecutionTarget.POOL,
+        )
+
+
+def test_import_records_stats_and_completes() -> None:
+    """Record stats on a running import and complete it."""
+    job = Import(
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        execution_target=ExecutionTarget.POOL,
+    )
+    job.claim(WORKER_ID)
+    job.start()
+    job.record_stats(ImportStats(created=2, skipped=1, failed=0))
+    job.complete()
+    assert job.status is JobStatus.COMPLETED
+    assert job.stats is not None
+    assert job.stats.created == 2
+    assert job.ended_at is not None
+
+
+def test_import_complete_requires_stats() -> None:
+    """Reject completing an import without recorded stats."""
+    job = Import(
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        execution_target=ExecutionTarget.POOL,
+    )
+    job.claim(WORKER_ID)
+    job.start()
+    with pytest.raises(JobMissingStats, match=f"Job {job.id} has no stats"):
+        job.complete()
+
+
+def test_import_record_stats_requires_active() -> None:
+    """Reject recording stats on a pending import."""
+    job = Import(
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        execution_target=ExecutionTarget.POOL,
+    )
+    with pytest.raises(JobNotActive, match=f"Job {job.id} is not claimed or running"):
+        job.record_stats(ImportStats(created=0, skipped=0, failed=0))
+
+
+def test_import_retry_clears_stats() -> None:
+    """Clear recorded stats when an import is retried."""
+    job = Import(
+        plugin_version_id=uuid.uuid4(),
+        payload_blob_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        execution_target=ExecutionTarget.POOL,
+    )
+    job.claim(WORKER_ID)
+    job.start()
+    job.record_stats(ImportStats(created=1, skipped=0, failed=0))
+    job.fail("boom")
+    job.retry()
+    assert job.stats is None
+    assert job.status is JobStatus.PENDING
+    assert job.attempt == 2
+
+
+def test_import_stats_bounds() -> None:
+    """Reject negative counts and an oversized failure sample."""
+    with pytest.raises(ValidationError):
+        ImportStats(created=-1, skipped=0, failed=0)
+    failures = [
+        ImportFailure(line=index, error="bad line")
+        for index in range(MAX_IMPORT_FAILURES + 1)
+    ]
+    with pytest.raises(
+        InvalidJob, match=f"Import stats carry at most {MAX_IMPORT_FAILURES} failures"
+    ):
+        ImportStats(created=0, skipped=0, failed=21, failures=failures)
+    bounded = ImportStats(
+        created=0, skipped=0, failed=20, failures=failures[:MAX_IMPORT_FAILURES]
+    )
+    assert len(bounded.failures) == MAX_IMPORT_FAILURES
+
+
+async def test_create_import_pins_latest_version(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Pin the latest importer version and store the params as inputs."""
+    plugin = await register_importer(
+        plugin_repository, blob_repository, "langfuse", versions=2
+    )
+    payload = await create_payload(blob_repository)
+    latest = await plugin_repository.get_version(plugin.id, 2)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse",
+            agent_id=agent.id,
+            payload_blob_id=payload.id,
+            params={"project": "demo"},
+        ),
+        actor=ACTOR,
+    )
+    assert job.kind is JobKind.IMPORT
+    assert job.plugin_version_id == latest.id
+    assert job.payload_blob_id == payload.id
+    assert job.inputs == {"project": "demo"}
+    assert job.status is JobStatus.PENDING
+    assert job.execution_target is ExecutionTarget.POOL
+    assert job.agent_version_id is None
+
+
+async def test_create_import_pins_explicit_version(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Pin the requested importer version."""
+    plugin = await register_importer(
+        plugin_repository, blob_repository, "langfuse", versions=2
+    )
+    payload = await create_payload(blob_repository)
+    first = await plugin_repository.get_version(plugin.id, 1)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse",
+            agent_id=agent.id,
+            version=1,
+            payload_blob_id=payload.id,
+        ),
+        actor=ACTOR,
+    )
+    assert job.plugin_version_id == first.id
+    assert job.inputs == {}
+
+
+async def test_create_import_unknown_importer(
+    service: JobService, blob_repository: FakeBlobRepository, agent: Agent
+) -> None:
+    """Reject an import naming an unregistered importer."""
+    payload = await create_payload(blob_repository)
+    with pytest.raises(
+        PluginNameNotFound, match="Plugin 'langfuse' of kind 'importer' was not found"
+    ):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_import_unknown_version(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject an import naming a version the importer does not have."""
+    plugin = await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    with pytest.raises(
+        PluginVersionNotFound, match=f"Plugin {plugin.id} has no version 4"
+    ):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse",
+                agent_id=agent.id,
+                version=4,
+                payload_blob_id=payload.id,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_import_unknown_payload(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject an import referencing a payload blob that does not exist."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    missing = uuid.uuid4()
+    with pytest.raises(BlobNotFound, match=f"Blob {missing} was not found"):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse", agent_id=agent.id, payload_blob_id=missing
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_import_unknown_agent(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+) -> None:
+    """Reject an import naming an agent that does not exist."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    missing = uuid.uuid4()
+    with pytest.raises(AgentNotFound, match=f"Agent {missing} was not found"):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse", agent_id=missing, payload_blob_id=payload.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_import_importer_without_provider(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject an import whose importer carries no provider."""
+    await register_importer(
+        plugin_repository, blob_repository, "langfuse", provider=None
+    )
+    payload = await create_payload(blob_repository)
+    with pytest.raises(InvalidJob, match="Importer 'langfuse' carries no provider"):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_import_importer_with_unknown_provider(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject an import whose importer reads from no session provider."""
+    await register_importer(
+        plugin_repository, blob_repository, "langfuse", provider="phoenix"
+    )
+    payload = await create_payload(blob_repository)
+    with pytest.raises(
+        InvalidJob, match="Importer 'langfuse' reads from unknown provider 'phoenix'"
+    ):
+        await service.create_import(
+            ImportCreate(
+                importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_get_spec_import_job(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Resolve the importer code and payload of an import job."""
+    plugin = await register_importer(plugin_repository, blob_repository, "langfuse")
+    plugin_version = await plugin_repository.get_version(plugin.id, 1)
+    code = await blob_repository.get(plugin_version.blob_id)
+    payload = await create_payload(blob_repository)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse",
+            agent_id=agent.id,
+            payload_blob_id=payload.id,
+            params={"project": "demo"},
+        ),
+        actor=ACTOR,
+    )
+    spec = await service.get_spec(job.id, actor=ACTOR)
+    assert spec.kind is JobKind.IMPORT
+    assert spec.run_spec is None
+    assert spec.secret_env == {}
+    assert spec.scorer is None
+    assert spec.importer is not None
+    assert spec.importer.plugin.format is PluginFormat.INLINE
+    assert spec.importer.plugin.entrypoint == "parse"
+    assert spec.importer.plugin.blob_id == code.id
+    assert spec.importer.plugin.sha256 == code.sha256
+    assert spec.importer.payload.blob_id == payload.id
+    assert spec.importer.payload.sha256 == payload.sha256
+    assert spec.importer.provider is SessionProvider.LANGFUSE
+    assert spec.importer.agent_id == agent.id
+    assert spec.importer.params == {"project": "demo"}
+
+
+async def test_update_import_records_stats_and_completes(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+) -> None:
+    """Record import stats through a stats-only patch, then complete."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+        ),
+        actor=ACTOR,
+    )
+    await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    stats = ImportStats(
+        created=3,
+        skipped=1,
+        failed=1,
+        failures=[ImportFailure(line=7, external_id="ext-7", error="bad line")],
+    )
+    updated, _ = await service.update_job(job.id, JobUpdate(stats=stats), actor=ACTOR)
+    assert isinstance(updated, Import)
+    assert updated.stats == stats
+    assert updated.status is JobStatus.RUNNING
+    finished, _ = await service.update_job(
+        job.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
+    )
+    assert finished.status is JobStatus.COMPLETED
+
+
+async def test_update_import_complete_requires_stats(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+) -> None:
+    """Reject completing an import that reported no stats."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+        ),
+        actor=ACTOR,
+    )
+    await service.claim_job(job.id, worker_id=worker.id, actor=ACTOR)
+    await service.update_job(job.id, JobUpdate(status=JobStatus.RUNNING), actor=ACTOR)
+    with pytest.raises(JobMissingStats, match=f"Job {job.id} has no stats"):
+        await service.update_job(
+            job.id, JobUpdate(status=JobStatus.COMPLETED), actor=ACTOR
+        )
+
+
+async def test_update_job_rejects_stats_on_other_kinds(
+    service: JobService,
+    session_repository: FakeSessionRepository,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Reject recording import stats on a replay."""
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    with pytest.raises(InvalidJob, match="Only import jobs record stats"):
+        await service.update_job(
+            job.id,
+            JobUpdate(stats=ImportStats(created=0, skipped=0, failed=0)),
+            actor=ACTOR,
+        )
+
+
+async def test_claim_jobs_matches_unbound_import_jobs(
+    service: JobService,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+) -> None:
+    """Claim pool imports whether or not the claim scopes to agents."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    job = await service.create_import(
+        ImportCreate(
+            importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+        ),
+        actor=ACTOR,
+    )
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=[agent.id],
+        experiment_run_id=None,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+    assert [claimed_job.id for claimed_job, _, _ in claimed] == [job.id]
+
+
+async def test_claim_jobs_ship_specs_for_every_kind(
+    service: JobService,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Assemble one spec per claimed job across the kinds in a batch."""
+    await register_importer(plugin_repository, blob_repository, "langfuse")
+    payload = await create_payload(blob_repository)
+    session = await create_session(session_repository, agent.id)
+    replay, _ = await service.create_replay(replay_create(session.id), actor=ACTOR)
+    session_run = await service.create_session_run(
+        session_run_create(agent_id=agent.id), actor=ACTOR
+    )
+    import_job = await service.create_import(
+        ImportCreate(
+            importer="langfuse", agent_id=agent.id, payload_blob_id=payload.id
+        ),
+        actor=ACTOR,
+    )
+
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=None,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+
+    specs = {job.id: spec for job, _, spec in claimed}
+    assert set(specs) == {replay.id, session_run.id, import_job.id}
+    assert specs[replay.id].kind is JobKind.REPLAY
+    assert specs[replay.id].input_session_id == session.id
+    assert specs[replay.id].run_spec is not None
+    assert specs[session_run.id].kind is JobKind.SESSION_RUN
+    assert specs[session_run.id].run_spec is not None
+    import_spec = specs[import_job.id]
+    assert import_spec.kind is JobKind.IMPORT
+    assert import_spec.importer is not None
+    assert import_spec.importer.payload.blob_id == payload.id
+
+
+async def test_claim_jobs_ship_score_specs_from_one_batch(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Assemble the plugin code reference of every claimed score job."""
+    await register_scorer(plugin_repository, blob_repository, "relevance")
+    session = await create_session(session_repository, agent.id)
+    job, _ = await service.create_replay(
+        replay_create(session.id, scoring_policy=registry_policy()), actor=ACTOR
+    )
+    await enter_scoring(service, repository, session_repository, job.id, agent.id)
+
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=None,
+        parent_job_id=job.id,
+        actor=ACTOR,
+    )
+
+    assert len(claimed) == 2
+    for _, _, spec in claimed:
+        assert spec.kind is JobKind.SCORE
+        assert spec.scorer is not None
+        assert spec.scorer.plugin is not None
+        assert len(spec.scorer.plugin.sha256) == 64
+
+
+async def test_claim_jobs_fail_jobs_whose_referents_are_gone(
+    service: JobService,
+    repository: FakeJobRepository,
+    session_repository: FakeSessionRepository,
+    version_repository: FakeAgentVersionRepository,
+    worker: Worker,
+    agent: Agent,
+    version: AgentVersion,
+) -> None:
+    """Fail a claimed job with an unresolvable spec and keep the batch."""
+    broken_version = await version_repository.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            version="v2",
+            run_spec=RunSpec(
+                command="python agent.py",
+                secret_ids=[uuid.uuid4()],
+                timeout_seconds=600,
+            ),
+        )
+    )
+    broken = await service.create_session_run(
+        session_run_create(agent_version_id=broken_version.id), actor=ACTOR
+    )
+    healthy = await service.create_session_run(
+        session_run_create(agent_version_id=version.id), actor=ACTOR
+    )
+
+    claimed = await service.claim_jobs(
+        worker_id=worker.id,
+        max_jobs=10,
+        agent_ids=None,
+        experiment_run_id=None,
+        parent_job_id=None,
+        actor=ACTOR,
+    )
+
+    assert [job.id for job, _, _ in claimed] == [healthy.id]
+    failed = await repository.get(broken.id)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error is not None
+    assert "Failed to resolve the job spec" in failed.error

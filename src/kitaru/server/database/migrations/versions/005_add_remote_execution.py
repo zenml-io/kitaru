@@ -41,6 +41,82 @@ def upgrade() -> None:
         batch_op.create_index("ix_worker_owner_id", ["owner_id"], unique=False)
 
     op.create_table(
+        "blob",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "sha256", sqlmodel.sql.sqltypes.AutoString(length=64), nullable=False
+        ),
+        sa.Column("size", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "media_type", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False
+        ),
+        sa.Column("data", sa.LargeBinary(), nullable=True),
+        sa.Column("uri", sqlmodel.sql.sqltypes.AutoString(length=2048), nullable=True),
+        sa.ForeignKeyConstraint(["owner_id"], ["account.id"], name="fk_blob_owner_id"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("sha256", name="uq_blob_sha256"),
+    )
+    with op.batch_alter_table("blob", schema=None) as batch_op:
+        batch_op.create_index("ix_blob_owner_id", ["owner_id"], unique=False)
+
+    op.create_table(
+        "plugin",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("kind", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
+        sa.Column("name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
+        sa.Column(
+            "provider", sqlmodel.sql.sqltypes.AutoString(length=64), nullable=True
+        ),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("latest_version", sa.Integer(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name="fk_plugin_owner_id"
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("kind", "name", name="uq_plugin_kind_name"),
+    )
+    with op.batch_alter_table("plugin", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_plugin_kind_provider", ["kind", "provider"], unique=False
+        )
+        batch_op.create_index("ix_plugin_owner_id", ["owner_id"], unique=False)
+
+    op.create_table(
+        "plugin_version",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("plugin_id", sa.Uuid(), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False),
+        sa.Column(
+            "format", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False
+        ),
+        sa.Column("blob_id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "entrypoint", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False
+        ),
+        sa.ForeignKeyConstraint(
+            ["blob_id"], ["blob.id"], name="fk_plugin_version_blob_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["plugin_id"],
+            ["plugin.id"],
+            name="fk_plugin_version_plugin_id",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "plugin_id", "version", name="uq_plugin_version_plugin_id_version"
+        ),
+    )
+
+    op.create_table(
         "job",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
@@ -48,8 +124,18 @@ def upgrade() -> None:
         sa.Column("kind", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False),
         sa.Column("experiment_run_id", sa.Uuid(), nullable=True),
         sa.Column("replay_config_id", sa.Uuid(), nullable=True),
-        sa.Column("agent_version_id", sa.Uuid(), nullable=False),
-        sa.Column("original_session_id", sa.Uuid(), nullable=True),
+        sa.Column("agent_version_id", sa.Uuid(), nullable=True),
+        sa.Column("agent_id", sa.Uuid(), nullable=True),
+        sa.Column("parent_job_id", sa.Uuid(), nullable=True),
+        sa.Column("plugin_version_id", sa.Uuid(), nullable=True),
+        sa.Column("payload_blob_id", sa.Uuid(), nullable=True),
+        sa.Column(
+            "scorer_name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True
+        ),
+        sa.Column(
+            "scorer_config", postgresql.JSONB(astext_type=sa.Text()), nullable=True
+        ),
+        sa.Column("input_session_id", sa.Uuid(), nullable=True),
         sa.Column("result_session_id", sa.Uuid(), nullable=True),
         sa.Column(
             "status", sqlmodel.sql.sqltypes.AutoString(length=16), nullable=False
@@ -59,7 +145,7 @@ def upgrade() -> None:
         sa.Column(
             "execution_target",
             sqlmodel.sql.sqltypes.AutoString(length=16),
-            nullable=True,
+            nullable=False,
         ),
         sa.Column(
             "executor_handle",
@@ -77,6 +163,8 @@ def upgrade() -> None:
         sa.Column("score", sa.Float(), nullable=True),
         sa.Column("scores", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("diff", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("stats", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+        sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_job_agent_id"),
         sa.ForeignKeyConstraint(
             ["agent_version_id"], ["agent_version.id"], name="fk_job_agent_version_id"
         ),
@@ -87,7 +175,21 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
-            ["original_session_id"], ["session.id"], name="fk_job_original_session_id"
+            ["input_session_id"], ["session.id"], name="fk_job_input_session_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["parent_job_id"],
+            ["job.id"],
+            name="fk_job_parent_job_id",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["payload_blob_id"], ["blob.id"], name="fk_job_payload_blob_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["plugin_version_id"],
+            ["plugin_version.id"],
+            name="fk_job_plugin_version_id",
         ),
         sa.ForeignKeyConstraint(
             ["replay_config_id"], ["replay_config.id"], name="fk_job_replay_config_id"
@@ -101,8 +203,14 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "experiment_run_id",
-            "original_session_id",
-            name="uq_job_experiment_run_id_original_session_id",
+            "input_session_id",
+            name="uq_job_experiment_run_id_input_session_id",
+        ),
+        sa.UniqueConstraint(
+            "parent_job_id",
+            "input_session_id",
+            "scorer_name",
+            name="uq_job_parent_job_id_input_session_id_scorer_name",
         ),
     )
     with op.batch_alter_table("job", schema=None) as batch_op:
@@ -112,8 +220,24 @@ def upgrade() -> None:
             unique=False,
         )
         batch_op.create_index(
-            "ix_job_original_session_id", ["original_session_id"], unique=False
+            "ix_job_input_session_id", ["input_session_id"], unique=False
         )
+        batch_op.create_index("ix_job_parent_job_id", ["parent_job_id"], unique=False)
+
+    op.create_index(
+        "ix_job_pending_id",
+        "job",
+        ["id"],
+        unique=False,
+        postgresql_where=sa.text("status = 'pending'"),
+    )
+    op.create_index(
+        "ix_job_active_heartbeat_at",
+        "job",
+        [sa.text("coalesce(heartbeat_at, claimed_at)")],
+        unique=False,
+        postgresql_where=sa.text("status IN ('claimed', 'running')"),
+    )
 
     with op.batch_alter_table("replay", schema=None) as batch_op:
         batch_op.drop_index(batch_op.f("ix_replay_experiment_run_id_status"))
@@ -284,11 +408,24 @@ def downgrade() -> None:
             unique=False,
         )
 
+    op.drop_index("ix_job_active_heartbeat_at", table_name="job")
+    op.drop_index("ix_job_pending_id", table_name="job")
     with op.batch_alter_table("job", schema=None) as batch_op:
-        batch_op.drop_index("ix_job_original_session_id")
+        batch_op.drop_index("ix_job_parent_job_id")
+        batch_op.drop_index("ix_job_input_session_id")
         batch_op.drop_index("ix_job_experiment_run_id_status")
 
     op.drop_table("job")
+    op.drop_table("plugin_version")
+    with op.batch_alter_table("plugin", schema=None) as batch_op:
+        batch_op.drop_index("ix_plugin_owner_id")
+        batch_op.drop_index("ix_plugin_kind_provider")
+
+    op.drop_table("plugin")
+    with op.batch_alter_table("blob", schema=None) as batch_op:
+        batch_op.drop_index("ix_blob_owner_id")
+
+    op.drop_table("blob")
     with op.batch_alter_table("worker", schema=None) as batch_op:
         batch_op.drop_index("ix_worker_owner_id")
 

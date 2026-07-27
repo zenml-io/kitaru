@@ -96,9 +96,9 @@ from kitaru.server.domain.replay_config import (
     ReplayConfig,
     ReplayConfigNotFound,
     ReplayOverride,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
@@ -111,7 +111,7 @@ from kitaru.server.domain.tag import (
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
-        ScorerConfig(
+        SourceScorerConfig(
             name="conciseness",
             source=SourceRef(module="my_pkg.scorers", attribute="conciseness"),
         )

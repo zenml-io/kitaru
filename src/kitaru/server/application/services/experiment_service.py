@@ -27,6 +27,9 @@ from kitaru.server.application.interfaces.experiment_repository import (
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
+from kitaru.server.application.interfaces.plugin_repository import (
+    PluginRepository,
+)
 from kitaru.server.application.interfaces.replay_config_repository import (
     ReplayConfigRepository,
 )
@@ -39,6 +42,9 @@ from kitaru.server.application.models.experiments import (
     ExperimentCreate,
     ExperimentFilter,
     ExperimentUpdate,
+)
+from kitaru.server.application.services.scorer_resolution import (
+    validate_scoring_policy,
 )
 from kitaru.server.application.services.worker_liveness import (
     warn_if_no_live_worker,
@@ -79,6 +85,7 @@ class ExperimentService:
         agent_version_repository: AgentVersionRepository,
         replay_config_repository: ReplayConfigRepository,
         worker_repository: WorkerRepository,
+        plugin_repository: PluginRepository,
         worker_liveness_timeout_seconds: int,
     ) -> None:
         """Initialize the service.
@@ -90,6 +97,7 @@ class ExperimentService:
             agent_version_repository: Agent version repository.
             replay_config_repository: Replay config repository.
             worker_repository: Worker repository.
+            plugin_repository: Plugin repository.
             worker_liveness_timeout_seconds: Seconds after which a worker
                 counts as dead.
         """
@@ -99,6 +107,7 @@ class ExperimentService:
         self._agent_version_repository = agent_version_repository
         self._replay_config_repository = replay_config_repository
         self._worker_repository = worker_repository
+        self._plugin_repository = plugin_repository
         self._worker_liveness_timeout_seconds = worker_liveness_timeout_seconds
 
     async def create_experiment(
@@ -117,11 +126,14 @@ class ExperimentService:
             CohortNotFound: No cohort has the referenced cohort id.
             DuplicateExperimentName: The experiment name is already
                 registered.
+            PluginNameNotFound: No scorer has a configured name.
+            PluginVersionNotFound: A scorer has no configured version.
 
         Returns:
             Created experiment and its replay config.
         """
         await self._cohort_repository.get(command.cohort_id)
+        await validate_scoring_policy(self._plugin_repository, command.scoring_policy)
         config = await self._replay_config_repository.create(
             ReplayConfig(
                 owner_id=actor.account.id,
@@ -210,6 +222,8 @@ class ExperimentService:
             CohortNotFound: No cohort has the referenced cohort id.
             DuplicateExperimentName: The experiment name is already
                 registered.
+            PluginNameNotFound: No scorer has a configured name.
+            PluginVersionNotFound: A scorer has no configured version.
 
         Returns:
             Updated experiment and its replay config.
@@ -241,6 +255,10 @@ class ExperimentService:
                     raise InvalidExperiment("Experiment tool policy cannot be null")
                 if "scoring_policy" in fields and command.scoring_policy is None:
                     raise InvalidExperiment("Experiment scoring policy cannot be null")
+                if command.scoring_policy is not None:
+                    await validate_scoring_policy(
+                        self._plugin_repository, command.scoring_policy
+                    )
                 old_config = await self._replay_config_repository.get(old_config_id)
                 config = await self._replay_config_repository.create(
                     ReplayConfig(
@@ -404,7 +422,8 @@ class ExperimentService:
                 experiment_run_id=run.id,
                 replay_config_id=experiment.replay_config_id,
                 agent_version_id=version.id,
-                original_session_id=session.id,
+                input_session_id=session.id,
+                execution_target=target,
             )
             for session in sessions
         ]

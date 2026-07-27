@@ -108,6 +108,7 @@ class ExperimentRunProgress(FrozenModel):
     pending: int = 0
     claimed: int = 0
     running: int = 0
+    scoring: int = 0
     completed: int = 0
     failed: int = 0
     timed_out: int = 0

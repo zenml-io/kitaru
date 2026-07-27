@@ -127,9 +127,9 @@ from kitaru.server.domain.job import (
 from kitaru.server.domain.replay_config import (
     PassthroughPolicy,
     ReplayConfig,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
@@ -138,7 +138,7 @@ from kitaru.server.domain.worker import Worker
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
-        ScorerConfig(
+        SourceScorerConfig(
             name="conciseness",
             source=SourceRef(module="my_pkg.scorers", attribute="conciseness"),
         )
@@ -318,7 +318,8 @@ def job_entities(run: ExperimentRun, seed: Seed) -> list[Replay]:
             experiment_run_id=run.id,
             replay_config_id=seed.config.id,
             agent_version_id=seed.version.id,
-            original_session_id=session.id,
+            input_session_id=session.id,
+            execution_target=run.execution_target,
         )
         for session in seed.sessions
     ]
@@ -360,7 +361,7 @@ async def test_create_assigns_number_and_stores_jobs(setup: Setup) -> None:
     jobs, total = await setup.jobs.query(JobFilter(experiment_run_id=run.id))
     assert total == 2
     replays = [job for job in jobs if isinstance(job, Replay)]
-    assert {replay.original_session_id for replay in replays} == {
+    assert {replay.input_session_id for replay in replays} == {
         session.id for session in seed.sessions
     }
     for replay in replays:
@@ -595,7 +596,8 @@ async def test_duplicate_replay_session_within_run(setup: Setup) -> None:
         experiment_run_id=created.id,
         replay_config_id=seed.config.id,
         agent_version_id=seed.version.id,
-        original_session_id=seed.sessions[0].id,
+        input_session_id=seed.sessions[0].id,
+        execution_target=created.execution_target,
     )
     with pytest.raises(
         DuplicateReplaySession,

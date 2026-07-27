@@ -20,6 +20,7 @@ from kitaru.server.adapters.db.schemas.agent_version import (
     AgentVersionSecretSchema,
 )
 from kitaru.server.adapters.db.schemas.api_key import ApiKeySchema
+from kitaru.server.adapters.db.schemas.blob import BlobSchema
 from kitaru.server.adapters.db.schemas.cohort import (
     CohortSchema,
     CohortSessionSchema,
@@ -27,6 +28,10 @@ from kitaru.server.adapters.db.schemas.cohort import (
 from kitaru.server.adapters.db.schemas.experiment import ExperimentSchema
 from kitaru.server.adapters.db.schemas.experiment_run import ExperimentRunSchema
 from kitaru.server.adapters.db.schemas.job import JobSchema
+from kitaru.server.adapters.db.schemas.plugin import (
+    PluginSchema,
+    PluginVersionSchema,
+)
 from kitaru.server.adapters.db.schemas.replay_config import ReplayConfigSchema
 from kitaru.server.adapters.db.schemas.secret import SecretSchema
 from kitaru.server.adapters.db.schemas.session import SessionSchema
@@ -40,11 +45,14 @@ __all__ = [
     "AgentVersionSchema",
     "AgentVersionSecretSchema",
     "ApiKeySchema",
+    "BlobSchema",
     "CohortSchema",
     "CohortSessionSchema",
     "ExperimentRunSchema",
     "ExperimentSchema",
     "JobSchema",
+    "PluginSchema",
+    "PluginVersionSchema",
     "ReplayConfigSchema",
     "SecretSchema",
     "SessionNodeSchema",

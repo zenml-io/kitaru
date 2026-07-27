@@ -34,11 +34,15 @@ from kitaru.server.adapters.rest.routers import (
     agents,
     api_keys,
     auth,
+    blobs,
     cohorts,
     experiment_runs,
     experiments,
+    importers,
+    imports,
     jobs,
     replays,
+    scorers,
     secrets,
     session_runs,
     sessions,
@@ -172,6 +176,7 @@ def create_app(settings: APISettings) -> FastAPI:
         agent_versions.router, prefix="/v1/agent-versions", tags=["agent-versions"]
     )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
+    app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
     app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
     app.include_router(
         experiment_runs.router,
@@ -181,8 +186,11 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(
         experiments.router, prefix="/v1/experiments", tags=["experiments"]
     )
+    app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
+    app.include_router(imports.router, prefix="/v1/imports", tags=["imports"])
     app.include_router(jobs.router, prefix="/v1/jobs", tags=["jobs"])
     app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
+    app.include_router(scorers.router, prefix="/v1/scorers", tags=["scorers"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
     app.include_router(
         session_runs.router, prefix="/v1/session-runs", tags=["session-runs"]

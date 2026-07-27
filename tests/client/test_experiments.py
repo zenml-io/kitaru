@@ -35,8 +35,8 @@ from kitaru.api_models.v1.experiments import (
 from kitaru.api_models.v1.jobs import (
     PassthroughPolicy,
     ReplayOverride,
-    ScorerConfig,
     ScoringPolicy,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.api_models.v1.sessions import (
@@ -49,7 +49,9 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 
 SCORING_POLICY = ScoringPolicy(
-    scorers=[ScorerConfig(name="conciseness", source="my_pkg.scorers:conciseness")],
+    scorers=[
+        SourceScorerConfig(name="conciseness", source="my_pkg.scorers:conciseness")
+    ],
     pass_threshold=0.5,
 )
 

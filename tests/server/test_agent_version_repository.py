@@ -369,3 +369,32 @@ async def test_secret_delete_while_referenced(setup: Setup) -> None:
     await secrets.delete(secret.id)
     with pytest.raises(SecretNotFound):
         await secrets.get(secret.id)
+
+
+async def test_get_many(setup: Setup) -> None:
+    """Load agent versions by id with their run spec secret ids."""
+    repository, agents, secrets, owner_id = setup
+    agent = await create_agent(agents, owner_id)
+    db = await secrets.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    first = await repository.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent.id,
+            version="v1",
+            run_spec=RunSpec(
+                command="python agent.py",
+                secret_ids=[db.id],
+                timeout_seconds=600,
+            ),
+        )
+    )
+    second = await repository.create(
+        AgentVersion(owner_id=owner_id, agent_id=agent.id, version="v2")
+    )
+    loaded = await repository.get_many([first.id, second.id, uuid.uuid4()])
+    assert set(loaded) == {first.id, second.id}
+    first_spec = loaded[first.id].run_spec
+    assert first_spec is not None
+    assert first_spec.secret_ids == [db.id]
+    assert loaded[second.id].run_spec is None
+    assert await repository.get_many([]) == {}

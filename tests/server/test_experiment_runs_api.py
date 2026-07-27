@@ -25,6 +25,7 @@ from test_experiments_api import (
     create_experiment,
     create_runnable_version,
 )
+from test_jobs_api import run_score_jobs
 
 from conftest import experiment_app
 
@@ -261,7 +262,7 @@ async def test_list_experiment_run_jobs_by_status(
     created = await seed_run(client)
     response = await claim_run_jobs(client, created["id"], 1)
     assert response.status_code == 200
-    claimed_id = response.json()["jobs"][0]["id"]
+    claimed_id = response.json()["jobs"][0]["job"]["id"]
 
     response = await client.get(
         f"/v1/experiment-runs/{created['id']}/jobs", params={"status": "claimed"}
@@ -299,7 +300,7 @@ async def test_list_experiment_run_jobs_stale_claim_matches_pending() -> None:
         created = await seed_run(client, session_count=1)
         response = await claim_run_jobs(client, created["id"], 1)
         assert response.status_code == 200
-        job_id = response.json()["jobs"][0]["id"]
+        job_id = response.json()["jobs"][0]["job"]["id"]
 
         response = await client.get(
             f"/v1/experiment-runs/{created['id']}/jobs",
@@ -336,12 +337,16 @@ async def test_claim_jobs(client: httpx.AsyncClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert len(body["jobs"]) == 1
-    claimed = body["jobs"][0]
+    claimed = body["jobs"][0]["job"]
     assert claimed["status"] == "claimed"
     assert claimed["worker_id"] is not None
     assert claimed["claimed_at"] is not None
     assert claimed["heartbeat_at"] is not None
     assert claimed["scoring_policy"] == SCORING_POLICY_RESPONSE
+    spec = body["jobs"][0]["spec"]
+    assert spec["job_id"] == claimed["id"]
+    assert spec["kind"] == "replay"
+    assert spec["run"]["command"] == "python agent.py"
 
     response = await client.get(f"/v1/experiment-runs/{created['id']}")
     body = response.json()
@@ -401,7 +406,8 @@ async def test_cancel_run_drains_through_job_patch(
     """Leave running jobs to the heartbeat path and drain on patch."""
     created = await seed_run(client, session_count=1)
     response = await claim_run_jobs(client, created["id"], 1)
-    job_id = response.json()["jobs"][0]["id"]
+    job_id = response.json()["jobs"][0]["job"]["id"]
+    worker_id = response.json()["jobs"][0]["job"]["worker_id"]
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
 
@@ -409,9 +415,11 @@ async def test_cancel_run_drains_through_job_patch(
     assert response.status_code == 200
     assert response.json()["status"] == "canceling"
 
-    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
+    response = await client.post(
+        f"/v1/workers/{worker_id}/heartbeat", json={"job_ids": [job_id]}
+    )
     assert response.status_code == 200
-    assert response.json() == {"status": "running", "canceled": True}
+    assert response.json() == {"abandon": [job_id]}
 
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "canceled"})
     assert response.status_code == 200
@@ -428,13 +436,13 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
     """Complete every job of a run and observe the stored summary."""
     created = await seed_run(client, session_count=2)
     response = await claim_run_jobs(client, created["id"], 5)
-    jobs = response.json()["jobs"]
+    jobs = [claimed["job"] for claimed in response.json()["jobs"]]
     assert len(jobs) == 2
     for index, job in enumerate(jobs):
         job_id = job["id"]
         response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
         assert response.status_code == 200
-        original = await client.get(f"/v1/sessions/{job['original_session_id']}")
+        original = await client.get(f"/v1/sessions/{job['input_session_id']}")
         response = await client.post(
             "/v1/sessions",
             json={
@@ -450,16 +458,9 @@ async def test_run_finalizes_with_summary(client: httpx.AsyncClient) -> None:
             f"/v1/sessions/{result_session_id}", json={"status": "completed"}
         )
         assert response.status_code == 200
-        response = await client.patch(
-            f"/v1/jobs/{job_id}",
-            json={
-                "status": "completed",
-                "passed": index == 0,
-                "score": 0.8 - index * 0.6,
-                "scores": {"conciseness": 0.8 - index * 0.6},
-            },
-        )
+        response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "scoring"})
         assert response.status_code == 200
+        await run_score_jobs(client, job_id, {"conciseness": 0.8 - index * 0.6})
 
     response = await client.get(f"/v1/experiment-runs/{created['id']}")
     body = response.json()
@@ -476,7 +477,7 @@ async def test_run_finalizes_failed_with_error(client: httpx.AsyncClient) -> Non
     """Land a run with failed and timed out jobs on failed."""
     created = await seed_run(client, session_count=2)
     response = await claim_run_jobs(client, created["id"], 5)
-    jobs = response.json()["jobs"]
+    jobs = [claimed["job"] for claimed in response.json()["jobs"]]
     assert len(jobs) == 2
     response = await client.patch(
         f"/v1/jobs/{jobs[0]['id']}",

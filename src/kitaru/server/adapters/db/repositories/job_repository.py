@@ -17,38 +17,54 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, and_, case, exists, func, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    case,
+    delete,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.schemas.agent_version import AgentVersionSchema
-from kitaru.server.adapters.db.schemas.experiment_run import (
-    ExperimentRunSchema,
-)
 from kitaru.server.adapters.db.schemas.job import (
     JOB_AGENT_VERSION_ID_FOREIGN_KEY,
     JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY,
-    JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY,
+    JOB_INPUT_SESSION_ID_FOREIGN_KEY,
+    JOB_PAYLOAD_BLOB_ID_FOREIGN_KEY,
+    JOB_PLUGIN_VERSION_ID_FOREIGN_KEY,
     JOB_REPLAY_CONFIG_ID_FOREIGN_KEY,
     JOB_RESULT_SESSION_ID_FOREIGN_KEY,
+    JOB_SCORER_UNIQUE_CONSTRAINT,
     JOB_SESSION_UNIQUE_CONSTRAINT,
     JobSchema,
 )
 from kitaru.server.application.models.jobs import JobFilter
 from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment_run import ExperimentRunNotFound
 from kitaru.server.domain.job import (
     DuplicateReplaySession,
+    DuplicateScoreJob,
+    Import,
     Job,
     JobNotFound,
     JobStatus,
     Replay,
+    Score,
     SessionRun,
 )
+from kitaru.server.domain.plugin import PluginVersionIdNotFound
 from kitaru.server.domain.replay_config import ReplayConfigNotFound
 from kitaru.server.domain.session import SessionNotFound
 
@@ -61,31 +77,53 @@ def translate_job_integrity_error(exc: IntegrityError, job: Job) -> None:
         job: Job that was written.
 
     Raises:
-        DuplicateReplaySession: The run already replays the original
+        DuplicateReplaySession: The run already replays the input
             session.
+        DuplicateScoreJob: The parent job already scores the input
+            session with the scorer.
         ExperimentRunNotFound: No experiment run has the job's
             experiment run id.
         ReplayConfigNotFound: No replay config has the job's job
             config id.
         AgentVersionNotFound: No agent version has the job's agent
             version id.
-        SessionNotFound: No session has the job's original session id.
+        PluginVersionIdNotFound: No plugin version has the job's plugin
+            version id.
+        BlobNotFound: No blob has the job's payload blob id.
+        SessionNotFound: No session has the job's input session id.
     """
     constraint = violated_constraint(exc)
     if isinstance(job, Replay):
         if constraint == JOB_SESSION_UNIQUE_CONSTRAINT:
             assert job.experiment_run_id is not None
             raise DuplicateReplaySession(
-                job.experiment_run_id, job.original_session_id
+                job.experiment_run_id, job.input_session_id
             ) from exc
         if constraint == JOB_EXPERIMENT_RUN_ID_FOREIGN_KEY:
             assert job.experiment_run_id is not None
             raise ExperimentRunNotFound(job.experiment_run_id) from exc
         if constraint == JOB_REPLAY_CONFIG_ID_FOREIGN_KEY:
             raise ReplayConfigNotFound(job.replay_config_id) from exc
-        if constraint == JOB_ORIGINAL_SESSION_ID_FOREIGN_KEY:
-            raise SessionNotFound(job.original_session_id) from exc
+        if constraint == JOB_INPUT_SESSION_ID_FOREIGN_KEY:
+            raise SessionNotFound(job.input_session_id) from exc
+    if isinstance(job, Score):
+        if constraint == JOB_SCORER_UNIQUE_CONSTRAINT:
+            assert job.parent_job_id is not None
+            raise DuplicateScoreJob(
+                job.parent_job_id, job.input_session_id, job.scorer_config.name
+            ) from exc
+        if constraint == JOB_INPUT_SESSION_ID_FOREIGN_KEY:
+            raise SessionNotFound(job.input_session_id) from exc
+        if constraint == JOB_PLUGIN_VERSION_ID_FOREIGN_KEY:
+            assert job.plugin_version_id is not None
+            raise PluginVersionIdNotFound(job.plugin_version_id) from exc
+    if isinstance(job, Import):
+        if constraint == JOB_PLUGIN_VERSION_ID_FOREIGN_KEY:
+            raise PluginVersionIdNotFound(job.plugin_version_id) from exc
+        if constraint == JOB_PAYLOAD_BLOB_ID_FOREIGN_KEY:
+            raise BlobNotFound(job.payload_blob_id) from exc
     if constraint == JOB_AGENT_VERSION_ID_FOREIGN_KEY:
+        assert job.agent_version_id is not None
         raise AgentVersionNotFound(job.agent_version_id) from exc
 
 
@@ -131,11 +169,41 @@ class SQLJobRepository:
             raise
         return row.to_domain()
 
-    async def get(self, job_id: uuid.UUID) -> Job:
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist new jobs as one batch.
+
+        Args:
+            jobs: Jobs to store.
+
+        Raises:
+            DuplicateScoreJob: A parent job already scores an input
+                session with a scorer.
+            AgentVersionNotFound: No agent version has a job's agent
+                version id.
+            PluginVersionIdNotFound: No plugin version has a job's plugin
+                version id.
+            SessionNotFound: No session has a job's input session id.
+
+        Returns:
+            Stored jobs with timestamps set.
+        """
+        rows = [JobSchema.from_domain(job) for job in jobs]
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(rows)
+                await self._session.flush()
+        except IntegrityError as exc:
+            for job in jobs:
+                translate_job_integrity_error(exc, job)
+            raise
+        return [row.to_domain() for row in rows]
+
+    async def get(self, job_id: uuid.UUID, for_update: bool = False) -> Job:
         """Load a job by id.
 
         Args:
             job_id: Id of the job.
+            for_update: Lock the row for the transaction.
 
         Raises:
             JobNotFound: No job has this id.
@@ -143,7 +211,7 @@ class SQLJobRepository:
         Returns:
             Stored job.
         """
-        row = await self._session.get(JobSchema, job_id)
+        row = await self._session.get(JobSchema, job_id, with_for_update=for_update)
         if row is None:
             raise JobNotFound(job_id)
         return row.to_domain()
@@ -166,9 +234,9 @@ class SQLJobRepository:
             statement = statement.where(
                 col(JobSchema.experiment_run_id) == job_filter.experiment_run_id
             )
-        if job_filter.original_session_id is not None:
+        if job_filter.input_session_id is not None:
             statement = statement.where(
-                col(JobSchema.original_session_id) == job_filter.original_session_id
+                col(JobSchema.input_session_id) == job_filter.input_session_id
             )
         if job_filter.kind is not None:
             statement = statement.where(col(JobSchema.kind) == job_filter.kind.value)
@@ -220,9 +288,7 @@ class SQLJobRepository:
         row.status = job.status.value
         row.attempt = job.attempt
         row.worker_id = job.worker_id
-        row.execution_target = (
-            None if job.execution_target is None else job.execution_target.value
-        )
+        row.execution_target = job.execution_target.value
         row.executor_handle = job.executor_handle
         row.claimed_at = job.claimed_at
         row.heartbeat_at = job.heartbeat_at
@@ -232,7 +298,7 @@ class SQLJobRepository:
         if isinstance(job, Replay):
             row.experiment_run_id = job.experiment_run_id
             row.replay_config_id = job.replay_config_id
-            row.original_session_id = job.original_session_id
+            row.input_session_id = job.input_session_id
             row.passed = job.passed
             row.score = job.score
             row.scores = job.scores
@@ -240,6 +306,18 @@ class SQLJobRepository:
         elif isinstance(job, SessionRun):
             row.inputs = job.inputs
             row.name = job.name
+        elif isinstance(job, Score):
+            row.parent_job_id = job.parent_job_id
+            row.input_session_id = job.input_session_id
+            row.plugin_version_id = job.plugin_version_id
+            row.scorer_name = job.scorer_config.name
+            row.scorer_config = job.scorer_config.model_dump(mode="json")
+            row.score = job.score
+        elif isinstance(job, Import):
+            row.plugin_version_id = job.plugin_version_id
+            row.payload_blob_id = job.payload_blob_id
+            row.inputs = job.inputs
+            row.stats = None if job.stats is None else job.stats.model_dump(mode="json")
 
     async def update(self, job: Job) -> Job:
         """Persist changes to an existing job.
@@ -285,6 +363,34 @@ class SQLJobRepository:
         await self._session.delete(row)
         await self._session.flush()
 
+    async def list_children(self, parent_job_id: uuid.UUID) -> list[Job]:
+        """Load every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+
+        Returns:
+            Child jobs in id order.
+        """
+        statement = (
+            select(JobSchema)
+            .where(col(JobSchema.parent_job_id) == parent_job_id)
+            .order_by(col(JobSchema.id))
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain() for row in rows]
+
+    async def delete_children(self, parent_job_id: uuid.UUID) -> None:
+        """Delete every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+        """
+        await self._session.execute(
+            delete(JobSchema).where(col(JobSchema.parent_job_id) == parent_job_id)
+        )
+        await self._session.flush()
+
     def _stale_condition(self, stale_before: datetime) -> ColumnElement[bool]:
         """Build the lost-heartbeat condition on claimed or running rows.
 
@@ -328,34 +434,43 @@ class SQLJobRepository:
         self,
         agent_ids: Sequence[uuid.UUID] | None,
         experiment_run_id: uuid.UUID | None,
+        parent_job_id: uuid.UUID | None,
     ) -> list[ColumnElement[bool]]:
         """Build the claim scope conditions.
 
         Args:
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
 
         Returns:
             SQL conditions.
         """
-        if experiment_run_id is not None:
-            conditions = [col(JobSchema.experiment_run_id) == experiment_run_id]
-        else:
+        parent = aliased(JobSchema)
+        if parent_job_id is not None:
+            conditions = [col(JobSchema.parent_job_id) == parent_job_id]
+        elif experiment_run_id is not None:
             conditions = [
                 or_(
-                    col(JobSchema.execution_target) == ExecutionTarget.POOL.value,
-                    exists().where(
-                        col(ExperimentRunSchema.id) == col(JobSchema.experiment_run_id),
-                        col(ExperimentRunSchema.execution_target)
-                        == ExecutionTarget.POOL.value,
-                    ),
+                    col(JobSchema.experiment_run_id) == experiment_run_id,
+                    select(col(parent.id))
+                    .where(
+                        col(parent.id) == col(JobSchema.parent_job_id),
+                        col(parent.experiment_run_id) == experiment_run_id,
+                    )
+                    .exists(),
                 )
             ]
+        else:
+            conditions = [col(JobSchema.execution_target) == ExecutionTarget.POOL.value]
         if agent_ids is not None:
             conditions.append(
-                exists().where(
-                    col(AgentVersionSchema.id) == col(JobSchema.agent_version_id),
-                    col(AgentVersionSchema.agent_id).in_(agent_ids),
+                or_(
+                    col(JobSchema.agent_version_id).is_(None),
+                    exists().where(
+                        col(AgentVersionSchema.id) == col(JobSchema.agent_version_id),
+                        col(AgentVersionSchema.agent_id).in_(agent_ids),
+                    ),
                 )
             )
         return conditions
@@ -366,7 +481,8 @@ class SQLJobRepository:
         max_attempts: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
-    ) -> None:
+        parent_job_id: uuid.UUID | None = None,
+    ) -> list[Job]:
         """Requeue or time out jobs with lost heartbeats within a scope.
 
         Args:
@@ -374,11 +490,15 @@ class SQLJobRepository:
             max_attempts: Attempt count at which a stale job times out.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
+
+        Returns:
+            Jobs the staleness rule moved.
         """
         statement = (
             select(JobSchema)
             .where(
-                *self._scope_conditions(agent_ids, experiment_run_id),
+                *self._scope_conditions(agent_ids, experiment_run_id, parent_job_id),
                 self._stale_condition(stale_before),
             )
             .with_for_update(skip_locked=True)
@@ -388,6 +508,7 @@ class SQLJobRepository:
             job = row.to_domain()
             self._apply(row, job.with_staleness(stale_before, max_attempts))
         await self._session.flush()
+        return [row.to_domain() for row in rows]
 
     async def claim_pending(
         self,
@@ -395,6 +516,7 @@ class SQLJobRepository:
         limit: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
+        parent_job_id: uuid.UUID | None = None,
     ) -> list[Job]:
         """Atomically claim pending jobs within a scope for a worker.
 
@@ -406,6 +528,7 @@ class SQLJobRepository:
             limit: Maximum number of jobs to claim.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
 
         Returns:
             Claimed jobs.
@@ -413,7 +536,7 @@ class SQLJobRepository:
         statement = (
             select(JobSchema)
             .where(
-                *self._scope_conditions(agent_ids, experiment_run_id),
+                *self._scope_conditions(agent_ids, experiment_run_id, parent_job_id),
                 col(JobSchema.status) == JobStatus.PENDING.value,
             )
             .order_by(col(JobSchema.id))
@@ -425,6 +548,44 @@ class SQLJobRepository:
             job = row.to_domain()
             job.claim(worker_id)
             self._apply(row, job)
+        await self._session.flush()
+        return [row.to_domain() for row in rows]
+
+    async def heartbeat_many(
+        self,
+        worker_id: uuid.UUID,
+        job_ids: Sequence[uuid.UUID],
+        heartbeat_at: datetime,
+    ) -> list[Job]:
+        """Record one worker heartbeat on every claimed or running job it owns.
+
+        Args:
+            worker_id: Id of the heartbeating worker.
+            job_ids: Ids of the jobs the worker reports.
+            heartbeat_at: Time of the heartbeat.
+
+        Returns:
+            Jobs the heartbeat reached.
+        """
+        if not job_ids:
+            return []
+        statement = (
+            update(JobSchema)
+            .where(
+                col(JobSchema.id).in_(job_ids),
+                col(JobSchema.worker_id) == worker_id,
+                col(JobSchema.status).in_(
+                    [JobStatus.CLAIMED.value, JobStatus.RUNNING.value]
+                ),
+            )
+            .values(heartbeat_at=heartbeat_at)
+            .returning(JobSchema)
+        )
+        rows = (
+            await self._session.scalars(
+                statement, execution_options={"synchronize_session": False}
+            )
+        ).all()
         await self._session.flush()
         return [row.to_domain() for row in rows]
 

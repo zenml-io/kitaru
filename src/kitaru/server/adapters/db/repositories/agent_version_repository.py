@@ -148,6 +148,26 @@ class SQLAgentVersionRepository:
         secret_ids = await self._load_secret_ids([row.id])
         return row.to_domain(secret_ids.get(row.id, []))
 
+    async def get_many(
+        self, version_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, AgentVersion]:
+        """Load agent versions by id.
+
+        Args:
+            version_ids: Ids of the agent versions.
+
+        Returns:
+            Stored agent versions keyed by id, missing ids omitted.
+        """
+        if not version_ids:
+            return {}
+        statement = select(AgentVersionSchema).where(
+            col(AgentVersionSchema.id).in_(version_ids)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        secret_ids = await self._load_secret_ids([row.id for row in rows])
+        return {row.id: row.to_domain(secret_ids.get(row.id, [])) for row in rows}
+
     async def query(
         self, version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], int]:

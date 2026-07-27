@@ -24,6 +24,7 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthService,
 )
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.blob_storage import DatabaseBlobStorage
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -37,6 +38,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.blob_repository import (
+    SQLBlobRepository,
+)
 from kitaru.server.adapters.db.repositories.cohort_repository import (
     SQLCohortRepository,
 )
@@ -48,6 +52,9 @@ from kitaru.server.adapters.db.repositories.experiment_run_repository import (
 )
 from kitaru.server.adapters.db.repositories.job_repository import (
     SQLJobRepository,
+)
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
 )
 from kitaru.server.adapters.db.repositories.replay_config_repository import (
     SQLReplayConfigRepository,
@@ -75,6 +82,7 @@ from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -83,6 +91,7 @@ from kitaru.server.application.services.experiment_service import (
     ExperimentService,
 )
 from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -92,6 +101,7 @@ from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
 BearerCredential = tuple[str, str | None]
@@ -196,6 +206,26 @@ def get_agent_version_service(
     )
 
 
+def get_blob_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> BlobService:
+    """Return a blob service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Blob service bound to the SQL repository.
+    """
+    return BlobService(
+        repository=SQLBlobRepository(session),
+        storage=DatabaseBlobStorage(),
+        max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+    )
+
+
 def get_cohort_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> CohortService:
@@ -234,6 +264,7 @@ def get_experiment_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
         worker_repository=SQLWorkerRepository(session),
+        plugin_repository=SQLPluginRepository(session),
         worker_liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
     )
 
@@ -279,6 +310,7 @@ def get_job_service(
         repository=SQLJobRepository(session),
         replay_config_repository=SQLReplayConfigRepository(session),
         session_repository=SQLSessionRepository(session),
+        agent_repository=SQLAgentRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         session_node_repository=SQLSessionNodeRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
@@ -288,9 +320,48 @@ def get_job_service(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
         worker_repository=SQLWorkerRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
         heartbeat_timeout_seconds=settings.JOB_HEARTBEAT_TIMEOUT_SECONDS,
         max_attempts=settings.JOB_MAX_ATTEMPTS,
         worker_liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
+
+
+def get_scorer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return a scorer service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories and the scorer kind.
+    """
+    return PluginService(
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        kind=PluginKind.SCORER,
+    )
+
+
+def get_importer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return an importer service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories and the importer
+        kind.
+    """
+    return PluginService(
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        kind=PluginKind.IMPORTER,
     )
 
 

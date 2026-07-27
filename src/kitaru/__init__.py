@@ -14,14 +14,14 @@
 """Kitaru."""
 
 from kitaru.job_context import job_id, job_inputs
-from kitaru.runner import JobRunner, Runner
-from kitaru.scoring import SessionView, evaluate_scoring_policy, load_scorer
+from kitaru.runner import JobRunner, Runner, WorkerHeartbeat
+from kitaru.scoring import SessionView, load_scorer
 
 __all__ = [
     "JobRunner",
     "Runner",
     "SessionView",
-    "evaluate_scoring_policy",
+    "WorkerHeartbeat",
     "job_id",
     "job_inputs",
     "load_scorer",

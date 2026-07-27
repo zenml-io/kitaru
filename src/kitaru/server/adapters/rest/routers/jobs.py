@@ -21,9 +21,9 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.agent_versions import ExecutionTarget
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.jobs import (
+    ClaimedJobResponse,
     JobClaimRequest,
     JobClaimResponse,
-    JobHeartbeatResponse,
     JobKind,
     JobResponse,
     JobSpecResponse,
@@ -62,7 +62,7 @@ async def list_jobs(
     service: Annotated[JobService, Depends(get_job_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     experiment_run_id: uuid.UUID | None = None,
-    original_session_id: uuid.UUID | None = None,
+    input_session_id: uuid.UUID | None = None,
     kind: JobKind | None = None,
     job_status: Annotated[JobStatus | None, Query(alias="status")] = None,
     standalone: bool | None = None,
@@ -80,7 +80,7 @@ async def list_jobs(
         service: Job service.
         actor: Caller context.
         experiment_run_id: Filter on experiment run id.
-        original_session_id: Filter on the replayed session id.
+        input_session_id: Filter on the session the job reads.
         kind: Filter on job kind.
         job_status: Filter on job status.
         standalone: Filter on standalone jobs.
@@ -94,7 +94,7 @@ async def list_jobs(
     """
     job_filter = JobFilter(
         experiment_run_id=experiment_run_id,
-        original_session_id=original_session_id,
+        input_session_id=input_session_id,
         kind=job_kind_to_domain(kind),
         status=job_status_to_domain(job_status),
         standalone=standalone,
@@ -124,7 +124,9 @@ async def claim_jobs(
     first, and the claim bumps the worker's last seen time. An unscoped
     claim yields only pool-target work. With an experiment run id the
     first claim moves a pending run to running, and canceling and
-    terminal runs yield no jobs.
+    terminal runs yield no jobs. Every claimed job ships with the spec the
+    runner executes it with, and a job whose spec does not resolve fails
+    and drops out of the response.
 
     Clients observe HTTP 200 on success, 404 when no worker or scoped
     experiment run has the referenced id, and 422 on invalid input.
@@ -135,16 +137,24 @@ async def claim_jobs(
         actor: Caller context.
 
     Returns:
-        Claimed jobs.
+        Claimed jobs with their specs.
     """
     jobs = await service.claim_jobs(
         worker_id=body.worker_id,
         max_jobs=body.max_jobs,
         agent_ids=body.agent_ids,
         experiment_run_id=body.experiment_run_id,
+        parent_job_id=body.parent_job_id,
         actor=actor,
     )
-    return JobClaimResponse(jobs=[job_to_response(job, config) for job, config in jobs])
+    return JobClaimResponse(
+        jobs=[
+            ClaimedJobResponse(
+                job=job_to_response(job, config), spec=job_spec_to_response(spec)
+            )
+            for job, config, spec in jobs
+        ]
+    )
 
 
 @router.get("/{job_id}")
@@ -325,32 +335,6 @@ async def retry_job(
     """
     job, config = await service.retry_job(job_id, actor=actor)
     return job_to_response(job, config)
-
-
-@router.post("/{job_id}/heartbeat")
-async def heartbeat_job(
-    job_id: uuid.UUID,
-    service: Annotated[JobService, Depends(get_job_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> JobHeartbeatResponse:
-    """Record a worker heartbeat on a job.
-
-    Terminal jobs record nothing and report the stop flag, so the
-    worker abandons the job.
-
-    Clients observe HTTP 200 on success, including terminal jobs, 404
-    when no job has this id, and 409 when the job is pending.
-
-    Args:
-        job_id: Id of the job.
-        service: Job service.
-        actor: Caller context.
-
-    Returns:
-        Heartbeat response with the status and stop flag.
-    """
-    job_status, canceled = await service.heartbeat_job(job_id, actor=actor)
-    return JobHeartbeatResponse(status=JobStatus(job_status.value), canceled=canceled)
 
 
 @router.post("/{job_id}/tool-lookup")

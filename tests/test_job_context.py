@@ -26,7 +26,7 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove the job env contract variables."""
     for name in (
         "KITARU_JOB_ID",
-        "KITARU_INPUTS",
+        "KITARU_JOB_INPUTS",
         "KITARU_API_URL",
         "KITARU_API_KEY",
     ):
@@ -50,14 +50,14 @@ def test_job_inputs_outside_job_mode() -> None:
 
 
 def test_job_inputs_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Parse KITARU_INPUTS when the runner set it."""
+    """Parse KITARU_JOB_INPUTS when the runner set it."""
     monkeypatch.setenv("KITARU_JOB_ID", "job-1")
-    monkeypatch.setenv("KITARU_INPUTS", '{"question": "hi"}')
+    monkeypatch.setenv("KITARU_JOB_INPUTS", '{"question": "hi"}')
     assert job_inputs() == {"question": "hi"}
 
 
 def test_job_inputs_fetches_spec(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fetch the job spec when KITARU_INPUTS is absent."""
+    """Fetch the job spec when KITARU_JOB_INPUTS is absent."""
     monkeypatch.setenv("KITARU_JOB_ID", "job-1")
     monkeypatch.setenv("KITARU_API_URL", "http://server/")
     monkeypatch.setenv("KITARU_API_KEY", "key")

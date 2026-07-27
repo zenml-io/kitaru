@@ -38,9 +38,8 @@ class JobRepository(Protocol):
                 config id.
             AgentVersionNotFound: No agent version has the job's agent
                 version id.
-            SessionNotFound: No session has the job's original session
-                id.
-            DuplicateReplaySession: The run already replays the original
+            SessionNotFound: No session has the job's input session id.
+            DuplicateReplaySession: The run already replays the input
                 session.
 
         Returns:
@@ -48,11 +47,32 @@ class JobRepository(Protocol):
         """
         ...
 
-    async def get(self, job_id: uuid.UUID) -> Job:
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist new jobs as one batch.
+
+        Args:
+            jobs: Jobs to store.
+
+        Raises:
+            DuplicateScoreJob: A parent job already scores an input
+                session with a scorer.
+            AgentVersionNotFound: No agent version has a job's agent
+                version id.
+            PluginVersionIdNotFound: No plugin version has a job's plugin
+                version id.
+            SessionNotFound: No session has a job's input session id.
+
+        Returns:
+            Stored jobs with timestamps set.
+        """
+        ...
+
+    async def get(self, job_id: uuid.UUID, for_update: bool = False) -> Job:
         """Load a job by id.
 
         Args:
             job_id: Id of the job.
+            for_update: Lock the row for the transaction.
 
         Raises:
             JobNotFound: No job has this id.
@@ -103,28 +123,53 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def list_children(self, parent_job_id: uuid.UUID) -> list[Job]:
+        """Load every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+
+        Returns:
+            Child jobs in id order.
+        """
+        ...
+
+    async def delete_children(self, parent_job_id: uuid.UUID) -> None:
+        """Delete every job fanned out from a parent job.
+
+        Args:
+            parent_job_id: Id of the parent job.
+        """
+        ...
+
     async def requeue_stale(
         self,
         stale_before: datetime,
         max_attempts: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
-    ) -> None:
+        parent_job_id: uuid.UUID | None = None,
+    ) -> list[Job]:
         """Requeue or time out jobs with lost heartbeats within a scope.
 
         A claimed or running job whose last heartbeat, or claim when no
         heartbeat arrived yet, is older than the threshold goes back to
         pending with the attempt incremented, or to timed out once the
-        attempt count reached the maximum. With an experiment run id the
-        scope is that run's jobs, without it the scope is pool-target
-        work. An agent ids scope keeps only jobs of those agents'
-        versions.
+        attempt count reached the maximum. With a parent job id the scope
+        is that job's children, with an experiment run id it is that run's
+        jobs and their children, without either it is pool-target work. An
+        agent ids scope keeps only jobs of those agents' versions and jobs
+        without an agent version.
 
         Args:
             stale_before: Heartbeats older than this time count as lost.
             max_attempts: Attempt count at which a stale job times out.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
+
+        Returns:
+            Jobs the staleness rule moved.
         """
         ...
 
@@ -134,22 +179,47 @@ class JobRepository(Protocol):
         limit: int,
         agent_ids: Sequence[uuid.UUID] | None = None,
         experiment_run_id: uuid.UUID | None = None,
+        parent_job_id: uuid.UUID | None = None,
     ) -> list[Job]:
         """Atomically claim pending jobs within a scope for a worker.
 
         Rows locked by a concurrent claim are skipped, so parallel workers
-        never double-claim. With an experiment run id the scope is that
-        run's jobs, without it the scope is pool-target work. An agent
-        ids scope keeps only jobs of those agents' versions.
+        never double-claim. With a parent job id the scope is that job's
+        children, with an experiment run id it is that run's jobs and
+        their children, without either it is pool-target work. An agent
+        ids scope keeps only jobs of those agents' versions and jobs
+        without an agent version.
 
         Args:
             worker_id: Id of the claiming worker.
             limit: Maximum number of jobs to claim.
             agent_ids: Ids of the agents to scope to.
             experiment_run_id: Id of the experiment run to scope to.
+            parent_job_id: Id of the parent job to scope to.
 
         Returns:
             Claimed jobs.
+        """
+        ...
+
+    async def heartbeat_many(
+        self,
+        worker_id: uuid.UUID,
+        job_ids: Sequence[uuid.UUID],
+        heartbeat_at: datetime,
+    ) -> list[Job]:
+        """Record one worker heartbeat on every claimed or running job it owns.
+
+        Reported jobs the worker no longer owns, and jobs that already went
+        terminal, stay untouched and are absent from the result.
+
+        Args:
+            worker_id: Id of the heartbeating worker.
+            job_ids: Ids of the jobs the worker reports.
+            heartbeat_at: Time of the heartbeat.
+
+        Returns:
+            Jobs the heartbeat reached.
         """
         ...
 

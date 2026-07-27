@@ -21,15 +21,19 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.workers import (
     WorkerCreateRequest,
+    WorkerHeartbeatRequest,
+    WorkerHeartbeatResponse,
     WorkerResponse,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_job_service,
     get_worker_service,
 )
 from kitaru.server.adapters.rest.mapping.workers import worker_to_response
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.workers import WorkerFilter
+from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.worker_service import WorkerService
 
 router = APIRouter()
@@ -121,6 +125,36 @@ async def get_worker(
     """
     worker = await service.get_worker(worker_id, actor=actor)
     return worker_to_response(worker, service.liveness_timeout_seconds)
+
+
+@router.post("/{worker_id}/heartbeat")
+async def heartbeat_worker(
+    worker_id: uuid.UUID,
+    body: WorkerHeartbeatRequest,
+    service: Annotated[JobService, Depends(get_job_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> WorkerHeartbeatResponse:
+    """Record one worker heartbeat on the jobs it reports as in flight.
+
+    The heartbeat reaches only claimed or running jobs the worker owns and
+    bumps the worker's last seen time. Reported jobs it did not reach, and
+    jobs whose experiment run is canceling, come back for the worker to
+    abandon.
+
+    Clients observe HTTP 200 on success, 404 when no worker has this id,
+    and 422 on invalid input.
+
+    Args:
+        worker_id: Id of the worker.
+        body: Worker heartbeat request.
+        service: Job service.
+        actor: Caller context.
+
+    Returns:
+        Job ids the worker should stop working on.
+    """
+    abandon = await service.heartbeat_worker(worker_id, body.job_ids, actor=actor)
+    return WorkerHeartbeatResponse(abandon=abandon)
 
 
 @router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)

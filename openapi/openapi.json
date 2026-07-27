@@ -617,6 +617,47 @@
         "title": "ApiKeyUpdateRequest",
         "type": "object"
       },
+      "BlobResponse": {
+        "description": "Blob response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "Blob id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Media type of the content.",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Hash of the content.",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size": {
+            "description": "Content size in bytes.",
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "sha256",
+          "size",
+          "media_type",
+          "created"
+        ],
+        "title": "BlobResponse",
+        "type": "object"
+      },
       "Body_login_v1_login_post": {
         "properties": {
           "password": {
@@ -631,6 +672,39 @@
           }
         },
         "title": "Body_login_v1_login_post",
+        "type": "object"
+      },
+      "Body_upload_blob_v1_blobs_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_blob_v1_blobs_post",
+        "type": "object"
+      },
+      "ClaimedJobResponse": {
+        "description": "Claimed job.",
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/JobResponse",
+            "description": "Claimed job."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/JobSpecResponse",
+            "description": "Spec the runner executes the job with."
+          }
+        },
+        "required": [
+          "job",
+          "spec"
+        ],
+        "title": "ClaimedJobResponse",
         "type": "object"
       },
       "CohortCreateRequest": {
@@ -1056,6 +1130,11 @@
             "title": "Running",
             "type": "integer"
           },
+          "scoring": {
+            "description": "Scoring job count.",
+            "title": "Scoring",
+            "type": "integer"
+          },
           "timed_out": {
             "description": "Timed out job count.",
             "title": "Timed Out",
@@ -1071,6 +1150,7 @@
           "pending",
           "claimed",
           "running",
+          "scoring",
           "completed",
           "failed",
           "timed_out",
@@ -1363,6 +1443,314 @@
         "title": "HistoryScope",
         "type": "string"
       },
+      "ImportCreateRequest": {
+        "additionalProperties": false,
+        "description": "Import create request.",
+        "properties": {
+          "agent_id": {
+            "description": "Id of the agent the sessions bind to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "importer": {
+            "description": "Name of the registered importer.",
+            "title": "Importer",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Keyword arguments for the importer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "payload_blob_id": {
+            "description": "Id of the payload blob.",
+            "format": "uuid",
+            "title": "Payload Blob Id",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registered version to run, the latest one when omitted.",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "importer",
+          "agent_id",
+          "payload_blob_id"
+        ],
+        "title": "ImportCreateRequest",
+        "type": "object"
+      },
+      "ImportFailure": {
+        "additionalProperties": false,
+        "description": "Import failure.",
+        "properties": {
+          "error": {
+            "description": "Error message.",
+            "title": "Error",
+            "type": "string"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External id of the failed session.",
+            "title": "External Id"
+          },
+          "line": {
+            "description": "Payload line the failure occurred on, the stream position for ingest failures.",
+            "minimum": 0.0,
+            "title": "Line",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "line",
+          "error"
+        ],
+        "title": "ImportFailure",
+        "type": "object"
+      },
+      "ImportStats": {
+        "additionalProperties": false,
+        "description": "Import stats.",
+        "properties": {
+          "created": {
+            "description": "Number of imported sessions.",
+            "minimum": 0.0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "failed": {
+            "description": "Number of sessions that failed to parse.",
+            "minimum": 0.0,
+            "title": "Failed",
+            "type": "integer"
+          },
+          "failures": {
+            "description": "Sample of the recorded failures.",
+            "items": {
+              "$ref": "#/components/schemas/ImportFailure"
+            },
+            "maxItems": 20,
+            "title": "Failures",
+            "type": "array"
+          },
+          "skipped": {
+            "description": "Number of already imported sessions.",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "skipped",
+          "failed"
+        ],
+        "title": "ImportStats",
+        "type": "object"
+      },
+      "ImporterCreateRequest": {
+        "additionalProperties": false,
+        "description": "Importer create request.",
+        "properties": {
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Importer configuration.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Importer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider the importer reads from.",
+            "title": "Provider"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ImporterCreateRequest",
+        "type": "object"
+      },
+      "ImporterResponse": {
+        "description": "Importer response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "Importer id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "description": "Highest registered version number.",
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Importer configuration.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Importer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider the importer reads from.",
+            "title": "Provider"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "provider",
+          "metadata",
+          "latest_version",
+          "created",
+          "updated"
+        ],
+        "title": "ImporterResponse",
+        "type": "object"
+      },
+      "ImporterVersionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Importer version create request.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the code blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Attribute implementing the importer.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/PluginFormat",
+            "default": "inline",
+            "description": "Code format."
+          }
+        },
+        "required": [
+          "blob_id",
+          "entrypoint"
+        ],
+        "title": "ImporterVersionCreateRequest",
+        "type": "object"
+      },
+      "ImporterVersionResponse": {
+        "description": "Importer version response.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the code blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Attribute implementing the importer.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/PluginFormat",
+            "description": "Code format."
+          },
+          "id": {
+            "description": "Importer version id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importer_id": {
+            "description": "Id of the importer.",
+            "format": "uuid",
+            "title": "Importer Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "Version number.",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "importer_id",
+          "version",
+          "format",
+          "blob_id",
+          "entrypoint",
+          "created"
+        ],
+        "title": "ImporterVersionResponse",
+        "type": "object"
+      },
       "JobClaimRequest": {
         "additionalProperties": false,
         "description": "Job claim request.",
@@ -1403,6 +1791,19 @@
             "title": "Max Jobs",
             "type": "integer"
           },
+          "parent_job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the job whose fanned out jobs to claim for.",
+            "title": "Parent Job Id"
+          },
           "worker_id": {
             "description": "Id of the claiming worker.",
             "format": "uuid",
@@ -1423,7 +1824,7 @@
           "jobs": {
             "description": "Claimed jobs.",
             "items": {
-              "$ref": "#/components/schemas/JobResponse"
+              "$ref": "#/components/schemas/ClaimedJobResponse"
             },
             "title": "Jobs",
             "type": "array"
@@ -1435,30 +1836,13 @@
         "title": "JobClaimResponse",
         "type": "object"
       },
-      "JobHeartbeatResponse": {
-        "description": "Job heartbeat response.",
-        "properties": {
-          "canceled": {
-            "description": "Whether the worker should stop working on the job.",
-            "title": "Canceled",
-            "type": "boolean"
-          },
-          "status": {
-            "$ref": "#/components/schemas/JobStatus"
-          }
-        },
-        "required": [
-          "status",
-          "canceled"
-        ],
-        "title": "JobHeartbeatResponse",
-        "type": "object"
-      },
       "JobKind": {
         "description": "Job kind.",
         "enum": [
           "replay",
-          "session_run"
+          "session_run",
+          "score",
+          "import"
         ],
         "title": "JobKind",
         "type": "string"
@@ -1466,11 +1850,31 @@
       "JobResponse": {
         "description": "Job response.",
         "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent, null outside import jobs.",
+            "title": "Agent Id"
+          },
           "agent_version_id": {
-            "description": "Id of the agent version.",
-            "format": "uuid",
-            "title": "Agent Version Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the agent version, null for registry score jobs.",
+            "title": "Agent Version Id"
           },
           "attempt": {
             "description": "Attempt counter.",
@@ -1535,15 +1939,7 @@
             "title": "Error"
           },
           "execution_target": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ExecutionTarget"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Execution target, null for run-created jobs."
+            "$ref": "#/components/schemas/ExecutionTarget"
           },
           "executor_handle": {
             "anyOf": [
@@ -1589,8 +1985,21 @@
             "title": "Id",
             "type": "string"
           },
+          "input_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the session the job reads, null for session runs.",
+            "title": "Input Session Id"
+          },
           "inputs": {
-            "description": "Session inputs, null for replay jobs.",
+            "description": "Session inputs or importer params, null for replay jobs.",
             "title": "Inputs"
           },
           "kind": {
@@ -1608,19 +2017,6 @@
             "description": "Session run name.",
             "title": "Name"
           },
-          "original_session_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the replayed session, null for session runs.",
-            "title": "Original Session Id"
-          },
           "override": {
             "anyOf": [
               {
@@ -1631,6 +2027,19 @@
               }
             ],
             "description": "Execution override."
+          },
+          "parent_job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the job this job was fanned out from.",
+            "title": "Parent Job Id"
           },
           "passed": {
             "anyOf": [
@@ -1643,6 +2052,32 @@
             ],
             "description": "Scoring outcome, null until scored.",
             "title": "Passed"
+          },
+          "payload_blob_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the payload blob, null outside import jobs.",
+            "title": "Payload Blob Id"
+          },
+          "plugin_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the pinned plugin version.",
+            "title": "Plugin Version Id"
           },
           "result_session_id": {
             "anyOf": [
@@ -1666,8 +2101,34 @@
                 "type": "null"
               }
             ],
-            "description": "Weighted average, null until scored.",
+            "description": "Weighted average of a replay or the value a score job produced, null until scored.",
             "title": "Score"
+          },
+          "scorer": {
+            "anyOf": [
+              {
+                "discriminator": {
+                  "mapping": {
+                    "scorer": "#/components/schemas/RegistryScorerConfig",
+                    "source": "#/components/schemas/SourceScorerConfig"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceScorerConfig"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RegistryScorerConfig"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scorer configuration, null outside score jobs.",
+            "title": "Scorer"
           },
           "scores": {
             "anyOf": [
@@ -1708,6 +2169,17 @@
             "description": "Execution start time.",
             "title": "Started At"
           },
+          "stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ImportStats"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Import results, null until the importer reports them."
+          },
           "status": {
             "$ref": "#/components/schemas/JobStatus"
           },
@@ -1747,8 +2219,13 @@
           "kind",
           "experiment_run_id",
           "agent_version_id",
-          "original_session_id",
+          "agent_id",
+          "parent_job_id",
+          "input_session_id",
           "result_session_id",
+          "scorer",
+          "plugin_version_id",
+          "payload_blob_id",
           "status",
           "attempt",
           "worker_id",
@@ -1765,6 +2242,7 @@
           "score",
           "scores",
           "diff",
+          "stats",
           "override",
           "tool_policy",
           "scoring_policy",
@@ -1774,9 +2252,126 @@
         "title": "JobResponse",
         "type": "object"
       },
+      "JobSpecImporter": {
+        "description": "Job spec importer.",
+        "properties": {
+          "agent_id": {
+            "description": "Id of the agent the sessions bind to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Keyword arguments for the importer.",
+            "title": "Params",
+            "type": "object"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/JobSpecPayload",
+            "description": "Payload to import."
+          },
+          "plugin": {
+            "$ref": "#/components/schemas/JobSpecPlugin",
+            "description": "Registered code."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/SessionProvider",
+            "description": "Provider of the imported sessions."
+          }
+        },
+        "required": [
+          "plugin",
+          "payload",
+          "provider",
+          "agent_id",
+          "params"
+        ],
+        "title": "JobSpecImporter",
+        "type": "object"
+      },
+      "JobSpecPayload": {
+        "description": "Job spec payload.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the payload blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Hash of the payload blob content.",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "blob_id",
+          "sha256"
+        ],
+        "title": "JobSpecPayload",
+        "type": "object"
+      },
+      "JobSpecPlugin": {
+        "description": "Job spec plugin code.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the code blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Attribute implementing the plugin.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/PluginFormat",
+            "description": "Code format."
+          },
+          "sha256": {
+            "description": "Hash of the code blob content.",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "entrypoint",
+          "blob_id",
+          "sha256"
+        ],
+        "title": "JobSpecPlugin",
+        "type": "object"
+      },
       "JobSpecResponse": {
         "description": "Job spec response.",
         "properties": {
+          "importer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobSpecImporter"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Importer to run, null outside import jobs."
+          },
+          "input_session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the session the job reads, null for session runs.",
+            "title": "Input Session Id"
+          },
           "inputs": {
             "description": "Effective session inputs, with any prompt override applied.",
             "title": "Inputs"
@@ -1802,19 +2397,6 @@
             "description": "Session run name.",
             "title": "Name"
           },
-          "original_session_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Id of the replayed session, null for session runs.",
-            "title": "Original Session Id"
-          },
           "override": {
             "anyOf": [
               {
@@ -1827,31 +2409,26 @@
             "description": "Execution override."
           },
           "run": {
-            "$ref": "#/components/schemas/JobSpecRun",
-            "description": "Run command of the agent version."
-          },
-          "score_baselines": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/JobSpecRun"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Whether the runner also scores originals missing scores, null for session runs.",
-            "title": "Score Baselines"
+            "description": "Run command of the agent version, null for registry score jobs."
           },
-          "scoring_policy": {
+          "scorer": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ScoringPolicy"
+                "$ref": "#/components/schemas/JobSpecScorer"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Scoring policy, null for session runs."
+            "description": "Scorer to run, null outside score jobs."
           },
           "secret_env": {
             "additionalProperties": {
@@ -1870,7 +2447,7 @@
                 "type": "null"
               }
             ],
-            "description": "Tool policy, null for session runs."
+            "description": "Tool policy, null outside replays."
           }
         },
         "required": [
@@ -1879,11 +2456,11 @@
           "inputs",
           "override",
           "tool_policy",
-          "scoring_policy",
-          "score_baselines",
+          "scorer",
+          "importer",
           "run",
           "secret_env",
-          "original_session_id",
+          "input_session_id",
           "name"
         ],
         "title": "JobSpecResponse",
@@ -1932,12 +2509,61 @@
         "title": "JobSpecRun",
         "type": "object"
       },
+      "JobSpecScorer": {
+        "description": "Job spec scorer.",
+        "properties": {
+          "config": {
+            "description": "Scorer configuration.",
+            "discriminator": {
+              "mapping": {
+                "scorer": "#/components/schemas/RegistryScorerConfig",
+                "source": "#/components/schemas/SourceScorerConfig"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SourceScorerConfig"
+              },
+              {
+                "$ref": "#/components/schemas/RegistryScorerConfig"
+              }
+            ],
+            "title": "Config"
+          },
+          "input_session_id": {
+            "description": "Id of the session to score.",
+            "format": "uuid",
+            "title": "Input Session Id",
+            "type": "string"
+          },
+          "plugin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobSpecPlugin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registered code, null for source scorers."
+          }
+        },
+        "required": [
+          "config",
+          "plugin",
+          "input_session_id"
+        ],
+        "title": "JobSpecScorer",
+        "type": "object"
+      },
       "JobStatus": {
         "description": "Job status.",
         "enum": [
           "pending",
           "claimed",
           "running",
+          "scoring",
           "completed",
           "failed",
           "timed_out",
@@ -1962,18 +2588,6 @@
             "description": "Error message, required for failed and timed out.",
             "title": "Error"
           },
-          "passed": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Scoring outcome, required for completed.",
-            "title": "Passed"
-          },
           "score": {
             "anyOf": [
               {
@@ -1983,32 +2597,32 @@
                 "type": "null"
               }
             ],
-            "description": "Weighted average, required for completed.",
+            "description": "Value the scorer produced, score jobs only.",
             "title": "Score"
           },
-          "scores": {
+          "stats": {
             "anyOf": [
               {
-                "additionalProperties": {
-                  "type": "number"
-                },
-                "type": "object"
+                "$ref": "#/components/schemas/ImportStats"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Scores by scorer name, required for completed.",
-            "title": "Scores"
+            "description": "Results the importer produced, import jobs only."
           },
           "status": {
-            "$ref": "#/components/schemas/JobStatus",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Target status."
           }
         },
-        "required": [
-          "status"
-        ],
         "title": "JobUpdateRequest",
         "type": "object"
       },
@@ -2373,6 +2987,68 @@
         "title": "Page[ExperimentRunResponse]",
         "type": "object"
       },
+      "Page_ImporterResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImporterResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ImporterResponse]",
+        "type": "object"
+      },
+      "Page_ImporterVersionResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImporterVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ImporterVersionResponse]",
+        "type": "object"
+      },
       "Page_JobResponse_": {
         "properties": {
           "items": {
@@ -2402,6 +3078,68 @@
           "page_size"
         ],
         "title": "Page[JobResponse]",
+        "type": "object"
+      },
+      "Page_ScorerResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScorerResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ScorerResponse]",
+        "type": "object"
+      },
+      "Page_ScorerVersionResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScorerVersionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "page_size": {
+            "title": "Page Size",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "page_size"
+        ],
+        "title": "Page[ScorerVersionResponse]",
         "type": "object"
       },
       "Page_SecretResponse_": {
@@ -2542,6 +3280,73 @@
         "title": "PassthroughPolicy",
         "type": "object"
       },
+      "PluginFormat": {
+        "description": "Plugin code format.",
+        "enum": [
+          "inline"
+        ],
+        "title": "PluginFormat",
+        "type": "string"
+      },
+      "RegistryScorerConfig": {
+        "additionalProperties": false,
+        "description": "Registry scorer configuration.",
+        "properties": {
+          "fail_below": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score at or below which the job fails outright.",
+            "title": "Fail Below"
+          },
+          "name": {
+            "description": "Name of the registered scorer.",
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Keyword arguments for the function.",
+            "title": "Params",
+            "type": "object"
+          },
+          "type": {
+            "const": "scorer",
+            "default": "scorer",
+            "title": "Type",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registered version to run, the latest one when omitted.",
+            "title": "Version"
+          },
+          "weight": {
+            "default": 1.0,
+            "description": "Weight in the average.",
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "RegistryScorerConfig",
+        "type": "object"
+      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -2559,10 +3364,10 @@
             "description": "Id of the agent version to execute, the latest runnable version when omitted.",
             "title": "Agent Version Id"
           },
-          "original_session_id": {
+          "input_session_id": {
             "description": "Id of the session to replay.",
             "format": "uuid",
-            "title": "Original Session Id",
+            "title": "Input Session Id",
             "type": "string"
           },
           "override": {
@@ -2592,7 +3397,7 @@
           }
         },
         "required": [
-          "original_session_id",
+          "input_session_id",
           "scoring_policy"
         ],
         "title": "ReplayCreateRequest",
@@ -2873,52 +3678,151 @@
         "title": "ScoreDelta",
         "type": "object"
       },
-      "ScorerConfig": {
+      "ScorerCreateRequest": {
         "additionalProperties": false,
-        "description": "Scorer configuration.",
+        "description": "Scorer create request.",
         "properties": {
-          "fail_below": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Score at or below which the job fails outright.",
-            "title": "Fail Below"
-          },
           "name": {
-            "description": "Scorer name, unique within the policy.",
+            "description": "Scorer name.",
             "title": "Name",
             "type": "string"
-          },
-          "params": {
-            "additionalProperties": true,
-            "description": "Keyword arguments for the function.",
-            "title": "Params",
-            "type": "object"
-          },
-          "source": {
-            "description": "Scoring function reference as 'module:attribute'.",
-            "pattern": "^[^:\\s]+:[^:\\s]+$",
-            "title": "Source",
-            "type": "string"
-          },
-          "weight": {
-            "default": 1.0,
-            "description": "Weight in the average.",
-            "minimum": 0.0,
-            "title": "Weight",
-            "type": "number"
           }
         },
         "required": [
-          "name",
-          "source"
+          "name"
         ],
-        "title": "ScorerConfig",
+        "title": "ScorerCreateRequest",
+        "type": "object"
+      },
+      "ScorerResponse": {
+        "description": "Scorer response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "Scorer id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "latest_version": {
+            "description": "Highest registered version number.",
+            "title": "Latest Version",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Scorer name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "owner_id",
+          "name",
+          "latest_version",
+          "created",
+          "updated"
+        ],
+        "title": "ScorerResponse",
+        "type": "object"
+      },
+      "ScorerVersionCreateRequest": {
+        "additionalProperties": false,
+        "description": "Scorer version create request.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the code blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Attribute implementing the scorer.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/PluginFormat",
+            "default": "inline",
+            "description": "Code format."
+          }
+        },
+        "required": [
+          "blob_id",
+          "entrypoint"
+        ],
+        "title": "ScorerVersionCreateRequest",
+        "type": "object"
+      },
+      "ScorerVersionResponse": {
+        "description": "Scorer version response.",
+        "properties": {
+          "blob_id": {
+            "description": "Id of the code blob.",
+            "format": "uuid",
+            "title": "Blob Id",
+            "type": "string"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "entrypoint": {
+            "description": "Attribute implementing the scorer.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/PluginFormat",
+            "description": "Code format."
+          },
+          "id": {
+            "description": "Scorer version id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "scorer_id": {
+            "description": "Id of the scorer.",
+            "format": "uuid",
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "Version number.",
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "scorer_id",
+          "version",
+          "format",
+          "blob_id",
+          "entrypoint",
+          "created"
+        ],
+        "title": "ScorerVersionResponse",
         "type": "object"
       },
       "ScoringPolicy": {
@@ -2935,7 +3839,21 @@
           "scorers": {
             "description": "Scorers to run.",
             "items": {
-              "$ref": "#/components/schemas/ScorerConfig"
+              "discriminator": {
+                "mapping": {
+                  "scorer": "#/components/schemas/RegistryScorerConfig",
+                  "source": "#/components/schemas/SourceScorerConfig"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/SourceScorerConfig"
+                },
+                {
+                  "$ref": "#/components/schemas/RegistryScorerConfig"
+                }
+              ]
             },
             "minItems": 1,
             "title": "Scorers",
@@ -4364,6 +5282,60 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
+      "SourceScorerConfig": {
+        "additionalProperties": false,
+        "description": "Source scorer configuration.",
+        "properties": {
+          "fail_below": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score at or below which the job fails outright.",
+            "title": "Fail Below"
+          },
+          "name": {
+            "description": "Scorer name, unique within the policy.",
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Keyword arguments for the function.",
+            "title": "Params",
+            "type": "object"
+          },
+          "source": {
+            "description": "Scoring function reference as 'module:attribute'.",
+            "pattern": "^[^:\\s]+:[^:\\s]+$",
+            "title": "Source",
+            "type": "string"
+          },
+          "type": {
+            "const": "source",
+            "default": "source",
+            "title": "Type",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1.0,
+            "description": "Weight in the average.",
+            "minimum": 0.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "source"
+        ],
+        "title": "SourceScorerConfig",
+        "type": "object"
+      },
       "StandaloneJobClaimRequest": {
         "additionalProperties": false,
         "description": "Standalone job claim request.",
@@ -4943,6 +5915,42 @@
           "name"
         ],
         "title": "WorkerCreateRequest",
+        "type": "object"
+      },
+      "WorkerHeartbeatRequest": {
+        "additionalProperties": false,
+        "description": "Worker heartbeat request.",
+        "properties": {
+          "job_ids": {
+            "description": "Ids of the jobs the worker has in flight.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Job Ids",
+            "type": "array"
+          }
+        },
+        "title": "WorkerHeartbeatRequest",
+        "type": "object"
+      },
+      "WorkerHeartbeatResponse": {
+        "description": "Worker heartbeat response.",
+        "properties": {
+          "abandon": {
+            "description": "Reported job ids the worker should stop working on.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Abandon",
+            "type": "array"
+          }
+        },
+        "required": [
+          "abandon"
+        ],
+        "title": "WorkerHeartbeatResponse",
         "type": "object"
       },
       "WorkerResponse": {
@@ -6041,6 +7049,85 @@
         ]
       }
     },
+    "/v1/blobs": {
+      "post": {
+        "description": "Upload a blob, deduplicating by content hash.\n\nContent already stored returns the stored blob, so clients observe\nHTTP 200 instead of 201 on success, and 422 when the content exceeds\nthe size limit.\n\nArgs:\n    response: Outgoing response.\n    file: Uploaded content.\n    service: Blob service.\n    actor: Caller context.\n\nReturns:\n    Stored blob.",
+        "operationId": "upload_blob_v1_blobs_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_blob_v1_blobs_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Blob",
+        "tags": [
+          "blobs"
+        ]
+      }
+    },
+    "/v1/blobs/{blob_id}/content": {
+      "get": {
+        "description": "Download the content of a blob.\n\nClients observe HTTP 200 on success and 404 when no blob has this id.\n\nArgs:\n    blob_id: Id of the blob.\n    service: Blob service.\n    actor: Caller context.\n\nReturns:\n    Blob content under its stored media type.",
+        "operationId": "download_blob_v1_blobs__blob_id__content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "blob_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Blob",
+        "tags": [
+          "blobs"
+        ]
+      }
+    },
     "/v1/cohorts": {
       "get": {
         "description": "List cohorts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Cohort service.\n    actor: Caller context.\n    name: Filter on cohort name.\n    tag: Filter on attached tag name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of cohorts.",
@@ -7059,9 +8146,431 @@
         ]
       }
     },
+    "/v1/importers": {
+      "get": {
+        "description": "List importers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Plugin service.\n    actor: Caller context.\n    name: Filter on importer name.\n    provider: Filter on the provider the importer reads from.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of importers.",
+        "operationId": "list_importers_v1_importers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ImporterResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Importers",
+        "tags": [
+          "importers"
+        ]
+      },
+      "post": {
+        "description": "Create an importer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Importer create request.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Created importer.",
+        "operationId": "create_importer_v1_importers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImporterCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImporterResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Importer",
+        "tags": [
+          "importers"
+        ]
+      }
+    },
+    "/v1/importers/{importer_id}": {
+      "delete": {
+        "description": "Delete an importer and its versions.\n\nClients observe HTTP 204 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Plugin service.\n    actor: Caller context.",
+        "operationId": "delete_importer_v1_importers__importer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Importer",
+        "tags": [
+          "importers"
+        ]
+      },
+      "get": {
+        "description": "Get an importer by id.\n\nClients observe HTTP 200 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Stored importer.",
+        "operationId": "get_importer_v1_importers__importer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImporterResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Importer",
+        "tags": [
+          "importers"
+        ]
+      }
+    },
+    "/v1/importers/{importer_id}/versions": {
+      "get": {
+        "description": "List the versions of an importer.\n\nClients observe HTTP 200 on success, 404 when no importer has this\nid, and 422 on invalid pagination parameters.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Plugin service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of importer versions.",
+        "operationId": "list_importer_versions_v1_importers__importer_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ImporterVersionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Importer Versions",
+        "tags": [
+          "importers"
+        ]
+      },
+      "post": {
+        "description": "Create an importer version under the next version number.\n\nClients observe HTTP 201 on success, 404 when no importer has this id\nor the code blob does not exist, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
+        "operationId": "create_importer_version_v1_importers__importer_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImporterVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImporterVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Importer Version",
+        "tags": [
+          "importers"
+        ]
+      }
+    },
+    "/v1/importers/{importer_id}/versions/{version}": {
+      "get": {
+        "description": "Get an importer version by version number.\n\nClients observe HTTP 200 on success and 404 when no importer has this\nid or the importer has no such version.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Stored importer version.",
+        "operationId": "get_importer_version_v1_importers__importer_id__versions__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "importer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImporterVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Importer Version",
+        "tags": [
+          "importers"
+        ]
+      }
+    },
+    "/v1/imports": {
+      "post": {
+        "description": "Create an import of one payload blob.\n\nThe named importer resolves to a plugin version that the job pins.\n\nClients observe HTTP 201 on success, 404 when no importer has the\nname, the importer has no such version, no agent has the id, or no\nblob has the payload blob id, and 422 when the input is invalid or\nthe importer reads from no known provider.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "operationId": "create_import_v1_imports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Import",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
     "/v1/jobs": {
       "get": {
-        "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    original_session_id: Filter on the replayed session id.\n    kind: Filter on job kind.\n    job_status: Filter on job status.\n    standalone: Filter on standalone jobs.\n    worker_id: Filter on the claiming worker id.\n    execution_target: Filter on execution target.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
+        "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    experiment_run_id: Filter on experiment run id.\n    input_session_id: Filter on the session the job reads.\n    kind: Filter on job kind.\n    job_status: Filter on job status.\n    standalone: Filter on standalone jobs.\n    worker_id: Filter on the claiming worker id.\n    execution_target: Filter on execution target.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of jobs.",
         "operationId": "list_jobs_v1_jobs_get",
         "parameters": [
           {
@@ -7083,7 +8592,7 @@
           },
           {
             "in": "query",
-            "name": "original_session_id",
+            "name": "input_session_id",
             "required": false,
             "schema": {
               "anyOf": [
@@ -7095,7 +8604,7 @@
                   "type": "null"
                 }
               ],
-              "title": "Original Session Id"
+              "title": "Input Session Id"
             }
           },
           {
@@ -7233,7 +8742,7 @@
     },
     "/v1/jobs/claim": {
       "post": {
-        "description": "Atomically claim pending jobs within a scope for a worker.\n\nStale claimed or running jobs in scope are requeued or timed out\nfirst, and the claim bumps the worker's last seen time. An unscoped\nclaim yields only pool-target work. With an experiment run id the\nfirst claim moves a pending run to running, and canceling and\nterminal runs yield no jobs.\n\nClients observe HTTP 200 on success, 404 when no worker or scoped\nexperiment run has the referenced id, and 422 on invalid input.\n\nArgs:\n    body: Job claim request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Claimed jobs.",
+        "description": "Atomically claim pending jobs within a scope for a worker.\n\nStale claimed or running jobs in scope are requeued or timed out\nfirst, and the claim bumps the worker's last seen time. An unscoped\nclaim yields only pool-target work. With an experiment run id the\nfirst claim moves a pending run to running, and canceling and\nterminal runs yield no jobs. Every claimed job ships with the spec the\nrunner executes it with, and a job whose spec does not resolve fails\nand drops out of the response.\n\nClients observe HTTP 200 on success, 404 when no worker or scoped\nexperiment run has the referenced id, and 422 on invalid input.\n\nArgs:\n    body: Job claim request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Claimed jobs with their specs.",
         "operationId": "claim_jobs_v1_jobs_claim_post",
         "requestBody": {
           "content": {
@@ -7497,50 +9006,6 @@
           }
         },
         "summary": "Get Job Diff",
-        "tags": [
-          "jobs"
-        ]
-      }
-    },
-    "/v1/jobs/{job_id}/heartbeat": {
-      "post": {
-        "description": "Record a worker heartbeat on a job.\n\nTerminal jobs record nothing and report the stop flag, so the\nworker abandons the job.\n\nClients observe HTTP 200 on success, including terminal jobs, 404\nwhen no job has this id, and 409 when the job is pending.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Heartbeat response with the status and stop flag.",
-        "operationId": "heartbeat_job_v1_jobs__job_id__heartbeat_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "job_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Job Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/JobHeartbeatResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Heartbeat Job",
         "tags": [
           "jobs"
         ]
@@ -7827,6 +9292,370 @@
         "summary": "Create Replay",
         "tags": [
           "replays"
+        ]
+      }
+    },
+    "/v1/scorers": {
+      "get": {
+        "description": "List scorers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Plugin service.\n    actor: Caller context.\n    name: Filter on scorer name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of scorers.",
+        "operationId": "list_scorers_v1_scorers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ScorerResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Scorers",
+        "tags": [
+          "scorers"
+        ]
+      },
+      "post": {
+        "description": "Create a scorer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Scorer create request.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Created scorer.",
+        "operationId": "create_scorer_v1_scorers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScorerCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Scorer",
+        "tags": [
+          "scorers"
+        ]
+      }
+    },
+    "/v1/scorers/{scorer_id}": {
+      "delete": {
+        "description": "Delete a scorer and its versions.\n\nClients observe HTTP 204 on success and 404 when no scorer has this\nid.\n\nArgs:\n    scorer_id: Id of the scorer.\n    service: Plugin service.\n    actor: Caller context.",
+        "operationId": "delete_scorer_v1_scorers__scorer_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scorer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scorer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Scorer",
+        "tags": [
+          "scorers"
+        ]
+      },
+      "get": {
+        "description": "Get a scorer by id.\n\nClients observe HTTP 200 on success and 404 when no scorer has this\nid.\n\nArgs:\n    scorer_id: Id of the scorer.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Stored scorer.",
+        "operationId": "get_scorer_v1_scorers__scorer_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scorer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scorer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorerResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scorer",
+        "tags": [
+          "scorers"
+        ]
+      }
+    },
+    "/v1/scorers/{scorer_id}/versions": {
+      "get": {
+        "description": "List the versions of a scorer.\n\nClients observe HTTP 200 on success, 404 when no scorer has this id,\nand 422 on invalid pagination parameters.\n\nArgs:\n    scorer_id: Id of the scorer.\n    service: Plugin service.\n    actor: Caller context.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of scorer versions.",
+        "operationId": "list_scorer_versions_v1_scorers__scorer_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scorer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scorer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ScorerVersionResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Scorer Versions",
+        "tags": [
+          "scorers"
+        ]
+      },
+      "post": {
+        "description": "Create a scorer version under the next version number.\n\nClients observe HTTP 201 on success, 404 when no scorer has this id\nor the code blob does not exist, and 422 on invalid input.\n\nArgs:\n    scorer_id: Id of the scorer.\n    body: Scorer version create request.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Created scorer version.",
+        "operationId": "create_scorer_version_v1_scorers__scorer_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scorer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scorer Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScorerVersionCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Scorer Version",
+        "tags": [
+          "scorers"
+        ]
+      }
+    },
+    "/v1/scorers/{scorer_id}/versions/{version}": {
+      "get": {
+        "description": "Get a scorer version by version number.\n\nClients observe HTTP 200 on success and 404 when no scorer has this\nid or the scorer has no such version.\n\nArgs:\n    scorer_id: Id of the scorer.\n    version: Version number.\n    service: Plugin service.\n    actor: Caller context.\n\nReturns:\n    Stored scorer version.",
+        "operationId": "get_scorer_version_v1_scorers__scorer_id__versions__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scorer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Scorer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScorerVersionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Scorer Version",
+        "tags": [
+          "scorers"
         ]
       }
     },
@@ -9262,6 +11091,60 @@
           }
         },
         "summary": "Get Worker",
+        "tags": [
+          "workers"
+        ]
+      }
+    },
+    "/v1/workers/{worker_id}/heartbeat": {
+      "post": {
+        "description": "Record one worker heartbeat on the jobs it reports as in flight.\n\nThe heartbeat reaches only claimed or running jobs the worker owns and\nbumps the worker's last seen time. Reported jobs it did not reach, and\njobs whose experiment run is canceling, come back for the worker to\nabandon.\n\nClients observe HTTP 200 on success, 404 when no worker has this id,\nand 422 on invalid input.\n\nArgs:\n    worker_id: Id of the worker.\n    body: Worker heartbeat request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Job ids the worker should stop working on.",
+        "operationId": "heartbeat_worker_v1_workers__worker_id__heartbeat_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerHeartbeatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerHeartbeatResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Heartbeat Worker",
         "tags": [
           "workers"
         ]

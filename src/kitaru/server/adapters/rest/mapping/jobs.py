@@ -20,11 +20,17 @@ from kitaru.api_models.v1.jobs import DiffNode as DiffNodeModel
 from kitaru.api_models.v1.jobs import DiffValue as DiffValueModel
 from kitaru.api_models.v1.jobs import HistoryPolicy as HistoryPolicyModel
 from kitaru.api_models.v1.jobs import HistoryScope as HistoryScopeModel
+from kitaru.api_models.v1.jobs import ImportFailure as ImportFailureModel
+from kitaru.api_models.v1.jobs import ImportStats as ImportStatsModel
 from kitaru.api_models.v1.jobs import JobKind as JobKindModel
 from kitaru.api_models.v1.jobs import (
     JobResponse,
+    JobSpecImporter,
+    JobSpecPayload,
+    JobSpecPlugin,
     JobSpecResponse,
     JobSpecRun,
+    JobSpecScorer,
     JobUpdateRequest,
     ReplayCreateRequest,
     ReplayDiffResponse,
@@ -37,12 +43,18 @@ from kitaru.api_models.v1.jobs import (
     PassthroughPolicy as PassthroughPolicyModel,
 )
 from kitaru.api_models.v1.jobs import (
+    RegistryScorerConfig as RegistryScorerConfigModel,
+)
+from kitaru.api_models.v1.jobs import (
     ReplayInputDiff as ReplayInputDiffModel,
 )
 from kitaru.api_models.v1.jobs import ReplayOverride as ReplayOverrideModel
 from kitaru.api_models.v1.jobs import ScoreDelta as ScoreDeltaModel
 from kitaru.api_models.v1.jobs import ScorerConfig as ScorerConfigModel
 from kitaru.api_models.v1.jobs import ScoringPolicy as ScoringPolicyModel
+from kitaru.api_models.v1.jobs import (
+    SourceScorerConfig as SourceScorerConfigModel,
+)
 from kitaru.api_models.v1.jobs import StaticCase as StaticCaseModel
 from kitaru.api_models.v1.jobs import StaticMatchMode as StaticMatchModeModel
 from kitaru.api_models.v1.jobs import StaticPolicy as StaticPolicyModel
@@ -54,14 +66,25 @@ from kitaru.api_models.v1.jobs import (
 from kitaru.api_models.v1.jobs import (
     ToolPolicyOnMiss as ToolPolicyOnMissModel,
 )
+from kitaru.api_models.v1.plugins import PluginFormat as PluginFormatModel
 from kitaru.api_models.v1.session_nodes import NodeType as NodeTypeModel
+from kitaru.api_models.v1.sessions import (
+    SessionProvider as SessionProviderModel,
+)
 from kitaru.server.application.models.jobs import JobUpdate, ReplayCreate
 from kitaru.server.domain.job import (
+    Import,
+    ImporterSpec,
+    ImportFailure,
+    ImportStats,
     Job,
     JobKind,
     JobSpec,
     JobStatus,
+    PluginSpec,
     Replay,
+    Score,
+    ScorerSpec,
     SessionRun,
 )
 from kitaru.server.domain.replay_config import (
@@ -69,11 +92,13 @@ from kitaru.server.domain.replay_config import (
     HistoryScope,
     LLMPolicy,
     PassthroughPolicy,
+    RegistryScorerConfig,
     ReplayConfig,
     ReplayOverride,
     ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     StaticCase,
     StaticMatchMode,
     StaticPolicy,
@@ -232,6 +257,58 @@ def tool_policy_config_to_response(config: ToolPolicyConfig) -> ToolPolicyConfig
     )
 
 
+def scorer_config_to_domain(config: ScorerConfigModel) -> ScorerConfig:
+    """Convert a scorer config DTO to its domain value object.
+
+    Args:
+        config: Scorer config DTO.
+
+    Returns:
+        Domain scorer config.
+    """
+    if isinstance(config, SourceScorerConfigModel):
+        return SourceScorerConfig(
+            name=config.name,
+            source=SourceRef.parse(config.source),
+            params=config.params,
+            weight=config.weight,
+            fail_below=config.fail_below,
+        )
+    return RegistryScorerConfig(
+        name=config.name,
+        version=config.version,
+        params=config.params,
+        weight=config.weight,
+        fail_below=config.fail_below,
+    )
+
+
+def scorer_config_to_response(config: ScorerConfig) -> ScorerConfigModel:
+    """Convert a domain scorer config to its DTO.
+
+    Args:
+        config: Domain scorer config.
+
+    Returns:
+        Scorer config DTO.
+    """
+    if isinstance(config, SourceScorerConfig):
+        return SourceScorerConfigModel(
+            name=config.name,
+            source=config.source.render(),
+            params=config.params,
+            weight=config.weight,
+            fail_below=config.fail_below,
+        )
+    return RegistryScorerConfigModel(
+        name=config.name,
+        version=config.version,
+        params=config.params,
+        weight=config.weight,
+        fail_below=config.fail_below,
+    )
+
+
 def scoring_policy_to_domain(policy: ScoringPolicyModel) -> ScoringPolicy:
     """Convert a scoring policy DTO to its domain value object.
 
@@ -242,16 +319,7 @@ def scoring_policy_to_domain(policy: ScoringPolicyModel) -> ScoringPolicy:
         Domain scoring policy.
     """
     return ScoringPolicy(
-        scorers=[
-            ScorerConfig(
-                name=scorer.name,
-                source=SourceRef.parse(scorer.source),
-                params=scorer.params,
-                weight=scorer.weight,
-                fail_below=scorer.fail_below,
-            )
-            for scorer in policy.scorers
-        ],
+        scorers=[scorer_config_to_domain(scorer) for scorer in policy.scorers],
         pass_threshold=policy.pass_threshold,
     )
 
@@ -266,16 +334,7 @@ def scoring_policy_to_response(policy: ScoringPolicy) -> ScoringPolicyModel:
         Scoring policy DTO.
     """
     return ScoringPolicyModel(
-        scorers=[
-            ScorerConfigModel(
-                name=scorer.name,
-                source=scorer.source.render(),
-                params=scorer.params,
-                weight=scorer.weight,
-                fail_below=scorer.fail_below,
-            )
-            for scorer in policy.scorers
-        ],
+        scorers=[scorer_config_to_response(scorer) for scorer in policy.scorers],
         pass_threshold=policy.pass_threshold,
     )
 
@@ -290,7 +349,7 @@ def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:
         Replay create command.
     """
     return ReplayCreate(
-        original_session_id=body.original_session_id,
+        input_session_id=body.input_session_id,
         agent_version_id=body.agent_version_id,
         override=override_to_domain(body.override),
         tool_policy=tool_policy_config_to_domain(body.tool_policy),
@@ -326,6 +385,58 @@ def job_kind_to_domain(kind: JobKindModel | None) -> JobKind | None:
     return JobKind(kind.value)
 
 
+def import_stats_to_domain(stats: ImportStatsModel | None) -> ImportStats | None:
+    """Convert an optional import stats DTO to its domain value object.
+
+    Args:
+        stats: Import stats DTO.
+
+    Returns:
+        Domain import stats, ``None`` for ``None``.
+    """
+    if stats is None:
+        return None
+    return ImportStats(
+        created=stats.created,
+        skipped=stats.skipped,
+        failed=stats.failed,
+        failures=[
+            ImportFailure(
+                line=failure.line,
+                external_id=failure.external_id,
+                error=failure.error,
+            )
+            for failure in stats.failures
+        ],
+    )
+
+
+def import_stats_to_response(stats: ImportStats | None) -> ImportStatsModel | None:
+    """Convert optional domain import stats to their DTO.
+
+    Args:
+        stats: Domain import stats.
+
+    Returns:
+        Import stats DTO, ``None`` for ``None``.
+    """
+    if stats is None:
+        return None
+    return ImportStatsModel(
+        created=stats.created,
+        skipped=stats.skipped,
+        failed=stats.failed,
+        failures=[
+            ImportFailureModel(
+                line=failure.line,
+                external_id=failure.external_id,
+                error=failure.error,
+            )
+            for failure in stats.failures
+        ],
+    )
+
+
 def job_to_response(job: Job, config: ReplayConfig | None) -> JobResponse:
     """Convert a job entity to its response DTO.
 
@@ -340,23 +451,47 @@ def job_to_response(job: Job, config: ReplayConfig | None) -> JobResponse:
     assert job.updated is not None
     replay = job if isinstance(job, Replay) else None
     session_run = job if isinstance(job, SessionRun) else None
+    score = job if isinstance(job, Score) else None
+    import_job = job if isinstance(job, Import) else None
     if replay is not None:
         assert config is not None
+    input_session_id = None
+    score_value = None
+    if replay is not None:
+        input_session_id = replay.input_session_id
+    elif score is not None:
+        input_session_id = score.input_session_id
+        score_value = score.score
+    inputs = None
+    if session_run is not None:
+        inputs = session_run.inputs
+    elif import_job is not None:
+        inputs = import_job.inputs
+    plugin_version_id = None
+    if score is not None:
+        plugin_version_id = score.plugin_version_id
+    elif import_job is not None:
+        plugin_version_id = import_job.plugin_version_id
     return JobResponse(
         id=job.id,
         kind=JobKindModel(job.kind.value),
         experiment_run_id=None if replay is None else replay.experiment_run_id,
         agent_version_id=job.agent_version_id,
-        original_session_id=None if replay is None else replay.original_session_id,
+        agent_id=None if import_job is None else import_job.agent_id,
+        parent_job_id=None if score is None else score.parent_job_id,
+        input_session_id=input_session_id,
         result_session_id=job.result_session_id,
+        scorer=None
+        if score is None
+        else scorer_config_to_response(score.scorer_config),
+        plugin_version_id=plugin_version_id,
+        payload_blob_id=None if import_job is None else import_job.payload_blob_id,
         status=JobStatusModel(job.status.value),
         attempt=job.attempt,
         worker_id=job.worker_id,
-        execution_target=None
-        if job.execution_target is None
-        else ExecutionTargetModel(job.execution_target.value),
+        execution_target=ExecutionTargetModel(job.execution_target.value),
         executor_handle=job.executor_handle,
-        inputs=None if session_run is None else session_run.inputs,
+        inputs=inputs,
         name=None if session_run is None else session_run.name,
         claimed_at=job.claimed_at,
         heartbeat_at=job.heartbeat_at,
@@ -364,9 +499,12 @@ def job_to_response(job: Job, config: ReplayConfig | None) -> JobResponse:
         ended_at=job.ended_at,
         error=job.error,
         passed=None if replay is None else replay.passed,
-        score=None if replay is None else replay.score,
+        score=replay.score if replay is not None else score_value,
         scores=None if replay is None else replay.scores,
         diff=None if replay is None else replay.diff,
+        stats=import_stats_to_response(
+            None if import_job is None else import_job.stats
+        ),
         override=None if config is None else override_to_response(config.override),
         tool_policy=None
         if config is None
@@ -389,11 +527,65 @@ def job_update_to_command(body: JobUpdateRequest) -> JobUpdate:
         Job update command.
     """
     return JobUpdate(
-        status=JobStatus(body.status.value),
+        status=None if body.status is None else JobStatus(body.status.value),
         error=body.error,
-        passed=body.passed,
         score=body.score,
-        scores=body.scores,
+        stats=import_stats_to_domain(body.stats),
+    )
+
+
+def _plugin_spec_to_response(plugin: PluginSpec) -> JobSpecPlugin:
+    """Convert a domain plugin spec to its DTO.
+
+    Args:
+        plugin: Domain plugin spec.
+
+    Returns:
+        Job spec plugin DTO.
+    """
+    return JobSpecPlugin(
+        format=PluginFormatModel(plugin.format.value),
+        entrypoint=plugin.entrypoint,
+        blob_id=plugin.blob_id,
+        sha256=plugin.sha256,
+    )
+
+
+def _scorer_spec_to_response(scorer: ScorerSpec) -> JobSpecScorer:
+    """Convert a domain scorer spec to its DTO.
+
+    Args:
+        scorer: Domain scorer spec.
+
+    Returns:
+        Job spec scorer DTO.
+    """
+    return JobSpecScorer(
+        config=scorer_config_to_response(scorer.config),
+        plugin=None
+        if scorer.plugin is None
+        else _plugin_spec_to_response(scorer.plugin),
+        input_session_id=scorer.input_session_id,
+    )
+
+
+def _importer_spec_to_response(importer: ImporterSpec) -> JobSpecImporter:
+    """Convert a domain importer spec to its DTO.
+
+    Args:
+        importer: Domain importer spec.
+
+    Returns:
+        Job spec importer DTO.
+    """
+    return JobSpecImporter(
+        plugin=_plugin_spec_to_response(importer.plugin),
+        payload=JobSpecPayload(
+            blob_id=importer.payload.blob_id, sha256=importer.payload.sha256
+        ),
+        provider=SessionProviderModel(importer.provider.value),
+        agent_id=importer.agent_id,
+        params=importer.params,
     )
 
 
@@ -414,11 +606,13 @@ def job_spec_to_response(spec: JobSpec) -> JobSpecResponse:
         tool_policy=None
         if spec.tool_policy is None
         else tool_policy_config_to_response(spec.tool_policy),
-        scoring_policy=None
-        if spec.scoring_policy is None
-        else scoring_policy_to_response(spec.scoring_policy),
-        score_baselines=spec.score_baselines,
-        run=JobSpecRun(
+        scorer=None if spec.scorer is None else _scorer_spec_to_response(spec.scorer),
+        importer=None
+        if spec.importer is None
+        else _importer_spec_to_response(spec.importer),
+        run=None
+        if spec.run_spec is None
+        else JobSpecRun(
             command=spec.run_spec.command,
             working_dir=spec.run_spec.working_dir,
             env=spec.run_spec.env,
@@ -427,7 +621,7 @@ def job_spec_to_response(spec: JobSpec) -> JobSpecResponse:
         secret_env={
             name: value.get_secret_value() for name, value in spec.secret_env.items()
         },
-        original_session_id=spec.original_session_id,
+        input_session_id=spec.input_session_id,
         name=spec.name,
     )
 

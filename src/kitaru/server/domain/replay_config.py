@@ -18,7 +18,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, TypeAdapter, model_validator
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.base import (
@@ -107,14 +107,54 @@ def effective_inputs(inputs: Any, override: ReplayOverride | None) -> Any:
     return inputs
 
 
-class ScorerConfig(FrozenModel):
-    """Scorer configuration."""
+class SourceScorerConfig(FrozenModel):
+    """Source scorer configuration."""
 
+    type: Literal["source"] = "source"
     name: str
     source: SourceRef
     params: dict[str, Any] = Field(default_factory=dict)
     weight: float = Field(default=1.0, ge=0)
     fail_below: float | None = None
+
+
+class RegistryScorerConfig(FrozenModel):
+    """Registry scorer configuration."""
+
+    type: Literal["scorer"] = "scorer"
+    name: str
+    version: int | None = None
+    params: dict[str, Any] = Field(default_factory=dict)
+    weight: float = Field(default=1.0, ge=0)
+    fail_below: float | None = None
+
+
+ScorerConfig = Annotated[
+    SourceScorerConfig | RegistryScorerConfig,
+    Field(discriminator="type"),
+]
+
+_SCORER_CONFIG_ADAPTER: TypeAdapter[ScorerConfig] = TypeAdapter(ScorerConfig)
+
+
+def parse_scorer_config(value: dict[str, Any]) -> ScorerConfig:
+    """Parse a serialized scorer configuration.
+
+    Args:
+        value: Serialized configuration.
+
+    Returns:
+        Parsed scorer configuration.
+    """
+    return _SCORER_CONFIG_ADAPTER.validate_python(value)
+
+
+class ScoringResult(FrozenModel):
+    """Scoring result."""
+
+    passed: bool
+    score: float
+    scores: dict[str, float]
 
 
 class ScoringPolicy(FrozenModel):
@@ -141,13 +181,42 @@ class ScoringPolicy(FrozenModel):
             raise InvalidReplayConfig("Scorer names contain duplicates")
         return self
 
+    def evaluate(self, scores: dict[str, float]) -> ScoringResult:
+        """Evaluate the policy over the scores of its scorers.
 
-class ScoringResult(FrozenModel):
-    """Scoring result."""
+        Any scorer at or below its ``fail_below`` fails the result
+        outright. Otherwise the weighted average must reach
+        ``pass_threshold``.
 
-    passed: bool
-    score: float
-    scores: dict[str, float]
+        Args:
+            scores: Score values by scorer name.
+
+        Raises:
+            InvalidReplayConfig: A scorer has no score or the total
+                scorer weight is 0.
+
+        Returns:
+            Scoring result.
+        """
+        missing = [scorer.name for scorer in self.scorers if scorer.name not in scores]
+        if missing:
+            raise InvalidReplayConfig(f"Scorers {sorted(missing)} have no score")
+        total_weight = sum(scorer.weight for scorer in self.scorers)
+        if total_weight <= 0:
+            raise InvalidReplayConfig("Scoring policy has a total scorer weight of 0")
+        score = (
+            sum(scores[scorer.name] * scorer.weight for scorer in self.scorers)
+            / total_weight
+        )
+        hard_failed = any(
+            scorer.fail_below is not None and scores[scorer.name] <= scorer.fail_below
+            for scorer in self.scorers
+        )
+        return ScoringResult(
+            passed=not hard_failed and score >= self.pass_threshold,
+            score=score,
+            scores={scorer.name: scores[scorer.name] for scorer in self.scorers},
+        )
 
 
 class HistoryScope(StrEnum):

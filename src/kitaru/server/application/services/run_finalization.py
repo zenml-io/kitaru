@@ -89,7 +89,7 @@ async def finalize_run_if_drained(
         return
     sessions: dict[uuid.UUID, Session] = {}
     for job in jobs:
-        for session_id in (job.original_session_id, job.result_session_id):
+        for session_id in (job.input_session_id, job.result_session_id):
             if session_id is not None and session_id not in sessions:
                 sessions[session_id] = await session_repository.get(session_id)
     run.finalize(

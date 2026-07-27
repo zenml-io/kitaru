@@ -45,13 +45,14 @@ from kitaru.server.domain.agent_version import (
     InvalidAgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.job import Replay
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.secret import SecretNotFound
@@ -555,7 +556,7 @@ async def freeze_version(
             tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
             scoring_policy=ScoringPolicy(
                 scorers=[
-                    ScorerConfig(
+                    SourceScorerConfig(
                         name="conciseness",
                         source=SourceRef(
                             module="my_pkg.scorers", attribute="conciseness"
@@ -570,7 +571,8 @@ async def freeze_version(
         Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
-            original_session_id=session.id,
+            input_session_id=session.id,
+            execution_target=ExecutionTarget.POOL,
         )
     )
     return version.id

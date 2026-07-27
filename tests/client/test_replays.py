@@ -48,7 +48,7 @@ async def test_create_with_default_constructed_policy(
     )
     created = await api_client.replays.create(
         ReplayCreateRequest(
-            original_session_id=session_id,
+            input_session_id=session_id,
             scoring_policy=SCORING_POLICY,
             tool_policy=tool_policy,
         )
@@ -62,7 +62,7 @@ async def test_create_rejects_cohort_scope(api_client: KitaruAPIClient) -> None:
     with pytest.raises(APIError) as exc_info:
         await api_client.replays.create(
             ReplayCreateRequest(
-                original_session_id=session_id,
+                input_session_id=session_id,
                 scoring_policy=SCORING_POLICY,
                 tool_policy=ToolPolicyConfig(
                     default=HistoryPolicy(scope=HistoryScope.COHORT)

@@ -21,7 +21,13 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 SCORING_POLICY = {
-    "scorers": [{"name": "conciseness", "source": "my_pkg.scorers:conciseness"}],
+    "scorers": [
+        {
+            "type": "source",
+            "name": "conciseness",
+            "source": "my_pkg.scorers:conciseness",
+        }
+    ],
     "pass_threshold": 0.5,
 }
 

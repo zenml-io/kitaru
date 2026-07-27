@@ -42,6 +42,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
+from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.job import (
     JobAlreadyLinked,
     JobNotActive,
@@ -53,9 +54,9 @@ from kitaru.server.domain.job import (
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     ReplayConfig,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.session import (
@@ -737,7 +738,7 @@ async def create_running_job(
             tool_policy=ToolPolicyConfig(default=HistoryPolicy()),
             scoring_policy=ScoringPolicy(
                 scorers=[
-                    ScorerConfig(
+                    SourceScorerConfig(
                         name="conciseness",
                         source=SourceRef(
                             module="my_pkg.scorers", attribute="conciseness"
@@ -752,8 +753,9 @@ async def create_running_job(
         Replay(
             replay_config_id=config.id,
             agent_version_id=version.id,
-            original_session_id=original.id,
+            input_session_id=original.id,
             status=status,
+            execution_target=ExecutionTarget.POOL,
         )
     )
     assert isinstance(job, Replay)
@@ -901,7 +903,11 @@ async def test_create_session_links_session_run_keeps_origin(
         )
     )
     job = await job_repository.create(
-        SessionRun(agent_version_id=version.id, status=JobStatus.RUNNING)
+        SessionRun(
+            agent_version_id=version.id,
+            status=JobStatus.RUNNING,
+            execution_target=ExecutionTarget.POOL,
+        )
     )
     session = await service.create_session(
         recorded_command(agent, job_id=job.id), actor=ACTOR

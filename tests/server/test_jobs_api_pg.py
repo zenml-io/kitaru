@@ -17,9 +17,12 @@ from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 from test_experiments_api_pg import SCORING_POLICY
 
 from conftest import db_settings, lifespan_client
+from kitaru.server.database import DatabaseService
 
 
 @pytest.fixture
@@ -68,7 +71,7 @@ async def test_standalone_job_flow_persists_across_requests(
 ) -> None:
     """Create standalone jobs and read them back with filters."""
     session_id = await seed_session(client)
-    body = {"original_session_id": session_id, "scoring_policy": SCORING_POLICY}
+    body = {"input_session_id": session_id, "scoring_policy": SCORING_POLICY}
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
     first = response.json()
@@ -86,7 +89,7 @@ async def test_standalone_job_flow_persists_across_requests(
 
     response = await client.get(
         "/v1/jobs",
-        params={"original_session_id": session_id, "standalone": "true"},
+        params={"input_session_id": session_id, "standalone": "true"},
     )
     assert response.status_code == 200
     assert response.json()["total"] == 2
@@ -102,7 +105,7 @@ async def test_standalone_worker_lifecycle_end_to_end(
 ) -> None:
     """Walk a standalone job through claim, release, retry, and delete."""
     session_id = await seed_session(client)
-    body = {"original_session_id": session_id, "scoring_policy": SCORING_POLICY}
+    body = {"input_session_id": session_id, "scoring_policy": SCORING_POLICY}
     response = await client.post("/v1/replays", json=body)
     assert response.status_code == 201
     job_id = response.json()["id"]
@@ -127,19 +130,29 @@ async def test_standalone_worker_lifecycle_end_to_end(
 
     response = await client.post("/v1/workers", json={"name": "worker-2"})
     assert response.status_code == 200
+    other_worker_id = response.json()["id"]
     response = await client.post(
-        f"/v1/jobs/{job_id}/claim", json={"worker_id": response.json()["id"]}
+        f"/v1/jobs/{job_id}/claim", json={"worker_id": other_worker_id}
     )
     assert response.status_code == 200
+
+    response = await client.post(
+        f"/v1/workers/{other_worker_id}/heartbeat", json={"job_ids": [job_id]}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"abandon": []}
+
     response = await client.patch(
         f"/v1/jobs/{job_id}",
         json={"status": "failed", "error": "agent exited with code 1"},
     )
     assert response.status_code == 200
 
-    response = await client.post(f"/v1/jobs/{job_id}/heartbeat")
+    response = await client.post(
+        f"/v1/workers/{other_worker_id}/heartbeat", json={"job_ids": [job_id]}
+    )
     assert response.status_code == 200
-    assert response.json() == {"status": "failed", "canceled": True}
+    assert response.json() == {"abandon": [job_id]}
 
     response = await client.post(f"/v1/jobs/{job_id}/retry")
     assert response.status_code == 200
@@ -188,8 +201,9 @@ async def test_session_run_flow_end_to_end(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
     claimed = response.json()["jobs"]
-    assert [job["id"] for job in claimed] == [job_id]
-    assert claimed[0]["worker_id"] == worker_id
+    assert [entry["job"]["id"] for entry in claimed] == [job_id]
+    assert claimed[0]["job"]["worker_id"] == worker_id
+    assert claimed[0]["spec"]["job_id"] == job_id
     response = await client.get(f"/v1/workers/{worker_id}")
     assert response.status_code == 200
     assert response.json()["last_seen_at"] >= last_seen
@@ -200,7 +214,7 @@ async def test_session_run_flow_end_to_end(client: httpx.AsyncClient) -> None:
     assert spec["kind"] == "session_run"
     assert spec["inputs"] == {"prompt": "hi"}
     assert spec["name"] == "smoke"
-    assert spec["scoring_policy"] is None
+    assert spec["scorer"] is None
 
     response = await client.patch(f"/v1/jobs/{job_id}", json={"status": "running"})
     assert response.status_code == 200
@@ -218,3 +232,29 @@ async def test_session_run_flow_end_to_end(client: httpx.AsyncClient) -> None:
     assert body["status"] == "completed"
     assert body["result_session_id"] == result_session_id
     assert body["passed"] is None
+
+
+async def test_migrated_job_table_carries_the_hot_path_indexes(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe the partial claim and stale sweep indexes after the migrations."""
+    _ = client
+    settings = db_settings()
+    engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+    try:
+        async with engine.connect() as connection:
+            rows = await connection.execute(
+                text(
+                    "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'job'"
+                )
+            )
+            definitions = {name: definition for name, definition in rows.all()}
+    finally:
+        await engine.dispose()
+
+    assert (
+        "WHERE ((status)::text = 'pending'::text)" in definitions["ix_job_pending_id"]
+    )
+    stale = definitions["ix_job_active_heartbeat_at"]
+    assert "COALESCE(heartbeat_at, claimed_at)" in stale
+    assert "WHERE" in stale

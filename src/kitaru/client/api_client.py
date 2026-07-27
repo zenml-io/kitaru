@@ -24,11 +24,15 @@ from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
+from kitaru.client.resources.blobs import BlobsResource
 from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.experiment_runs import ExperimentRunsResource
 from kitaru.client.resources.experiments import ExperimentsResource
+from kitaru.client.resources.importers import ImportersResource
+from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.replays import ReplaysResource
+from kitaru.client.resources.scorers import ScorersResource
 from kitaru.client.resources.secrets import SecretsResource
 from kitaru.client.resources.session_nodes import SessionNodesResource
 from kitaru.client.resources.session_runs import SessionRunsResource
@@ -69,11 +73,15 @@ class KitaruAPIClient:
         self.agents = AgentsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
+        self.blobs = BlobsResource(self)
         self.cohorts = CohortsResource(self)
         self.experiment_runs = ExperimentRunsResource(self)
         self.experiments = ExperimentsResource(self)
+        self.importers = ImportersResource(self)
+        self.imports = ImportsResource(self)
         self.jobs = JobsResource(self)
         self.replays = ReplaysResource(self)
+        self.scorers = ScorersResource(self)
         self.secrets = SecretsResource(self)
         self.session_nodes = SessionNodesResource(self)
         self.session_runs = SessionRunsResource(self)
@@ -88,6 +96,7 @@ class KitaruAPIClient:
         params: dict[str, Any] | None = None,
         json: Any = None,
         data: dict[str, str] | None = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
@@ -97,6 +106,7 @@ class KitaruAPIClient:
             params: Query parameters.
             json: JSON request body.
             data: Form request body.
+            files: Multipart request body.
 
         Raises:
             APIError: The response has an error status code.
@@ -105,7 +115,7 @@ class KitaruAPIClient:
             HTTP response.
         """
         response = await self._http.request(
-            method, path, params=params, json=json, data=data
+            method, path, params=params, json=json, data=data, files=files
         )
         raise_for_response(response)
         return response

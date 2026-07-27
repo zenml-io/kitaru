@@ -447,7 +447,7 @@ def compute_run_summary(
     originals = [
         session
         for replay in replays
-        if (session := sessions.get(replay.original_session_id)) is not None
+        if (session := sessions.get(replay.input_session_id)) is not None
     ]
     results = [
         session

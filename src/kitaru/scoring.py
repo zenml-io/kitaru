@@ -11,16 +11,20 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Client-side scoring of sessions with user-defined scorer functions."""
+"""Scoring of sessions with user-defined scorer functions."""
 
 import importlib
 from collections.abc import Callable
+from types import ModuleType
+from typing import Any
 
 from pydantic import BaseModel
 
-from kitaru.api_models.v1.jobs import ScorerConfig, ScoringPolicy
 from kitaru.api_models.v1.session_nodes import SessionNodeResponse
 from kitaru.api_models.v1.sessions import SessionResponse
+from kitaru.plugin_loader import PluginLoadError, module_attribute
+
+SCORER_LABEL = "Scorer"
 
 
 class ScoringError(Exception):
@@ -34,12 +38,23 @@ class SessionView(BaseModel):
     nodes: list[SessionNodeResponse]
 
 
-class ScoringResult(BaseModel):
-    """Scoring result."""
+def scorer_attribute(module: ModuleType, attribute: str) -> Callable[..., float]:
+    """Return the scorer attribute of an imported module.
 
-    passed: bool
-    score: float
-    scores: dict[str, float]
+    Args:
+        module: Module holding the scorer.
+        attribute: Name of the scorer attribute.
+
+    Raises:
+        ScoringError: The attribute is missing or not callable.
+
+    Returns:
+        Scorer function.
+    """
+    try:
+        return module_attribute(module, attribute, SCORER_LABEL)
+    except PluginLoadError as exc:
+        raise ScoringError(str(exc)) from exc
 
 
 def load_scorer(source: str) -> Callable[..., float]:
@@ -69,80 +84,41 @@ def load_scorer(source: str) -> Callable[..., float]:
         raise ScoringError(
             f"Failed to import scorer module {module_name!r}: {exc}"
         ) from exc
-    try:
-        scorer = getattr(module, attribute)
-    except AttributeError as exc:
-        raise ScoringError(
-            f"Module {module_name!r} has no attribute {attribute!r}"
-        ) from exc
-    if not callable(scorer):
-        raise ScoringError(f"Scorer {source!r} is not callable")
-    return scorer
+    return scorer_attribute(module, attribute)
 
 
-def run_scorer(config: ScorerConfig, session: SessionView) -> float:
-    """Run a single scorer against a session view.
+def call_scorer(
+    name: str,
+    scorer: Callable[..., float],
+    session: SessionView,
+    params: dict[str, Any],
+) -> float:
+    """Call a scorer on a session view and validate its score.
 
     Args:
-        config: Scorer configuration.
+        name: Name of the scorer.
+        scorer: Scorer function.
         session: Session view to score.
+        params: Keyword arguments for the scorer.
 
     Raises:
-        ScoringError: The scorer failed to load, raised, or returned a
-            value outside 0..1.
+        ScoringError: The scorer raised or returned a value outside 0..1.
 
     Returns:
         Score in 0..1.
     """
-    scorer = load_scorer(config.source)
     try:
-        value = scorer(session, **config.params)
+        value = scorer(session, **params)
     except Exception as exc:
         raise ScoringError(
-            f"Scorer {config.name!r} raised {type(exc).__name__}: {exc}"
+            f"Scorer {name!r} raised {type(exc).__name__}: {exc}"
         ) from exc
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ScoringError(
-            f"Scorer {config.name!r} returned {value!r}, expected a float in 0..1"
+            f"Scorer {name!r} returned {value!r}, expected a float in 0..1"
         )
     if not 0 <= value <= 1:
         raise ScoringError(
-            f"Scorer {config.name!r} returned {value}, expected a value in 0..1"
+            f"Scorer {name!r} returned {value}, expected a value in 0..1"
         )
     return float(value)
-
-
-def evaluate_scoring_policy(
-    policy: ScoringPolicy, session: SessionView
-) -> ScoringResult:
-    """Evaluate a scoring policy against a session view.
-
-    Any scorer at or below its ``fail_below`` fails the result outright.
-    Otherwise the weighted average of all scores must reach
-    ``pass_threshold``.
-
-    Args:
-        policy: Scoring policy to evaluate.
-        session: Session view to score.
-
-    Raises:
-        ScoringError: A scorer failed to load, raised, or returned a value
-            outside 0..1, or the total scorer weight is 0.
-
-    Returns:
-        Scoring result.
-    """
-    scores = {config.name: run_scorer(config, session) for config in policy.scorers}
-    total_weight = sum(config.weight for config in policy.scorers)
-    if total_weight <= 0:
-        raise ScoringError("Scoring policy has a total scorer weight of 0")
-    score = (
-        sum(scores[config.name] * config.weight for config in policy.scorers)
-        / total_weight
-    )
-    hard_failed = any(
-        config.fail_below is not None and scores[config.name] <= config.fail_below
-        for config in policy.scorers
-    )
-    passed = not hard_failed and score >= policy.pass_threshold
-    return ScoringResult(passed=passed, score=score, scores=scores)

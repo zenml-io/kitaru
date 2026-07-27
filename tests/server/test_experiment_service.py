@@ -20,10 +20,12 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeBlobRepository,
     FakeCohortRepository,
     FakeExperimentRepository,
     FakeExperimentRunRepository,
     FakeJobRepository,
+    FakePluginRepository,
     FakeReplayConfigRepository,
     FakeSessionRepository,
     FakeTagRepository,
@@ -50,6 +52,7 @@ from kitaru.server.domain.agent_version import (
     NoRunnableAgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.cohort import Cohort, CohortNotFound
 from kitaru.server.domain.execution import ExecutionTarget
 from kitaru.server.domain.experiment import (
@@ -64,14 +67,23 @@ from kitaru.server.domain.experiment_run import (
     InvalidExperimentRun,
 )
 from kitaru.server.domain.job import JobStatus, Replay
+from kitaru.server.domain.plugin import (
+    Plugin,
+    PluginFormat,
+    PluginKind,
+    PluginNameNotFound,
+    PluginVersion,
+    PluginVersionNotFound,
+)
 from kitaru.server.domain.replay_config import (
     HistoryPolicy,
     PassthroughPolicy,
+    RegistryScorerConfig,
     ReplayConfigNotFound,
     ReplayOverride,
-    ScorerConfig,
     ScoringPolicy,
     SourceRef,
+    SourceScorerConfig,
     ToolPolicyConfig,
 )
 from kitaru.server.domain.session import Session, SessionOrigin, SessionStatus
@@ -81,7 +93,7 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
 SCORING_POLICY = ScoringPolicy(
     scorers=[
-        ScorerConfig(
+        SourceScorerConfig(
             name="conciseness",
             source=SourceRef(module="my_pkg.scorers", attribute="conciseness"),
         )
@@ -153,9 +165,12 @@ def job_repository(
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
+    plugin_repository: FakePluginRepository,
 ) -> FakeJobRepository:
     """Provide a fake job repository."""
-    return FakeJobRepository(session_repository, version_repository, config_repository)
+    return FakeJobRepository(
+        session_repository, version_repository, config_repository, plugin_repository
+    )
 
 
 @pytest.fixture
@@ -176,6 +191,7 @@ def service(
     version_repository: FakeAgentVersionRepository,
     config_repository: FakeReplayConfigRepository,
     worker_repository: FakeWorkerRepository,
+    plugin_repository: FakePluginRepository,
 ) -> ExperimentService:
     """Provide an experiment service backed by the fake repositories."""
     return ExperimentService(
@@ -185,6 +201,7 @@ def service(
         agent_version_repository=version_repository,
         replay_config_repository=config_repository,
         worker_repository=worker_repository,
+        plugin_repository=plugin_repository,
         worker_liveness_timeout_seconds=60,
     )
 
@@ -193,6 +210,18 @@ def service(
 def worker_repository() -> FakeWorkerRepository:
     """Provide a fake worker repository."""
     return FakeWorkerRepository()
+
+
+@pytest.fixture
+def blob_repository() -> FakeBlobRepository:
+    """Provide a fake blob repository."""
+    return FakeBlobRepository()
+
+
+@pytest.fixture
+def plugin_repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
+    """Provide a fake plugin repository."""
+    return FakePluginRepository(blob_repository)
 
 
 @pytest.fixture
@@ -737,7 +766,7 @@ async def test_start_run_fans_out_jobs(
     jobs, total = await job_repository.query(JobFilter(experiment_run_id=run.id))
     assert total == 3
     replays = [job for job in jobs if isinstance(job, Replay)]
-    assert {replay.original_session_id for replay in replays} == {
+    assert {replay.input_session_id for replay in replays} == {
         session.id for session in sessions
     }
     for replay in replays:
@@ -745,6 +774,7 @@ async def test_start_run_fans_out_jobs(
         assert replay.attempt == 1
         assert replay.replay_config_id == config.id
         assert replay.agent_version_id == version.id
+        assert replay.execution_target is run.execution_target
 
 
 async def test_start_run_increments_number(
@@ -917,6 +947,7 @@ async def test_start_run_explicit_execution_target(
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
     version_repository: FakeAgentVersionRepository,
+    job_repository: FakeJobRepository,
     agent: Agent,
 ) -> None:
     """Prefer the requested execution target over the run spec default."""
@@ -941,6 +972,8 @@ async def test_start_run_explicit_execution_target(
         execution_target=ExecutionTarget.ON_DEMAND,
     )
     assert run.execution_target is ExecutionTarget.ON_DEMAND
+    jobs, _ = await job_repository.query(JobFilter(experiment_run_id=run.id))
+    assert {job.execution_target for job in jobs} == {ExecutionTarget.ON_DEMAND}
 
 
 async def test_start_run_execution_target_from_run_spec(
@@ -1024,3 +1057,99 @@ async def test_start_run_warns_without_live_worker(
             created.id, agent_version_id=None, score_baselines=False, actor=ACTOR
         )
     assert "No live worker" not in caplog.text
+
+
+REGISTRY_POLICY = ScoringPolicy(
+    scorers=[RegistryScorerConfig(name="relevance")], pass_threshold=0.5
+)
+
+
+async def register_scorer(
+    plugin_repository: FakePluginRepository, blob_repository: FakeBlobRepository
+) -> Plugin:
+    """Register a scorer plugin with one code version.
+
+    Args:
+        plugin_repository: Fake plugin repository.
+        blob_repository: Fake blob repository.
+
+    Returns:
+        Stored plugin with the latest version counter set.
+    """
+    blob = await blob_repository.create(
+        Blob(
+            owner_id=ACTOR.account.id,
+            sha256="a" * 64,
+            size=4,
+            media_type="text/x-python",
+            data=b"code",
+        )
+    )
+    plugin = await plugin_repository.create(
+        Plugin(owner_id=ACTOR.account.id, kind=PluginKind.SCORER, name="relevance")
+    )
+    await plugin_repository.create_version(
+        PluginVersion(
+            plugin_id=plugin.id,
+            format=PluginFormat.INLINE,
+            blob_id=blob.id,
+            entrypoint="score",
+        )
+    )
+    return await plugin_repository.get(plugin.id)
+
+
+async def test_create_experiment_validates_registry_scorers(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject an experiment naming an unregistered scorer."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    with pytest.raises(
+        PluginNameNotFound, match="Plugin 'relevance' of kind 'scorer' was not found"
+    ):
+        await service.create_experiment(
+            experiment_create(cohort.id, scoring_policy=REGISTRY_POLICY), actor=ACTOR
+        )
+    await register_scorer(plugin_repository, blob_repository)
+    _, config = await service.create_experiment(
+        experiment_create(cohort.id, scoring_policy=REGISTRY_POLICY), actor=ACTOR
+    )
+    assert config.scoring_policy == REGISTRY_POLICY
+
+
+async def test_update_experiment_validates_registry_scorers(
+    service: ExperimentService,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
+    agent: Agent,
+) -> None:
+    """Reject a scoring policy update naming an unregistered version."""
+    cohort, _ = await create_cohort(cohort_repository, session_repository, agent.id)
+    created, _ = await service.create_experiment(
+        experiment_create(cohort.id), actor=ACTOR
+    )
+    plugin = await register_scorer(plugin_repository, blob_repository)
+    with pytest.raises(
+        PluginVersionNotFound, match=f"Plugin {plugin.id} has no version 7"
+    ):
+        await service.update_experiment(
+            created.id,
+            ExperimentUpdate(
+                scoring_policy=ScoringPolicy(
+                    scorers=[RegistryScorerConfig(name="relevance", version=7)],
+                    pass_threshold=0.5,
+                )
+            ),
+            actor=ACTOR,
+        )
+    _, config = await service.update_experiment(
+        created.id, ExperimentUpdate(scoring_policy=REGISTRY_POLICY), actor=ACTOR
+    )
+    assert config.scoring_policy == REGISTRY_POLICY

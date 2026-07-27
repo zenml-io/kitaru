@@ -118,6 +118,24 @@ class SQLSecretRepository:
             raise SecretNotFound(secret_id)
         return row.to_domain(self._decrypt_values(row.values_encrypted))
 
+    async def get_many(self, secret_ids: list[uuid.UUID]) -> dict[uuid.UUID, Secret]:
+        """Load secrets by id.
+
+        Args:
+            secret_ids: Ids of the secrets.
+
+        Returns:
+            Stored secrets keyed by id, missing ids omitted.
+        """
+        if not secret_ids:
+            return {}
+        statement = select(SecretSchema).where(col(SecretSchema.id).in_(secret_ids))
+        rows = (await self._session.scalars(statement)).all()
+        return {
+            row.id: row.to_domain(self._decrypt_values(row.values_encrypted))
+            for row in rows
+        }
+
     async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
         """Query secrets matching a filter.
 
