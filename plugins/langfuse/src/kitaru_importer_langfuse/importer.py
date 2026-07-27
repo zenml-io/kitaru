@@ -36,12 +36,41 @@ from kitaru.importers import (
     ReplayReadiness,
     SessionStatus,
     TokenUsage,
+    parsed_items,
 )
+from kitaru.importing import ParsedSession, ParseFailure
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _TRACE_SHAPE = "trace"
 _OBSERVATION_SHAPE = "observation"
 _EVENT_SHAPE = "ingestion_event"
+_METADATA_KEYS = {
+    "agent_name",
+    "deployment.environment.name",
+    "environment",
+    "gen_ai.agent.name",
+    "gen_ai.operation.name",
+    "gen_ai.provider.name",
+    "gen_ai.request.model",
+    "gen_ai.response.model",
+    "gen_ai.system",
+    "name",
+    "sdk_span_type",
+    "service.name",
+    "service.version",
+}
+_RESOURCE_METADATA_KEYS = {
+    "deployment.environment.name",
+    "service.name",
+    "service.version",
+}
+_TRACE_CONTEXT_FIELDS = {
+    "traceEnvironment": "environment",
+    "traceHtmlPath": "html_path",
+    "traceRelease": "release",
+    "traceTags": "tags",
+    "traceVersion": "version",
+}
 
 
 def _first(record: dict[str, Any], *names: str) -> Any:
@@ -49,6 +78,15 @@ def _first(record: dict[str, Any], *names: str) -> Any:
     for name in names:
         if name in record:
             return record[name]
+    return None
+
+
+def _first_nonempty(record: dict[str, Any], *names: str) -> Any:
+    """Return the first non-empty field."""
+    for name in names:
+        value = record.get(name)
+        if value not in (None, ""):
+            return value
     return None
 
 
@@ -105,6 +143,46 @@ def _dict(value: Any) -> dict[str, Any]:
     """Return a decoded dictionary or an empty one."""
     decoded = _decode_json(value)
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
+    """Return the first non-empty value from Langfuse metadata layers."""
+    metadata = _dict(record.get("metadata"))
+    attributes = _dict(metadata.get("attributes"))
+    resource_attributes = _dict(metadata.get("resourceAttributes"))
+    for key in keys:
+        for source in (attributes, metadata, resource_attributes):
+            value = source.get(key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    """Return bounded metadata useful for debugging and filtering."""
+    metadata = _dict(record.get("metadata"))
+    attributes = _dict(metadata.get("attributes"))
+    resource_attributes = _dict(metadata.get("resourceAttributes"))
+    selected: dict[str, Any] = {}
+    for source in (metadata, attributes):
+        for key in _METADATA_KEYS:
+            if key in source:
+                selected[f"langfuse.{key}"] = source[key]
+    for key in _RESOURCE_METADATA_KEYS:
+        if key in resource_attributes:
+            selected[f"langfuse.{key}"] = resource_attributes[key]
+    for source_field, target_field in _TRACE_CONTEXT_FIELDS.items():
+        if source_field in record:
+            selected[f"langfuse.trace.{target_field}"] = record[source_field]
+    for source_field, target_field in (
+        ("environment", "environment"),
+        ("promptName", "prompt_name"),
+        ("promptVersion", "prompt_version"),
+        ("version", "version"),
+    ):
+        if source_field in record and record[source_field] not in (None, ""):
+            selected[f"langfuse.{target_field}"] = record[source_field]
+    return selected
 
 
 def _detect_shape(record: dict[str, Any]) -> str:
@@ -214,6 +292,11 @@ def _trace_rows_to_observations(
                 ("timestamp", "traceTimestamp"),
                 ("input", "traceInput"),
                 ("output", "traceOutput"),
+                ("environment", "traceEnvironment"),
+                ("htmlPath", "traceHtmlPath"),
+                ("release", "traceRelease"),
+                ("tags", "traceTags"),
+                ("version", "traceVersion"),
             ):
                 if source in trace and target not in observation:
                     observation[target] = trace[source]
@@ -246,7 +329,14 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
         tool_name = attributes.get("gen_ai.tool.name") or metadata.get(
             "gen_ai.tool.name"
         )
-    if explicit_tool:
+    function_span = (
+        observation_type == "SPAN"
+        and str(record.get("name") or "").startswith("Function:")
+        and attributes.get("name") not in (None, "")
+    )
+    if function_span:
+        tool_name = attributes["name"]
+    if explicit_tool or function_span:
         return NodeType.TOOL_CALL, str(tool_name or record.get("name") or "tool")
     if observation_type == "GENERATION":
         return NodeType.LLM_CALL, None
@@ -385,6 +475,7 @@ class LangfuseJSONLImporter:
         raw_nodes: list[tuple[str, str | None, dict[str, Any]]] = []
         turns: list[NormalizedTurn] = []
         trace_names: list[str] = []
+        root_by_trace: dict[str, dict[str, Any]] = {}
         for trace_id, observations in traces:
             ordered = sorted(
                 observations,
@@ -411,6 +502,7 @@ class LangfuseJSONLImporter:
                     f"Trace '{trace_id}' has {len(roots)} root observations"
                 )
             root = roots[0] if roots else (ordered[0] if ordered else {})
+            root_by_trace[trace_id] = root
             turn_input = _decode_json(_first(root, "traceInput", "input"))
             turn_output = _decode_json(_first(root, "traceOutput", "output"))
             trace_start = min(
@@ -477,7 +569,6 @@ class LangfuseJSONLImporter:
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
             status = _node_status(record)
-            metadata = _dict(record.get("metadata"))
             nodes.append(
                 NormalizedNode(
                     source_id=source_node_id,
@@ -496,11 +587,31 @@ class LangfuseJSONLImporter:
                     ended_at=_datetime(_first(record, "endTime", "end_time")),
                     inputs=_decode_json(record.get("input")),
                     outputs=_decode_json(record.get("output")),
-                    requested_model=_first(
-                        record, "providedModelName", "provided_model_name"
+                    requested_model=(
+                        _first_nonempty(
+                            record,
+                            "providedModelName",
+                            "provided_model_name",
+                            "model",
+                        )
+                        or _metadata_value(record, "gen_ai.request.model")
                     ),
-                    model=_first(record, "modelId", "model_id"),
-                    provider=_first(record, "modelProvider", "model_provider"),
+                    model=(
+                        _first_nonempty(record, "modelId", "model_id", "model")
+                        or _metadata_value(
+                            record,
+                            "gen_ai.response.model",
+                            "gen_ai.request.model",
+                        )
+                    ),
+                    provider=(
+                        _first_nonempty(record, "modelProvider", "model_provider")
+                        or _metadata_value(
+                            record,
+                            "gen_ai.provider.name",
+                            "gen_ai.system",
+                        )
+                    ),
                     tokens=_tokens(record),
                     cost=_decimal(
                         _first(record, "totalCost", "total_cost")
@@ -517,7 +628,7 @@ class LangfuseJSONLImporter:
                         "langfuse.type": record.get("type"),
                         "langfuse.level": record.get("level"),
                     },
-                    source_metadata=metadata,
+                    source_metadata=_source_metadata(record),
                 )
             )
 
@@ -550,9 +661,19 @@ class LangfuseJSONLImporter:
             replayable_tool_call_count=len(replayable_tools),
             reasons=reasons,
         )
-        failed_nodes = [node for node in nodes if node.status is NodeStatus.FAILED]
+        latest_turn = turns[-1]
+        latest_root = root_by_trace[latest_turn.trace_id]
+        latest_root_status = _node_status(latest_root)
         session_status = (
-            SessionStatus.FAILED if failed_nodes else SessionStatus.COMPLETED
+            SessionStatus.FAILED
+            if latest_root_status is NodeStatus.FAILED
+            else SessionStatus.COMPLETED
+        )
+        session_error = (
+            str(_first(latest_root, "statusMessage", "status_message"))
+            if session_status is SessionStatus.FAILED
+            and _first(latest_root, "statusMessage", "status_message")
+            else None
         )
         started_at = min(
             (turn.started_at for turn in turns if turn.started_at), default=None
@@ -585,13 +706,49 @@ class LangfuseJSONLImporter:
             nodes=nodes,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
-            error=failed_nodes[-1].error if failed_nodes else None,
+            error=session_error,
             started_at=started_at,
             ended_at=ended_at,
             source_metadata={
                 "langfuse.project_id": next(iter(project_ids), None),
                 "langfuse.session_id": source_id,
                 "langfuse.trace_ids": [turn.trace_id for turn in turns],
+                "langfuse.environments": sorted(
+                    {
+                        str(value)
+                        for _, observations in traces
+                        for record in observations
+                        if (
+                            value := _first(
+                                record,
+                                "traceEnvironment",
+                                "environment",
+                            )
+                        )
+                    }
+                ),
+                "langfuse.releases": sorted(
+                    {
+                        str(record["traceRelease"])
+                        for _, observations in traces
+                        for record in observations
+                        if record.get("traceRelease") not in (None, "")
+                    }
+                ),
+                "langfuse.versions": sorted(
+                    {
+                        str(value)
+                        for _, observations in traces
+                        for record in observations
+                        if (
+                            value := _first(
+                                record,
+                                "traceVersion",
+                                "version",
+                            )
+                        )
+                    }
+                ),
                 "source_trace_count": len(turns),
                 "source_completeness": "unknown",
             },
@@ -599,3 +756,13 @@ class LangfuseJSONLImporter:
             readiness=readiness,
             content_digest=_canonical_digest(digest_payload),
         )
+
+
+def parse(
+    content: bytes,
+    source_instance: str | None = None,
+    filename: str | None = None,
+) -> list[ParsedSession | ParseFailure]:
+    """Parse Langfuse JSONL through the unified importer contract."""
+    context = ImportContext(source_instance=source_instance, filename=filename)
+    return parsed_items(LangfuseJSONLImporter().parse(content, context))

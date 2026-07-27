@@ -27,12 +27,12 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter
 
-from kitaru.api_models.v1.replays import (
+from kitaru.api_models.v1.jobs import (
     HistoryPolicy,
+    JobSpecResponse,
     LLMPolicy,
     PassthroughPolicy,
     ReplayOverride,
-    ReplaySpecResponse,
     StaticCase,
     StaticMatchMode,
     StaticPolicy,
@@ -334,8 +334,8 @@ class _RunState:
     """Mutable state isolated to one PydanticAI run."""
 
     client: KitaruAPIClient
-    replay_id: uuid.UUID | None
-    spec: ReplaySpecResponse | None
+    job_id: uuid.UUID | None
+    spec: JobSpecResponse | None
     override: ReplayOverride | None
     effective_input: Any
     prompt_input: Any
@@ -376,10 +376,10 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Create isolated client and replay state for one run."""
         client = KitaruAPIClient(base_url=self.api_url, api_key=self.api_key)
         try:
-            replay_value = os.environ.get("KITARU_REPLAY_ID")
-            replay_id = uuid.UUID(replay_value) if replay_value else None
-            spec = await client.replays.get_spec(replay_id) if replay_id else None
-            raw_inputs = os.environ.get("KITARU_INPUTS")
+            job_value = os.environ.get("KITARU_JOB_ID")
+            job_id = uuid.UUID(job_value) if job_value else None
+            spec = await client.jobs.get_spec(job_id) if job_id else None
+            raw_inputs = os.environ.get("KITARU_JOB_INPUTS")
             if raw_inputs is not None:
                 effective_input = json.loads(raw_inputs)
             elif spec is not None:
@@ -403,7 +403,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             self,
             _state=_RunState(
                 client=client,
-                replay_id=replay_id,
+                job_id=job_id,
                 spec=spec,
                 override=override,
                 effective_input=effective_input,
@@ -429,7 +429,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                    replay_id=state.replay_id,
+                    job_id=state.job_id,
                 )
             )
             state.session_id = session.id
@@ -639,9 +639,9 @@ class _KitaruCapability(AbstractCapability[Any]):
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
             elif isinstance(policy, HistoryPolicy):
-                assert state.replay_id is not None
-                response = await state.client.replays.tool_lookup(
-                    state.replay_id,
+                assert state.job_id is not None
+                response = await state.client.jobs.tool_lookup(
+                    state.job_id,
                     ToolLookupRequest(
                         tool_name=call.tool_name,
                         inputs=json_args,
@@ -717,6 +717,8 @@ class _KitaruCapability(AbstractCapability[Any]):
         if state.spec is None:
             return None
         config = state.spec.tool_policy
+        if config is None:
+            return None
         return config.tools.get(tool_name, config.default)
 
     async def _record_native_tools(
