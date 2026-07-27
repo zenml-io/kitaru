@@ -21,12 +21,16 @@ from pydantic import model_validator
 
 from kitaru.server.config import Settings
 
+# Sentinel meaning the server has not been enrolled with a control plane.
+UNSET_SERVER_ID = uuid.UUID(int=0)
+
 
 class AuthScheme(StrEnum):
     """Authentication scheme."""
 
     NONE = "none"
     LOCAL = "local"
+    CONTROL_PLANE = "control_plane"
 
 
 class APISettings(Settings):
@@ -37,7 +41,7 @@ class APISettings(Settings):
 
     AUTH_SCHEME: AuthScheme = AuthScheme.NONE
 
-    SERVER_ID: uuid.UUID = uuid.UUID(int=0)
+    SERVER_ID: uuid.UUID = UNSET_SERVER_ID
     ENROLLMENT_KEY: str = ""
 
     CONTROL_PLANE_API_URL: str = ""
@@ -72,8 +76,16 @@ class APISettings(Settings):
         Returns:
             The validated settings object.
         """
-        if self.AUTH_SCHEME is AuthScheme.LOCAL and not self.JWT_SIGNING_KEY:
+        if (
+            self.AUTH_SCHEME in (AuthScheme.LOCAL, AuthScheme.CONTROL_PLANE)
+            and not self.JWT_SIGNING_KEY
+        ):
             raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
+        if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+            if not self.CONTROL_PLANE_API_URL:
+                raise ValueError("Set KITARU_SERVER_CONTROL_PLANE_API_URL")
+            if self.SERVER_ID == UNSET_SERVER_ID:
+                raise ValueError("Set KITARU_SERVER_SERVER_ID")
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")
         return self

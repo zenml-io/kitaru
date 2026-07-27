@@ -17,7 +17,7 @@ import logging
 from collections.abc import AsyncGenerator
 
 import sqlalchemy
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -101,7 +101,9 @@ class DatabaseService:
                     )
                 try:
                     await conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-                except ProgrammingError:
+                except (IntegrityError, ProgrammingError):
+                    # Postgres reports a losing concurrent CREATE as a unique
+                    # violation on pg_database rather than a duplicate database.
                     logger.info(
                         "Database %s already exists, skipping creation.",
                         database_name,

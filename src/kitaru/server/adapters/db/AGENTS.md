@@ -9,7 +9,10 @@ repository and schema mechanics.
 - Table names are singular (`__tablename__ = "agent"`, not `"agents"`).
 - Enforce uniqueness with a named `UniqueConstraint` in `__table_args__`, not
   with `Field(unique=True)`. A `UniqueConstraint` is backed by its own index, so
-  do not also pass `index=True` for the same column.
+  do not also index the same column separately.
+- Declare every other index as a named `Index` in `__table_args__`. Never pass
+  `index=True` on a `Field`. It bypasses `index_name` and leaves no module-level
+  constant for the migration and the repository to refer to.
 - Never hand-write index or constraint names. Generate them with `index_name`
   and `unique_constraint_name` from `schemas/schema_utils.py`, and store the
   result as the module-level constant the repository compares against, so the

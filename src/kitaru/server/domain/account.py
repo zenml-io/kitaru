@@ -52,6 +52,7 @@ class Account(DomainModel):
 
     id: uuid.UUID = Field(default_factory=uuid7)
     is_service_account: bool = False
+    external_id: uuid.UUID | None = None
     name: Name
     email: str | None = None
     password_hash: str | None = None
@@ -66,6 +67,16 @@ class Account(DomainModel):
             active: New active state.
         """
         self.active = active
+
+    def update_identity(self, name: str, email: str | None) -> None:
+        """Set the account name and contact email.
+
+        Args:
+            name: New account name.
+            email: New contact email.
+        """
+        self.name = name
+        self.email = email
 
     def update_password_hash(self, password_hash: str) -> None:
         """Set a new password hash.

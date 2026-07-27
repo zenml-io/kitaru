@@ -13,9 +13,18 @@
 #  permissions and limitations under the License.
 """Auth API models."""
 
+from enum import StrEnum
+
 from pydantic import Field
 
 from kitaru.api_models.v1.base import ResponseModel
+
+
+class GrantType(StrEnum):
+    """Login grant type."""
+
+    PASSWORD = "password"
+    CONTROL_PLANE = "control-plane"
 
 
 class TokenResponse(ResponseModel):

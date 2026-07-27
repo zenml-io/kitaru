@@ -26,7 +26,7 @@ from fastapi import (
     status,
 )
 
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import GrantType, TokenResponse
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
@@ -40,44 +40,130 @@ from kitaru.server.api.config import APISettings, AuthScheme
 router = APIRouter()
 
 
+def _get_bearer_credential(request: Request) -> str | None:
+    """Read a bearer credential from the request authorization header.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Credential string without the ``Bearer`` prefix, or ``None``.
+    """
+    header = request.headers.get("Authorization")
+    if not header:
+        return None
+    scheme, _, credential = header.partition(" ")
+    if scheme.lower() != "bearer" or not credential:
+        return None
+    return credential
+
+
+class LoginRequestForm:
+    """Login request form resolving and validating the grant type."""
+
+    def __init__(
+        self,
+        settings: Annotated[APISettings, Depends(get_app_settings)],
+        grant_type: Annotated[str | None, Form()] = None,
+        username: Annotated[str | None, Form()] = None,
+        password: Annotated[str | None, Form()] = None,
+    ) -> None:
+        """Resolve the grant type and validate the fields it requires.
+
+        Args:
+            settings: Service settings governing auth behavior.
+            grant_type: Requested grant type, inferred when omitted.
+            username: Account name, required by the password grant type.
+            password: Login password.
+
+        Raises:
+            HTTPException: The grant type is unknown, is not accepted by this
+                server's auth scheme, or is missing a required field.
+        """
+        self.grant_type = self._resolve_grant_type(settings, grant_type, username)
+        if self.grant_type is GrantType.PASSWORD:
+            if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
+                raise self._unsupported_grant_type(self.grant_type)
+            if not username:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid request: username is required.",
+                )
+        elif self.grant_type is GrantType.CONTROL_PLANE:
+            if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
+                raise self._unsupported_grant_type(self.grant_type)
+        self.username = username or ""
+        self.password = password or ""
+
+    @classmethod
+    def _resolve_grant_type(
+        cls, settings: APISettings, grant_type: str | None, username: str | None
+    ) -> GrantType:
+        if grant_type is not None:
+            if grant_type not in set(GrantType):
+                raise cls._unsupported_grant_type(grant_type)
+            return GrantType(grant_type)
+        if username is not None:
+            return GrantType.PASSWORD
+        if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+            return GrantType.CONTROL_PLANE
+        if settings.AUTH_SCHEME is AuthScheme.LOCAL:
+            return GrantType.PASSWORD
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid request: grant type is required.",
+        )
+
+    @staticmethod
+    def _unsupported_grant_type(grant_type: str) -> HTTPException:
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported grant type: {grant_type}",
+        )
+
+
 @router.post("/login")
 async def login(
     request: Request,
     response: Response,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     service: Annotated[AuthService, Depends(get_auth_service)],
-    username: Annotated[str, Form()],
-    password: Annotated[str, Form()],
+    form: Annotated[LoginRequestForm, Depends()],
 ) -> TokenResponse:
-    """Log in with a username and password and receive a bearer token.
+    """Log in and receive a bearer token.
 
-    Clients observe HTTP 200 on success and 401 when password login is not
-    enabled or the credentials cannot be validated.
+    The ``password`` grant type takes the form username and password and is
+    accepted under the ``local`` auth scheme. The ``control-plane`` grant type
+    reads a control plane credential from the authorization header and mirrors
+    the control plane user into a local account. Clients observe HTTP 200 on
+    success, 400 when the grant type is not accepted by this server, and 401
+    when the credentials cannot be validated.
 
     Args:
         request: Incoming request.
         response: Outgoing response.
         settings: Service settings governing auth behavior.
         service: Authentication service.
-        username: Account name.
-        password: Login password.
+        form: Login request form carrying the resolved grant type.
 
     Raises:
-        HTTPException: Password login is not enabled or the credentials
-            cannot be validated.
+        HTTPException: The credentials cannot be validated.
 
     Returns:
         Issued token.
     """
-    if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Password login is not enabled.",
-        )
     try:
-        token, expires_at, csrf_token = await service.login_with_password(
-            username, password
-        )
+        if form.grant_type is GrantType.CONTROL_PLANE:
+            credential = _get_bearer_credential(request)
+            if credential is None:
+                raise AuthenticationError("Missing control plane bearer credential.")
+            token, expires_at, csrf_token = await service.login_with_control_plane(
+                credential
+            )
+        else:
+            token, expires_at, csrf_token = await service.login_with_password(
+                form.username, form.password
+            )
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

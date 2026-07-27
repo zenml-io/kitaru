@@ -155,12 +155,27 @@ async def test_login_unknown_user(client: httpx.AsyncClient) -> None:
 
 
 async def test_login_missing_fields(client: httpx.AsyncClient) -> None:
-    """Observe HTTP 422 when the login form is incomplete."""
+    """Observe HTTP 400 when the login form omits the username."""
     response = await client.post("/v1/login", data={})
-    assert response.status_code == 422
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid request: username is required."}
 
     response = await client.post("/v1/login", data={"username": "alice"})
-    assert response.status_code == 422
+    assert response.status_code == 401
+
+
+async def test_login_unknown_grant_type(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 400 for a grant type this server does not know."""
+    response = await client.post("/v1/login", data={"grant_type": "client_credentials"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Unsupported grant type: client_credentials"}
+
+
+async def test_login_grant_type_rejected_by_scheme(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 400 for the control plane grant type under the local scheme."""
+    response = await client.post("/v1/login", data={"grant_type": "control-plane"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Unsupported grant type: control-plane"}
 
 
 async def test_login_unavailable_under_none_scheme(
@@ -168,7 +183,7 @@ async def test_login_unavailable_under_none_scheme(
     api_key_repository: FakeApiKeyRepository,
     account: Account,
 ) -> None:
-    """Observe HTTP 401 for password login under the none auth scheme."""
+    """Observe HTTP 400 for password login under the none auth scheme."""
     _ = account
     app = build_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
@@ -180,8 +195,8 @@ async def test_login_unavailable_under_none_scheme(
         response = await client.post(
             "/v1/login", data={"username": "alice", "password": "secret"}
         )
-        assert response.status_code == 401
-        assert response.json() == {"detail": "Password login is not enabled."}
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Unsupported grant type: password"}
 
 
 async def test_none_scheme_requires_bootstrap(

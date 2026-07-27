@@ -18,7 +18,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeAccountRepository, FakePasswordHasher, asgi_api_client
+from conftest import (
+    FakeAccountRepository,
+    FakePasswordHasher,
+    asgi_api_client,
+    local_settings,
+)
 from kitaru.api_models.v1.accounts import (
     AccountCreateRequest,
     AccountResponse,
@@ -28,7 +33,6 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.domain.account import Account
@@ -39,9 +43,7 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
 @pytest.fixture
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed service."""
-    app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
-    )
+    app = create_app(local_settings())
     service = AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),

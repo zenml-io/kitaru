@@ -19,10 +19,9 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAccountRepository, FakePasswordHasher
+from conftest import FakeAccountRepository, FakePasswordHasher, local_settings
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.domain.account import Account
@@ -33,9 +32,7 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
 @pytest.fixture
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed account service."""
-    app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
-    )
+    app = create_app(local_settings())
     service = AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),

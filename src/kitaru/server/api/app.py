@@ -20,13 +20,14 @@ from importlib.metadata import version
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.rest.routers import accounts, api_keys, auth, secrets
 from kitaru.server.api import health
-from kitaru.server.api.config import APISettings
+from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -85,18 +86,25 @@ def create_app(settings: APISettings) -> FastAPI:
         if not settings.SKIP_DB_MIGRATION:
             await database.create_db_and_tables()
         app.state.database = database
-        async for session in database.get_async_session():
-            account_service = AccountService(
-                repository=SQLAccountRepository(session),
-                password_hasher=BcryptPasswordHasher(),
-            )
-            await account_service.ensure_account(
-                settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
-            )
-            await session.commit()
+        if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+            app.state.control_plane_client = ControlPlaneClient(settings)
+        # The control plane owns every account under its auth scheme, so there
+        # is no local default account to fall back on.
+        if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
+            async for session in database.get_async_session():
+                account_service = AccountService(
+                    repository=SQLAccountRepository(session),
+                    password_hasher=BcryptPasswordHasher(),
+                )
+                await account_service.ensure_account(
+                    settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
+                )
+                await session.commit()
         try:
             yield
         finally:
+            if app.state.control_plane_client is not None:
+                await app.state.control_plane_client.close()
             await database.cleanup()
 
     app = FastAPI(
@@ -105,6 +113,8 @@ def create_app(settings: APISettings) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    # Replaced with a live client at startup under the control plane scheme.
+    app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])

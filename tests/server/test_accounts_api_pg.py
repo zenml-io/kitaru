@@ -18,13 +18,19 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import db_settings, lifespan_client
+from conftest import lifespan_client, local_settings
 
 
 @pytest.fixture
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app running its full lifespan."""
-    async with lifespan_client(db_settings()) as client:
+    """Provide an HTTP client authenticated as the default account."""
+    settings = local_settings(use_db=True, DEFAULT_ACCOUNT_PASSWORD="secret")
+    async with lifespan_client(settings) as client:
+        response = await client.post(
+            "/v1/login", data={"username": "default", "password": "secret"}
+        )
+        token = response.json()["access_token"]
+        client.headers["Authorization"] = f"Bearer {token}"
         yield client
 
 

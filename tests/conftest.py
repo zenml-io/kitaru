@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Shared test helpers and in-memory fakes."""
 
+import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -33,6 +34,11 @@ from sqlalchemy.ext.asyncio import (
 from sqlmodel import SQLModel
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.server.adapters.auth.control_plane import (
+    ControlPlaneClient,
+    ControlPlaneError,
+    ServerAuthorization,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
@@ -58,6 +64,8 @@ from kitaru.server.domain.secret import (
     SecretNotFound,
 )
 
+TEST_DB_PREFIX = "kitaru_test"
+
 
 def db_settings(**overrides: Any) -> APISettings:
     """Build API settings pointing at the local test database.
@@ -71,7 +79,9 @@ def db_settings(**overrides: Any) -> APISettings:
     return APISettings(
         DB_HOST=os.environ.get("KITARU_TEST_DB_HOST", "localhost"),
         DB_PORT=int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
-        DB_NAME="kitaru_test",
+        # A database per caller. Tests drop their database on teardown, and a
+        # shared name would let one test drop the database another is using.
+        DB_NAME=f"{TEST_DB_PREFIX}_{uuid.uuid4().hex[:12]}",
         SECRET_ENCRYPTION_KEY="test-encryption-key",
         **overrides,
     )
@@ -90,6 +100,30 @@ def local_settings(use_db: bool = False, **overrides: Any) -> APISettings:
     values: dict[str, Any] = {
         "AUTH_SCHEME": AuthScheme.LOCAL,
         "JWT_SIGNING_KEY": "test-signing-key-0123456789abcdef",
+        **overrides,
+    }
+    if use_db:
+        return db_settings(**values)
+    return APISettings(
+        DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key", **values
+    )
+
+
+def control_plane_settings(use_db: bool = False, **overrides: Any) -> APISettings:
+    """Build API settings for the control plane auth scheme.
+
+    Args:
+        use_db: Whether to point at the local test database.
+        **overrides: Additional settings values.
+
+    Returns:
+        Settings for control plane authentication.
+    """
+    values: dict[str, Any] = {
+        "AUTH_SCHEME": AuthScheme.CONTROL_PLANE,
+        "JWT_SIGNING_KEY": "test-signing-key-0123456789abcdef",
+        "CONTROL_PLANE_API_URL": "https://control-plane.example.com",
+        "SERVER_ID": uuid.uuid4(),
         **overrides,
     }
     if use_db:
@@ -125,6 +159,58 @@ async def postgres_available() -> bool:
     return _postgres_available
 
 
+async def _drop_stale_test_databases() -> None:
+    engine = create_async_engine(
+        DatabaseService.generate_database_uri(db_settings(), use_default_db=True)
+    )
+    try:
+        async with engine.execution_options(
+            isolation_level="AUTOCOMMIT"
+        ).begin() as connection:
+            names = (
+                await connection.execute(
+                    text("SELECT datname FROM pg_database WHERE datname LIKE :prefix"),
+                    {"prefix": f"{TEST_DB_PREFIX}%"},
+                )
+            ).scalars()
+            for name in list(names):
+                await connection.execute(
+                    text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+                )
+    except OSError:
+        # PostgreSQL is unreachable. The tests that need it skip themselves.
+        pass
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def reap_stale_test_databases() -> None:
+    """Drop test databases left behind by a run that was killed."""
+    asyncio.run(_drop_stale_test_databases())
+
+
+async def drop_test_database(settings: APISettings) -> None:
+    """Drop the database a test created.
+
+    Args:
+        settings: Settings naming the database to drop.
+    """
+    database_name = DatabaseService.application_database_name(settings)
+    engine = create_async_engine(
+        DatabaseService.generate_database_uri(settings, use_default_db=True)
+    )
+    try:
+        async with engine.execution_options(
+            isolation_level="AUTOCOMMIT"
+        ).begin() as connection:
+            await connection.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+    finally:
+        await engine.dispose()
+
+
 @asynccontextmanager
 async def lifespan_client(
     settings: APISettings,
@@ -139,14 +225,17 @@ async def lifespan_client(
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    await DatabaseService.create_db(settings, force_drop=True)
-    app = create_app(settings)
-    async with app.router.lifespan_context(app):
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://test"
-        ) as client:
-            yield client
+    await DatabaseService.create_db(settings)
+    try:
+        app = create_app(settings)
+        async with app.router.lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://test"
+            ) as client:
+                yield client
+    finally:
+        await drop_test_database(settings)
 
 
 @asynccontextmanager
@@ -157,7 +246,7 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
         Session bound to the test database engine.
     """
     settings = db_settings()
-    await DatabaseService.create_db(settings, force_drop=True)
+    await DatabaseService.create_db(settings)
     engine = create_async_engine(DatabaseService.generate_database_uri(settings))
     try:
         async with engine.begin() as connection:
@@ -169,6 +258,7 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
             yield session
     finally:
         await engine.dispose()
+        await drop_test_database(settings)
 
 
 def asgi_api_client(app: FastAPI) -> KitaruAPIClient:
@@ -236,6 +326,51 @@ class FakePasswordHasher:
             ``True`` when the password matches the hash.
         """
         return password_hash == f"hashed:{password}"
+
+
+class FakeControlPlaneClient(ControlPlaneClient):
+    """Fake control plane API client returning a scripted authorization."""
+
+    def __init__(
+        self,
+        authorization: ServerAuthorization | None = None,
+        error: ControlPlaneError | None = None,
+    ) -> None:
+        """Create a fake control plane API client.
+
+        Args:
+            authorization: Authorization result returned by authorize_server.
+            error: Error raised by authorize_server instead of returning.
+        """
+        self.authorization = authorization
+        self.error = error
+        self.received_credential: str | None = None
+        self.received_server_id: uuid.UUID | None = None
+
+    async def authorize_server(
+        self, credential: str, server_id: uuid.UUID
+    ) -> ServerAuthorization:
+        """Record the call and return the scripted authorization.
+
+        Args:
+            credential: Bearer token supplied by the caller.
+            server_id: Server instance this API represents.
+
+        Raises:
+            ControlPlaneError: The fake was configured to raise.
+
+        Returns:
+            Scripted authorization result.
+        """
+        self.received_credential = credential
+        self.received_server_id = server_id
+        if self.error is not None:
+            raise self.error
+        assert self.authorization is not None
+        return self.authorization
+
+    async def close(self) -> None:
+        """Close the fake client, which holds no connections."""
 
 
 class FakeAccountRepository:
@@ -309,6 +444,29 @@ class FakeAccountRepository:
             ):
                 return account.model_copy()
         raise AccountNotFound(name)
+
+    async def get_by_external_id(
+        self, external_id: uuid.UUID, is_service_account: bool = False
+    ) -> Account:
+        """Load an account by external id.
+
+        Args:
+            external_id: External id of the account.
+            is_service_account: Whether to look up a service account.
+
+        Raises:
+            AccountNotFound: No account has this external id.
+
+        Returns:
+            Stored account.
+        """
+        for account in self._accounts.values():
+            if (
+                account.external_id == external_id
+                and account.is_service_account == is_service_account
+            ):
+                return account.model_copy()
+        raise AccountNotFound(external_id)
 
     async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
         """Query accounts matching a filter.
