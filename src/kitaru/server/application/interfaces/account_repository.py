@@ -16,7 +16,7 @@
 import uuid
 from typing import Protocol
 
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import Account
 
 

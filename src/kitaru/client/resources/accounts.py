@@ -16,7 +16,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from kitaru.api_models.v1.accounts import (
+from kitaru.api_models.v1.account import (
     AccountCreateRequest,
     AccountResponse,
     AccountUpdateRequest,

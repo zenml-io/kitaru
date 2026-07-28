@@ -1,7 +1,8 @@
 # API model rules
 
-- DTOs live in versioned modules (`v1/<resource>.py`) and are named
-  `XCreateRequest`, `XUpdateRequest`, `XResponse`.
+- DTOs live in versioned modules named after the entity in the singular
+  (`v1/order.py`) and are named `XCreateRequest`, `XUpdateRequest`,
+  `XResponse`.
 - Requests extend `RequestModel`, responses extend `ResponseModel`, list
   responses use `Page[XResponse]`.
 - Every field declares `Field(description=...)`. The descriptions feed the

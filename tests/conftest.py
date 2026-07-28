@@ -41,9 +41,9 @@ from kitaru.server.adapters.auth.control_plane import (
 from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
-from kitaru.server.application.models.accounts import AccountFilter
-from kitaru.server.application.models.api_keys import ApiKeyFilter
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.account import AccountFilter
+from kitaru.server.application.models.api_key import ApiKeyFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,

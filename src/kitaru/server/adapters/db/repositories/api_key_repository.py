@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.orm.api_key import (
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
-from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.domain.api_key import (
     ApiKey,
     ApiKeyNotFound,

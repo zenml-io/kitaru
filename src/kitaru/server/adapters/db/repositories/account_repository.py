@@ -23,7 +23,7 @@ from kitaru.server.adapters.db.orm.account import (
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,

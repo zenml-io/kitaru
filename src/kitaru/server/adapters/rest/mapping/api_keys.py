@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """API key DTO conversions."""
 
-from kitaru.api_models.v1.api_keys import ApiKeyIssuedResponse, ApiKeyResponse
+from kitaru.api_models.v1.api_key import ApiKeyIssuedResponse, ApiKeyResponse
 from kitaru.server.domain.api_key import ApiKey
 
 

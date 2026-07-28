@@ -18,7 +18,7 @@ import uuid
 from kitaru.server.application.interfaces.api_key_repository import (
     ApiKeyRepository,
 )
-from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.api_key import (
     ApiKey,

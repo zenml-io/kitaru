@@ -19,7 +19,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.secrets import (
+from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
     SecretResponse,
     SecretUpdateRequest,
@@ -31,7 +31,7 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.adapters.rest.mapping.secrets import secret_to_response
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
 
 router = APIRouter()

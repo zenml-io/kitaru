@@ -16,7 +16,7 @@
 import uuid
 from typing import Protocol
 
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.secret import Secret
 
 

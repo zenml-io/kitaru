@@ -25,7 +25,7 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,

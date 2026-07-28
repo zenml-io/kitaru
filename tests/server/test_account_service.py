@@ -18,7 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.domain.account import (

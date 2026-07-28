@@ -15,7 +15,7 @@
 
 from typing import Literal, overload
 
-from kitaru.api_models.v1.secrets import SecretResponse, SecretWithValuesResponse
+from kitaru.api_models.v1.secret import SecretResponse, SecretWithValuesResponse
 from kitaru.server.domain.secret import Secret
 
 
