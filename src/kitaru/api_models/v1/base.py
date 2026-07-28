@@ -13,9 +13,16 @@
 #  permissions and limitations under the License.
 """Shared DTO bases, pagination envelope, and error body."""
 
-from typing import Generic, TypeVar
+import uuid
+from datetime import datetime
+from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, SecretStr
+
+PlainSerializedSecretStr = Annotated[
+    SecretStr,
+    PlainSerializer(lambda value: value.get_secret_value(), when_used="json"),
+]
 
 
 class RequestModel(BaseModel):
@@ -24,8 +31,34 @@ class RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class DiscriminatedRequestModel(RequestModel):
+    """Discriminated request model."""
+
+    def model_post_init(self, context: Any) -> None:
+        """Mark the type discriminator as set so exclude_unset dumps keep it.
+
+        Args:
+            context: Pydantic context.
+        """
+        _ = context
+        self.model_fields_set.add("type")
+
+
 class ResponseModel(BaseModel):
     """Response model."""
+
+
+class TimestampedResponseModel(ResponseModel):
+    """Timestamped response model."""
+
+    created: datetime = Field(description="Creation time.")
+    updated: datetime = Field(description="Last modification time.")
+
+
+class OwnedResponseModel(TimestampedResponseModel):
+    """Owned response model."""
+
+    owner_id: uuid.UUID = Field(description="Id of the owning account.")
 
 
 ItemT = TypeVar("ItemT", bound=ResponseModel)

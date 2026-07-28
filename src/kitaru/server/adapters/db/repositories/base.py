@@ -1,0 +1,136 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Shared SQL repository base."""
+
+import uuid
+from collections.abc import Callable, Mapping
+from typing import Generic, NoReturn, TypeVar
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from kitaru.server.adapters.db.errors import violated_constraint
+from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
+from kitaru.server.domain.base import DomainError, NotFoundError
+
+RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
+
+ConstraintErrors = Mapping[str, Callable[[], DomainError]]
+
+
+class BaseSQLRepository(Generic[RowT]):
+    """Base class for SQL repositories."""
+
+    orm_class: type[RowT]
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize the repository.
+
+        Args:
+            session: Database session for all operations.
+        """
+        self._session = session
+
+    def _not_found(self, entity_id: uuid.UUID) -> NotFoundError:
+        """Build the not-found error for an id.
+
+        Args:
+            entity_id: Id of the missing row.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError
+
+    async def _get_row(self, entity_id: uuid.UUID) -> RowT:
+        """Load a row by id.
+
+        Args:
+            entity_id: Id of the row.
+
+        Raises:
+            NotFoundError: No row has this id.
+
+        Returns:
+            Stored row.
+        """
+        row = await self._session.get(self.orm_class, entity_id)
+        if row is None:
+            raise self._not_found(entity_id)
+        return row
+
+    async def _add(
+        self, row: RowT, constraints: ConstraintErrors | None = None
+    ) -> None:
+        """Add a row and flush, translating constraint violations.
+
+        Args:
+            row: Row to add.
+            constraints: Domain error factories keyed by constraint name.
+
+        Raises:
+            DomainError: A mapped constraint was violated.
+        """
+        try:
+            async with self._session.begin_nested():
+                self._session.add(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(exc, constraints)
+
+    async def _flush(self, constraints: ConstraintErrors | None = None) -> None:
+        """Flush pending changes, translating constraint violations.
+
+        Args:
+            constraints: Domain error factories keyed by constraint name.
+
+        Raises:
+            DomainError: A mapped constraint was violated.
+        """
+        try:
+            async with self._session.begin_nested():
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(exc, constraints)
+
+    async def _delete_row(self, entity_id: uuid.UUID) -> None:
+        """Delete a row by id.
+
+        Args:
+            entity_id: Id of the row.
+
+        Raises:
+            NotFoundError: No row has this id.
+        """
+        row = await self._get_row(entity_id)
+        await self._session.delete(row)
+        await self._session.flush()
+
+    def _raise_translated(
+        self, exc: IntegrityError, constraints: ConstraintErrors | None
+    ) -> NoReturn:
+        """Raise the mapped domain error for a constraint violation.
+
+        Args:
+            exc: Integrity error raised by the flush.
+            constraints: Domain error factories keyed by constraint name.
+
+        Raises:
+            DomainError: A mapped constraint was violated.
+            IntegrityError: No mapping matched the violated constraint.
+        """
+        name = violated_constraint(exc)
+        if constraints is not None and name is not None and name in constraints:
+            raise constraints[name]() from exc
+        raise exc

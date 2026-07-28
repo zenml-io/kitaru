@@ -13,7 +13,33 @@
 #  permissions and limitations under the License.
 """Generic helpers shared across server layers."""
 
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, tzinfo
+from typing import TypeVar
+
+ItemT = TypeVar("ItemT")
+
+
+async def paginate_all(
+    query: Callable[[int], Awaitable[tuple[Sequence[ItemT], int]]],
+) -> list[ItemT]:
+    """Collect all items of a paginated query.
+
+    Args:
+        query: Runs one page of the query by one-based page number, returning
+            the page items and the total match count.
+
+    Returns:
+        All matching items.
+    """
+    items: list[ItemT] = []
+    page = 1
+    while True:
+        batch, total = await query(page)
+        items.extend(batch)
+        if not batch or len(items) >= total:
+            return items
+        page += 1
 
 
 def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:

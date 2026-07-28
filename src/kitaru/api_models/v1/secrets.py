@@ -14,17 +14,14 @@
 """Secret API models."""
 
 import uuid
-from datetime import datetime
-from typing import Annotated
 
-from pydantic import Field, PlainSerializer, SecretStr
+from pydantic import Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
-
-PlainSerializedSecretStr = Annotated[
-    SecretStr,
-    PlainSerializer(lambda value: value.get_secret_value(), when_used="json"),
-]
+from kitaru.api_models.v1.base import (
+    OwnedResponseModel,
+    PlainSerializedSecretStr,
+    RequestModel,
+)
 
 
 class SecretCreateRequest(RequestModel):
@@ -44,15 +41,12 @@ class SecretUpdateRequest(RequestModel):
     )
 
 
-class SecretResponse(ResponseModel):
+class SecretResponse(OwnedResponseModel):
     """Secret response."""
 
     id: uuid.UUID = Field(description="Secret id.")
-    owner_id: uuid.UUID = Field(description="Id of the owning account.")
     name: str = Field(description="Secret name.")
     type: str | None = Field(description="Secret type.")
-    created: datetime = Field(description="Creation time.")
-    updated: datetime = Field(description="Last modification time.")
 
 
 class SecretWithValuesResponse(SecretResponse):

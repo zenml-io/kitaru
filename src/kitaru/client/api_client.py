@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Kitaru API client."""
 
+import os
 from types import TracebackType
 from typing import Any
 
@@ -62,6 +63,21 @@ class KitaruAPIClient:
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.secrets = SecretsResource(self)
+
+    @classmethod
+    def from_env(cls) -> "KitaruAPIClient":
+        """Construct a client from KITARU_API_URL and KITARU_API_KEY.
+
+        Raises:
+            RuntimeError: KITARU_API_URL is not set.
+
+        Returns:
+            Client.
+        """
+        base_url = os.environ.get("KITARU_API_URL")
+        if not base_url:
+            raise RuntimeError("KITARU_API_URL is not set")
+        return cls(base_url=base_url, api_key=os.environ.get("KITARU_API_KEY"))
 
     async def request(
         self,

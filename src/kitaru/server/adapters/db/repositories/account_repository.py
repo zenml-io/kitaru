@@ -16,33 +16,37 @@
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.account import (
     ACCOUNT_NAME_UNIQUE_CONSTRAINT,
     AccountORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.accounts import AccountFilter
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
     DuplicateAccountName,
 )
+from kitaru.server.domain.base import NotFoundError
 
 
-class SQLAccountRepository:
+class SQLAccountRepository(BaseSQLRepository[AccountORM]):
     """Account repository backed by the application database."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """Initialize the repository.
+    orm_class = AccountORM
+
+    def _not_found(self, entity_id: uuid.UUID) -> NotFoundError:
+        """Build the not-found error for an id.
 
         Args:
-            session: Database session for all operations.
+            entity_id: Id of the missing row.
+
+        Returns:
+            Not-found error.
         """
-        self._session = session
+        return AccountNotFound(entity_id)
 
     async def create(self, account: Account) -> Account:
         """Persist a new account.
@@ -57,14 +61,14 @@ class SQLAccountRepository:
             Stored account with timestamps set.
         """
         row = AccountORM.from_domain(account)
-        try:
-            async with self._session.begin_nested():
-                self._session.add(row)
-                await self._session.flush()
-        except IntegrityError as exc:
-            if violated_constraint(exc) == ACCOUNT_NAME_UNIQUE_CONSTRAINT:
-                raise DuplicateAccountName(account.name) from exc
-            raise
+        await self._add(
+            row,
+            {
+                ACCOUNT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateAccountName(
+                    account.name
+                )
+            },
+        )
         return row.to_domain()
 
     async def get(self, account_id: uuid.UUID) -> Account:
@@ -79,9 +83,7 @@ class SQLAccountRepository:
         Returns:
             Stored account.
         """
-        row = await self._session.get(AccountORM, account_id)
-        if row is None:
-            raise AccountNotFound(account_id)
+        row = await self._get_row(account_id)
         return row.to_domain()
 
     async def get_by_name(self, name: str, is_service_account: bool = False) -> Account:
@@ -166,20 +168,14 @@ class SQLAccountRepository:
         Returns:
             Stored account with the updated timestamp renewed.
         """
-        row = await self._session.get(AccountORM, account.id)
-        if row is None:
-            raise AccountNotFound(account.id)
+        row = await self._get_row(account.id)
         row.is_service_account = account.is_service_account
         row.external_id = account.external_id
         row.name = account.name
         row.email = account.email
         row.password_hash = account.password_hash
         row.active = account.active
-        try:
-            async with self._session.begin_nested():
-                await self._session.flush()
-        except IntegrityError as exc:
-            if violated_constraint(exc) == ACCOUNT_NAME_UNIQUE_CONSTRAINT:
-                raise DuplicateAccountName(account.name) from exc
-            raise
+        await self._flush(
+            {ACCOUNT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateAccountName(account.name)}
+        )
         return row.to_domain()

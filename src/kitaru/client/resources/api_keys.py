@@ -14,7 +14,7 @@
 """API keys resource."""
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.api_keys import (
     ApiKeyCreateRequest,
@@ -23,6 +23,7 @@ from kitaru.api_models.v1.api_keys import (
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
+from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -94,9 +95,7 @@ class ApiKeysResource:
         Returns:
             Page of API keys.
         """
-        params: dict[str, Any] = {"page": page, "page_size": page_size}
-        if name is not None:
-            params["name"] = name
+        params = build_params(page=page, page_size=page_size, name=name)
         response = await self._client.request("GET", "/v1/api-keys", params=params)
         return Page[ApiKeyResponse].model_validate(response.json())
 
