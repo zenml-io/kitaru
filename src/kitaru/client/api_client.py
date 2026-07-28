@@ -29,6 +29,7 @@ from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.transport import RetryTransport
 
 
 class KitaruAPIClient:
@@ -40,6 +41,7 @@ class KitaruAPIClient:
         api_key: str | None = None,
         timeout: float = 30.0,
         retries: int = 3,
+        pool_size: int = 20,
     ) -> None:
         """Initialize the client.
 
@@ -47,17 +49,23 @@ class KitaruAPIClient:
             base_url: Server base URL.
             api_key: API key sent as a bearer token.
             timeout: Request timeout in seconds.
-            retries: Connect retry count.
+            retries: Retry count for failed requests.
+            pool_size: Connection pool size.
         """
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        limits = httpx.Limits(
+            max_connections=pool_size, max_keepalive_connections=pool_size
+        )
         self._http = httpx.AsyncClient(
             base_url=base_url,
             headers=headers,
             timeout=timeout,
-            transport=httpx.AsyncHTTPTransport(retries=retries),
+            transport=RetryTransport(
+                httpx.AsyncHTTPTransport(limits=limits), retries=retries
+            ),
         )
         self.accounts = AccountsResource(self)
         self.api_keys = ApiKeysResource(self)

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The API client now retries requests that fail with a transport error or a retryable status code (408, 429, 502, 503, 504) with exponential backoff, configurable via the `retries` constructor parameter. Every request carries an `Idempotency-Key` header that stays the same across retries of the same request, and the connection pool size is configurable via the `pool_size` constructor parameter.
 - List endpoints now paginate with an opaque cursor instead of page numbers. Requests take `cursor`, `size`, and `sort` (`created:asc` or `created:desc`), and responses return `items` and `next_cursor` instead of a total count. A cursor is invalidated by changing filters or sort mid-pagination. Client resources can also iterate every item across pages with `iter()`.
 - The API client now identifies itself with an `X-Kitaru-Client` header (`kitaru-python/<version>`) on every request, and the server uses it as the source for analytics events. Server-side analytics can be disabled with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
 - Secrets holding string key-value pairs, managed via `/v1/secrets`. Values are encrypted at rest with AES-GCM using the new required `KITARU_SERVER_SECRET_ENCRYPTION_KEY` setting, and reads return them only when explicitly requested, never in list responses.

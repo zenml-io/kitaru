@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.transport import RetryTransport
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneClient,
     ControlPlaneError,
@@ -274,7 +275,7 @@ def asgi_api_client(app: FastAPI) -> KitaruAPIClient:
     """
     client = KitaruAPIClient(base_url="http://test")
     client._http = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app),
+        transport=RetryTransport(httpx.ASGITransport(app=app)),
         base_url="http://test",
         headers=client._http.headers,
     )
