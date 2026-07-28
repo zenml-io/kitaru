@@ -26,10 +26,10 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql.schema import MetaData, SchemaItem
-from sqlmodel import SQLModel
 
-# Register all ORM tables on SQLModel.metadata for autogenerate.
+# Register all ORM tables on Base.metadata for autogenerate.
 import kitaru.server.adapters.db.orm  # noqa: F401
+from kitaru.server.adapters.db.orm.base import Base
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +66,14 @@ class Alembic:
     """Run Alembic migrations against the service async database engine.
 
     Callers use this wrapper for startup migration, CLI upgrades, and revision
-    inspection. The default metadata is SQLModel's registered table set.
+    inspection. The default metadata is the declarative base's registered
+    table set.
     """
 
     def __init__(
         self,
         engine: AsyncEngine,
-        metadata: MetaData = SQLModel.metadata,
+        metadata: MetaData = Base.metadata,
         context: EnvironmentContext | None = None,
         **kwargs: Any,
     ) -> None:
@@ -224,8 +225,8 @@ class Alembic:
         # We need to account for 2 distinct cases here:
         #
         # 1. the database is completely empty (not initialized). We don't need
-        # to involve alembic here, we can just create the tables using SQLModel
-        # and then only stamp the database with the latest revision.
+        # to involve alembic here, we can just create the tables from the ORM
+        # metadata and then only stamp the database with the latest revision.
         #
         # 2. the database is not empty and has been migrated with alembic
         # before. This is the most common case. We just need to upgrade to the
@@ -245,9 +246,9 @@ class Alembic:
             await self.upgrade()
         elif await self.db_is_empty():
             # Case 1: the database is empty. We can just create the
-            # tables from scratch with SQLModel and then stamp the database
-            # with the latest revision.
+            # tables from scratch from the ORM metadata and then stamp the
+            # database with the latest revision.
             logger.info("Creating database tables")
             async with self.engine.begin() as conn:
-                await conn.run_sync(SQLModel.metadata.create_all)
+                await conn.run_sync(self.metadata.create_all)
             await self.stamp("head")

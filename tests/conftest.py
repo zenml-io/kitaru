@@ -31,7 +31,6 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlmodel import SQLModel
 
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.server.adapters.auth.control_plane import (
@@ -39,6 +38,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ServerAuthorization,
 )
+from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.accounts import AccountFilter
@@ -250,7 +250,7 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     engine = create_async_engine(DatabaseService.generate_database_uri(settings))
     try:
         async with engine.begin() as connection:
-            await connection.run_sync(SQLModel.metadata.create_all)
+            await connection.run_sync(Base.metadata.create_all)
         session_factory = async_sessionmaker(
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )

@@ -47,7 +47,6 @@ dependencies = [
 [project.optional-dependencies]
 server = [
     "fastapi>=0.139",
-    "sqlmodel>=0.0.39",
     "sqlalchemy[asyncio]>=2.0.51",
     "alembic>=1.18",
     "uvicorn>=0.51",

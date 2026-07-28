@@ -15,10 +15,11 @@
 
 import uuid
 
-from sqlalchemy import Index, UniqueConstraint
-from sqlmodel import Field
+from sqlalchemy import Index, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import (
+    Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
@@ -36,7 +37,7 @@ ACCOUNT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
 ACCOUNT_EXTERNAL_ID_INDEX = index_name("account", ["external_id"])
 
 
-class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Account table."""
 
     __tablename__ = "account"
@@ -47,12 +48,12 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         Index(ACCOUNT_EXTERNAL_ID_INDEX, "external_id"),
     )
 
-    is_service_account: bool = Field(nullable=False)
-    external_id: uuid.UUID | None = Field(default=None)
-    name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
-    email: str | None = Field(default=None, max_length=255)
-    password_hash: str | None = Field(default=None, max_length=128)
-    active: bool = Field(nullable=False)
+    is_service_account: Mapped[bool]
+    external_id: Mapped[uuid.UUID | None]
+    name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
+    email: Mapped[str | None] = mapped_column(String(255))
+    password_hash: Mapped[str | None] = mapped_column(String(128))
+    active: Mapped[bool]
 
     @classmethod
     def from_domain(cls, account: Account) -> "AccountORM":
