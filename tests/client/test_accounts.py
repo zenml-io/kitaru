@@ -24,7 +24,7 @@ from conftest import (
     asgi_api_client,
     local_settings,
 )
-from kitaru.api_models.v1.accounts import (
+from kitaru.api_models.v1.account import (
     AccountCreateRequest,
     AccountResponse,
     AccountUpdateRequest,

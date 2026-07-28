@@ -18,7 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeApiKeyRepository
-from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.domain.account import Account

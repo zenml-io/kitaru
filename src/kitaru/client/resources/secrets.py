@@ -17,7 +17,7 @@ import uuid
 from typing import TYPE_CHECKING, Literal, overload
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.secrets import (
+from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
     SecretResponse,
     SecretUpdateRequest,

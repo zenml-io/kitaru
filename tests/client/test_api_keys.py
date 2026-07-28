@@ -19,7 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeApiKeyRepository, asgi_api_client
-from kitaru.api_models.v1.api_keys import (
+from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
     ApiKeyResponse,

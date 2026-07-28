@@ -27,7 +27,7 @@ from kitaru.server.adapters.db.orm.secret import (
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.secret import (
     DuplicateSecretName,

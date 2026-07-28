@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Account DTO conversions."""
 
-from kitaru.api_models.v1.accounts import AccountResponse
+from kitaru.api_models.v1.account import AccountResponse
 from kitaru.server.domain.account import Account
 
 

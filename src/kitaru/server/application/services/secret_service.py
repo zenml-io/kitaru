@@ -21,7 +21,7 @@ from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
 )
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.secret import Secret, SecretNotFound
 
 

@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from kitaru.api_models.v1.accounts import (
+from kitaru.api_models.v1.account import (
     AccountCreateRequest,
     AccountResponse,
     AccountUpdateRequest,
@@ -30,7 +30,7 @@ from kitaru.server.adapters.rest.dependencies import (
     require_local_account_management,
 )
 from kitaru.server.adapters.rest.mapping.accounts import account_to_response
-from kitaru.server.application.models.accounts import AccountFilter
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 

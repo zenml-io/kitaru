@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from kitaru.api_models.v1.api_keys import (
+from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
     ApiKeyResponse,
@@ -33,7 +33,7 @@ from kitaru.server.adapters.rest.mapping.api_keys import (
     api_key_to_issued_response,
     api_key_to_response,
 )
-from kitaru.server.application.models.api_keys import ApiKeyFilter
+from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 

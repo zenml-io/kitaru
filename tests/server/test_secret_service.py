@@ -20,7 +20,7 @@ from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, create_secret
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secrets import SecretFilter
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.secret import DuplicateSecretName, SecretNotFound

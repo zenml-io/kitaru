@@ -20,7 +20,7 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, asgi_api_client
-from kitaru.api_models.v1.secrets import (
+from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
     SecretResponse,
     SecretUpdateRequest,

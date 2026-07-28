@@ -16,7 +16,7 @@
 import uuid
 from typing import TYPE_CHECKING
 
-from kitaru.api_models.v1.api_keys import (
+from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
     ApiKeyResponse,
