@@ -24,9 +24,8 @@ from kitaru.server.domain.api_key import (
     InvalidApiKey,
     decode_api_key,
     encode_api_key,
-    generate_secret,
-    hash_secret,
 )
+from kitaru.server.domain.keys import generate_secret, hash_secret
 
 
 def test_encode_decode_round_trip() -> None:

@@ -55,6 +55,21 @@ class ServerError(APIError):
     """Server error."""
 
 
+class TokenGrantError(APIError):
+    """Token grant error."""
+
+    def __init__(self, status_code: int, detail: str, error: str) -> None:
+        """Initialize the error.
+
+        Args:
+            status_code: HTTP status code.
+            detail: Error detail.
+            error: OAuth 2.0 error code.
+        """
+        super().__init__(status_code, detail)
+        self.error = error
+
+
 _STATUS_ERRORS: dict[int, type[APIError]] = {
     401: AuthenticationError,
     403: AuthorizationError,
@@ -82,6 +97,15 @@ def raise_for_response(response: httpx.Response) -> None:
         payload = None
     if isinstance(payload, dict) and isinstance(payload.get("detail"), str):
         detail = payload["detail"]
+    if response.status_code == httpx.codes.BAD_REQUEST and isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str):
+            # OAuth 2.0 error bodies carry error_description where Kitaru's own
+            # error bodies carry detail.
+            description = payload.get("error_description")
+            if isinstance(description, str):
+                detail = description
+            raise TokenGrantError(response.status_code, detail, error)
 
     error_class = _STATUS_ERRORS.get(response.status_code)
     if error_class is None:

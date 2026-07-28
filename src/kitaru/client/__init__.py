@@ -14,7 +14,17 @@
 """Public SDK surface."""
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.auth import TokenProvider
 from kitaru.client.client import KitaruClient
+from kitaru.client.control_plane import (
+    ControlPlaneLoginError,
+    ControlPlaneSession,
+)
+from kitaru.client.control_plane_auth import control_plane_login
+from kitaru.client.credential_store import CredentialStore
+from kitaru.client.credentials import ApiToken, CredentialType, ServerCredentials
+from kitaru.client.device_auth import device_login
+from kitaru.client.device_grant import DeviceLoginError
 from kitaru.client.exceptions import (
     APIError,
     AuthenticationError,
@@ -22,19 +32,31 @@ from kitaru.client.exceptions import (
     KitaruClientError,
     NotFoundError,
     ServerError,
+    TokenGrantError,
     ValidationError,
 )
 from kitaru.client.sync_client import KitaruSyncClient
 
 __all__ = [
     "APIError",
+    "ApiToken",
     "AuthenticationError",
     "AuthorizationError",
+    "ControlPlaneLoginError",
+    "ControlPlaneSession",
+    "CredentialStore",
+    "CredentialType",
+    "DeviceLoginError",
     "KitaruAPIClient",
     "KitaruClient",
     "KitaruClientError",
     "KitaruSyncClient",
     "NotFoundError",
+    "ServerCredentials",
     "ServerError",
+    "TokenGrantError",
+    "TokenProvider",
     "ValidationError",
+    "control_plane_login",
+    "device_login",
 ]

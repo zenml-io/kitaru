@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Device authentication for headless clients, following the OAuth 2.0 device authorization grant. `POST /v1/device_authorization` issues a short user code and a device code, a signed-in account confirms the user code at the verification URI, and the client exchanges its device code for a token at `POST /v1/login`. Authorized devices are listed, locked, and revoked via `/v1/devices`, and revoking one immediately invalidates every token issued for it. Configured through `KITARU_SERVER_DASHBOARD_URL`, `KITARU_SERVER_DEVICE_AUTH_TIMEOUT_SECONDS`, `KITARU_SERVER_DEVICE_AUTH_POLLING_INTERVAL_SECONDS`, `KITARU_SERVER_MAX_FAILED_DEVICE_AUTH_ATTEMPTS`, `KITARU_SERVER_DEVICE_EXPIRATION_MINUTES`, and `KITARU_SERVER_TRUSTED_DEVICE_EXPIRATION_MINUTES`.
+- A client credential store at `~/.config/kitaru/credentials.json`, holding API keys, device authorizations, and cached tokens per server URL. The file is written atomically with owner-only permissions, and `KITARU_CREDENTIALS_PATH` moves it while `KITARU_DISABLE_CREDENTIALS_CACHE` keeps it in memory.
+- The API client can authenticate from the credential store via `KitaruAPIClient.from_credentials(...)`, renewing its token before it expires and once more after an HTTP 401. Concurrent callers share a single renewal.
 - The API client now retries requests that fail with a transport error or a retryable status code (408, 429, 502, 503, 504) with exponential backoff, configurable via the `retries` constructor parameter. Every request carries an `Idempotency-Key` header that stays the same across retries of the same request, and the connection pool size is configurable via the `pool_size` constructor parameter.
 - List endpoints now paginate with an opaque cursor instead of page numbers. Requests take `cursor`, `size`, and `sort` (`created:asc` or `created:desc`), and responses return `items` and `next_cursor` instead of a total count. A cursor is invalidated by changing filters or sort mid-pagination. Client resources can also iterate every item across pages with `iter()`.
 - The API client now identifies itself with an `X-Kitaru-Client` header (`kitaru-python/<version>`) on every request, and the server uses it as the source for analytics events. Server-side analytics can be disabled with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
@@ -18,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Flow and execution deletion is now available through the SDK, `kitaru flow delete` and `kitaru executions delete` CLI commands, and MCP tools.
 
 ### Changed
+- The CSRF token is now required only when the session token arrives in the auth cookie. A token sent in the `Authorization` header no longer needs the `X-CSRF-Token` header, because a browser never attaches that header on its own. The auth cookie also honors the new `KITARU_SERVER_AUTH_COOKIE_DOMAIN` and `KITARU_SERVER_AUTH_COOKIE_SECURE` settings, so the secure attribute is no longer derived from the request scheme behind a TLS-terminating proxy.
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed

@@ -1,12 +1,13 @@
 # Kitaru package rules
 
-The package has four independent top-level parts. `client` and `server` never
-import each other and both sit on `api_models` and `analytics`. import-linter
-enforces this, along with the server layering (adapters above application
-above domain).
+The package has five independent top-level parts. `client` and `server` never
+import each other and both sit on `api_models`, `analytics`, and `transport`.
+import-linter enforces this, along with the server layering (adapters above
+application above domain).
 
 - `analytics/`: Async analytics client and event source tracking.
 - `api_models/`: Versioned request and response DTOs shared by server and SDK.
+- `transport.py`: Retrying HTTP transport shared by every outbound client.
 - `client/`: Async SDK making REST calls.
 - `server/`: FastAPI server in layers (API, application, domain,
   infrastructure adapters).

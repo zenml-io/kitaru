@@ -14,12 +14,13 @@
 """FastAPI dependency providers."""
 
 from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
@@ -36,20 +37,32 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.device_repository import (
+    SQLDeviceRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
 from kitaru.server.adapters.rest.commit_route import attach_request_session
-from kitaru.server.api.config import APISettings, AuthScheme
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
 
 CSRF_HEADER = "X-CSRF-Token"
-BearerCredential = tuple[str, str | None]
+
+
+class RequestCredential(NamedTuple):
+    """Credential read off an incoming request."""
+
+    token: str
+    csrf_token: str | None
+    from_cookie: bool
 
 
 async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
@@ -148,15 +161,45 @@ def get_secret_service(
     )
 
 
+def get_device_service(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> DeviceService:
+    """Return a device service for the current request.
+
+    Args:
+        request: Incoming request.
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Device service bound to the SQL repository.
+    """
+    database: DatabaseService = request.app.state.database
+    return DeviceService(
+        repository=SQLDeviceRepository(session, database.engine),
+        policy=DevicePolicy(
+            auth_timeout_seconds=settings.DEVICE_AUTH_TIMEOUT_SECONDS,
+            polling_interval_seconds=settings.DEVICE_AUTH_POLLING_INTERVAL_SECONDS,
+            max_failed_attempts=settings.MAX_FAILED_DEVICE_AUTH_ATTEMPTS,
+            expiration_minutes=settings.DEVICE_EXPIRATION_MINUTES,
+            trusted_expiration_minutes=settings.TRUSTED_DEVICE_EXPIRATION_MINUTES,
+        ),
+    )
+
+
 def get_auth_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
+    device_service: Annotated[DeviceService, Depends(get_device_service)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
     Args:
         request: Incoming request.
         session: Request-scoped database session.
+        device_service: Device service for the current request.
 
     Returns:
         Authentication service bound to the SQL repositories.
@@ -176,6 +219,7 @@ def get_auth_service(
         account_repository=account_repository,
         api_key_repository=SQLApiKeyRepository(session),
         password_hasher=BcryptPasswordHasher(),
+        device_service=device_service,
         control_plane=control_plane,
     )
 
@@ -183,7 +227,7 @@ def get_auth_service(
 def get_optional_bearer_credential(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
-) -> BearerCredential | None:
+) -> RequestCredential | None:
     """Read an optional bearer credential from the request.
 
     Args:
@@ -191,19 +235,19 @@ def get_optional_bearer_credential(
         settings: API settings for this process.
 
     Returns:
-        Credential string without the ``Bearer`` prefix and optional CSRF
-        token, or ``None``.
+        Credential without the ``Bearer`` prefix, the CSRF token, and where
+        the credential came from, or ``None``.
     """
     header = request.headers.get("Authorization")
     csrf_token = request.headers.get(CSRF_HEADER)
     if header:
         scheme, _, credential = header.partition(" ")
         if scheme.lower() == "bearer" and credential:
-            return credential, csrf_token
+            return RequestCredential(credential, csrf_token, from_cookie=False)
     if settings.AUTH_COOKIE_NAME:
         cookie = request.cookies.get(settings.AUTH_COOKIE_NAME)
         if cookie:
-            return cookie, csrf_token
+            return RequestCredential(cookie, csrf_token, from_cookie=True)
     return None
 
 
@@ -228,7 +272,7 @@ def require_local_account_management(
 async def authorize(
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
-        BearerCredential | None, Depends(get_optional_bearer_credential)
+        RequestCredential | None, Depends(get_optional_bearer_credential)
     ],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AuthContext:
@@ -263,8 +307,9 @@ async def authorize(
 
     try:
         return await auth_service.resolve(
-            credential=credential[0],
-            csrf_token=credential[1],
+            credential=credential.token,
+            csrf_token=credential.csrf_token,
+            from_cookie=credential.from_cookie,
         )
     except AuthenticationError as exc:
         raise HTTPException(

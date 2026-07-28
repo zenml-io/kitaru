@@ -94,3 +94,35 @@ class RetryTransport(httpx.AsyncBaseTransport):
     async def _backoff(self, index: int) -> None:
         base = self._backoff_seconds
         await asyncio.sleep(base * (2**index) + random.uniform(0, base))
+
+
+def build_async_client(
+    base_url: str,
+    headers: dict[str, str],
+    timeout: float,
+    retries: int,
+    pool_size: int,
+) -> httpx.AsyncClient:
+    """Build a retrying HTTP client the way this SDK builds them.
+
+    Args:
+        base_url: Base URL requests are sent relative to.
+        headers: Headers sent on every request.
+        timeout: Request timeout in seconds.
+        retries: Retry count for failed requests.
+        pool_size: Connection pool size.
+
+    Returns:
+        HTTP client wrapped in a retrying transport.
+    """
+    limits = httpx.Limits(
+        max_connections=pool_size, max_keepalive_connections=pool_size
+    )
+    return httpx.AsyncClient(
+        base_url=base_url,
+        headers=headers,
+        timeout=timeout,
+        transport=RetryTransport(
+            httpx.AsyncHTTPTransport(limits=limits), retries=retries
+        ),
+    )

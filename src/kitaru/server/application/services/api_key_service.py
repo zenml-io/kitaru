@@ -24,9 +24,8 @@ from kitaru.server.domain.api_key import (
     ApiKey,
     ApiKeyNotFound,
     encode_api_key,
-    generate_secret,
-    hash_secret,
 )
+from kitaru.server.domain.keys import generate_secret, hash_secret
 
 
 class ApiKeyService:

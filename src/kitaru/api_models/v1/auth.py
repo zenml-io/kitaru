@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Auth API models."""
 
+import uuid
 from enum import StrEnum
 
 from pydantic import Field
@@ -25,6 +26,19 @@ class GrantType(StrEnum):
 
     PASSWORD = "password"
     CONTROL_PLANE = "control-plane"
+    DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code"
+
+
+class TokenErrorCode(StrEnum):
+    """Device authorization grant error code."""
+
+    AUTHORIZATION_PENDING = "authorization_pending"
+    SLOW_DOWN = "slow_down"
+    ACCESS_DENIED = "access_denied"
+    EXPIRED_TOKEN = "expired_token"
+    INVALID_GRANT = "invalid_grant"
+    INVALID_REQUEST = "invalid_request"
+    UNSUPPORTED_GRANT_TYPE = "unsupported_grant_type"
 
 
 class TokenResponse(ResponseModel):
@@ -36,3 +50,24 @@ class TokenResponse(ResponseModel):
     csrf_token: str | None = Field(
         default=None, description="CSRF token for cookie authentication."
     )
+
+
+class TokenErrorResponse(ResponseModel):
+    """Token error response."""
+
+    error: TokenErrorCode = Field(description="Error code.")
+    detail: str = Field(description="Error message.")
+
+
+class DeviceAuthorizationResponse(ResponseModel):
+    """Device authorization response."""
+
+    device_id: uuid.UUID = Field(description="Device id to verify.")
+    device_code: str = Field(description="Code the device presents when polling.")
+    user_code: str = Field(description="Code the user confirms in the browser.")
+    verification_uri: str = Field(description="Page where the user enters the code.")
+    verification_uri_complete: str = Field(
+        description="Verification page with the code already filled in."
+    )
+    expires_in: int = Field(description="Code lifetime in seconds.")
+    interval: int = Field(description="Seconds to wait between polls.")

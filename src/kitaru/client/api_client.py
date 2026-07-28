@@ -24,12 +24,16 @@ from kitaru.analytics.source import (
     AnalyticsSource,
     format_client_header,
 )
+from kitaru.client.auth import TokenProvider
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
+from kitaru.client.resources.devices import DevicesResource
+from kitaru.client.resources.info import InfoResource
 from kitaru.client.resources.secrets import SecretsResource
-from kitaru.client.transport import RetryTransport
+from kitaru.transport import build_async_client
 
 
 class KitaruAPIClient:
@@ -39,6 +43,7 @@ class KitaruAPIClient:
         self,
         base_url: str,
         api_key: str | None = None,
+        credential_store: CredentialStore | None = None,
         timeout: float = 30.0,
         retries: int = 3,
         pool_size: int = 20,
@@ -47,30 +52,30 @@ class KitaruAPIClient:
 
         Args:
             base_url: Server base URL.
-            api_key: API key sent as a bearer token.
+            api_key: API key sent as a bearer token. Ignored when a credential
+                store is supplied.
+            credential_store: Store holding the credentials this client
+                authenticates with, renewing its token as it expires.
             timeout: Request timeout in seconds.
             retries: Retry count for failed requests.
             pool_size: Connection pool size.
         """
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
-        if api_key:
+        if api_key and credential_store is None:
             headers["Authorization"] = f"Bearer {api_key}"
-        limits = httpx.Limits(
-            max_connections=pool_size, max_keepalive_connections=pool_size
-        )
-        self._http = httpx.AsyncClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=timeout,
-            transport=RetryTransport(
-                httpx.AsyncHTTPTransport(limits=limits), retries=retries
-            ),
+        self._http = build_async_client(
+            base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
         self.accounts = AccountsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
+        self.devices = DevicesResource(self)
+        self.info = InfoResource(self)
         self.secrets = SecretsResource(self)
+        self._auth: TokenProvider | None = None
+        if credential_store is not None:
+            self._auth = TokenProvider(base_url, credential_store, self.auth)
 
     @classmethod
     def from_env(cls) -> "KitaruAPIClient":
@@ -94,8 +99,14 @@ class KitaruAPIClient:
         params: dict[str, Any] | None = None,
         json: Any = None,
         data: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        authenticate: bool = True,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
+
+        A request rejected with HTTP 401 is retried once with a renewed token,
+        unless another caller renewed it first, in which case the retry uses
+        theirs.
 
         Args:
             method: HTTP method.
@@ -103,6 +114,9 @@ class KitaruAPIClient:
             params: Query parameters.
             json: JSON request body.
             data: Form request body.
+            headers: Additional request headers.
+            authenticate: Whether to attach a bearer token from the credential
+                store. The login endpoints send their own credential.
 
         Raises:
             APIError: The response has an error status code.
@@ -110,14 +124,38 @@ class KitaruAPIClient:
         Returns:
             HTTP response.
         """
-        response = await self._http.request(
-            method, path, params=params, json=json, data=data
-        )
+        provider = self._auth if authenticate else None
+        generation = provider.generation if provider is not None else 0
+        request_headers = dict(headers or {})
+
+        async def send() -> httpx.Response:
+            return await self._http.request(
+                method,
+                path,
+                params=params,
+                json=json,
+                data=data,
+                headers=request_headers or None,
+            )
+
+        if provider is not None:
+            token = await provider.get_token()
+            if token is not None:
+                request_headers["Authorization"] = f"Bearer {token}"
+        response = await send()
+        if response.status_code == httpx.codes.UNAUTHORIZED and provider is not None:
+            await response.aclose()
+            token = await provider.renew(generation)
+            if token is not None:
+                request_headers["Authorization"] = f"Bearer {token}"
+                response = await send()
         raise_for_response(response)
         return response
 
     async def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the underlying HTTP clients."""
+        if self._auth is not None:
+            await self._auth.close()
         await self._http.aclose()
 
     async def __aenter__(self) -> "KitaruAPIClient":

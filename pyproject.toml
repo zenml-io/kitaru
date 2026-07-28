@@ -132,11 +132,11 @@ asyncio_default_fixture_loop_scope = "function"
 root_packages = ["kitaru"]
 
 [[tool.importlinter.contracts]]
-name = "client and server are independent, both sit on api_models and analytics"
+name = "client and server are independent, both sit on the shared packages"
 type = "layers"
 layers = [
     "kitaru.client | kitaru.server",
-    "kitaru.api_models | kitaru.analytics",
+    "kitaru.api_models | kitaru.analytics | kitaru.transport",
 ]
 
 [[tool.importlinter.contracts]]

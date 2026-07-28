@@ -25,6 +25,10 @@ RESERVED_SEPARATORS = frozenset({".", "/", ":", "@"})
 
 DEFAULT_ALLOWED_SEPARATORS = frozenset({"-", "_"})
 
+# An account mirrors an external identity, whose username is an email address
+# under an OAuth2 control plane, so account names carry the email separators.
+ACCOUNT_ALLOWED_SEPARATORS = frozenset({"-", "_", ".", "+", "@"})
+
 MAX_NAME_LENGTH = 255
 
 
@@ -57,6 +61,39 @@ def validate_name(
     reserved = allowed_separators & RESERVED_SEPARATORS
     if reserved:
         raise ValueError(f"Separators {sorted(reserved)} are reserved")
+    return _validate(value, allowed_separators, max_length)
+
+
+def validate_account_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
+    """Validate an account name, which may be an email address.
+
+    Args:
+        value: Name to validate.
+        max_length: Maximum name length.
+
+    Raises:
+        InvalidName: ``value`` violates the name rules.
+
+    Returns:
+        Validated name.
+    """
+    return _validate(value, ACCOUNT_ALLOWED_SEPARATORS, max_length)
+
+
+def _validate(value: str, allowed_separators: frozenset[str], max_length: int) -> str:
+    """Check a name against a character set.
+
+    Args:
+        value: Name to validate.
+        allowed_separators: Separator characters permitted inside the name.
+        max_length: Maximum name length.
+
+    Raises:
+        InvalidName: ``value`` violates the name rules.
+
+    Returns:
+        Validated name.
+    """
     if not value:
         raise InvalidName("Name must not be empty")
     if len(value) > max_length:
@@ -73,3 +110,4 @@ def validate_name(
 
 
 Name = Annotated[str, AfterValidator(validate_name)]
+AccountName = Annotated[str, AfterValidator(validate_account_name)]

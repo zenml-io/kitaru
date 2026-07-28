@@ -14,23 +14,15 @@
 """API process configuration."""
 
 import uuid
-from enum import StrEnum
 from typing import Self
 
 from pydantic import model_validator
 
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.config import Settings
 
 # Sentinel meaning the server has not been enrolled with a control plane.
 UNSET_SERVER_ID = uuid.UUID(int=0)
-
-
-class AuthScheme(StrEnum):
-    """Authentication scheme."""
-
-    NONE = "none"
-    LOCAL = "local"
-    CONTROL_PLANE = "control_plane"
 
 
 class APISettings(Settings):
@@ -42,10 +34,9 @@ class APISettings(Settings):
     AUTH_SCHEME: AuthScheme = AuthScheme.NONE
 
     SERVER_ID: uuid.UUID = UNSET_SERVER_ID
-    ENROLLMENT_KEY: str = ""
+    SERVER_URL: str = ""
 
     CONTROL_PLANE_API_URL: str = ""
-    CONTROL_PLANE_AUDIENCE: str | None = None
     CONTROL_PLANE_TIMEOUT_SECONDS: float = 10.0
     CONTROL_PLANE_CONNECTION_POOL_SIZE: int = 20
     CONTROL_PLANE_RETRY_CONNECT: int = 2
@@ -53,13 +44,22 @@ class APISettings(Settings):
     CONTROL_PLANE_RETRY_STATUS: int = 2
     CONTROL_PLANE_RETRY_OTHER: int = 1
     CONTROL_PLANE_RETRY_BACKOFF_SECONDS: float = 0.25
-    CONTROL_PLANE_TOKEN_REFRESH_LEEWAY_SECONDS: int = 60
 
     JWT_SIGNING_KEY: str = ""
     JWT_ISSUER: str = "kitaru"
     JWT_AUDIENCE: str = "kitaru"
     JWT_LIFETIME_SECONDS: int = 3600
     AUTH_COOKIE_NAME: str = ""
+    AUTH_COOKIE_DOMAIN: str = ""
+    AUTH_COOKIE_SECURE: bool | None = None
+
+    DASHBOARD_URL: str = ""
+    DEVICE_AUTH_TIMEOUT_SECONDS: int = 300
+    DEVICE_AUTH_POLLING_INTERVAL_SECONDS: int = 5
+    MAX_FAILED_DEVICE_AUTH_ATTEMPTS: int = 3
+    # None keeps a device usable until its account deletes it.
+    DEVICE_EXPIRATION_MINUTES: int | None = None
+    TRUSTED_DEVICE_EXPIRATION_MINUTES: int | None = None
 
     DEFAULT_ACCOUNT_NAME: str = "default"
     DEFAULT_ACCOUNT_PASSWORD: str | None = None
