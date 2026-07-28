@@ -22,6 +22,7 @@ from pydantic import SecretStr
 from conftest import FakeSecretRepository, asgi_api_client
 from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
+    SecretListParams,
     SecretResponse,
     SecretUpdateRequest,
     SecretWithValuesResponse,
@@ -107,11 +108,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.total == 3
     assert [item.name for item in page.items] == ["db", "smtp", "s3"]
 
-    page = await api_client.secrets.list(name="smtp")
+    page = await api_client.secrets.list(SecretListParams(name="smtp"))
     assert page.total == 1
     assert page.items[0].name == "smtp"
 
-    page = await api_client.secrets.list(page=2, page_size=2)
+    page = await api_client.secrets.list(SecretListParams(page=2, page_size=2))
     assert page.total == 3
     assert page.page == 2
     assert page.page_size == 2

@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
+    ApiKeyListParams,
     ApiKeyResponse,
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -78,16 +78,12 @@ class ApiKeysResource:
 
     async def list(
         self,
-        name: str | None = None,
-        page: int = 1,
-        page_size: int = 20,
+        params: ApiKeyListParams | None = None,
     ) -> Page[ApiKeyResponse]:
         """List API keys of the caller.
 
         Args:
-            name: Filter on API key name.
-            page: Page number.
-            page_size: Page size.
+            params: API key list params.
 
         Raises:
             APIError: The request failed.
@@ -95,8 +91,12 @@ class ApiKeysResource:
         Returns:
             Page of API keys.
         """
-        params = build_params(page=page, page_size=page_size, name=name)
-        response = await self._client.request("GET", "/v1/api-keys", params=params)
+        params = params or ApiKeyListParams()
+        response = await self._client.request(
+            "GET",
+            "/v1/api-keys",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
         return Page[ApiKeyResponse].model_validate(response.json())
 
     async def update(

@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING, Literal, overload
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
+    SecretListParams,
     SecretResponse,
     SecretUpdateRequest,
     SecretWithValuesResponse,
 )
-from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -96,16 +96,12 @@ class SecretsResource:
 
     async def list(
         self,
-        name: str | None = None,
-        page: int = 1,
-        page_size: int = 20,
+        params: SecretListParams | None = None,
     ) -> Page[SecretResponse]:
         """List secrets.
 
         Args:
-            name: Filter on secret name.
-            page: Page number.
-            page_size: Page size.
+            params: Secret list params.
 
         Raises:
             APIError: The request failed.
@@ -113,8 +109,12 @@ class SecretsResource:
         Returns:
             Page of secrets without values.
         """
-        params = build_params(page=page, page_size=page_size, name=name)
-        response = await self._client.request("GET", "/v1/secrets", params=params)
+        params = params or SecretListParams()
+        response = await self._client.request(
+            "GET",
+            "/v1/secrets",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
         return Page[SecretResponse].model_validate(response.json())
 
     async def update(

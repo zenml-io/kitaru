@@ -13,7 +13,12 @@
 #  permissions and limitations under the License.
 """API key DTO conversions."""
 
-from kitaru.api_models.v1.api_key import ApiKeyIssuedResponse, ApiKeyResponse
+from kitaru.api_models.v1.api_key import (
+    ApiKeyIssuedResponse,
+    ApiKeyListParams,
+    ApiKeyResponse,
+)
+from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.domain.api_key import ApiKey
 
 
@@ -60,4 +65,20 @@ def api_key_to_issued_response(api_key: ApiKey, key: str) -> ApiKeyIssuedRespons
         last_used=api_key.last_used,
         created=api_key.created,
         updated=api_key.updated,
+    )
+
+
+def api_key_list_params_to_filter(params: ApiKeyListParams) -> ApiKeyFilter:
+    """Convert API key list params to the application filter.
+
+    Args:
+        params: API key list params.
+
+    Returns:
+        API key filter.
+    """
+    return ApiKeyFilter(
+        name=params.name,
+        page=params.page,
+        page_size=params.page_size,
     )

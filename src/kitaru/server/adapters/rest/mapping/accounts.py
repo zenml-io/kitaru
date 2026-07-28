@@ -13,7 +13,8 @@
 #  permissions and limitations under the License.
 """Account DTO conversions."""
 
-from kitaru.api_models.v1.account import AccountResponse
+from kitaru.api_models.v1.account import AccountListParams, AccountResponse
+from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import Account
 
 
@@ -36,4 +37,21 @@ def account_to_response(account: Account) -> AccountResponse:
         active=account.active,
         created=account.created,
         updated=account.updated,
+    )
+
+
+def account_list_params_to_filter(params: AccountListParams) -> AccountFilter:
+    """Convert account list params to the application filter.
+
+    Args:
+        params: Account list params.
+
+    Returns:
+        Account filter.
+    """
+    return AccountFilter(
+        name=params.name,
+        active=params.active,
+        page=params.page,
+        page_size=params.page_size,
     )

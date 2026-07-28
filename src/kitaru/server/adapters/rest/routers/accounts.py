@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.account import (
     AccountCreateRequest,
+    AccountListParams,
     AccountResponse,
     AccountUpdateRequest,
 )
@@ -29,8 +30,10 @@ from kitaru.server.adapters.rest.dependencies import (
     get_account_service,
     require_local_account_management,
 )
-from kitaru.server.adapters.rest.mapping.accounts import account_to_response
-from kitaru.server.application.models.account import AccountFilter
+from kitaru.server.adapters.rest.mapping.accounts import (
+    account_list_params_to_filter,
+    account_to_response,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 
@@ -73,10 +76,7 @@ async def create_account(
 async def list_accounts(
     service: Annotated[AccountService, Depends(get_account_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    name: str | None = None,
-    active: bool | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
+    params: Annotated[AccountListParams, Query()],
 ) -> Page[AccountResponse]:
     """List accounts.
 
@@ -86,23 +86,18 @@ async def list_accounts(
     Args:
         service: Account service.
         actor: Caller context.
-        name: Filter on account name.
-        active: Filter on active state.
-        page: Page number.
-        page_size: Page size.
+        params: Account list params.
 
     Returns:
         Page of accounts.
     """
-    account_filter = AccountFilter(
-        name=name, active=active, page=page, page_size=page_size
-    )
+    account_filter = account_list_params_to_filter(params)
     accounts, total = await service.list_accounts(account_filter, actor=actor)
     return Page[AccountResponse](
         items=[account_to_response(account) for account in accounts],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=params.page,
+        page_size=params.page_size,
     )
 
 

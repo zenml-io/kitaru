@@ -15,7 +15,12 @@
 
 from typing import Literal, overload
 
-from kitaru.api_models.v1.secret import SecretResponse, SecretWithValuesResponse
+from kitaru.api_models.v1.secret import (
+    SecretListParams,
+    SecretResponse,
+    SecretWithValuesResponse,
+)
+from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.secret import Secret
 
 
@@ -62,4 +67,20 @@ def secret_to_response(
         type=secret.type,
         created=secret.created,
         updated=secret.updated,
+    )
+
+
+def secret_list_params_to_filter(params: SecretListParams) -> SecretFilter:
+    """Convert secret list params to the application filter.
+
+    Args:
+        params: Secret list params.
+
+    Returns:
+        Secret filter.
+    """
+    return SecretFilter(
+        name=params.name,
+        page=params.page,
+        page_size=params.page_size,
     )

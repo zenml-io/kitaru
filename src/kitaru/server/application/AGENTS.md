@@ -9,7 +9,7 @@
   request DTO.
 - List operations take an application-owned filter model extending
   `FrozenModel` with `page` and `page_size` fields, defined in `models/`.
-  Pagination is bounded on the model, not only on the router query parameters,
+  Pagination is bounded on the model, not only on the wire params model,
   so validation holds however the filter is constructed:
   `page: PositiveInt = 1` and
   `page_size: int = Field(default=20, ge=1, le=1000)`.

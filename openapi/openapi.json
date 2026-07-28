@@ -795,10 +795,38 @@
     },
     "/v1/accounts": {
       "get": {
-        "description": "List accounts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Account service.\n    actor: Caller context.\n    name: Filter on account name.\n    active: Filter on active state.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of accounts.",
+        "description": "List accounts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Account service.\n    actor: Caller context.\n    params: Account list params.\n\nReturns:\n    Page of accounts.",
         "operationId": "list_accounts_v1_accounts_get",
         "parameters": [
           {
+            "description": "Page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter on account name.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -811,10 +839,12 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter on account name.",
               "title": "Name"
             }
           },
           {
+            "description": "Filter on active state.",
             "in": "query",
             "name": "active",
             "required": false,
@@ -827,30 +857,8 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter on active state.",
               "title": "Active"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
             }
           }
         ],
@@ -1020,10 +1028,38 @@
     },
     "/v1/api-keys": {
       "get": {
-        "description": "List API keys of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: API key service.\n    actor: Caller context.\n    name: Filter on API key name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of API keys.",
+        "description": "List API keys of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: API key service.\n    actor: Caller context.\n    params: API key list params.\n\nReturns:\n    Page of API keys.",
         "operationId": "list_api_keys_v1_api_keys_get",
         "parameters": [
           {
+            "description": "Page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter on API key name.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -1036,30 +1072,8 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter on API key name.",
               "title": "Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
             }
           }
         ],
@@ -1320,10 +1334,38 @@
     },
     "/v1/secrets": {
       "get": {
-        "description": "List secrets.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters. List responses never include secret values.\n\nArgs:\n    service: Secret service.\n    actor: Caller context.\n    name: Filter on secret name.\n    page: Page number.\n    page_size: Page size.\n\nReturns:\n    Page of secrets without values.",
+        "description": "List secrets.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters. List responses never include secret values.\n\nArgs:\n    service: Secret service.\n    actor: Caller context.\n    params: Secret list params.\n\nReturns:\n    Page of secrets without values.",
         "operationId": "list_secrets_v1_secrets_get",
         "parameters": [
           {
+            "description": "Page number.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page number.",
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filter on secret name.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -1336,30 +1378,8 @@
                   "type": "null"
                 }
               ],
+              "description": "Filter on secret name.",
               "title": "Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "default": 1,
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_size",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 1000,
-              "minimum": 1,
-              "title": "Page Size",
-              "type": "integer"
             }
           }
         ],
