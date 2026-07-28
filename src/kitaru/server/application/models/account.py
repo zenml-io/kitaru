@@ -13,15 +13,11 @@
 #  permissions and limitations under the License.
 """Account filter model."""
 
-from pydantic import Field, PositiveInt
-
-from kitaru.server.base import FrozenModel
+from kitaru.server.base import ListFilter
 
 
-class AccountFilter(FrozenModel):
+class AccountFilter(ListFilter):
     """Account list filter."""
 
     name: str | None = None
     active: bool | None = None
-    page: PositiveInt = 1
-    page_size: int = Field(default=20, ge=1, le=1000)

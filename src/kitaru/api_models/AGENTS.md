@@ -4,10 +4,11 @@
   (`v1/order.py`) and are named `XCreateRequest`, `XUpdateRequest`,
   `XListParams`, `XResponse`.
 - Requests extend `RequestModel`, responses extend `ResponseModel`, list
-  responses use `Page[XResponse]`.
+  responses use `Page[XResponse]`, which carries `items` and `next_cursor`,
+  never a total count.
 - Paginated list endpoints take an `XListParams` model extending `ListParams`
-  (base.py), which carries `page` and `page_size`. List params models declare
-  only wire-exposed fields, never internal filter dimensions such as
+  (base.py), which carries `cursor`, `size`, and `sort`. List params models
+  declare only wire-exposed fields, never internal filter dimensions such as
   `owner_id`.
 - Every field declares `Field(description=...)`. The descriptions feed the
   OpenAPI schema, so they are part of the API contract. Use the shortest noun

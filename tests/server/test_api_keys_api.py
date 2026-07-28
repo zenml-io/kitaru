@@ -92,7 +92,7 @@ async def test_create_api_key_invalid_name(client: httpx.AsyncClient) -> None:
 
 
 async def test_list_api_keys(client: httpx.AsyncClient) -> None:
-    """List API keys with filters and pagination."""
+    """List API keys newest-first with filters."""
     for name in ["ci", "deploy", "local"]:
         response = await client.post("/v1/api-keys", json={"name": name})
         assert response.status_code == 201
@@ -100,30 +100,50 @@ async def test_list_api_keys(client: httpx.AsyncClient) -> None:
     response = await client.get("/v1/api-keys")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 3
-    assert body["page"] == 1
-    assert body["page_size"] == 20
-    assert [item["name"] for item in body["items"]] == ["ci", "deploy", "local"]
+    assert body["next_cursor"] is None
+    assert [item["name"] for item in body["items"]] == ["local", "deploy", "ci"]
     assert all("key" not in item for item in body["items"])
 
     response = await client.get("/v1/api-keys", params={"name": "deploy"})
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
+    assert body["next_cursor"] is None
     assert body["items"][0]["name"] == "deploy"
 
-    response = await client.get("/v1/api-keys", params={"page": 2, "page_size": 2})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["total"] == 3
-    assert [item["name"] for item in body["items"]] == ["local"]
+
+async def test_list_api_keys_walks_pages_with_cursor(
+    client: httpx.AsyncClient,
+) -> None:
+    """Walk every page of API keys via next_cursor."""
+    for name in ["ci", "deploy", "local"]:
+        response = await client.post("/v1/api-keys", json={"name": name})
+        assert response.status_code == 201
+
+    collected: list[str] = []
+    params: dict[str, str] = {"size": "2"}
+    while True:
+        response = await client.get("/v1/api-keys", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        collected.extend(item["name"] for item in body["items"])
+        if body["next_cursor"] is None:
+            break
+        params = {"size": "2", "cursor": body["next_cursor"]}
+
+    assert collected == ["local", "deploy", "ci"]
 
 
 async def test_list_api_keys_invalid_pagination(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for out-of-bounds pagination parameters."""
-    response = await client.get("/v1/api-keys", params={"page": 0})
+    response = await client.get("/v1/api-keys", params={"size": 0})
     assert response.status_code == 422
-    response = await client.get("/v1/api-keys", params={"page_size": 1001})
+    response = await client.get("/v1/api-keys", params={"size": 1001})
+    assert response.status_code == 422
+
+
+async def test_list_api_keys_invalid_cursor(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a cursor string that fails to decode."""
+    response = await client.get("/v1/api-keys", params={"cursor": "not-a-cursor"})
     assert response.status_code == 422
 
 

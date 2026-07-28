@@ -120,14 +120,16 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
         row = await self._get_row(secret_id)
         return row.to_domain(self._decrypt_values(row.values_encrypted))
 
-    async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
+    async def query(
+        self, secret_filter: SecretFilter
+    ) -> tuple[list[Secret], str | None]:
         """Query secrets matching a filter.
 
         Args:
             secret_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching secrets and the total match count.
+            Page of matching secrets and the next cursor.
         """
         statement = select(SecretORM)
         if secret_filter.name is not None:
@@ -136,16 +138,15 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
             statement = statement.where(SecretORM.owner_id == secret_filter.owner_id)
         if secret_filter.internal is not None:
             statement = statement.where(SecretORM.internal == secret_filter.internal)
-        rows, total = await paginate(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
-            order_by=SecretORM.id,
-            page=secret_filter.page,
-            page_size=secret_filter.page_size,
+            secret_filter,
+            id_column=SecretORM.id,
         )
         return [
             row.to_domain(self._decrypt_values(row.values_encrypted)) for row in rows
-        ], total
+        ], next_cursor
 
     async def update(self, secret: Secret) -> Secret:
         """Persist changes to an existing secret.

@@ -85,23 +85,46 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_list(api_client: KitaruAPIClient) -> None:
-    """List API keys with filters and pagination through the SDK."""
+    """List API keys newest-first with filters through the SDK."""
     for name in ["ci", "deploy", "local"]:
         await api_client.api_keys.create(ApiKeyCreateRequest(name=name))
 
     page = await api_client.api_keys.list()
-    assert page.total == 3
-    assert [item.name for item in page.items] == ["ci", "deploy", "local"]
+    assert page.next_cursor is None
+    assert [item.name for item in page.items] == ["local", "deploy", "ci"]
 
     page = await api_client.api_keys.list(ApiKeyListParams(name="deploy"))
-    assert page.total == 1
+    assert page.next_cursor is None
     assert page.items[0].name == "deploy"
 
-    page = await api_client.api_keys.list(ApiKeyListParams(page=2, page_size=2))
-    assert page.total == 3
-    assert page.page == 2
-    assert page.page_size == 2
-    assert [item.name for item in page.items] == ["local"]
+
+async def test_list_walks_pages_with_cursor(api_client: KitaruAPIClient) -> None:
+    """Walk every page of API keys via next_cursor through the SDK."""
+    for name in ["ci", "deploy", "local"]:
+        await api_client.api_keys.create(ApiKeyCreateRequest(name=name))
+
+    collected: list[str] = []
+    params = ApiKeyListParams(size=2)
+    while True:
+        page = await api_client.api_keys.list(params)
+        collected.extend(item.name for item in page.items)
+        if page.next_cursor is None:
+            break
+        params = ApiKeyListParams(cursor=page.next_cursor, size=2)
+
+    assert collected == ["local", "deploy", "ci"]
+
+
+async def test_iter(api_client: KitaruAPIClient) -> None:
+    """Iterate every API key across pages through the SDK."""
+    for name in ["ci", "deploy", "local"]:
+        await api_client.api_keys.create(ApiKeyCreateRequest(name=name))
+
+    collected = [
+        item.name async for item in api_client.api_keys.iter(ApiKeyListParams(size=2))
+    ]
+
+    assert collected == ["local", "deploy", "ci"]
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:

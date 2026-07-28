@@ -85,12 +85,10 @@ async def list_api_keys(
         Page of API keys.
     """
     api_key_filter = api_key_list_params_to_filter(params)
-    api_keys, total = await service.list_api_keys(api_key_filter, actor=actor)
+    api_keys, next_cursor = await service.list_api_keys(api_key_filter, actor=actor)
     return Page[ApiKeyResponse](
         items=[api_key_to_response(api_key) for api_key in api_keys],
-        total=total,
-        page=params.page,
-        page_size=params.page_size,
+        next_cursor=next_cursor,
     )
 
 

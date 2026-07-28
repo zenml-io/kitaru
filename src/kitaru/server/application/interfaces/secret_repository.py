@@ -51,14 +51,16 @@ class SecretRepository(Protocol):
         """
         ...
 
-    async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
+    async def query(
+        self, secret_filter: SecretFilter
+    ) -> tuple[list[Secret], str | None]:
         """Query secrets matching a filter.
 
         Args:
             secret_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching secrets and the total match count.
+            Page of matching secrets and the next cursor.
         """
         ...
 

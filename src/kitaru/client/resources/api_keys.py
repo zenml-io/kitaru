@@ -14,6 +14,7 @@
 """API keys resource."""
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.api_key import (
@@ -98,6 +99,30 @@ class ApiKeysResource:
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ApiKeyResponse].model_validate(response.json())
+
+    async def iter(
+        self,
+        params: ApiKeyListParams | None = None,
+    ) -> AsyncIterator[ApiKeyResponse]:
+        """Iterate over all API keys of the caller.
+
+        Args:
+            params: API key list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every API key.
+        """
+        params = params or ApiKeyListParams()
+        while True:
+            page = await self.list(params)
+            for item in page.items:
+                yield item
+            if page.next_cursor is None:
+                break
+            params = params.model_copy(update={"cursor": page.next_cursor})
 
     async def update(
         self, api_key_id: uuid.UUID, request: ApiKeyUpdateRequest

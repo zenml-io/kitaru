@@ -82,28 +82,29 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
         row = await self._get_row(api_key_id)
         return row.to_domain()
 
-    async def query(self, api_key_filter: ApiKeyFilter) -> tuple[list[ApiKey], int]:
+    async def query(
+        self, api_key_filter: ApiKeyFilter
+    ) -> tuple[list[ApiKey], str | None]:
         """Query API keys matching a filter.
 
         Args:
             api_key_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching API keys and the total match count.
+            Page of matching API keys and the next cursor.
         """
         statement = select(ApiKeyORM)
         if api_key_filter.name is not None:
             statement = statement.where(ApiKeyORM.name == api_key_filter.name)
         if api_key_filter.owner_id is not None:
             statement = statement.where(ApiKeyORM.owner_id == api_key_filter.owner_id)
-        rows, total = await paginate(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
-            order_by=ApiKeyORM.id,
-            page=api_key_filter.page,
-            page_size=api_key_filter.page_size,
+            api_key_filter,
+            id_column=ApiKeyORM.id,
         )
-        return [row.to_domain() for row in rows], total
+        return [row.to_domain() for row in rows], next_cursor
 
     async def update(self, api_key: ApiKey) -> ApiKey:
         """Persist changes to an existing API key.

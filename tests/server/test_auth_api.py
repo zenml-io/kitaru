@@ -235,7 +235,7 @@ async def test_none_scheme_resolves_default_account(
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/v1/api-keys")
         assert response.status_code == 200
-        assert response.json()["total"] == 1
+        assert len(response.json()["items"]) == 1
 
 
 async def test_missing_bearer_credential(client: httpx.AsyncClient) -> None:

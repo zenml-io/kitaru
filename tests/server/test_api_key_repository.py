@@ -36,6 +36,7 @@ from kitaru.server.domain.api_key import (
     ApiKeyNotFound,
     DuplicateApiKeyName,
 )
+from kitaru.server.domain.base import ValidationError
 
 Setup = tuple[ApiKeyRepository, uuid.UUID, uuid.UUID]
 
@@ -113,7 +114,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 
 async def test_query(setup: Setup) -> None:
-    """Query API keys with filters and pagination."""
+    """Query API keys newest-first with filters."""
     repository, owner_id, other_owner_id = setup
     ci = await repository.create(ApiKey(owner_id=owner_id, name="ci", key_hash="hash"))
     await repository.create(ApiKey(owner_id=owner_id, name="deploy", key_hash="hash"))
@@ -121,25 +122,125 @@ async def test_query(setup: Setup) -> None:
         ApiKey(owner_id=other_owner_id, name="local", key_hash="hash")
     )
 
-    api_keys, total = await repository.query(ApiKeyFilter())
-    assert total == 3
-    assert [api_key.name for api_key in api_keys] == ["ci", "deploy", "local"]
+    api_keys, next_cursor = await repository.query(ApiKeyFilter())
+    assert next_cursor is None
+    assert [api_key.name for api_key in api_keys] == ["local", "deploy", "ci"]
 
-    api_keys, total = await repository.query(ApiKeyFilter(name="ci"))
-    assert total == 1
+    api_keys, next_cursor = await repository.query(ApiKeyFilter(name="ci"))
+    assert next_cursor is None
     assert api_keys[0] == ci
 
-    api_keys, total = await repository.query(ApiKeyFilter(owner_id=other_owner_id))
-    assert total == 1
+    api_keys, next_cursor = await repository.query(
+        ApiKeyFilter(owner_id=other_owner_id)
+    )
+    assert next_cursor is None
     assert api_keys[0] == local
 
-    api_keys, total = await repository.query(ApiKeyFilter(page=2, page_size=2))
-    assert total == 3
-    assert [api_key.name for api_key in api_keys] == ["local"]
-
-    api_keys, total = await repository.query(ApiKeyFilter(name="missing"))
-    assert total == 0
+    api_keys, next_cursor = await repository.query(ApiKeyFilter(name="missing"))
+    assert next_cursor is None
     assert api_keys == []
+
+
+async def test_query_sort_created_asc(setup: Setup) -> None:
+    """Sort API keys oldest-first with sort=created:asc."""
+    repository, owner_id, _ = setup
+    ci = await repository.create(ApiKey(owner_id=owner_id, name="ci", key_hash="hash"))
+    deploy = await repository.create(
+        ApiKey(owner_id=owner_id, name="deploy", key_hash="hash")
+    )
+    local = await repository.create(
+        ApiKey(owner_id=owner_id, name="local", key_hash="hash")
+    )
+
+    api_keys, next_cursor = await repository.query(ApiKeyFilter(sort="created:asc"))
+    assert next_cursor is None
+    assert api_keys == [ci, deploy, local]
+
+
+async def test_query_walks_pages(setup: Setup) -> None:
+    """Walk every page via next_cursor without duplicates or gaps."""
+    repository, owner_id, _ = setup
+    created = [
+        await repository.create(
+            ApiKey(owner_id=owner_id, name=f"key-{i}", key_hash="hash")
+        )
+        for i in range(5)
+    ]
+    expected_order = list(reversed(created))
+
+    collected: list[ApiKey] = []
+    cursor = None
+    while True:
+        api_keys, next_cursor = await repository.query(
+            ApiKeyFilter(cursor=cursor, size=2)
+        )
+        collected.extend(api_keys)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == expected_order
+    assert len({api_key.id for api_key in collected}) == 5
+
+
+async def test_query_filter_persists_across_cursor(setup: Setup) -> None:
+    """Keep a filter applied across every page of a cursor walk."""
+    repository, owner_id, other_owner_id = setup
+    for i in range(3):
+        await repository.create(
+            ApiKey(owner_id=owner_id, name=f"mine-{i}", key_hash="hash")
+        )
+    for i in range(2):
+        await repository.create(
+            ApiKey(owner_id=other_owner_id, name=f"theirs-{i}", key_hash="hash")
+        )
+
+    collected: list[ApiKey] = []
+    cursor = None
+    while True:
+        api_keys, next_cursor = await repository.query(
+            ApiKeyFilter(owner_id=owner_id, cursor=cursor, size=1)
+        )
+        collected.extend(api_keys)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert len(collected) == 3
+    assert all(api_key.owner_id == owner_id for api_key in collected)
+
+
+async def test_query_invalid_cursor(setup: Setup) -> None:
+    """Raise for a cursor string that fails to decode."""
+    repository, _, _ = setup
+    with pytest.raises(ValidationError):
+        await repository.query(ApiKeyFilter(cursor="not-a-valid-cursor"))
+
+
+async def test_query_cursor_sort_mismatch(setup: Setup) -> None:
+    """Raise when a cursor is replayed with a different sort."""
+    repository, owner_id, _ = setup
+    await repository.create(ApiKey(owner_id=owner_id, name="ci", key_hash="hash"))
+    await repository.create(ApiKey(owner_id=owner_id, name="deploy", key_hash="hash"))
+    _, next_cursor = await repository.query(ApiKeyFilter(size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(
+            ApiKeyFilter(cursor=next_cursor, size=1, sort="created:asc")
+        )
+
+
+async def test_query_cursor_filter_mismatch(setup: Setup) -> None:
+    """Raise when a cursor is replayed after the filter changes."""
+    repository, owner_id, other_owner_id = setup
+    await repository.create(ApiKey(owner_id=owner_id, name="ci", key_hash="hash"))
+    await repository.create(ApiKey(owner_id=owner_id, name="deploy", key_hash="hash"))
+    _, next_cursor = await repository.query(ApiKeyFilter(owner_id=owner_id, size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(
+            ApiKeyFilter(cursor=next_cursor, size=1, owner_id=other_owner_id)
+        )
 
 
 async def test_update(setup: Setup) -> None:

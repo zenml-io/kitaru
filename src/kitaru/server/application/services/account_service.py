@@ -119,7 +119,7 @@ class AccountService:
 
     async def list_accounts(
         self, account_filter: AccountFilter, actor: AuthContext
-    ) -> tuple[list[Account], int]:
+    ) -> tuple[list[Account], str | None]:
         """List accounts matching a filter.
 
         Args:
@@ -127,7 +127,7 @@ class AccountService:
             actor: Caller context.
 
         Returns:
-            Page of matching accounts and the total match count.
+            Page of matching accounts and the next cursor.
         """
         _ = actor
         return await self._repository.query(account_filter)

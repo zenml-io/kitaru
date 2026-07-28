@@ -140,7 +140,7 @@ async def test_update_secret_values_too_large(client: httpx.AsyncClient) -> None
 
 
 async def test_list_secrets(client: httpx.AsyncClient) -> None:
-    """List secrets with filters and pagination."""
+    """List secrets newest-first with filters."""
     for name in ["db", "smtp", "s3"]:
         response = await client.post(
             "/v1/secrets", json={"name": name, "values": VALUES}
@@ -150,31 +150,53 @@ async def test_list_secrets(client: httpx.AsyncClient) -> None:
     response = await client.get("/v1/secrets")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 3
-    assert body["page"] == 1
-    assert body["page_size"] == 20
-    assert [item["name"] for item in body["items"]] == ["db", "smtp", "s3"]
+    assert body["next_cursor"] is None
+    assert [item["name"] for item in body["items"]] == ["s3", "smtp", "db"]
     assert all("values" not in item for item in body["items"])
     assert all("internal" not in item for item in body["items"])
 
     response = await client.get("/v1/secrets", params={"name": "smtp"})
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
+    assert body["next_cursor"] is None
     assert body["items"][0]["name"] == "smtp"
 
-    response = await client.get("/v1/secrets", params={"page": 2, "page_size": 2})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["total"] == 3
-    assert [item["name"] for item in body["items"]] == ["s3"]
+
+async def test_list_secrets_walks_pages_with_cursor(
+    client: httpx.AsyncClient,
+) -> None:
+    """Walk every page of secrets via next_cursor."""
+    for name in ["db", "smtp", "s3"]:
+        response = await client.post(
+            "/v1/secrets", json={"name": name, "values": VALUES}
+        )
+        assert response.status_code == 201
+
+    collected: list[str] = []
+    params: dict[str, str] = {"size": "2"}
+    while True:
+        response = await client.get("/v1/secrets", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        collected.extend(item["name"] for item in body["items"])
+        if body["next_cursor"] is None:
+            break
+        params = {"size": "2", "cursor": body["next_cursor"]}
+
+    assert collected == ["s3", "smtp", "db"]
 
 
 async def test_list_secrets_invalid_pagination(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for out-of-bounds pagination parameters."""
-    response = await client.get("/v1/secrets", params={"page": 0})
+    response = await client.get("/v1/secrets", params={"size": 0})
     assert response.status_code == 422
-    response = await client.get("/v1/secrets", params={"page_size": 1001})
+    response = await client.get("/v1/secrets", params={"size": 1001})
+    assert response.status_code == 422
+
+
+async def test_list_secrets_invalid_cursor(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a cursor string that fails to decode."""
+    response = await client.get("/v1/secrets", params={"cursor": "not-a-cursor"})
     assert response.status_code == 422
 
 
@@ -244,7 +266,7 @@ async def test_list_secrets_excludes_internal(
     response = await client.get("/v1/secrets")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
+    assert body["next_cursor"] is None
     assert [item["name"] for item in body["items"]] == ["db"]
 
 

@@ -83,7 +83,7 @@ class SecretService:
 
     async def list_secrets(
         self, secret_filter: SecretFilter, actor: AuthContext
-    ) -> tuple[list[Secret], int]:
+    ) -> tuple[list[Secret], str | None]:
         """List secrets matching a filter.
 
         Args:
@@ -91,7 +91,7 @@ class SecretService:
             actor: Caller context.
 
         Returns:
-            Page of matching secrets and the total match count.
+            Page of matching secrets and the next cursor.
         """
         _ = actor
         scoped_filter = secret_filter.model_copy(update={"internal": False})

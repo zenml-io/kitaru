@@ -89,25 +89,38 @@ async def test_get_account_not_found(service: AccountService) -> None:
 
 
 async def test_list_accounts(service: AccountService) -> None:
-    """List accounts with filters and pagination."""
+    """List accounts newest-first with filters."""
     for name in ["alice", "bob", "carol"]:
         await service.create_account(name=name, email=None, password=None, actor=ACTOR)
 
-    accounts, total = await service.list_accounts(AccountFilter(), actor=ACTOR)
-    assert total == 3
-    assert [account.name for account in accounts] == ["alice", "bob", "carol"]
+    accounts, next_cursor = await service.list_accounts(AccountFilter(), actor=ACTOR)
+    assert next_cursor is None
+    assert [account.name for account in accounts] == ["carol", "bob", "alice"]
 
-    accounts, total = await service.list_accounts(
+    accounts, next_cursor = await service.list_accounts(
         AccountFilter(name="bob"), actor=ACTOR
     )
-    assert total == 1
+    assert next_cursor is None
     assert accounts[0].name == "bob"
 
-    accounts, total = await service.list_accounts(
-        AccountFilter(page=2, page_size=2), actor=ACTOR
-    )
-    assert total == 3
-    assert [account.name for account in accounts] == ["carol"]
+
+async def test_list_accounts_walks_pages(service: AccountService) -> None:
+    """Walk every page of accounts via next_cursor."""
+    for name in ["alice", "bob", "carol"]:
+        await service.create_account(name=name, email=None, password=None, actor=ACTOR)
+
+    collected: list[str] = []
+    cursor = None
+    while True:
+        accounts, next_cursor = await service.list_accounts(
+            AccountFilter(cursor=cursor, size=2), actor=ACTOR
+        )
+        collected.extend(account.name for account in accounts)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == ["carol", "bob", "alice"]
 
 
 async def test_update_account_active(service: AccountService) -> None:

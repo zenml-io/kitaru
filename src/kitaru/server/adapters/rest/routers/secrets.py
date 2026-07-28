@@ -86,12 +86,10 @@ async def list_secrets(
         Page of secrets without values.
     """
     secret_filter = secret_list_params_to_filter(params)
-    secrets, total = await service.list_secrets(secret_filter, actor=actor)
+    secrets, next_cursor = await service.list_secrets(secret_filter, actor=actor)
     return Page[SecretResponse](
         items=[secret_to_response(secret) for secret in secrets],
-        total=total,
-        page=params.page,
-        page_size=params.page_size,
+        next_cursor=next_cursor,
     )
 
 

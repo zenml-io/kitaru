@@ -52,7 +52,7 @@ async def test_secrets_persist_across_requests(client: httpx.AsyncClient) -> Non
     response = await client.get("/v1/secrets")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
+    assert body["next_cursor"] is None
     assert body["items"][0] == created
 
 

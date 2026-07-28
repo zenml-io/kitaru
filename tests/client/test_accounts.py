@@ -90,23 +90,46 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_list(api_client: KitaruAPIClient) -> None:
-    """List accounts with filters and pagination through the SDK."""
+    """List accounts newest-first with filters through the SDK."""
     for name in ["alice", "bob", "carol"]:
         await api_client.accounts.create(AccountCreateRequest(name=name))
 
     page = await api_client.accounts.list()
-    assert page.total == 3
-    assert [item.name for item in page.items] == ["alice", "bob", "carol"]
+    assert page.next_cursor is None
+    assert [item.name for item in page.items] == ["carol", "bob", "alice"]
 
     page = await api_client.accounts.list(AccountListParams(name="bob"))
-    assert page.total == 1
+    assert page.next_cursor is None
     assert page.items[0].name == "bob"
 
-    page = await api_client.accounts.list(AccountListParams(page=2, page_size=2))
-    assert page.total == 3
-    assert page.page == 2
-    assert page.page_size == 2
-    assert [item.name for item in page.items] == ["carol"]
+
+async def test_list_walks_pages_with_cursor(api_client: KitaruAPIClient) -> None:
+    """Walk every page of accounts via next_cursor through the SDK."""
+    for name in ["alice", "bob", "carol"]:
+        await api_client.accounts.create(AccountCreateRequest(name=name))
+
+    collected: list[str] = []
+    params = AccountListParams(size=2)
+    while True:
+        page = await api_client.accounts.list(params)
+        collected.extend(item.name for item in page.items)
+        if page.next_cursor is None:
+            break
+        params = AccountListParams(cursor=page.next_cursor, size=2)
+
+    assert collected == ["carol", "bob", "alice"]
+
+
+async def test_iter(api_client: KitaruAPIClient) -> None:
+    """Iterate every account across pages through the SDK."""
+    for name in ["alice", "bob", "carol"]:
+        await api_client.accounts.create(AccountCreateRequest(name=name))
+
+    collected = [
+        item.name async for item in api_client.accounts.iter(AccountListParams(size=2))
+    ]
+
+    assert collected == ["carol", "bob", "alice"]
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:

@@ -21,25 +21,24 @@ ItemT = TypeVar("ItemT")
 
 
 async def paginate_all(
-    query: Callable[[int], Awaitable[tuple[Sequence[ItemT], int]]],
+    query: Callable[[str | None], Awaitable[tuple[Sequence[ItemT], str | None]]],
 ) -> list[ItemT]:
-    """Collect all items of a paginated query.
+    """Collect all items of a cursor-paginated query.
 
     Args:
-        query: Runs one page of the query by one-based page number, returning
-            the page items and the total match count.
+        query: Runs one page of the query by cursor, returning the page items
+            and the next cursor.
 
     Returns:
         All matching items.
     """
     items: list[ItemT] = []
-    page = 1
+    cursor: str | None = None
     while True:
-        batch, total = await query(page)
+        batch, cursor = await query(cursor)
         items.extend(batch)
-        if not batch or len(items) >= total:
+        if not batch or cursor is None:
             return items
-        page += 1
 
 
 def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:
