@@ -32,7 +32,8 @@ from kitaru.server.adapters.auth.auth_service import (
 )
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.api_key import encode_api_key, generate_secret
+from kitaru.server.domain.api_key import encode_api_key
+from kitaru.server.domain.keys import generate_secret
 
 
 @pytest.fixture
@@ -238,7 +239,7 @@ async def test_csrf_token(
     account_repository: FakeAccountRepository,
     api_key_repository: FakeApiKeyRepository,
 ) -> None:
-    """Enforce the CSRF token stored in cookie session tokens."""
+    """Enforce the CSRF token on cookie credentials only."""
     settings = local_settings(AUTH_COOKIE_NAME="kitaru_session")
     service = AuthService(
         settings=settings,
@@ -251,9 +252,29 @@ async def test_csrf_token(
     token, _, csrf_token = await service.login_with_password("alice", "secret")
     assert csrf_token is not None
 
-    await service.resolve(token, csrf_token=csrf_token)
+    await service.resolve(token, csrf_token=csrf_token, from_cookie=True)
 
     with pytest.raises(AuthenticationError, match="Missing or invalid CSRF token"):
-        await service.resolve(token)
+        await service.resolve(token, from_cookie=True)
     with pytest.raises(AuthenticationError, match="Missing or invalid CSRF token"):
-        await service.resolve(token, csrf_token="wrong")
+        await service.resolve(token, csrf_token="wrong", from_cookie=True)
+
+
+async def test_csrf_token_not_required_for_header_credentials(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Accept a session token from the authorization header without a CSRF token."""
+    settings = local_settings(AUTH_COOKIE_NAME="kitaru_session")
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    await create_account(account_repository)
+
+    token, _, _ = await service.login_with_password("alice", "secret")
+
+    context = await service.resolve(token)
+    assert context.account.name == "alice"

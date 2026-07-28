@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 import httpx
@@ -27,23 +28,27 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.transport import RetryTransport
+from kitaru.client.client_id import ENV_CLIENT_ID
+from kitaru.client.credential_store import CredentialStore
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneClient,
     ControlPlaneError,
-    ServerAuthorization,
+    ControlPlaneUser,
 )
 from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings, AuthScheme
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
+from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
@@ -58,14 +63,15 @@ from kitaru.server.domain.api_key import (
     ApiKeyNotFound,
     DuplicateApiKeyName,
     encode_api_key,
-    generate_secret,
-    hash_secret,
 )
+from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
+from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
     SecretNotFound,
 )
+from kitaru.transport import RetryTransport
 
 TEST_DB_PREFIX = "kitaru_test"
 
@@ -271,11 +277,13 @@ async def lifespan_client(
 
 
 @asynccontextmanager
-async def pg_session() -> AsyncGenerator[AsyncSession, None]:
-    """Provide a session on a fresh test database with all tables created.
+async def pg_session_with_engine() -> AsyncGenerator[
+    tuple[AsyncSession, AsyncEngine], None
+]:
+    """Provide a session and its engine on a fresh test database.
 
     Yields:
-        Session bound to the test database engine.
+        Session bound to the test database engine, and the engine itself.
     """
     settings = db_settings()
     await DatabaseService.create_db(settings)
@@ -287,22 +295,50 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
             bind=engine, class_=AsyncSession, expire_on_commit=False
         )
         async with session_factory() as session:
-            yield session
+            yield session, engine
     finally:
         await engine.dispose()
         await drop_test_database(settings)
 
 
-def asgi_api_client(app: FastAPI) -> KitaruAPIClient:
+@asynccontextmanager
+async def pg_session() -> AsyncGenerator[AsyncSession, None]:
+    """Provide a session on a fresh test database with all tables created.
+
+    Yields:
+        Session bound to the test database engine.
+    """
+    async with pg_session_with_engine() as (session, _):
+        yield session
+
+
+@pytest.fixture
+def credential_store(tmp_path: Path) -> CredentialStore:
+    """Provide a credential store backed by a file under tmp_path."""
+    return CredentialStore(path=tmp_path / "credentials.json")
+
+
+@pytest.fixture
+def isolated_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point the client config directory at a fresh temporary directory."""
+    monkeypatch.delenv(ENV_CLIENT_ID, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
+def asgi_api_client(
+    app: FastAPI, credential_store: CredentialStore | None = None
+) -> KitaruAPIClient:
     """Build an SDK client routed to the app instead of the network.
 
     Args:
         app: Application to route requests to.
+        credential_store: Store holding the credentials the client
+            authenticates with.
 
     Returns:
         Client wired to an ASGI transport.
     """
-    client = KitaruAPIClient(base_url="http://test")
+    client = KitaruAPIClient(base_url="http://test", credential_store=credential_store)
     client._http = httpx.AsyncClient(
         transport=RetryTransport(httpx.ASGITransport(app=app)),
         base_url="http://test",
@@ -363,28 +399,28 @@ class FakePasswordHasher:
 
 
 class FakeControlPlaneClient(ControlPlaneClient):
-    """Fake control plane API client returning a scripted authorization."""
+    """Fake control plane API client returning a scripted user."""
 
     def __init__(
         self,
-        authorization: ServerAuthorization | None = None,
+        user: ControlPlaneUser | None = None,
         error: ControlPlaneError | None = None,
     ) -> None:
         """Create a fake control plane API client.
 
         Args:
-            authorization: Authorization result returned by authorize_server.
-            error: Error raised by authorize_server instead of returning.
+            user: User returned by authorize_user.
+            error: Error raised by authorize_user instead of returning.
         """
-        self.authorization = authorization
+        self.user = user
         self.error = error
-        self.received_credential: str | None = None
+        self.received_credentials: list[str] = []
         self.received_server_id: uuid.UUID | None = None
 
-    async def authorize_server(
+    async def authorize_user(
         self, credential: str, server_id: uuid.UUID
-    ) -> ServerAuthorization:
-        """Record the call and return the scripted authorization.
+    ) -> ControlPlaneUser:
+        """Record the call and return the scripted user.
 
         Args:
             credential: Bearer token supplied by the caller.
@@ -394,14 +430,14 @@ class FakeControlPlaneClient(ControlPlaneClient):
             ControlPlaneError: The fake was configured to raise.
 
         Returns:
-            Scripted authorization result.
+            Scripted user.
         """
-        self.received_credential = credential
+        self.received_credentials.append(credential)
         self.received_server_id = server_id
         if self.error is not None:
             raise self.error
-        assert self.authorization is not None
-        return self.authorization
+        assert self.user is not None
+        return self.user
 
     async def close(self) -> None:
         """Close the fake client, which holds no connections."""
@@ -729,6 +765,179 @@ async def create_api_key(
         )
     )
     return api_key, encode_api_key(api_key.id, secret)
+
+
+class FakeDeviceRepository:
+    """In-memory device repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._devices: dict[uuid.UUID, Device] = {}
+
+    async def create(self, device: Device) -> Device:
+        """Persist a new device.
+
+        Args:
+            device: Device to store.
+
+        Returns:
+            Stored device with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = device.model_copy(update={"created": now, "updated": now})
+        self._devices[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, device_id: uuid.UUID) -> Device:
+        """Load a device by id.
+
+        Args:
+            device_id: Id of the device.
+
+        Raises:
+            DeviceNotFound: No device has this id.
+
+        Returns:
+            Stored device.
+        """
+        device = self._devices.get(device_id)
+        if device is None:
+            raise DeviceNotFound(device_id)
+        return device.model_copy()
+
+    async def query(
+        self, device_filter: DeviceFilter
+    ) -> tuple[list[Device], str | None]:
+        """Query devices matching a filter.
+
+        Args:
+            device_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching devices and the next cursor.
+        """
+        devices = list(self._devices.values())
+        if device_filter.account_id is not None:
+            devices = [
+                device
+                for device in devices
+                if device.account_id == device_filter.account_id
+            ]
+        if device_filter.status is not None:
+            devices = [
+                device for device in devices if device.status == device_filter.status
+            ]
+        page, next_cursor = _paginate_fake(devices, device_filter)
+        return [device.model_copy() for device in page], next_cursor
+
+    async def update(self, device: Device) -> Device:
+        """Persist changes to an existing device.
+
+        Args:
+            device: Device with modified fields.
+
+        Raises:
+            DeviceNotFound: No device has this id.
+
+        Returns:
+            Stored device with the updated timestamp renewed.
+        """
+        stored = self._devices.get(device.id)
+        if stored is None:
+            raise DeviceNotFound(device.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = device.model_copy(update={"created": stored.created, "updated": now})
+        self._devices[device.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, device_id: uuid.UUID) -> None:
+        """Delete a device by id.
+
+        Args:
+            device_id: Id of the device.
+
+        Raises:
+            DeviceNotFound: No device has this id.
+        """
+        if device_id not in self._devices:
+            raise DeviceNotFound(device_id)
+        del self._devices[device_id]
+
+    async def record_failed_attempt(self, device: Device) -> None:
+        """Persist a failed code check in its own transaction.
+
+        Args:
+            device: Device whose attempt counter and locked state changed.
+        """
+        stored = self._devices.get(device.id)
+        if stored is None:
+            raise DeviceNotFound(device.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = stored.model_copy(
+            update={
+                "failed_auth_attempts": device.failed_auth_attempts,
+                "locked": device.locked,
+                "updated": now,
+            }
+        )
+        self._devices[device.id] = updated
+
+    async def delete_expired(self, now: datetime) -> int:
+        """Delete every device past its expiry.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Number of deleted devices.
+        """
+        expired = [
+            device_id
+            for device_id, device in self._devices.items()
+            if device.is_expired(now)
+        ]
+        for device_id in expired:
+            del self._devices[device_id]
+        return len(expired)
+
+
+async def create_device(
+    repository: FakeDeviceRepository,
+    account_id: uuid.UUID | None = None,
+    status: DeviceStatus = DeviceStatus.PENDING,
+    trusted: bool = False,
+    locked: bool = False,
+    expires: datetime | None = None,
+    user_code: str = "user-code",
+    device_code: str = "device-code",
+) -> tuple[Device, str, str]:
+    """Store a device in the fake repository.
+
+    Args:
+        repository: Fake device repository.
+        account_id: Id of the approving account, unset for a pending device.
+        status: Device status.
+        trusted: Trusted state.
+        locked: Locked state.
+        expires: Expiry time.
+        user_code: Plaintext user code to hash and store.
+        device_code: Plaintext device code to hash and store.
+
+    Returns:
+        Stored device and the plaintext user code and device code.
+    """
+    device = await repository.create(
+        Device(
+            account_id=account_id,
+            user_code_hash=hash_secret(user_code),
+            device_code_hash=hash_secret(device_code),
+            status=status,
+            trusted=trusted,
+            locked=locked,
+            expires=expires,
+        )
+    )
+    return device, user_code, device_code
 
 
 class FakeSecretRepository:

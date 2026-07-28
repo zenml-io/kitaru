@@ -34,7 +34,6 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneError,
     ControlPlaneUser,
-    ServerAuthorization,
 )
 from kitaru.server.adapters.rest.dependencies import (
     get_account_service,
@@ -123,10 +122,7 @@ def authenticate(
         control_plane_client: Fake control plane API client.
         settings: API server settings.
     """
-    control_plane_client.authorization = ServerAuthorization(
-        user=ControlPlaneUser(id=uuid.uuid4(), username="alice"),
-        server_id=settings.SERVER_ID,
-    )
+    control_plane_client.user = ControlPlaneUser(id=uuid.uuid4(), username="alice")
 
 
 @pytest.fixture
@@ -156,11 +152,8 @@ async def test_control_plane_login_authenticates_token(
     settings: APISettings,
 ) -> None:
     """Log in with a control plane credential and use the token on a protected route."""
-    control_plane_client.authorization = ServerAuthorization(
-        user=ControlPlaneUser(
-            id=uuid.uuid4(), username="alice", email="alice@example.com"
-        ),
-        server_id=settings.SERVER_ID,
+    control_plane_client.user = ControlPlaneUser(
+        id=uuid.uuid4(), username="alice", email="alice@example.com"
     )
 
     response = await client.post(
@@ -183,7 +176,7 @@ async def test_control_plane_login_missing_credential(
     """Observe HTTP 401 for control plane login without a bearer credential."""
     response = await client.post("/v1/login", data={})
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing control plane bearer credential."}
+    assert response.json() == {"detail": "Missing control plane credential."}
 
 
 async def test_control_plane_login_rejected_credential(
@@ -275,11 +268,8 @@ async def test_control_plane_api_key_authenticates_directly(
     settings: APISettings,
 ) -> None:
     """Authenticate a request with a control plane API key without logging in."""
-    control_plane_client.authorization = ServerAuthorization(
-        user=ControlPlaneUser(
-            id=uuid.uuid4(), username="ci-bot", is_service_account=True
-        ),
-        server_id=settings.SERVER_ID,
+    control_plane_client.user = ControlPlaneUser(
+        id=uuid.uuid4(), username="ci-bot", is_service_account=True
     )
 
     response = await client.get(

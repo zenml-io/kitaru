@@ -20,7 +20,7 @@ from pydantic import Field
 
 from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import Name
+from kitaru.server.domain.names import AccountName
 
 
 class AccountNotFound(NotFoundError):
@@ -53,7 +53,7 @@ class Account(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     is_service_account: bool = False
     external_id: uuid.UUID | None = None
-    name: Name
+    name: AccountName
     email: str | None = None
     password_hash: str | None = None
     active: bool = True

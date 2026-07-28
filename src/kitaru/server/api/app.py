@@ -27,14 +27,23 @@ from kitaru.analytics.source import (
     current_source,
     parse_client_header,
 )
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.rest.routers import accounts, api_keys, auth, secrets
+from kitaru.server.adapters.rest.routers import (
+    accounts,
+    api_keys,
+    auth,
+    devices,
+    info,
+    secrets,
+)
+from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
-from kitaru.server.api.config import APISettings, AuthScheme
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -75,6 +84,24 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+def _register_token_grant_exception_handler(app: FastAPI) -> None:
+    """Register the OAuth 2.0 error response for a failed token grant.
+
+    Clients receive HTTP 400 with an ``error`` code alongside the usual
+    ``detail`` message.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(TokenGrantError)
+    async def token_grant_error(request: Request, exc: TokenGrantError) -> JSONResponse:
+        _ = request
+        return JSONResponse(
+            status_code=400, content=exc.to_response().model_dump(mode="json")
+        )
 
 
 async def _set_analytics_source(
@@ -146,10 +173,13 @@ def create_app(settings: APISettings) -> FastAPI:
     # Replaced with a live client at startup under the control plane scheme.
     app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
+    _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_source)
     app.include_router(health.router, prefix="/health", tags=["health"])
+    app.include_router(info.router, prefix="/v1/info", tags=["info"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
+    app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
     return app

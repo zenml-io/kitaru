@@ -18,6 +18,7 @@ import pytest
 from kitaru.server.domain.names import (
     RESERVED_SEPARATORS,
     InvalidName,
+    validate_account_name,
     validate_name,
 )
 
@@ -62,3 +63,25 @@ def test_reserved_separators_cannot_be_allowed(separator: str) -> None:
     """Refuse separator sets that include a reserved separator."""
     with pytest.raises(ValueError, match="reserved"):
         validate_name(f"a{separator}b", allowed_separators=frozenset(separator))
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "alice",
+        "michael@zenml.io",
+        "first.last@example.co.uk",
+        "alice+ci@example.com",
+        "a_b-c.d@e.f",
+    ],
+)
+def test_valid_account_names_pass(name: str) -> None:
+    """Accept the email addresses an OAuth2 control plane uses as usernames."""
+    assert validate_account_name(name) == name
+
+
+@pytest.mark.parametrize("name", ["", "@alice", "alice@", "a b", "a/b", "a:b", "ä"])
+def test_invalid_account_names_rejected(name: str) -> None:
+    """Reject names that are empty, boundary separated, or outside the set."""
+    with pytest.raises(InvalidName):
+        validate_account_name(name)

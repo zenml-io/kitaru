@@ -15,6 +15,7 @@
 
 from kitaru.server.adapters.db.orm.account import AccountORM
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
+from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 
-__all__ = ["AccountORM", "ApiKeyORM", "SecretORM"]
+__all__ = ["AccountORM", "ApiKeyORM", "DeviceORM", "SecretORM"]

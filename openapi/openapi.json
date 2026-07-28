@@ -298,8 +298,91 @@
         "title": "ApiKeyUpdateRequest",
         "type": "object"
       },
+      "AuthScheme": {
+        "description": "Authentication scheme.",
+        "enum": [
+          "none",
+          "local",
+          "control_plane"
+        ],
+        "title": "AuthScheme",
+        "type": "string"
+      },
+      "Body_device_authorization_v1_device_authorization_post": {
+        "properties": {
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Version"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostname"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Os"
+          },
+          "python_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Python Version"
+          }
+        },
+        "title": "Body_device_authorization_v1_device_authorization_post",
+        "type": "object"
+      },
       "Body_login_v1_login_post": {
         "properties": {
+          "device_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Code"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
           "grant_type": {
             "anyOf": [
               {
@@ -335,6 +418,262 @@
           }
         },
         "title": "Body_login_v1_login_post",
+        "type": "object"
+      },
+      "DeviceAuthorizationResponse": {
+        "description": "Device authorization response.",
+        "properties": {
+          "device_code": {
+            "description": "Code the device presents when polling.",
+            "title": "Device Code",
+            "type": "string"
+          },
+          "device_id": {
+            "description": "Device id to verify.",
+            "format": "uuid",
+            "title": "Device Id",
+            "type": "string"
+          },
+          "expires_in": {
+            "description": "Code lifetime in seconds.",
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "interval": {
+            "description": "Seconds to wait between polls.",
+            "title": "Interval",
+            "type": "integer"
+          },
+          "user_code": {
+            "description": "Code the user confirms in the browser.",
+            "title": "User Code",
+            "type": "string"
+          },
+          "verification_uri": {
+            "description": "Page where the user enters the code.",
+            "title": "Verification Uri",
+            "type": "string"
+          },
+          "verification_uri_complete": {
+            "description": "Verification page with the code already filled in.",
+            "title": "Verification Uri Complete",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "device_code",
+          "user_code",
+          "verification_uri",
+          "verification_uri_complete",
+          "expires_in",
+          "interval"
+        ],
+        "title": "DeviceAuthorizationResponse",
+        "type": "object"
+      },
+      "DeviceResponse": {
+        "description": "Device response.",
+        "properties": {
+          "client_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Kitaru version the device reported.",
+            "title": "Client Version"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "expires": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expiry time, null for a device that never expires.",
+            "title": "Expires"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Host the device reported.",
+            "title": "Hostname"
+          },
+          "id": {
+            "description": "Device id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ip_address": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Address the authorization came from.",
+            "title": "Ip Address"
+          },
+          "last_login": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last authentication with this device.",
+            "title": "Last Login"
+          },
+          "locked": {
+            "description": "Whether the device can authenticate.",
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Operating system the device reported.",
+            "title": "Os"
+          },
+          "python_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Python version the device reported.",
+            "title": "Python Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DeviceStatus",
+            "description": "Device status."
+          },
+          "trusted": {
+            "description": "Whether the device has the trusted lifetime.",
+            "title": "Trusted",
+            "type": "boolean"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "status",
+          "locked",
+          "trusted",
+          "expires",
+          "last_login",
+          "hostname",
+          "os",
+          "ip_address",
+          "python_version",
+          "client_version"
+        ],
+        "title": "DeviceResponse",
+        "type": "object"
+      },
+      "DeviceStatus": {
+        "description": "Authorized device status.",
+        "enum": [
+          "pending",
+          "verified",
+          "active"
+        ],
+        "title": "DeviceStatus",
+        "type": "string"
+      },
+      "DeviceUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Device update request.",
+        "properties": {
+          "locked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New locked state, left unchanged when omitted.",
+            "title": "Locked"
+          },
+          "trusted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New trusted state, left unchanged when omitted.",
+            "title": "Trusted"
+          }
+        },
+        "title": "DeviceUpdateRequest",
+        "type": "object"
+      },
+      "DeviceVerifyRequest": {
+        "additionalProperties": false,
+        "description": "Device verify request.",
+        "properties": {
+          "trusted": {
+            "default": false,
+            "description": "Whether to grant the trusted device lifetime.",
+            "title": "Trusted",
+            "type": "boolean"
+          },
+          "user_code": {
+            "description": "User code shown on the device.",
+            "title": "User Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_code"
+        ],
+        "title": "DeviceVerifyRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -408,6 +747,36 @@
           "next_cursor"
         ],
         "title": "Page[ApiKeyResponse]",
+        "type": "object"
+      },
+      "Page_DeviceResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/DeviceResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[DeviceResponse]",
         "type": "object"
       },
       "Page_SecretResponse_": {
@@ -637,6 +1006,72 @@
           "values"
         ],
         "title": "SecretWithValuesResponse",
+        "type": "object"
+      },
+      "ServerInfoResponse": {
+        "description": "Server info response.",
+        "properties": {
+          "auth_scheme": {
+            "$ref": "#/components/schemas/AuthScheme",
+            "description": "Scheme used to authenticate requests."
+          },
+          "control_plane_api_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Control plane API the server accepts credentials from.",
+            "title": "Control Plane Api Url"
+          },
+          "version": {
+            "description": "Kitaru version the server runs.",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "auth_scheme"
+        ],
+        "title": "ServerInfoResponse",
+        "type": "object"
+      },
+      "TokenErrorCode": {
+        "description": "Device authorization grant error code.",
+        "enum": [
+          "authorization_pending",
+          "slow_down",
+          "access_denied",
+          "expired_token",
+          "invalid_grant",
+          "invalid_request",
+          "unsupported_grant_type"
+        ],
+        "title": "TokenErrorCode",
+        "type": "string"
+      },
+      "TokenErrorResponse": {
+        "description": "Token error response.",
+        "properties": {
+          "detail": {
+            "description": "Error message.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "error": {
+            "$ref": "#/components/schemas/TokenErrorCode",
+            "description": "Error code."
+          }
+        },
+        "required": [
+          "error",
+          "detail"
+        ],
+        "title": "TokenErrorResponse",
         "type": "object"
       },
       "TokenResponse": {
@@ -1297,9 +1732,354 @@
         ]
       }
     },
+    "/v1/device_authorization": {
+      "post": {
+        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    HTTPException: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
+        "operationId": "device_authorization_v1_device_authorization_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_device_authorization_v1_device_authorization_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceAuthorizationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Device Authorization",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/devices": {
+      "get": {
+        "description": "List devices of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Device service.\n    actor: Caller context.\n    params: Device list params.\n\nReturns:\n    Page of devices.",
+        "operationId": "list_devices_v1_devices_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter on device status.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DeviceStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on device status.",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_DeviceResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Devices",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/{device_id}": {
+      "delete": {
+        "description": "Delete a device.\n\nEvery token issued for the device stops authenticating. Clients observe\nHTTP 204 on success and 404 when the caller owns no device with this id.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.",
+        "operationId": "delete_device_v1_devices__device_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Device",
+        "tags": [
+          "devices"
+        ]
+      },
+      "get": {
+        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when the caller owns no device\nwith this id.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Stored device.",
+        "operationId": "get_device_v1_devices__device_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Device",
+        "tags": [
+          "devices"
+        ]
+      },
+      "patch": {
+        "description": "Update a device.\n\nLocking a device rejects every token issued for it. Clients observe HTTP\n200 on success, 404 when the caller owns no device with this id, and 422 on\ninvalid input.\n\nArgs:\n    device_id: Id of the device.\n    body: Device update request.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Updated device.",
+        "operationId": "update_device_v1_devices__device_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Device",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/devices/{device_id}/verify": {
+      "post": {
+        "description": "Approve a pending device authorization.\n\nThe device polling the token endpoint receives a token for the caller's\naccount on its next poll. Clients observe HTTP 200 on success, 404 when no\nsuch device exists or another account already approved it, and 422 when\nthe user code does not match, the authorization expired, or the device is\nlocked. Three failed attempts lock the device.\n\nArgs:\n    device_id: Id of the device.\n    body: Device verify request.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Verified device.",
+        "operationId": "verify_device_v1_devices__device_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Device Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceVerifyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Device",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
+    "/v1/info": {
+      "get": {
+        "description": "Report how this server authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present. It carries no deployment detail\nbeyond what a caller needs to log in.\n\nArgs:\n    settings: Service settings governing auth behavior.\n\nReturns:\n    Server info.",
+        "operationId": "get_info_v1_info_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Info",
+        "tags": [
+          "info"
+        ]
+      }
+    },
     "/v1/login": {
       "post": {
-        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``control-plane`` grant type\nreads a control plane credential from the authorization header and mirrors\nthe control plane user into a local account. Clients observe HTTP 200 on\nsuccess, 400 when the grant type is not accepted by this server, and 401\nwhen the credentials cannot be validated.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
+        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``control-plane`` grant type\nreads a control plane credential from the authorization header and mirrors\nthe control plane user into a local account. The device grant type takes\nthe ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 for the device grant type\ncarries an OAuth 2.0 ``error`` code, of which ``authorization_pending``\nmeans the caller should poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
         "operationId": "login_v1_login_post",
         "requestBody": {
           "content": {
@@ -1320,6 +2100,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "422": {
             "content": {

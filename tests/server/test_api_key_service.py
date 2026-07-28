@@ -27,8 +27,8 @@ from kitaru.server.domain.api_key import (
     ApiKeyNotFound,
     DuplicateApiKeyName,
     decode_api_key,
-    hash_secret,
 )
+from kitaru.server.domain.keys import hash_secret
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))

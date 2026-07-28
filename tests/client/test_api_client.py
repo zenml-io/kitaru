@@ -20,7 +20,7 @@ import pytest
 
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError, ServerError
-from kitaru.client.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
+from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
 
 
 def mock_api_client(

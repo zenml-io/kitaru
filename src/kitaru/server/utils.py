@@ -41,6 +41,22 @@ async def paginate_all(
             return items
 
 
+def is_stale(value: datetime | None, max_age_seconds: float, now: datetime) -> bool:
+    """Report whether a timestamp is missing or older than a maximum age.
+
+    Args:
+        value: Timestamp to check, treated as UTC when it carries no timezone.
+        max_age_seconds: Age at which the timestamp counts as stale.
+        now: Current time.
+
+    Returns:
+        Whether the timestamp needs renewing.
+    """
+    if value is None:
+        return True
+    return (now - to_tz_aware(value)).total_seconds() >= max_age_seconds
+
+
 def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:
     """Normalize a datetime to the given timezone, treating naive values as being in it.
 

@@ -14,9 +14,7 @@
 """API key entity, key material helpers, and errors."""
 
 import base64
-import hashlib
 import json
-import secrets
 import uuid
 from datetime import datetime
 
@@ -89,27 +87,6 @@ class ApiKey(DomainModel):
             when: Time of use.
         """
         self.last_used = when
-
-
-def generate_secret() -> str:
-    """Generate a random API key secret.
-
-    Returns:
-        Hex-encoded 256-bit secret.
-    """
-    return secrets.token_hex(32)
-
-
-def hash_secret(secret: str) -> str:
-    """Hash an API key secret for storage.
-
-    Args:
-        secret: Plaintext secret.
-
-    Returns:
-        SHA-256 hex digest.
-    """
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
 def encode_api_key(key_id: uuid.UUID, secret: str) -> str:

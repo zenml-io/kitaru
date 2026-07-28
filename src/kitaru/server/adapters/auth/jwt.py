@@ -36,17 +36,22 @@ class JWTToken(BaseModel):
 
     account_id: uuid.UUID
     csrf_token: str | None = None
+    device_id: uuid.UUID | None = None
     expires_at: datetime | None = None
 
     @classmethod
     def from_auth_context(
-        cls, context: AuthContext, csrf_token: str | None = None
+        cls,
+        context: AuthContext,
+        csrf_token: str | None = None,
+        device_id: uuid.UUID | None = None,
     ) -> Self:
         """Build a local session token from an authenticated context.
 
         Args:
             context: Authenticated request context.
             csrf_token: CSRF token associated with a browser cookie session.
+            device_id: Device the session was issued for.
 
         Returns:
             Token representation for the supplied context.
@@ -54,6 +59,7 @@ class JWTToken(BaseModel):
         return cls(
             account_id=context.account.id,
             csrf_token=csrf_token,
+            device_id=device_id,
         )
 
     @classmethod
@@ -104,13 +110,16 @@ class JWTToken(BaseModel):
                 raise ValueError("subject is not an account subject.")
             account_id = uuid.UUID(raw_account_id)
             csrf_token = claims.pop("csrf", None)
+            raw_device_id = claims.pop("device_id", None)
+            device_id = uuid.UUID(raw_device_id) if raw_device_id is not None else None
             expires_at = cls._timestamp_claim(claims.pop("exp"))
-        except (KeyError, TypeError, ValueError) as exc:
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
             raise TokenError(f"Invalid session token claims: {exc}") from exc
 
         return cls(
             account_id=account_id,
             csrf_token=csrf_token,
+            device_id=device_id,
             expires_at=expires_at,
         )
 
@@ -141,6 +150,8 @@ class JWTToken(BaseModel):
             claims["exp"] = int(self.expires(settings).timestamp())
         if self.csrf_token is not None:
             claims["csrf"] = self.csrf_token
+        if self.device_id is not None:
+            claims["device_id"] = str(self.device_id)
 
         return jwt.encode(
             payload=claims,

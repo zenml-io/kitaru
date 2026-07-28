@@ -13,19 +13,21 @@
 #  permissions and limitations under the License.
 """Authentication service for direct Kitaru server access."""
 
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
 
 from anyio import to_thread
 
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import (
     CONTROL_PLANE_API_KEY_PREFIX,
     ControlPlaneAuthenticator,
     ControlPlaneError,
 )
 from kitaru.server.adapters.auth.jwt import JWTToken, TokenError
-from kitaru.server.api.config import APISettings, AuthScheme
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
@@ -34,6 +36,7 @@ from kitaru.server.application.interfaces.api_key_repository import (
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.domain.account import Account, AccountNotFound
 from kitaru.server.domain.api_key import (
     API_KEY_PREFIX,
@@ -41,8 +44,12 @@ from kitaru.server.domain.api_key import (
     ApiKeyNotFound,
     InvalidApiKey,
     decode_api_key,
-    hash_secret,
 )
+from kitaru.server.domain.device import DeviceError, DeviceNotFound
+from kitaru.server.domain.keys import verify_secret
+from kitaru.server.utils import is_stale, to_tz_aware
+
+logger = logging.getLogger(__name__)
 
 # Skip the last_used write while the stored value is this fresh, so requests
 # sharing an API key do not serialize on its row lock.
@@ -62,6 +69,7 @@ class AuthService:
         account_repository: AccountRepository,
         api_key_repository: ApiKeyRepository,
         password_hasher: PasswordHasher,
+        device_service: DeviceService | None = None,
         control_plane: ControlPlaneAuthenticator | None = None,
     ) -> None:
         """Create an authentication service.
@@ -71,6 +79,8 @@ class AuthService:
             account_repository: Account repository.
             api_key_repository: API key repository.
             password_hasher: Password hasher for login credentials.
+            device_service: Device service backing the device authorization
+                grant.
             control_plane: Control plane authenticator, set when the server
                 runs the control plane auth scheme.
         """
@@ -78,18 +88,21 @@ class AuthService:
         self._account_repository = account_repository
         self._api_key_repository = api_key_repository
         self._password_hasher = password_hasher
+        self._device_service = device_service
         self._control_plane = control_plane
 
     async def resolve(
         self,
         credential: str,
         csrf_token: str | None = None,
+        from_cookie: bool = False,
     ) -> AuthContext:
         """Authenticate a bearer credential for API route handling.
 
         Args:
             credential: Bearer token supplied by the caller.
             csrf_token: CSRF token supplied alongside the bearer token.
+            from_cookie: Whether the credential arrived in the auth cookie.
 
         Raises:
             AuthenticationError: The credential cannot be validated.
@@ -103,8 +116,11 @@ class AuthService:
             context = await self._authenticate_api_key(credential)
         else:
             context = await self._resolve_session_token(credential)
-        if context.csrf_token is not None and not secrets.compare_digest(
-            csrf_token or "", context.csrf_token
+        # Only a cookie rides along on a cross-site request, so only a cookie
+        # needs the caller to prove it can read the login response.
+        if from_cookie and (
+            context.csrf_token is None
+            or not secrets.compare_digest(csrf_token or "", context.csrf_token)
         ):
             raise AuthenticationError("Missing or invalid CSRF token.")
         return context
@@ -174,14 +190,54 @@ class AuthService:
         """
         return self._issue_session(await self._authenticate_control_plane(credential))
 
+    async def login_with_device(
+        self, device_id: uuid.UUID, device_code: str
+    ) -> tuple[str, datetime]:
+        """Exchange a verified device code for a session token.
+
+        Args:
+            device_id: Id of the device.
+            device_code: Plaintext device code held by the polling client.
+
+        Raises:
+            AuthenticationError: Device authentication is not configured.
+            DeviceNotFound: No device has this id.
+            DeviceLocked: The device is locked.
+            DeviceExpired: The device authorization has expired.
+            InvalidDeviceCode: The code does not match.
+            DeviceAuthorizationPending: No account has approved the device yet.
+
+        Returns:
+            Encoded bearer token and its expiry time.
+        """
+        if self._device_service is None:
+            raise AuthenticationError("Device authentication is not configured.")
+        device = await self._device_service.authenticate_device(device_id, device_code)
+        assert device.account_id is not None
+        account = await self._load_active_account(
+            device.account_id, "Invalid device code."
+        )
+        return self.issue_token(
+            AuthContext(account=account),
+            device_id=device.id,
+            expires_at=device.expires,
+        )
+
     def issue_token(
-        self, context: AuthContext, csrf_token: str | None = None
+        self,
+        context: AuthContext,
+        csrf_token: str | None = None,
+        device_id: uuid.UUID | None = None,
+        expires_at: datetime | None = None,
     ) -> tuple[str, datetime]:
         """Issue a local session for an auth context.
 
         Args:
             context: Resolved context to store in the session token.
             csrf_token: CSRF token associated with a browser cookie session.
+            device_id: Device the session was issued for.
+            expires_at: Upper bound on the session lifetime, applied when it
+                falls before the configured lifetime.
 
         Returns:
             Encoded bearer token and its expiry time.
@@ -189,10 +245,13 @@ class AuthService:
         token = JWTToken.from_auth_context(
             context,
             csrf_token=csrf_token,
+            device_id=device_id,
         )
-        expires_at = token.expires(self._settings)
-        token = token.model_copy(update={"expires_at": expires_at})
-        return token.encode(self._settings), expires_at
+        session_expires_at = token.expires(self._settings)
+        if expires_at is not None:
+            session_expires_at = min(session_expires_at, to_tz_aware(expires_at))
+        token = token.model_copy(update={"expires_at": session_expires_at})
+        return token.encode(self._settings), session_expires_at
 
     def _issue_session(self, context: AuthContext) -> tuple[str, datetime, str | None]:
         csrf_token = None
@@ -221,6 +280,9 @@ class AuthService:
         try:
             return await self._control_plane.authenticate(credential)
         except ControlPlaneError as exc:
+            # The caller only learns the credential was rejected, so the reason
+            # is only ever visible here.
+            logger.warning("Control plane authentication failed: %s", exc)
             raise AuthenticationError("Invalid control plane credential.") from exc
 
     async def _resolve_session_token(self, credential: str) -> AuthContext:
@@ -239,7 +301,7 @@ class AuthService:
             api_key = await self._api_key_repository.get(key_id)
         except ApiKeyNotFound as exc:
             raise AuthenticationError("Invalid API key.") from exc
-        if not secrets.compare_digest(hash_secret(secret), api_key.key_hash):
+        if not verify_secret(secret, api_key.key_hash):
             raise AuthenticationError("Invalid API key.")
         if not api_key.active:
             raise AuthenticationError("Invalid API key.")
@@ -249,11 +311,7 @@ class AuthService:
 
     async def _touch_api_key(self, api_key: ApiKey) -> None:
         now = datetime.now(UTC)
-        if (
-            api_key.last_used is not None
-            and (now - api_key.last_used).total_seconds()
-            < LAST_USED_UPDATE_INTERVAL_SECONDS
-        ):
+        if not is_stale(api_key.last_used, LAST_USED_UPDATE_INTERVAL_SECONDS, now):
             return
         api_key.mark_used(now)
         await self._api_key_repository.update(api_key)
@@ -262,7 +320,19 @@ class AuthService:
         account = await self._load_active_account(
             token.account_id, "Invalid session token."
         )
+        if token.device_id is not None:
+            await self._authorize_session_device(token.device_id, account.id)
         return AuthContext(account=account, csrf_token=token.csrf_token)
+
+    async def _authorize_session_device(
+        self, device_id: uuid.UUID, account_id: uuid.UUID
+    ) -> None:
+        if self._device_service is None:
+            raise AuthenticationError("Device authentication is not configured.")
+        try:
+            await self._device_service.authorize_session(device_id, account_id)
+        except (DeviceNotFound, DeviceError) as exc:
+            raise AuthenticationError("Invalid session token.") from exc
 
     async def _load_active_account(
         self, account_id: uuid.UUID, message: str
