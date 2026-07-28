@@ -26,6 +26,7 @@ from kitaru.api_models.v1.secret import (
     SecretUpdateRequest,
     SecretWithValuesResponse,
 )
+from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_secret_service,
@@ -37,7 +38,7 @@ from kitaru.server.adapters.rest.mapping.secrets import (
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.secret_service import SecretService
 
-router = APIRouter()
+router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

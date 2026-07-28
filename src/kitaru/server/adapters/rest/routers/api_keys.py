@@ -26,6 +26,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
+from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_api_key_service,
@@ -38,7 +39,7 @@ from kitaru.server.adapters.rest.mapping.api_keys import (
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 
-router = APIRouter()
+router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

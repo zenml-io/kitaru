@@ -42,10 +42,10 @@ This file covers repository, ORM, and transaction mechanics.
   the application-layer Protocol, and take the session in the constructor.
 - Repositories never call `commit()`. Write methods end with `flush()` so the
   SQL runs and constraint violations surface inside the repository method.
-  The request session commits at the REST boundary (`get_session` in
-  `adapters/rest/dependencies.py`) after the route handler succeeds. Any
-  exception skips the commit and pending writes roll back when the session
-  closes.
+  The request session commits at the REST boundary, through `CommitRoute`
+  (`adapters/rest/commit_route.py`) after the route handler succeeds and
+  before the response is returned. Any exception skips the commit and
+  pending writes roll back when the session closes.
 - `query` methods build a filtered, unordered `Select` and pass it to the
   shared `paginate()` helper along with the filter and the id column.
   `paginate()` decodes the incoming cursor, applies the keyset
