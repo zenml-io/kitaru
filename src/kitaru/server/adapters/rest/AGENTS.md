@@ -16,8 +16,10 @@
 - One mapping module per resource under `mapping/`. Response functions
   construct DTOs explicitly field by field and assert timestamps are not
   `None`. Never use `model_validate(obj, from_attributes=True)`.
-- Routers parse query parameters into the application filter model and build
-  the `Page` envelope from the service result.
+- List routes bind query parameters with
+  `params: Annotated[XListParams, Query()]`, convert them to the application
+  filter through `<x>_list_params_to_filter` in the mapping module, and build
+  the `Page` envelope from the service result and the params.
 - Service dependencies live in `dependencies.py` as
   `get_<resource>_service(session)` returning the service bound to the SQL
   repository.

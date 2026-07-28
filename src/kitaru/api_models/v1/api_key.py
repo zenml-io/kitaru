@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.base import ListParams, OwnedResponseModel, RequestModel
 
 
 class ApiKeyCreateRequest(RequestModel):
@@ -31,6 +31,12 @@ class ApiKeyUpdateRequest(RequestModel):
     """API key update request."""
 
     active: bool = Field(description="New active state.")
+
+
+class ApiKeyListParams(ListParams):
+    """API key list params."""
+
+    name: str | None = Field(default=None, description="Filter on API key name.")
 
 
 class ApiKeyResponse(OwnedResponseModel):

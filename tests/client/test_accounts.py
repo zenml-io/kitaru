@@ -26,6 +26,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.account import (
     AccountCreateRequest,
+    AccountListParams,
     AccountResponse,
     AccountUpdateRequest,
 )
@@ -97,11 +98,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.total == 3
     assert [item.name for item in page.items] == ["alice", "bob", "carol"]
 
-    page = await api_client.accounts.list(name="bob")
+    page = await api_client.accounts.list(AccountListParams(name="bob"))
     assert page.total == 1
     assert page.items[0].name == "bob"
 
-    page = await api_client.accounts.list(page=2, page_size=2)
+    page = await api_client.accounts.list(AccountListParams(page=2, page_size=2))
     assert page.total == 3
     assert page.page == 2
     assert page.page_size == 2

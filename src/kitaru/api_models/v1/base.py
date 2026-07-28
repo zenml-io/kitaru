@@ -31,6 +31,13 @@ class RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ListParams(RequestModel):
+    """List params."""
+
+    page: int = Field(default=1, ge=1, description="Page number.")
+    page_size: int = Field(default=20, ge=1, le=1000, description="Items per page.")
+
+
 class DiscriminatedRequestModel(RequestModel):
     """Discriminated request model."""
 

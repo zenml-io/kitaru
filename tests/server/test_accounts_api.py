@@ -130,6 +130,12 @@ async def test_list_accounts_invalid_pagination(client: httpx.AsyncClient) -> No
     assert response.status_code == 422
 
 
+async def test_list_accounts_unknown_query_param(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an unknown query parameter."""
+    response = await client.get("/v1/accounts", params={"bogus": "x"})
+    assert response.status_code == 422
+
+
 async def test_get_account(client: httpx.AsyncClient) -> None:
     """Get an account by id."""
     created = (await client.post("/v1/accounts", json={"name": "alice"})).json()

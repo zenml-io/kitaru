@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.api_key import (
     ApiKeyCreateRequest,
     ApiKeyIssuedResponse,
+    ApiKeyListParams,
     ApiKeyResponse,
     ApiKeyUpdateRequest,
 )
@@ -30,10 +31,10 @@ from kitaru.server.adapters.rest.dependencies import (
     get_api_key_service,
 )
 from kitaru.server.adapters.rest.mapping.api_keys import (
+    api_key_list_params_to_filter,
     api_key_to_issued_response,
     api_key_to_response,
 )
-from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
 
@@ -68,9 +69,7 @@ async def create_api_key(
 async def list_api_keys(
     service: Annotated[ApiKeyService, Depends(get_api_key_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    name: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
+    params: Annotated[ApiKeyListParams, Query()],
 ) -> Page[ApiKeyResponse]:
     """List API keys of the caller.
 
@@ -80,20 +79,18 @@ async def list_api_keys(
     Args:
         service: API key service.
         actor: Caller context.
-        name: Filter on API key name.
-        page: Page number.
-        page_size: Page size.
+        params: API key list params.
 
     Returns:
         Page of API keys.
     """
-    api_key_filter = ApiKeyFilter(name=name, page=page, page_size=page_size)
+    api_key_filter = api_key_list_params_to_filter(params)
     api_keys, total = await service.list_api_keys(api_key_filter, actor=actor)
     return Page[ApiKeyResponse](
         items=[api_key_to_response(api_key) for api_key in api_keys],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=params.page,
+        page_size=params.page_size,
     )
 
 

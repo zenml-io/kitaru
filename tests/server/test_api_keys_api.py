@@ -127,6 +127,12 @@ async def test_list_api_keys_invalid_pagination(client: httpx.AsyncClient) -> No
     assert response.status_code == 422
 
 
+async def test_list_api_keys_unknown_query_param(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for an unknown query parameter."""
+    response = await client.get("/v1/api-keys", params={"bogus": "x"})
+    assert response.status_code == 422
+
+
 async def test_get_api_key(client: httpx.AsyncClient) -> None:
     """Get an API key by id without the plaintext key."""
     created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()

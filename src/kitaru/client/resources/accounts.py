@@ -18,11 +18,11 @@ from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.account import (
     AccountCreateRequest,
+    AccountListParams,
     AccountResponse,
     AccountUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -75,18 +75,12 @@ class AccountsResource:
 
     async def list(
         self,
-        name: str | None = None,
-        active: bool | None = None,
-        page: int = 1,
-        page_size: int = 20,
+        params: AccountListParams | None = None,
     ) -> Page[AccountResponse]:
         """List accounts.
 
         Args:
-            name: Filter on account name.
-            active: Filter on active state.
-            page: Page number.
-            page_size: Page size.
+            params: Account list params.
 
         Raises:
             APIError: The request failed.
@@ -94,8 +88,12 @@ class AccountsResource:
         Returns:
             Page of accounts.
         """
-        params = build_params(page=page, page_size=page_size, name=name, active=active)
-        response = await self._client.request("GET", "/v1/accounts", params=params)
+        params = params or AccountListParams()
+        response = await self._client.request(
+            "GET",
+            "/v1/accounts",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
         return Page[AccountResponse].model_validate(response.json())
 
     async def update(

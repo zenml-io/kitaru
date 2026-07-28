@@ -2,9 +2,13 @@
 
 - DTOs live in versioned modules named after the entity in the singular
   (`v1/order.py`) and are named `XCreateRequest`, `XUpdateRequest`,
-  `XResponse`.
+  `XListParams`, `XResponse`.
 - Requests extend `RequestModel`, responses extend `ResponseModel`, list
   responses use `Page[XResponse]`.
+- Paginated list endpoints take an `XListParams` model extending `ListParams`
+  (base.py), which carries `page` and `page_size`. List params models declare
+  only wire-exposed fields, never internal filter dimensions such as
+  `owner_id`.
 - Every field declares `Field(description=...)`. The descriptions feed the
   OpenAPI schema, so they are part of the API contract. Use the shortest noun
   phrase that disambiguates and never restate what the type, enum, validator,

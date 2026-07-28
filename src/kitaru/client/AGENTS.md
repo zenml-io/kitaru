@@ -9,8 +9,8 @@
   Endpoints without a request DTO, such as the form-encoded login, take plain
   parameters. Validate the response with `<X>Response.model_validate` (or
   `Page[<X>Response]` for lists).
-- Optional query parameters are built with `if x is not None` chains on a
-  `params` dict.
+- List methods take the `XListParams` model, defaulting to a fresh instance,
+  and send `model_dump(mode="json", exclude_unset=True)` as query params.
 - The SDK reuses `api_models` DTOs and carries no business rules. The server
   re-validates everything.
 - Docstrings document `APIError` under `Raises` and name status codes worth

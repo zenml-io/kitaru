@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
+    SecretListParams,
     SecretResponse,
     SecretUpdateRequest,
     SecretWithValuesResponse,
@@ -29,9 +30,11 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_secret_service,
 )
-from kitaru.server.adapters.rest.mapping.secrets import secret_to_response
+from kitaru.server.adapters.rest.mapping.secrets import (
+    secret_list_params_to_filter,
+    secret_to_response,
+)
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
 
 router = APIRouter()
@@ -67,9 +70,7 @@ async def create_secret(
 async def list_secrets(
     service: Annotated[SecretService, Depends(get_secret_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    name: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=1000)] = 20,
+    params: Annotated[SecretListParams, Query()],
 ) -> Page[SecretResponse]:
     """List secrets.
 
@@ -79,20 +80,18 @@ async def list_secrets(
     Args:
         service: Secret service.
         actor: Caller context.
-        name: Filter on secret name.
-        page: Page number.
-        page_size: Page size.
+        params: Secret list params.
 
     Returns:
         Page of secrets without values.
     """
-    secret_filter = SecretFilter(name=name, page=page, page_size=page_size)
+    secret_filter = secret_list_params_to_filter(params)
     secrets, total = await service.list_secrets(secret_filter, actor=actor)
     return Page[SecretResponse](
         items=[secret_to_response(secret) for secret in secrets],
         total=total,
-        page=page,
-        page_size=page_size,
+        page=params.page,
+        page_size=params.page_size,
     )
 
 

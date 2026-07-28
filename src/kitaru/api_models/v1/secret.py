@@ -18,6 +18,7 @@ import uuid
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
+    ListParams,
     OwnedResponseModel,
     PlainSerializedSecretStr,
     RequestModel,
@@ -39,6 +40,12 @@ class SecretUpdateRequest(RequestModel):
     values: dict[str, PlainSerializedSecretStr] | None = Field(
         default=None, description="New secret values."
     )
+
+
+class SecretListParams(ListParams):
+    """Secret list params."""
+
+    name: str | None = Field(default=None, description="Filter on secret name.")
 
 
 class SecretResponse(OwnedResponseModel):
