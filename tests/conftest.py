@@ -84,7 +84,8 @@ def db_settings(**overrides: Any) -> APISettings:
         DB_PORT=int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
         # A database per caller. Tests drop their database on teardown, and a
         # shared name would let one test drop the database another is using.
-        DB_NAME=f"{TEST_DB_PREFIX}_{uuid.uuid4().hex[:12]}",
+        # The timestamp lets the stale-database reaper age-gate its drops.
+        DB_NAME=f"{TEST_DB_PREFIX}_{int(datetime.now(UTC).timestamp())}_{uuid.uuid4().hex[:12]}",
         SECRET_ENCRYPTION_KEY="test-encryption-key",
         **overrides,
     )
@@ -162,6 +163,28 @@ async def postgres_available() -> bool:
     return _postgres_available
 
 
+STALE_TEST_DB_AGE = timedelta(hours=1)
+
+
+def _is_stale_test_database(name: str, now: datetime) -> bool:
+    """Report whether a test database is old enough to reap.
+
+    Args:
+        name: Database name.
+        now: Current time.
+
+    Returns:
+        ``True`` when the database is older than the stale age.
+    """
+    segments = name.removeprefix(f"{TEST_DB_PREFIX}_").split("_")
+    try:
+        created = datetime.fromtimestamp(int(segments[0]), tz=UTC)
+    except (ValueError, OverflowError):
+        # A name without a timestamp predates the age gate.
+        return True
+    return now - created > STALE_TEST_DB_AGE
+
+
 async def _drop_stale_test_databases() -> None:
     engine = create_async_engine(
         DatabaseService.generate_database_uri(db_settings(), use_default_db=True)
@@ -176,7 +199,10 @@ async def _drop_stale_test_databases() -> None:
                     {"prefix": f"{TEST_DB_PREFIX}%"},
                 )
             ).scalars()
+            now = datetime.now(UTC)
             for name in list(names):
+                if not _is_stale_test_database(name, now):
+                    continue
                 await connection.execute(
                     text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
                 )
@@ -189,7 +215,10 @@ async def _drop_stale_test_databases() -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def reap_stale_test_databases() -> None:
-    """Drop test databases left behind by a run that was killed."""
+    """Drop test databases left behind by a run that was killed.
+
+    The age gate keeps a concurrent run's live databases out of the reap.
+    """
     asyncio.run(_drop_stale_test_databases())
 
 
