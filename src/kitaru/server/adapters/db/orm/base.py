@@ -11,18 +11,22 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Shared SQLModel ORM base types and mixins."""
+"""Shared ORM base types and mixins."""
 
 import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import DateTime
-from sqlmodel import Field, SQLModel
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from kitaru.server.domain.ids import uuid7
 
 
-class TimestampMixin(SQLModel):
+class Base(DeclarativeBase):
+    """Declarative base for all ORM tables."""
+
+
+class TimestampMixin:
     """Created and updated timestamps on persisted entities.
 
     Attributes:
@@ -30,26 +34,30 @@ class TimestampMixin(SQLModel):
         updated: UTC time of the last modification.
     """
 
-    created: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
+    # Negative sort orders keep the mixin columns ahead of subclass columns,
+    # matching the column order in the migrations.
+    created: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        sort_order=-3,
     )
-    updated: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
-        sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
-        sa_column_kwargs={"onupdate": lambda: datetime.now(UTC)},
+    updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        sort_order=-2,
     )
 
 
-class UUIDPrimaryKeyMixin(SQLModel):
+class UUIDPrimaryKeyMixin:
     """UUID primary key for top-level persisted entities.
 
     Attributes:
         id: Stable identifier for the entity.
     """
 
-    id: uuid.UUID = Field(
-        default_factory=uuid7,
+    id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
-        nullable=False,
+        default=uuid7,
+        sort_order=-1,
     )

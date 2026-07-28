@@ -18,7 +18,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.api_key import (
@@ -96,15 +95,15 @@ class SQLApiKeyRepository:
         """
         statement = select(ApiKeyORM)
         if api_key_filter.name is not None:
-            statement = statement.where(col(ApiKeyORM.name) == api_key_filter.name)
+            statement = statement.where(ApiKeyORM.name == api_key_filter.name)
         if api_key_filter.owner_id is not None:
             statement = statement.where(
-                col(ApiKeyORM.owner_id) == api_key_filter.owner_id
+                ApiKeyORM.owner_id == api_key_filter.owner_id
             )
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(ApiKeyORM.id),
+            order_by=ApiKeyORM.id,
             page=api_key_filter.page,
             page_size=api_key_filter.page_size,
         )

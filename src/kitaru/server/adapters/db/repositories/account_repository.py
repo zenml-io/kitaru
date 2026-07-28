@@ -18,7 +18,6 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.account import (
@@ -99,8 +98,8 @@ class SQLAccountRepository:
             Stored account.
         """
         statement = select(AccountORM).where(
-            col(AccountORM.name) == name,
-            col(AccountORM.is_service_account) == is_service_account,
+            AccountORM.name == name,
+            AccountORM.is_service_account == is_service_account,
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
@@ -123,8 +122,8 @@ class SQLAccountRepository:
             Stored account.
         """
         statement = select(AccountORM).where(
-            col(AccountORM.external_id) == external_id,
-            col(AccountORM.is_service_account) == is_service_account,
+            AccountORM.external_id == external_id,
+            AccountORM.is_service_account == is_service_account,
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
@@ -142,13 +141,13 @@ class SQLAccountRepository:
         """
         statement = select(AccountORM)
         if account_filter.name is not None:
-            statement = statement.where(col(AccountORM.name) == account_filter.name)
+            statement = statement.where(AccountORM.name == account_filter.name)
         if account_filter.active is not None:
-            statement = statement.where(col(AccountORM.active) == account_filter.active)
+            statement = statement.where(AccountORM.active == account_filter.active)
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(AccountORM.id),
+            order_by=AccountORM.id,
             page=account_filter.page,
             page_size=account_filter.page_size,
         )

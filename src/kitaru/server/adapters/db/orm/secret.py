@@ -16,10 +16,17 @@
 import uuid
 
 from pydantic import SecretStr
-from sqlalchemy import ForeignKeyConstraint, Index, Text, UniqueConstraint
-from sqlmodel import Field
+from sqlalchemy import (
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import (
+    Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
@@ -36,7 +43,7 @@ SECRET_OWNER_ID_FOREIGN_KEY = foreign_key_name("secret", ["owner_id"])
 SECRET_OWNER_ID_INDEX = index_name("secret", ["owner_id"])
 
 
-class SecretORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class SecretORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Secret table."""
 
     __tablename__ = "secret"
@@ -48,11 +55,11 @@ class SecretORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         Index(SECRET_OWNER_ID_INDEX, "owner_id"),
     )
 
-    owner_id: uuid.UUID = Field(nullable=False)
-    name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
-    internal: bool = Field(nullable=False)
-    type: str | None = Field(default=None, max_length=MAX_SECRET_TYPE_LENGTH)
-    values_encrypted: str = Field(sa_type=Text, nullable=False)
+    owner_id: Mapped[uuid.UUID]
+    name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
+    internal: Mapped[bool]
+    type: Mapped[str | None] = mapped_column(String(MAX_SECRET_TYPE_LENGTH))
+    values_encrypted: Mapped[str] = mapped_column(Text)
 
     @classmethod
     def from_domain(cls, secret: Secret, values_encrypted: str) -> "SecretORM":

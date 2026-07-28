@@ -20,7 +20,6 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.errors import violated_constraint
@@ -125,19 +124,19 @@ class SQLSecretRepository:
         """
         statement = select(SecretORM)
         if secret_filter.name is not None:
-            statement = statement.where(col(SecretORM.name) == secret_filter.name)
+            statement = statement.where(SecretORM.name == secret_filter.name)
         if secret_filter.owner_id is not None:
             statement = statement.where(
-                col(SecretORM.owner_id) == secret_filter.owner_id
+                SecretORM.owner_id == secret_filter.owner_id
             )
         if secret_filter.internal is not None:
             statement = statement.where(
-                col(SecretORM.internal) == secret_filter.internal
+                SecretORM.internal == secret_filter.internal
             )
         rows, total = await paginate(
             self._session,
             statement,
-            order_by=col(SecretORM.id),
+            order_by=SecretORM.id,
             page=secret_filter.page,
             page_size=secret_filter.page_size,
         )

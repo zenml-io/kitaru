@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that Alembic migrations match the SQLModel schema."""
+"""Check that Alembic migrations match the ORM schema."""
 
 import asyncio
 import difflib
@@ -18,8 +18,8 @@ from sqlalchemy import inspect  # noqa: E402
 from sqlalchemy.engine import Connection  # noqa: E402
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlalchemy.sql import text  # noqa: E402
-from sqlmodel import SQLModel  # noqa: E402
 
+from kitaru.server.adapters.db.orm.base import Base  # noqa: E402
 from kitaru.server.config import Settings  # noqa: E402
 from kitaru.server.database import DatabaseService  # noqa: E402
 from kitaru.server.database.migrations.alembic import (  # noqa: E402
@@ -27,7 +27,7 @@ from kitaru.server.database.migrations.alembic import (  # noqa: E402
     include_object,
 )
 
-SQLMODEL_DB = "kitaru_migration_check_sqlmodel"
+ORM_DB = "kitaru_migration_check_orm"
 ALEMBIC_DB = "kitaru_migration_check_alembic"
 
 
@@ -115,7 +115,7 @@ def autogenerate_diffs(conn: Connection) -> list[Any]:
         conn,
         opts={"compare_type": True, "include_object": include_object},
     )
-    return compare_metadata(context, SQLModel.metadata)
+    return compare_metadata(context, Base.metadata)
 
 
 async def drop_db(settings: Settings) -> None:
@@ -137,11 +137,11 @@ async def drop_db(settings: Settings) -> None:
 
 async def main() -> int:
     """Run all migration checks and return the process exit code."""
-    sqlmodel_settings = check_settings(SQLMODEL_DB)
+    orm_settings = check_settings(ORM_DB)
     alembic_settings = check_settings(ALEMBIC_DB)
 
     try:
-        await DatabaseService.create_db(sqlmodel_settings, force_drop=True)
+        await DatabaseService.create_db(orm_settings, force_drop=True)
     except OSError as error:
         print(f"Cannot reach PostgreSQL: {error}")
         print("Start the local database with: docker compose up -d db")
@@ -149,29 +149,29 @@ async def main() -> int:
     await DatabaseService.create_db(alembic_settings, force_drop=True)
 
     failures: list[str] = []
-    sqlmodel_db = DatabaseService(sqlmodel_settings)
+    orm_db = DatabaseService(orm_settings)
     alembic_db = DatabaseService(alembic_settings)
     try:
         alembic = Alembic(alembic_db.engine)
         failures += check_linear_history(alembic)
 
-        async with sqlmodel_db.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        async with orm_db.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         await alembic.upgrade()
 
-        async with sqlmodel_db.engine.connect() as conn:
-            sqlmodel_schema = await conn.run_sync(snapshot_schema)
+        async with orm_db.engine.connect() as conn:
+            orm_schema = await conn.run_sync(snapshot_schema)
         async with alembic_db.engine.connect() as conn:
             alembic_schema = await conn.run_sync(snapshot_schema)
             diffs = await conn.run_sync(autogenerate_diffs)
 
-        if sqlmodel_schema != alembic_schema:
+        if orm_schema != alembic_schema:
             schema_diff = "\n".join(
                 difflib.unified_diff(
                     pprint.pformat(alembic_schema).splitlines(),
-                    pprint.pformat(sqlmodel_schema).splitlines(),
+                    pprint.pformat(orm_schema).splitlines(),
                     fromfile="alembic upgrade",
-                    tofile="sqlmodel create_all",
+                    tofile="orm create_all",
                     lineterm="",
                 )
             )
@@ -184,9 +184,9 @@ async def main() -> int:
                 + pprint.pformat(diffs)
             )
     finally:
-        await sqlmodel_db.cleanup()
+        await orm_db.cleanup()
         await alembic_db.cleanup()
-        await drop_db(sqlmodel_settings)
+        await drop_db(orm_settings)
         await drop_db(alembic_settings)
 
     if failures:

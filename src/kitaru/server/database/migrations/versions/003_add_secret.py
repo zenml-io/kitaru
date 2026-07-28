@@ -7,7 +7,6 @@ Create Date: 2026-07-23 16:08:28.016071
 """
 
 import sqlalchemy as sa
-import sqlmodel.sql.sqltypes
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -26,9 +25,9 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
-        sa.Column("name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("internal", sa.Boolean(), nullable=False),
-        sa.Column("type", sqlmodel.sql.sqltypes.AutoString(length=64), nullable=True),
+        sa.Column("type", sa.String(length=64), nullable=True),
         sa.Column("values_encrypted", sa.Text(), nullable=False),
         sa.ForeignKeyConstraint(
             ["owner_id"],

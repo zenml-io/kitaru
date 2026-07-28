@@ -7,7 +7,6 @@ Create Date: 2026-07-23 11:53:03.771418
 """
 
 import sqlalchemy as sa
-import sqlmodel.sql.sqltypes
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -26,11 +25,9 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("is_service_account", sa.Boolean(), nullable=False),
-        sa.Column("name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-        sa.Column("email", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=True),
-        sa.Column(
-            "password_hash", sqlmodel.sql.sqltypes.AutoString(length=128), nullable=True
-        ),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("email", sa.String(length=255), nullable=True),
+        sa.Column("password_hash", sa.String(length=128), nullable=True),
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
@@ -43,10 +40,8 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
-        sa.Column("name", sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-        sa.Column(
-            "key_hash", sqlmodel.sql.sqltypes.AutoString(length=128), nullable=False
-        ),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("key_hash", sa.String(length=128), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(

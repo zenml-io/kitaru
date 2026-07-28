@@ -2,22 +2,26 @@
 
 This file covers repository, ORM, and transaction mechanics.
 
-- ORM classes live one module per resource under `orm/`, extend
-  `UUIDPrimaryKeyMixin` and `TimestampMixin` with `table=True`, and are
-  exported from `orm/__init__.py`.
+- ORM classes live one module per resource under `orm/`, extend `Base` plus
+  `UUIDPrimaryKeyMixin` and `TimestampMixin`, and are exported from
+  `orm/__init__.py`.
+- Columns are declared with `Mapped[...]` annotations. Use a bare annotation
+  when the column needs no arguments and `mapped_column(...)` only when it
+  does. Nullability follows the annotation (`Mapped[str | None]` is nullable),
+  never pass `nullable=` explicitly.
 - ORM classes are named with an `ORM` suffix (`AccountORM`, `SecretORM`).
   Never use a `Schema` or `Table` suffix. "Schema" refers to API models in
   the FastAPI ecosystem and to the database schema in the DDL sense, so it
   stays out of class and module names here.
 - Table names are singular (`__tablename__ = "agent"`, not `"agents"`).
 - Enforce uniqueness with a named `UniqueConstraint` in `__table_args__`, not
-  with `Field(unique=True)`. A `UniqueConstraint` is backed by its own index, so
-  do not also index the same column separately.
+  with `mapped_column(unique=True)`. A `UniqueConstraint` is backed by its own
+  index, so do not also index the same column separately.
 - Declare every other index as a named `Index` in `__table_args__`. Never pass
-  `index=True` on a `Field`. It bypasses `index_name` and leaves no module-level
-  constant for the migration and the repository to refer to.
+  `index=True` to `mapped_column`. It bypasses `index_name` and leaves no
+  module-level constant for the migration and the repository to refer to.
 - Declare foreign keys as a named `ForeignKeyConstraint` in `__table_args__`,
-  never with `Field(foreign_key=...)`. An inline foreign key gets an
+  never with `mapped_column(ForeignKey(...))`. An inline foreign key gets an
   auto-generated name that `violated_constraint` can never match.
 - Never hand-write index or constraint names. Generate them with `index_name`,
   `unique_constraint_name`, and `foreign_key_name` from
@@ -25,7 +29,7 @@ This file covers repository, ORM, and transaction mechanics.
   the repository compares against, so the ORM class and the
   `violated_constraint` check share one source of truth.
 - String columns that back a name or other bounded identifier declare an
-  explicit `max_length`.
+  explicit length via `String(...)`.
 - `from_domain` passes the id and never timestamps. `to_domain` passes both
   timestamps. Immutable resources whose domain model has no `updated` field
   pass only `created`. Nothing outside a repository touches ORM models.
@@ -49,7 +53,7 @@ This file covers repository, ORM, and transaction mechanics.
 - `get(..., exclusive=True)` on a repository emits `SELECT ... FOR UPDATE`.
   Queue-style claim methods lock internally with `FOR UPDATE SKIP LOCKED`
   instead of exposing a flag.
-- Ids and timestamps are client-side defaults (`default_factory`, `onupdate`).
+- Ids and timestamps are client-side defaults (`default`, `onupdate`).
   Flush sets them on the row, so repositories return `to_domain()` without
   `refresh()`.
 - `TimestampMixin.updated` renews through its client-side `onupdate` hook on

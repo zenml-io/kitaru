@@ -83,7 +83,7 @@ fix:
 test *ARGS:
     uv run pytest {{ ARGS }}
 
-# Check Alembic migrations against the SQLModel schema (requires docker compose up -d db)
+# Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:
     uv run python scripts/check_migrations.py
 

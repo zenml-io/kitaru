@@ -16,10 +16,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, UniqueConstraint
-from sqlmodel import Field
+from sqlalchemy import (
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import (
+    Base,
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
@@ -36,7 +43,7 @@ API_KEY_OWNER_ID_FOREIGN_KEY = foreign_key_name("api_key", ["owner_id"])
 API_KEY_OWNER_ID_INDEX = index_name("api_key", ["owner_id"])
 
 
-class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
+class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """API key table."""
 
     __tablename__ = "api_key"
@@ -48,14 +55,11 @@ class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, table=True):
         Index(API_KEY_OWNER_ID_INDEX, "owner_id"),
     )
 
-    owner_id: uuid.UUID = Field(nullable=False)
-    name: str = Field(max_length=MAX_NAME_LENGTH, nullable=False)
-    key_hash: str = Field(max_length=128, nullable=False)
-    active: bool = Field(nullable=False)
-    last_used: datetime | None = Field(
-        default=None,
-        sa_type=DateTime(timezone=True),  # ty: ignore[invalid-argument-type]
-    )
+    owner_id: Mapped[uuid.UUID]
+    name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
+    key_hash: Mapped[str] = mapped_column(String(128))
+    active: Mapped[bool]
+    last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @classmethod
     def from_domain(cls, api_key: ApiKey) -> "ApiKeyORM":
