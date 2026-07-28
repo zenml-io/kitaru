@@ -10,6 +10,7 @@ Kitaru is a runtime for **recording, replaying, and improving AI agents in produ
 
 ```
 src/kitaru/           # Python package (src layout) — see src/kitaru/AGENTS.md
+  analytics/          # Async analytics client and event source tracking
   api_models/         # Versioned request/response DTOs shared by server and SDK
   client/             # Async SDK making REST calls
   server/             # FastAPI server (API, application, domain, adapters layers)

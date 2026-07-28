@@ -18,6 +18,11 @@ from typing import Any
 
 import httpx
 
+from kitaru.analytics.source import (
+    CLIENT_HEADER,
+    AnalyticsSource,
+    format_client_header,
+)
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
@@ -43,7 +48,8 @@ class KitaruAPIClient:
             timeout: Request timeout in seconds.
             retries: Connect retry count.
         """
-        headers = {}
+        identification = format_client_header(AnalyticsSource.PYTHON)
+        headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         self._http = httpx.AsyncClient(

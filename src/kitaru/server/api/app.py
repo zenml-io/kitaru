@@ -13,13 +13,20 @@
 #  permissions and limitations under the License.
 """FastAPI application factory."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from kitaru.analytics.client import AnalyticsClient
+from kitaru.analytics.source import (
+    CLIENT_HEADER,
+    AnalyticsSource,
+    current_source,
+    parse_client_header,
+)
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -70,6 +77,26 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
+async def _set_analytics_source(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    """Set the analytics source for the request from the client header.
+
+    Args:
+        request: Incoming request.
+        call_next: Next request handler.
+
+    Returns:
+        HTTP response.
+    """
+    source = parse_client_header(request.headers.get(CLIENT_HEADER, ""))
+    token = current_source.set(source or AnalyticsSource.API)
+    try:
+        return await call_next(request)
+    finally:
+        current_source.reset(token)
+
+
 def create_app(settings: APISettings) -> FastAPI:
     """Create the FastAPI application.
 
@@ -79,6 +106,7 @@ def create_app(settings: APISettings) -> FastAPI:
     Returns:
         Application instance.
     """
+    analytics = AnalyticsClient(enabled=settings.ANALYTICS_OPT_IN)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -103,6 +131,7 @@ def create_app(settings: APISettings) -> FastAPI:
         try:
             yield
         finally:
+            await analytics.aclose()
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()
             await database.cleanup()
@@ -113,9 +142,11 @@ def create_app(settings: APISettings) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.analytics = analytics
     # Replaced with a live client at startup under the control plane scheme.
     app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
+    app.middleware("http")(_set_analytics_source)
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])

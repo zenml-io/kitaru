@@ -66,6 +66,8 @@ class APISettings(Settings):
 
     SECRET_ENCRYPTION_KEY: str = ""
 
+    ANALYTICS_OPT_IN: bool = True
+
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:
         """Validate authentication settings.
