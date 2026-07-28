@@ -54,6 +54,10 @@ This file covers repository, ORM, and transaction mechanics.
   the next cursor.
 - Unique-column lookups use `.one_or_none()`, never `.first()`, so a would-be
   invariant violation surfaces instead of being hidden.
+- Bulk id lookups go through `_load_by_ids` on `BaseSQLRepository`, which
+  returns rows keyed by id with missing ids omitted. `get_many` methods wrap
+  repository-specific conversion (`to_domain`, decryption, hydration) around
+  it instead of hand-rolling `id.in_(...)` selects.
 - Translate `IntegrityError` by constraint name via
   `errors.violated_constraint`, comparing against a module-level constant.
   Never assume which constraint fired. Re-raise when the name does not match a

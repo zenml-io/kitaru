@@ -14,9 +14,10 @@
 """Shared SQL repository base."""
 
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Generic, NoReturn, TypeVar
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +70,21 @@ class BaseSQLRepository(Generic[RowT]):
         if row is None:
             raise self._not_found(entity_id)
         return row
+
+    async def _load_by_ids(self, ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, RowT]:
+        """Load rows by id into a dict keyed by id, missing ids omitted.
+
+        Args:
+            ids: Ids of the rows.
+
+        Returns:
+            Rows keyed by id.
+        """
+        if not ids:
+            return {}
+        statement = select(self.orm_class).where(self.orm_class.id.in_(ids))
+        rows = (await self._session.scalars(statement)).all()
+        return {row.id: row for row in rows}
 
     async def _add(
         self, row: RowT, constraints: ConstraintErrors | None = None
