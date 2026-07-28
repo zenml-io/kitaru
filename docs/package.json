@@ -35,7 +35,7 @@
     "postcss": "^8.5.19",
     "serve": "^14.2.5",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
