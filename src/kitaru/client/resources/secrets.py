@@ -14,7 +14,7 @@
 """Secrets resource."""
 
 import uuid
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.secrets import (
@@ -23,6 +23,7 @@ from kitaru.api_models.v1.secrets import (
     SecretUpdateRequest,
     SecretWithValuesResponse,
 )
+from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -112,9 +113,7 @@ class SecretsResource:
         Returns:
             Page of secrets without values.
         """
-        params: dict[str, Any] = {"page": page, "page_size": page_size}
-        if name is not None:
-            params["name"] = name
+        params = build_params(page=page, page_size=page_size, name=name)
         response = await self._client.request("GET", "/v1/secrets", params=params)
         return Page[SecretResponse].model_validate(response.json())
 

@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
+from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
 
 
 class ApiKeyCreateRequest(RequestModel):
@@ -33,18 +33,15 @@ class ApiKeyUpdateRequest(RequestModel):
     active: bool = Field(description="New active state.")
 
 
-class ApiKeyResponse(ResponseModel):
+class ApiKeyResponse(OwnedResponseModel):
     """API key response."""
 
     id: uuid.UUID = Field(description="API key id.")
-    owner_id: uuid.UUID = Field(description="Id of the owning account.")
     name: str = Field(description="API key name.")
     active: bool = Field(description="Whether the key can authenticate.")
     last_used: datetime | None = Field(
         description="Time of the last use for authentication."
     )
-    created: datetime = Field(description="Creation time.")
-    updated: datetime = Field(description="Last modification time.")
 
 
 class ApiKeyIssuedResponse(ApiKeyResponse):

@@ -91,13 +91,13 @@
           }
         },
         "required": [
+          "created",
+          "updated",
           "id",
           "name",
           "email",
           "is_service_account",
-          "active",
-          "created",
-          "updated"
+          "active"
         ],
         "title": "AccountResponse",
         "type": "object"
@@ -207,13 +207,13 @@
           }
         },
         "required": [
-          "id",
+          "created",
+          "updated",
           "owner_id",
+          "id",
           "name",
           "active",
           "last_used",
-          "created",
-          "updated",
           "key"
         ],
         "title": "ApiKeyIssuedResponse",
@@ -271,13 +271,13 @@
           }
         },
         "required": [
-          "id",
+          "created",
+          "updated",
           "owner_id",
+          "id",
           "name",
           "active",
-          "last_used",
-          "created",
-          "updated"
+          "last_used"
         ],
         "title": "ApiKeyResponse",
         "type": "object"
@@ -540,12 +540,12 @@
           }
         },
         "required": [
-          "id",
-          "owner_id",
-          "name",
-          "type",
           "created",
-          "updated"
+          "updated",
+          "owner_id",
+          "id",
+          "name",
+          "type"
         ],
         "title": "SecretResponse",
         "type": "object"
@@ -643,12 +643,12 @@
           }
         },
         "required": [
-          "id",
-          "owner_id",
-          "name",
-          "type",
           "created",
           "updated",
+          "owner_id",
+          "id",
+          "name",
+          "type",
           "values"
         ],
         "title": "SecretWithValuesResponse",

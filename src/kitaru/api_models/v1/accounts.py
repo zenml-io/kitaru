@@ -14,11 +14,10 @@
 """Account API models."""
 
 import uuid
-from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import RequestModel, ResponseModel
+from kitaru.api_models.v1.base import RequestModel, TimestampedResponseModel
 
 
 class AccountCreateRequest(RequestModel):
@@ -36,7 +35,7 @@ class AccountUpdateRequest(RequestModel):
     password: str | None = Field(default=None, description="New login password.")
 
 
-class AccountResponse(ResponseModel):
+class AccountResponse(TimestampedResponseModel):
     """Account response."""
 
     id: uuid.UUID = Field(description="Account id.")
@@ -44,5 +43,3 @@ class AccountResponse(ResponseModel):
     email: str | None = Field(description="Contact email.")
     is_service_account: bool = Field(description="Whether this is a service account.")
     active: bool = Field(description="Whether the account can authenticate.")
-    created: datetime = Field(description="Creation time.")
-    updated: datetime = Field(description="Last modification time.")

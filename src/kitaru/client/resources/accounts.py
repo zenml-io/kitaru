@@ -14,7 +14,7 @@
 """Accounts resource."""
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.accounts import (
     AccountCreateRequest,
@@ -22,6 +22,7 @@ from kitaru.api_models.v1.accounts import (
     AccountUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
+from kitaru.client.params import build_params
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -93,11 +94,7 @@ class AccountsResource:
         Returns:
             Page of accounts.
         """
-        params: dict[str, Any] = {"page": page, "page_size": page_size}
-        if name is not None:
-            params["name"] = name
-        if active is not None:
-            params["active"] = active
+        params = build_params(page=page, page_size=page_size, name=name, active=active)
         response = await self._client.request("GET", "/v1/accounts", params=params)
         return Page[AccountResponse].model_validate(response.json())
 

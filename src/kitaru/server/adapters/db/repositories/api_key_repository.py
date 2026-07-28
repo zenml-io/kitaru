@@ -16,33 +16,37 @@
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.api_key import (
     API_KEY_NAME_UNIQUE_CONSTRAINT,
     ApiKeyORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
+from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.api_keys import ApiKeyFilter
 from kitaru.server.domain.api_key import (
     ApiKey,
     ApiKeyNotFound,
     DuplicateApiKeyName,
 )
+from kitaru.server.domain.base import NotFoundError
 
 
-class SQLApiKeyRepository:
+class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
     """API key repository backed by the application database."""
 
-    def __init__(self, session: AsyncSession) -> None:
-        """Initialize the repository.
+    orm_class = ApiKeyORM
+
+    def _not_found(self, entity_id: uuid.UUID) -> NotFoundError:
+        """Build the not-found error for an id.
 
         Args:
-            session: Database session for all operations.
+            entity_id: Id of the missing row.
+
+        Returns:
+            Not-found error.
         """
-        self._session = session
+        return ApiKeyNotFound(entity_id)
 
     async def create(self, api_key: ApiKey) -> ApiKey:
         """Persist a new API key.
@@ -57,14 +61,10 @@ class SQLApiKeyRepository:
             Stored API key with timestamps set.
         """
         row = ApiKeyORM.from_domain(api_key)
-        try:
-            async with self._session.begin_nested():
-                self._session.add(row)
-                await self._session.flush()
-        except IntegrityError as exc:
-            if violated_constraint(exc) == API_KEY_NAME_UNIQUE_CONSTRAINT:
-                raise DuplicateApiKeyName(api_key.name) from exc
-            raise
+        await self._add(
+            row,
+            {API_KEY_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateApiKeyName(api_key.name)},
+        )
         return row.to_domain()
 
     async def get(self, api_key_id: uuid.UUID) -> ApiKey:
@@ -79,9 +79,7 @@ class SQLApiKeyRepository:
         Returns:
             Stored API key.
         """
-        row = await self._session.get(ApiKeyORM, api_key_id)
-        if row is None:
-            raise ApiKeyNotFound(api_key_id)
+        row = await self._get_row(api_key_id)
         return row.to_domain()
 
     async def query(self, api_key_filter: ApiKeyFilter) -> tuple[list[ApiKey], int]:
@@ -97,9 +95,7 @@ class SQLApiKeyRepository:
         if api_key_filter.name is not None:
             statement = statement.where(ApiKeyORM.name == api_key_filter.name)
         if api_key_filter.owner_id is not None:
-            statement = statement.where(
-                ApiKeyORM.owner_id == api_key_filter.owner_id
-            )
+            statement = statement.where(ApiKeyORM.owner_id == api_key_filter.owner_id)
         rows, total = await paginate(
             self._session,
             statement,
@@ -122,21 +118,15 @@ class SQLApiKeyRepository:
         Returns:
             Stored API key with the updated timestamp renewed.
         """
-        row = await self._session.get(ApiKeyORM, api_key.id)
-        if row is None:
-            raise ApiKeyNotFound(api_key.id)
+        row = await self._get_row(api_key.id)
         row.owner_id = api_key.owner_id
         row.name = api_key.name
         row.key_hash = api_key.key_hash
         row.active = api_key.active
         row.last_used = api_key.last_used
-        try:
-            async with self._session.begin_nested():
-                await self._session.flush()
-        except IntegrityError as exc:
-            if violated_constraint(exc) == API_KEY_NAME_UNIQUE_CONSTRAINT:
-                raise DuplicateApiKeyName(api_key.name) from exc
-            raise
+        await self._flush(
+            {API_KEY_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateApiKeyName(api_key.name)}
+        )
         return row.to_domain()
 
     async def delete(self, api_key_id: uuid.UUID) -> None:
@@ -148,8 +138,4 @@ class SQLApiKeyRepository:
         Raises:
             ApiKeyNotFound: No API key has this id.
         """
-        row = await self._session.get(ApiKeyORM, api_key_id)
-        if row is None:
-            raise ApiKeyNotFound(api_key_id)
-        await self._session.delete(row)
-        await self._session.flush()
+        await self._delete_row(api_key_id)
