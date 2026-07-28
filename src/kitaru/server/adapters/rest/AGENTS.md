@@ -2,6 +2,11 @@
 
 - One router module per resource under `routers/`, registered in
   `server/api/app.py` with a `/v1/<resource>` prefix and matching tag.
+- Every router is built with `APIRouter(route_class=CommitRoute)` from
+  `commit_route.py`. `CommitRoute` commits the request's database session,
+  attached to `request.state` by `get_session`, before the response is
+  returned. Any exception skips the commit and pending writes roll back when
+  the session closes.
 - Status codes: 201 for create, 200 for read and update, 204 for delete.
 - Updates are partial and use `PATCH /{id}`, never `PUT`. The update body
   carries only the mutable fields.

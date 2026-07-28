@@ -25,6 +25,7 @@ from kitaru.api_models.v1.account import (
     AccountUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
+from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
@@ -37,7 +38,7 @@ from kitaru.server.adapters.rest.mapping.accounts import (
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 
-router = APIRouter()
+router = APIRouter(route_class=CommitRoute)
 
 
 @router.post(

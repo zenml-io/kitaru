@@ -39,6 +39,7 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -54,8 +55,9 @@ BearerCredential = tuple[str, str | None]
 async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Provide a request-scoped database session.
 
-    The session commits after the route handler succeeds. Any exception skips
-    the commit and pending writes roll back when the session closes.
+    The session is attached to the request for ``CommitRoute`` to commit
+    before the response is returned. Any exception skips the commit and
+    pending writes roll back when the session closes.
 
     Args:
         request: Incoming request.
@@ -65,8 +67,8 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """
     database: DatabaseService = request.app.state.database
     async for session in database.get_async_session():
+        attach_request_session(request, session)
         yield session
-        await session.commit()
 
 
 def get_app_settings(request: Request) -> APISettings:

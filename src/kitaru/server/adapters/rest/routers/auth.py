@@ -31,13 +31,14 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
 )
+from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     get_app_settings,
     get_auth_service,
 )
 from kitaru.server.api.config import APISettings, AuthScheme
 
-router = APIRouter()
+router = APIRouter(route_class=CommitRoute)
 
 
 def _get_bearer_credential(request: Request) -> str | None:
