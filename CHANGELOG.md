@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- List endpoints now paginate with an opaque cursor instead of page numbers. Requests take `cursor`, `size`, and `sort` (`created:asc` or `created:desc`), and responses return `items` and `next_cursor` instead of a total count. A cursor is invalidated by changing filters or sort mid-pagination. Client resources can also iterate every item across pages with `iter()`.
 - The API client now identifies itself with an `X-Kitaru-Client` header (`kitaru-python/<version>`) on every request, and the server uses it as the source for analytics events. Server-side analytics can be disabled with `KITARU_SERVER_ANALYTICS_OPT_IN=false`.
 - Secrets holding string key-value pairs, managed via `/v1/secrets`. Values are encrypted at rest with AES-GCM using the new required `KITARU_SERVER_SECRET_ENCRYPTION_KEY` setting, and reads return them only when explicitly requested, never in list responses.
 - The `control_plane` auth scheme, in which a control plane owns every account on the server. `POST /v1/login` takes a control plane credential in the `Authorization` header, mirrors the control plane user into a local account, and returns a Kitaru bearer token. Control plane API keys also authenticate requests directly, while local API keys, local accounts, and the default-account bootstrap are disabled. Configured through `KITARU_SERVER_AUTH_SCHEME=control_plane`, `KITARU_SERVER_CONTROL_PLANE_API_URL`, and `KITARU_SERVER_SERVER_ID`.

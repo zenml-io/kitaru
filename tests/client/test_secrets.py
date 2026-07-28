@@ -100,23 +100,46 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_list(api_client: KitaruAPIClient) -> None:
-    """List secrets with filters and pagination through the SDK."""
+    """List secrets newest-first with filters through the SDK."""
     for name in ["db", "smtp", "s3"]:
         await api_client.secrets.create(SecretCreateRequest(name=name, values=VALUES))
 
     page = await api_client.secrets.list()
-    assert page.total == 3
-    assert [item.name for item in page.items] == ["db", "smtp", "s3"]
+    assert page.next_cursor is None
+    assert [item.name for item in page.items] == ["s3", "smtp", "db"]
 
     page = await api_client.secrets.list(SecretListParams(name="smtp"))
-    assert page.total == 1
+    assert page.next_cursor is None
     assert page.items[0].name == "smtp"
 
-    page = await api_client.secrets.list(SecretListParams(page=2, page_size=2))
-    assert page.total == 3
-    assert page.page == 2
-    assert page.page_size == 2
-    assert [item.name for item in page.items] == ["s3"]
+
+async def test_list_walks_pages_with_cursor(api_client: KitaruAPIClient) -> None:
+    """Walk every page of secrets via next_cursor through the SDK."""
+    for name in ["db", "smtp", "s3"]:
+        await api_client.secrets.create(SecretCreateRequest(name=name, values=VALUES))
+
+    collected: list[str] = []
+    params = SecretListParams(size=2)
+    while True:
+        page = await api_client.secrets.list(params)
+        collected.extend(item.name for item in page.items)
+        if page.next_cursor is None:
+            break
+        params = SecretListParams(cursor=page.next_cursor, size=2)
+
+    assert collected == ["s3", "smtp", "db"]
+
+
+async def test_iter(api_client: KitaruAPIClient) -> None:
+    """Iterate every secret across pages through the SDK."""
+    for name in ["db", "smtp", "s3"]:
+        await api_client.secrets.create(SecretCreateRequest(name=name, values=VALUES))
+
+    collected = [
+        item.name async for item in api_client.secrets.iter(SecretListParams(size=2))
+    ]
+
+    assert collected == ["s3", "smtp", "db"]
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:

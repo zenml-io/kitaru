@@ -15,16 +15,12 @@
 
 import uuid
 
-from pydantic import Field, PositiveInt
-
-from kitaru.server.base import FrozenModel
+from kitaru.server.base import ListFilter
 
 
-class SecretFilter(FrozenModel):
+class SecretFilter(ListFilter):
     """Secret list filter."""
 
     name: str | None = None
     owner_id: uuid.UUID | None = None
     internal: bool | None = None
-    page: PositiveInt = 1
-    page_size: int = Field(default=20, ge=1, le=1000)

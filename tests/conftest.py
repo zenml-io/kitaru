@@ -19,7 +19,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol, TypeVar
 
 import httpx
 import pytest
@@ -44,6 +44,8 @@ from kitaru.server.api.config import APISettings, AuthScheme
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.secret import SecretFilter
+from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.base import ListFilter
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import (
     Account,
@@ -375,6 +377,53 @@ class FakeControlPlaneClient(ControlPlaneClient):
         """Close the fake client, which holds no connections."""
 
 
+class _HasId(Protocol):
+    """Protocol for domain objects with a stable id."""
+
+    id: uuid.UUID
+
+
+ListItemT = TypeVar("ListItemT", bound=_HasId)
+
+
+def _paginate_fake(
+    items: list[ListItemT], list_filter: ListFilter
+) -> tuple[list[ListItemT], str | None]:
+    """Apply cursor pagination to an in-memory list of domain objects.
+
+    Args:
+        items: Candidate items already filtered by non-pagination fields.
+        list_filter: List filter carrying the cursor, size, and sort.
+
+    Returns:
+        Page of matching items and the next cursor.
+    """
+    _, _, direction = list_filter.sort.partition(":")
+    descending = direction == "desc"
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    ordered = sorted(items, key=lambda item: item.id, reverse=descending)
+
+    if cursor is not None:
+        last_id = uuid.UUID(cursor.id)
+        ordered = [
+            item
+            for item in ordered
+            if (item.id < last_id if descending else item.id > last_id)
+        ]
+
+    page = ordered[: list_filter.size + 1]
+    next_cursor = None
+    if len(page) > list_filter.size:
+        page = page[: list_filter.size]
+        last_item = page[-1]
+        next_cursor = encode_cursor(list_filter.sort, str(last_item.id), filter_hash)
+    return page, next_cursor
+
+
 class FakeAccountRepository:
     """In-memory account repository."""
 
@@ -470,16 +519,18 @@ class FakeAccountRepository:
                 return account.model_copy()
         raise AccountNotFound(external_id)
 
-    async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
+    async def query(
+        self, account_filter: AccountFilter
+    ) -> tuple[list[Account], str | None]:
         """Query accounts matching a filter.
 
         Args:
             account_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching accounts and the total match count.
+            Page of matching accounts and the next cursor.
         """
-        accounts = sorted(self._accounts.values(), key=lambda account: account.id.int)
+        accounts = list(self._accounts.values())
         if account_filter.name is not None:
             accounts = [
                 account for account in accounts if account.name == account_filter.name
@@ -490,10 +541,8 @@ class FakeAccountRepository:
                 for account in accounts
                 if account.active == account_filter.active
             ]
-        total = len(accounts)
-        start = (account_filter.page - 1) * account_filter.page_size
-        page = accounts[start : start + account_filter.page_size]
-        return [account.model_copy() for account in page], total
+        page, next_cursor = _paginate_fake(accounts, account_filter)
+        return [account.model_copy() for account in page], next_cursor
 
     async def update(self, account: Account) -> Account:
         """Persist changes to an existing account.
@@ -565,16 +614,18 @@ class FakeApiKeyRepository:
             raise ApiKeyNotFound(api_key_id)
         return api_key.model_copy()
 
-    async def query(self, api_key_filter: ApiKeyFilter) -> tuple[list[ApiKey], int]:
+    async def query(
+        self, api_key_filter: ApiKeyFilter
+    ) -> tuple[list[ApiKey], str | None]:
         """Query API keys matching a filter.
 
         Args:
             api_key_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching API keys and the total match count.
+            Page of matching API keys and the next cursor.
         """
-        api_keys = sorted(self._api_keys.values(), key=lambda api_key: api_key.id.int)
+        api_keys = list(self._api_keys.values())
         if api_key_filter.name is not None:
             api_keys = [
                 api_key for api_key in api_keys if api_key.name == api_key_filter.name
@@ -585,10 +636,8 @@ class FakeApiKeyRepository:
                 for api_key in api_keys
                 if api_key.owner_id == api_key_filter.owner_id
             ]
-        total = len(api_keys)
-        start = (api_key_filter.page - 1) * api_key_filter.page_size
-        page = api_keys[start : start + api_key_filter.page_size]
-        return [api_key.model_copy() for api_key in page], total
+        page, next_cursor = _paginate_fake(api_keys, api_key_filter)
+        return [api_key.model_copy() for api_key in page], next_cursor
 
     async def update(self, api_key: ApiKey) -> ApiKey:
         """Persist changes to an existing API key.
@@ -699,16 +748,18 @@ class FakeSecretRepository:
             raise SecretNotFound(secret_id)
         return secret.model_copy()
 
-    async def query(self, secret_filter: SecretFilter) -> tuple[list[Secret], int]:
+    async def query(
+        self, secret_filter: SecretFilter
+    ) -> tuple[list[Secret], str | None]:
         """Query secrets matching a filter.
 
         Args:
             secret_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching secrets and the total match count.
+            Page of matching secrets and the next cursor.
         """
-        secrets = sorted(self._secrets.values(), key=lambda secret: secret.id.int)
+        secrets = list(self._secrets.values())
         if secret_filter.name is not None:
             secrets = [
                 secret for secret in secrets if secret.name == secret_filter.name
@@ -725,10 +776,8 @@ class FakeSecretRepository:
                 for secret in secrets
                 if secret.internal == secret_filter.internal
             ]
-        total = len(secrets)
-        start = (secret_filter.page - 1) * secret_filter.page_size
-        page = secrets[start : start + secret_filter.page_size]
-        return [secret.model_copy() for secret in page], total
+        page, next_cursor = _paginate_fake(secrets, secret_filter)
+        return [secret.model_copy() for secret in page], next_cursor
 
     async def update(self, secret: Secret) -> Secret:
         """Persist changes to an existing secret.

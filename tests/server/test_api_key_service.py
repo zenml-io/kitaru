@@ -91,25 +91,19 @@ async def test_get_api_key_foreign_owner(service: ApiKeyService) -> None:
 
 
 async def test_list_api_keys(service: ApiKeyService) -> None:
-    """List API keys with filters and pagination."""
+    """List API keys newest-first with filters."""
     for name in ["ci", "deploy", "local"]:
         await service.create_api_key(name=name, actor=ACTOR)
 
-    api_keys, total = await service.list_api_keys(ApiKeyFilter(), actor=ACTOR)
-    assert total == 3
-    assert [api_key.name for api_key in api_keys] == ["ci", "deploy", "local"]
+    api_keys, next_cursor = await service.list_api_keys(ApiKeyFilter(), actor=ACTOR)
+    assert next_cursor is None
+    assert [api_key.name for api_key in api_keys] == ["local", "deploy", "ci"]
 
-    api_keys, total = await service.list_api_keys(
+    api_keys, next_cursor = await service.list_api_keys(
         ApiKeyFilter(name="deploy"), actor=ACTOR
     )
-    assert total == 1
+    assert next_cursor is None
     assert api_keys[0].name == "deploy"
-
-    api_keys, total = await service.list_api_keys(
-        ApiKeyFilter(page=2, page_size=2), actor=ACTOR
-    )
-    assert total == 3
-    assert [api_key.name for api_key in api_keys] == ["local"]
 
 
 async def test_list_api_keys_scoped_to_caller(service: ApiKeyService) -> None:
@@ -117,15 +111,35 @@ async def test_list_api_keys_scoped_to_caller(service: ApiKeyService) -> None:
     await service.create_api_key(name="mine", actor=ACTOR)
     await service.create_api_key(name="theirs", actor=FOREIGN_ACTOR)
 
-    api_keys, total = await service.list_api_keys(ApiKeyFilter(), actor=ACTOR)
-    assert total == 1
+    api_keys, next_cursor = await service.list_api_keys(ApiKeyFilter(), actor=ACTOR)
+    assert next_cursor is None
     assert api_keys[0].name == "mine"
 
-    api_keys, total = await service.list_api_keys(
+    api_keys, next_cursor = await service.list_api_keys(
         ApiKeyFilter(owner_id=FOREIGN_ACTOR.account.id), actor=ACTOR
     )
-    assert total == 1
+    assert next_cursor is None
     assert api_keys[0].name == "mine"
+
+
+async def test_list_api_keys_scoped_across_cursor(service: ApiKeyService) -> None:
+    """Keep the caller's owner id forced across every page of a cursor walk."""
+    for name in ["ci", "deploy", "local"]:
+        await service.create_api_key(name=name, actor=ACTOR)
+    await service.create_api_key(name="theirs", actor=FOREIGN_ACTOR)
+
+    collected: list[str] = []
+    cursor = None
+    while True:
+        api_keys, next_cursor = await service.list_api_keys(
+            ApiKeyFilter(cursor=cursor, size=1), actor=ACTOR
+        )
+        collected.extend(api_key.name for api_key in api_keys)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == ["local", "deploy", "ci"]
 
 
 async def test_update_api_key(service: ApiKeyService) -> None:

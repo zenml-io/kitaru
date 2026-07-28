@@ -19,7 +19,7 @@
 - List routes bind query parameters with
   `params: Annotated[XListParams, Query()]`, convert them to the application
   filter through `<x>_list_params_to_filter` in the mapping module, and build
-  the `Page` envelope from the service result and the params.
+  the `Page` envelope from the items and next cursor the service returns.
 - Service dependencies live in `dependencies.py` as
   `get_<resource>_service(session)` returning the service bound to the SQL
   repository.

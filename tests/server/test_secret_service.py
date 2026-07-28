@@ -111,23 +111,38 @@ async def test_get_secret_internal(
 
 
 async def test_list_secrets(service: SecretService) -> None:
-    """List secrets with filters and pagination."""
+    """List secrets newest-first with filters."""
     for name in ["db", "smtp", "s3"]:
         await service.create_secret(name=name, type=None, values=VALUES, actor=ACTOR)
 
-    secrets, total = await service.list_secrets(SecretFilter(), actor=ACTOR)
-    assert total == 3
-    assert [secret.name for secret in secrets] == ["db", "smtp", "s3"]
+    secrets, next_cursor = await service.list_secrets(SecretFilter(), actor=ACTOR)
+    assert next_cursor is None
+    assert [secret.name for secret in secrets] == ["s3", "smtp", "db"]
 
-    secrets, total = await service.list_secrets(SecretFilter(name="smtp"), actor=ACTOR)
-    assert total == 1
+    secrets, next_cursor = await service.list_secrets(
+        SecretFilter(name="smtp"), actor=ACTOR
+    )
+    assert next_cursor is None
     assert secrets[0].name == "smtp"
 
-    secrets, total = await service.list_secrets(
-        SecretFilter(page=2, page_size=2), actor=ACTOR
-    )
-    assert total == 3
-    assert [secret.name for secret in secrets] == ["s3"]
+
+async def test_list_secrets_walks_pages(service: SecretService) -> None:
+    """Walk every page of secrets via next_cursor."""
+    for name in ["db", "smtp", "s3"]:
+        await service.create_secret(name=name, type=None, values=VALUES, actor=ACTOR)
+
+    collected: list[str] = []
+    cursor = None
+    while True:
+        secrets, next_cursor = await service.list_secrets(
+            SecretFilter(cursor=cursor, size=2), actor=ACTOR
+        )
+        collected.extend(secret.name for secret in secrets)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == ["s3", "smtp", "db"]
 
 
 async def test_list_secrets_all_owners(service: SecretService) -> None:
@@ -137,9 +152,9 @@ async def test_list_secrets_all_owners(service: SecretService) -> None:
         name="theirs", type=None, values=VALUES, actor=FOREIGN_ACTOR
     )
 
-    secrets, total = await service.list_secrets(SecretFilter(), actor=ACTOR)
-    assert total == 2
-    assert [secret.name for secret in secrets] == ["mine", "theirs"]
+    secrets, next_cursor = await service.list_secrets(SecretFilter(), actor=ACTOR)
+    assert next_cursor is None
+    assert [secret.name for secret in secrets] == ["theirs", "mine"]
 
 
 async def test_list_secrets_excludes_internal(
@@ -149,9 +164,31 @@ async def test_list_secrets_excludes_internal(
     await service.create_secret(name="db", type=None, values=VALUES, actor=ACTOR)
     await create_secret(repository, ACTOR.account.id, name="hidden", internal=True)
 
-    secrets, total = await service.list_secrets(SecretFilter(), actor=ACTOR)
-    assert total == 1
+    secrets, next_cursor = await service.list_secrets(SecretFilter(), actor=ACTOR)
+    assert next_cursor is None
     assert [secret.name for secret in secrets] == ["db"]
+
+
+async def test_list_secrets_excludes_internal_across_cursor(
+    service: SecretService, repository: FakeSecretRepository
+) -> None:
+    """Keep the forced internal=False filter stable across a cursor walk."""
+    for name in ["db", "smtp"]:
+        await service.create_secret(name=name, type=None, values=VALUES, actor=ACTOR)
+    await create_secret(repository, ACTOR.account.id, name="hidden", internal=True)
+
+    collected: list[str] = []
+    cursor = None
+    while True:
+        secrets, next_cursor = await service.list_secrets(
+            SecretFilter(cursor=cursor, size=1), actor=ACTOR
+        )
+        collected.extend(secret.name for secret in secrets)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == ["smtp", "db"]
 
 
 async def test_update_secret(service: SecretService) -> None:

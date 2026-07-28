@@ -50,10 +50,11 @@ async def test_accounts_persist_across_requests(client: httpx.AsyncClient) -> No
     response = await client.get("/v1/accounts")
     assert response.status_code == 200
     body = response.json()
-    # The lifespan bootstraps the default account next to the created one.
-    assert body["total"] == 2
-    assert [item["name"] for item in body["items"]] == ["default", "alice"]
-    assert body["items"][1] == created
+    # The lifespan bootstraps the default account before the created one, and
+    # the default sort is newest-first.
+    assert body["next_cursor"] is None
+    assert [item["name"] for item in body["items"]] == ["alice", "default"]
+    assert body["items"][0] == created
 
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:

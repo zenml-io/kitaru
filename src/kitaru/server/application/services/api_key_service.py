@@ -80,7 +80,7 @@ class ApiKeyService:
 
     async def list_api_keys(
         self, api_key_filter: ApiKeyFilter, actor: AuthContext
-    ) -> tuple[list[ApiKey], int]:
+    ) -> tuple[list[ApiKey], str | None]:
         """List API keys of the caller matching a filter.
 
         Args:
@@ -88,7 +88,7 @@ class ApiKeyService:
             actor: Caller context.
 
         Returns:
-            Page of matching API keys and the total match count.
+            Page of matching API keys and the next cursor.
         """
         owner_id = actor.account.id
         scoped_filter = api_key_filter.model_copy(update={"owner_id": owner_id})

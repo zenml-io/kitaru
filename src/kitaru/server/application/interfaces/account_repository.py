@@ -83,14 +83,16 @@ class AccountRepository(Protocol):
         """
         ...
 
-    async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
+    async def query(
+        self, account_filter: AccountFilter
+    ) -> tuple[list[Account], str | None]:
         """Query accounts matching a filter.
 
         Args:
             account_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching accounts and the total match count.
+            Page of matching accounts and the next cursor.
         """
         ...
 

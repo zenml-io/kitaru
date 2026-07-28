@@ -13,39 +13,57 @@
 #  permissions and limitations under the License.
 """Shared query pagination."""
 
+import uuid
 from collections.abc import Sequence
-from typing import Any, TypeVar
+from typing import TypeVar
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.expression import ColumnExpressionArgument
+from sqlalchemy.orm import InstrumentedAttribute
 
-RowT = TypeVar("RowT")
+from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
+from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.base import ListFilter
+
+RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
 
 
 async def paginate(
     session: AsyncSession,
     statement: Select[tuple[RowT]],
-    order_by: ColumnExpressionArgument[Any],
-    page: int,
-    page_size: int,
-) -> tuple[Sequence[RowT], int]:
-    """Execute a filtered select as one page plus the total match count.
+    list_filter: ListFilter,
+    id_column: InstrumentedAttribute[uuid.UUID],
+) -> tuple[Sequence[RowT], str | None]:
+    """Execute a filtered select as one page plus the next cursor.
 
     Args:
-        session: Database session for both queries.
+        session: Database session for the query.
         statement: Filtered select without ordering or pagination.
-        order_by: Column expression ordering the results.
-        page: One-based page number.
-        page_size: Number of rows per page.
+        list_filter: List filter carrying the cursor, size, and sort.
+        id_column: Primary key column.
 
     Returns:
-        Page of matching rows and the total match count.
+        Page of matching rows and the next cursor, or None on the last page.
     """
-    count_statement = select(func.count()).select_from(statement.subquery())
-    total = (await session.execute(count_statement)).scalar_one()
-    statement = (
-        statement.order_by(order_by).offset((page - 1) * page_size).limit(page_size)
-    )
+    _, _, direction = list_filter.sort.partition(":")
+    descending = direction == "desc"
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    statement = statement.order_by(id_column.desc() if descending else id_column.asc())
+    if cursor is not None:
+        last_id = uuid.UUID(cursor.id)
+        statement = statement.where(
+            id_column < last_id if descending else id_column > last_id
+        )
+
+    statement = statement.limit(list_filter.size + 1)
     rows = (await session.scalars(statement)).all()
-    return rows, total
+    next_cursor = None
+    if len(rows) > list_filter.size:
+        rows = rows[: list_filter.size]
+        last_row = rows[-1]
+        next_cursor = encode_cursor(list_filter.sort, str(last_row.id), filter_hash)
+    return rows, next_cursor

@@ -20,6 +20,11 @@ This file covers repository, ORM, and transaction mechanics.
 - Declare every other index as a named `Index` in `__table_args__`. Never pass
   `index=True` to `mapped_column`. It bypasses `index_name` and leaves no
   module-level constant for the migration and the repository to refer to.
+- Sortable fields are declared via the `sortable_fields` ClassVar on the
+  filter model (`server/base.py`), defaulting to `created`, which rides the
+  UUIDv7 primary key and needs no index of its own. A field added beyond that
+  default needs a matching `(field, id)` composite `Index` in
+  `__table_args__`, an Alembic revision, and `paginate()` support.
 - Declare foreign keys as a named `ForeignKeyConstraint` in `__table_args__`,
   never with `mapped_column(ForeignKey(...))`. An inline foreign key gets an
   auto-generated name that `violated_constraint` can never match.
@@ -41,6 +46,12 @@ This file covers repository, ORM, and transaction mechanics.
   `adapters/rest/dependencies.py`) after the route handler succeeds. Any
   exception skips the commit and pending writes roll back when the session
   closes.
+- `query` methods build a filtered, unordered `Select` and pass it to the
+  shared `paginate()` helper along with the filter and the id column.
+  `paginate()` decodes the incoming cursor, applies the keyset
+  `WHERE`/`ORDER BY` for the requested sort direction, fetches one row beyond
+  the requested size to detect a next page, and returns the matching rows plus
+  the next cursor.
 - Unique-column lookups use `.one_or_none()`, never `.first()`, so a would-be
   invariant violation surfaces instead of being hidden.
 - Translate `IntegrityError` by constraint name via

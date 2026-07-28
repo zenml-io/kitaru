@@ -14,6 +14,7 @@
 """Secrets resource."""
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Literal, overload
 
 from kitaru.api_models.v1.base import Page
@@ -116,6 +117,30 @@ class SecretsResource:
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[SecretResponse].model_validate(response.json())
+
+    async def iter(
+        self,
+        params: SecretListParams | None = None,
+    ) -> AsyncIterator[SecretResponse]:
+        """Iterate over all secrets.
+
+        Args:
+            params: Secret list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every secret without values.
+        """
+        params = params or SecretListParams()
+        while True:
+            page = await self.list(params)
+            for item in page.items:
+                yield item
+            if page.next_cursor is None:
+                break
+            params = params.model_copy(update={"cursor": page.next_cursor})
 
     async def update(
         self, secret_id: uuid.UUID, request: SecretUpdateRequest

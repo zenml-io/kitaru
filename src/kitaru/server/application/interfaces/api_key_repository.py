@@ -51,14 +51,16 @@ class ApiKeyRepository(Protocol):
         """
         ...
 
-    async def query(self, api_key_filter: ApiKeyFilter) -> tuple[list[ApiKey], int]:
+    async def query(
+        self, api_key_filter: ApiKeyFilter
+    ) -> tuple[list[ApiKey], str | None]:
         """Query API keys matching a filter.
 
         Args:
             api_key_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching API keys and the total match count.
+            Page of matching API keys and the next cursor.
         """
         ...
 

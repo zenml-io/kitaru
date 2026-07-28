@@ -33,6 +33,7 @@ from kitaru.server.application.interfaces.secret_repository import (
 )
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -121,7 +122,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 
 async def test_query(setup: Setup) -> None:
-    """Query secrets with filters and pagination."""
+    """Query secrets newest-first with filters."""
     repository, owner_id, other_owner_id = setup
     db = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
     await repository.create(Secret(owner_id=owner_id, name="smtp", values=VALUES))
@@ -129,24 +130,20 @@ async def test_query(setup: Setup) -> None:
         Secret(owner_id=other_owner_id, name="s3", values=VALUES)
     )
 
-    secrets, total = await repository.query(SecretFilter())
-    assert total == 3
-    assert [secret.name for secret in secrets] == ["db", "smtp", "s3"]
+    secrets, next_cursor = await repository.query(SecretFilter())
+    assert next_cursor is None
+    assert [secret.name for secret in secrets] == ["s3", "smtp", "db"]
 
-    secrets, total = await repository.query(SecretFilter(name="db"))
-    assert total == 1
+    secrets, next_cursor = await repository.query(SecretFilter(name="db"))
+    assert next_cursor is None
     assert secrets[0] == db
 
-    secrets, total = await repository.query(SecretFilter(owner_id=other_owner_id))
-    assert total == 1
+    secrets, next_cursor = await repository.query(SecretFilter(owner_id=other_owner_id))
+    assert next_cursor is None
     assert secrets[0] == s3
 
-    secrets, total = await repository.query(SecretFilter(page=2, page_size=2))
-    assert total == 3
-    assert [secret.name for secret in secrets] == ["s3"]
-
-    secrets, total = await repository.query(SecretFilter(name="missing"))
-    assert total == 0
+    secrets, next_cursor = await repository.query(SecretFilter(name="missing"))
+    assert next_cursor is None
     assert secrets == []
 
 
@@ -158,16 +155,116 @@ async def test_query_internal_filter(setup: Setup) -> None:
         Secret(owner_id=owner_id, name="hidden", internal=True, values=VALUES)
     )
 
-    secrets, total = await repository.query(SecretFilter())
-    assert total == 2
+    secrets, next_cursor = await repository.query(SecretFilter())
+    assert next_cursor is None
+    assert len(secrets) == 2
 
-    secrets, total = await repository.query(SecretFilter(internal=False))
-    assert total == 1
+    secrets, next_cursor = await repository.query(SecretFilter(internal=False))
+    assert next_cursor is None
     assert secrets[0] == db
 
-    secrets, total = await repository.query(SecretFilter(internal=True))
-    assert total == 1
+    secrets, next_cursor = await repository.query(SecretFilter(internal=True))
+    assert next_cursor is None
     assert secrets[0] == hidden
+
+
+async def test_query_sort_created_asc(setup: Setup) -> None:
+    """Sort secrets oldest-first with sort=created:asc."""
+    repository, owner_id, _ = setup
+    db = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    smtp = await repository.create(
+        Secret(owner_id=owner_id, name="smtp", values=VALUES)
+    )
+    s3 = await repository.create(Secret(owner_id=owner_id, name="s3", values=VALUES))
+
+    secrets, next_cursor = await repository.query(SecretFilter(sort="created:asc"))
+    assert next_cursor is None
+    assert secrets == [db, smtp, s3]
+
+
+async def test_query_walks_pages(setup: Setup) -> None:
+    """Walk every page via next_cursor without duplicates or gaps."""
+    repository, owner_id, _ = setup
+    created = [
+        await repository.create(
+            Secret(owner_id=owner_id, name=f"secret-{i}", values=VALUES)
+        )
+        for i in range(5)
+    ]
+    expected_order = list(reversed(created))
+
+    collected: list[Secret] = []
+    cursor = None
+    while True:
+        secrets, next_cursor = await repository.query(
+            SecretFilter(cursor=cursor, size=2)
+        )
+        collected.extend(secrets)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == expected_order
+    assert len({secret.id for secret in collected}) == 5
+
+
+async def test_query_filter_persists_across_cursor(setup: Setup) -> None:
+    """Keep a filter applied across every page of a cursor walk."""
+    repository, owner_id, _ = setup
+    for i in range(3):
+        await repository.create(
+            Secret(owner_id=owner_id, name=f"visible-{i}", values=VALUES)
+        )
+    for i in range(2):
+        await repository.create(
+            Secret(owner_id=owner_id, name=f"hidden-{i}", internal=True, values=VALUES)
+        )
+
+    collected: list[Secret] = []
+    cursor = None
+    while True:
+        secrets, next_cursor = await repository.query(
+            SecretFilter(internal=False, cursor=cursor, size=1)
+        )
+        collected.extend(secrets)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert len(collected) == 3
+    assert all(not secret.internal for secret in collected)
+
+
+async def test_query_invalid_cursor(setup: Setup) -> None:
+    """Raise for a cursor string that fails to decode."""
+    repository, _, _ = setup
+    with pytest.raises(ValidationError):
+        await repository.query(SecretFilter(cursor="not-a-valid-cursor"))
+
+
+async def test_query_cursor_sort_mismatch(setup: Setup) -> None:
+    """Raise when a cursor is replayed with a different sort."""
+    repository, owner_id, _ = setup
+    await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    await repository.create(Secret(owner_id=owner_id, name="smtp", values=VALUES))
+    _, next_cursor = await repository.query(SecretFilter(size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(
+            SecretFilter(cursor=next_cursor, size=1, sort="created:asc")
+        )
+
+
+async def test_query_cursor_filter_mismatch(setup: Setup) -> None:
+    """Raise when a cursor is replayed after the filter changes."""
+    repository, owner_id, _ = setup
+    await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    await repository.create(Secret(owner_id=owner_id, name="smtp", values=VALUES))
+    await repository.create(Secret(owner_id=owner_id, name="s3", values=VALUES))
+    _, next_cursor = await repository.query(SecretFilter(internal=False, size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(SecretFilter(cursor=next_cursor, size=1))
 
 
 async def test_update(setup: Setup) -> None:

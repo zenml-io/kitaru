@@ -13,10 +13,58 @@
 #  permissions and limitations under the License.
 """Shared server model primitives."""
 
-from pydantic import BaseModel, ConfigDict
+import hashlib
+import json
+from typing import ClassVar
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from kitaru.server.domain.base import ValidationError
 
 
 class FrozenModel(BaseModel):
     """Base type for immutable value objects."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class ListFilter(FrozenModel):
+    """Base type for list filter models using cursor pagination."""
+
+    sortable_fields: ClassVar[frozenset[str]] = frozenset({"created"})
+
+    cursor: str | None = None
+    size: int = Field(default=20, ge=1, le=1000)
+    sort: str = "created:desc"
+
+    @field_validator("sort")
+    @classmethod
+    def _validate_sort(cls, value: str) -> str:
+        """Validate the sort field and direction.
+
+        Args:
+            value: Sort string.
+
+        Raises:
+            ValidationError: The sort string is malformed or names a field
+                outside the sortable allowlist.
+
+        Returns:
+            Validated sort string.
+        """
+        field, _, direction = value.partition(":")
+        if direction not in ("asc", "desc") or field not in cls.sortable_fields:
+            raise ValidationError(f"Invalid sort '{value}'")
+        return value
+
+    def compute_filter_hash(self) -> str:
+        """Hash the filter's non-pagination fields.
+
+        Returns:
+            First 16 hex characters of the SHA-256 digest.
+        """
+        payload = self.model_dump(mode="json")
+        for key in ("cursor", "size", "sort"):
+            payload.pop(key, None)
+        canonical = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]

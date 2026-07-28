@@ -34,8 +34,15 @@ class RequestModel(BaseModel):
 class ListParams(RequestModel):
     """List params."""
 
-    page: int = Field(default=1, ge=1, description="Page number.")
-    page_size: int = Field(default=20, ge=1, le=1000, description="Items per page.")
+    cursor: str | None = Field(
+        default=None, description="Cursor from the previous page."
+    )
+    size: int = Field(default=20, ge=1, le=1000, description="Items per page.")
+    sort: str = Field(
+        default="created:desc",
+        description="Sort field and direction, as field:asc or field:desc.",
+        pattern=r"^[a-z][a-z0-9_]*:(asc|desc)$",
+    )
 
 
 class DiscriminatedRequestModel(RequestModel):
@@ -75,9 +82,9 @@ class Page(ResponseModel, Generic[ItemT]):
     """Pagination envelope."""
 
     items: list[ItemT] = Field(description="Items on this page.")
-    total: int = Field(description="Total number of items across all pages.")
-    page: int = Field(description="Page number.")
-    page_size: int = Field(description="Items per page.")
+    next_cursor: str | None = Field(
+        description="Cursor for the next page, null on the last page."
+    )
 
 
 class ErrorBody(ResponseModel):

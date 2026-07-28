@@ -14,6 +14,7 @@
 """Accounts resource."""
 
 import uuid
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.account import (
@@ -95,6 +96,30 @@ class AccountsResource:
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[AccountResponse].model_validate(response.json())
+
+    async def iter(
+        self,
+        params: AccountListParams | None = None,
+    ) -> AsyncIterator[AccountResponse]:
+        """Iterate over all accounts.
+
+        Args:
+            params: Account list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every account.
+        """
+        params = params or AccountListParams()
+        while True:
+            page = await self.list(params)
+            for item in page.items:
+                yield item
+            if page.next_cursor is None:
+                break
+            params = params.model_copy(update={"cursor": page.next_cursor})
 
     async def update(
         self, account_id: uuid.UUID, request: AccountUpdateRequest

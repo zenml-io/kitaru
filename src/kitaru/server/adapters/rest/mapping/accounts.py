@@ -52,6 +52,7 @@ def account_list_params_to_filter(params: AccountListParams) -> AccountFilter:
     return AccountFilter(
         name=params.name,
         active=params.active,
-        page=params.page,
-        page_size=params.page_size,
+        cursor=params.cursor,
+        size=params.size,
+        sort=params.sort,
     )

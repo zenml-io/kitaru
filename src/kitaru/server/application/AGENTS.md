@@ -8,13 +8,14 @@
   take an application-owned command model defined in `models/`, never the API
   request DTO.
 - List operations take an application-owned filter model extending
-  `FrozenModel` with `page` and `page_size` fields, defined in `models/`.
-  Pagination is bounded on the model, not only on the wire params model,
-  so validation holds however the filter is constructed:
-  `page: PositiveInt = 1` and
-  `page_size: int = Field(default=20, ge=1, le=1000)`.
-  Filter models use `pydantic.AwareDatetime` for datetime bounds, never plain
-  `datetime`.
+  `ListFilter`, which carries `cursor`, `size`, and `sort`, defined in
+  `models/`. Pagination is bounded on `ListFilter` itself, not only on the
+  wire params model, so validation holds however the filter is constructed.
+  Sortable fields are declared via the `sortable_fields` ClassVar, which
+  defaults to `created`, riding the UUIDv7 primary key. A future sortable
+  field needs a matching `(field, id)` composite index plus `paginate()`
+  support. Filter models use `pydantic.AwareDatetime` for datetime bounds,
+  never plain `datetime`.
 - Use cases return domain objects and raise domain errors. No application
   output models, no HTTP concepts.
 - One transaction per use case. The request session commits after the use case

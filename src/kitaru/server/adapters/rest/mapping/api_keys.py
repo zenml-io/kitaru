@@ -79,6 +79,7 @@ def api_key_list_params_to_filter(params: ApiKeyListParams) -> ApiKeyFilter:
     """
     return ApiKeyFilter(
         name=params.name,
-        page=params.page,
-        page_size=params.page_size,
+        cursor=params.cursor,
+        size=params.size,
+        sort=params.sort,
     )

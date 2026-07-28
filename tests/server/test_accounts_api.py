@@ -96,7 +96,7 @@ async def test_create_account_invalid_name(client: httpx.AsyncClient) -> None:
 
 
 async def test_list_accounts(client: httpx.AsyncClient) -> None:
-    """List accounts with filters and pagination."""
+    """List accounts newest-first with filters."""
     for name in ["alice", "bob", "carol"]:
         response = await client.post("/v1/accounts", json={"name": name})
         assert response.status_code == 201
@@ -104,29 +104,106 @@ async def test_list_accounts(client: httpx.AsyncClient) -> None:
     response = await client.get("/v1/accounts")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 3
-    assert body["page"] == 1
-    assert body["page_size"] == 20
-    assert [item["name"] for item in body["items"]] == ["alice", "bob", "carol"]
+    assert body["next_cursor"] is None
+    assert [item["name"] for item in body["items"]] == ["carol", "bob", "alice"]
 
     response = await client.get("/v1/accounts", params={"name": "bob"})
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 1
+    assert body["next_cursor"] is None
     assert body["items"][0]["name"] == "bob"
 
-    response = await client.get("/v1/accounts", params={"page": 2, "page_size": 2})
+
+async def test_list_accounts_walks_pages_with_cursor(
+    client: httpx.AsyncClient,
+) -> None:
+    """Walk every page of accounts via next_cursor."""
+    for name in ["alice", "bob", "carol"]:
+        response = await client.post("/v1/accounts", json={"name": name})
+        assert response.status_code == 201
+
+    collected: list[str] = []
+    params: dict[str, str] = {"size": "2"}
+    while True:
+        response = await client.get("/v1/accounts", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        collected.extend(item["name"] for item in body["items"])
+        if body["next_cursor"] is None:
+            break
+        params = {"size": "2", "cursor": body["next_cursor"]}
+
+    assert collected == ["carol", "bob", "alice"]
+
+
+async def test_list_accounts_sort_created_asc(client: httpx.AsyncClient) -> None:
+    """Sort accounts oldest-first with sort=created:asc."""
+    for name in ["alice", "bob", "carol"]:
+        response = await client.post("/v1/accounts", json={"name": name})
+        assert response.status_code == 201
+
+    response = await client.get("/v1/accounts", params={"sort": "created:asc"})
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == 3
-    assert [item["name"] for item in body["items"]] == ["carol"]
+    assert [item["name"] for item in body["items"]] == ["alice", "bob", "carol"]
 
 
 async def test_list_accounts_invalid_pagination(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for out-of-bounds pagination parameters."""
-    response = await client.get("/v1/accounts", params={"page": 0})
+    response = await client.get("/v1/accounts", params={"size": 0})
     assert response.status_code == 422
-    response = await client.get("/v1/accounts", params={"page_size": 1001})
+    response = await client.get("/v1/accounts", params={"size": 1001})
+    assert response.status_code == 422
+
+
+async def test_list_accounts_malformed_sort(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a sort string that fails the wire pattern."""
+    response = await client.get("/v1/accounts", params={"sort": "bogus"})
+    assert response.status_code == 422
+
+
+async def test_list_accounts_unknown_sort_field(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a sort field outside the allowlist."""
+    response = await client.get("/v1/accounts", params={"sort": "name:asc"})
+    assert response.status_code == 422
+
+
+async def test_list_accounts_invalid_cursor(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a cursor string that fails to decode."""
+    response = await client.get("/v1/accounts", params={"cursor": "not-a-cursor"})
+    assert response.status_code == 422
+
+
+async def test_list_accounts_cursor_sort_mismatch(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 when a cursor is replayed with a different sort."""
+    for name in ["alice", "bob"]:
+        response = await client.post("/v1/accounts", json={"name": name})
+        assert response.status_code == 201
+
+    response = await client.get("/v1/accounts", params={"size": 1})
+    next_cursor = response.json()["next_cursor"]
+    assert next_cursor is not None
+
+    response = await client.get(
+        "/v1/accounts",
+        params={"size": 1, "cursor": next_cursor, "sort": "created:asc"},
+    )
+    assert response.status_code == 422
+
+
+async def test_list_accounts_cursor_filter_mismatch(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 when a cursor is replayed after the filter changes."""
+    for name in ["alice", "bob", "carol"]:
+        response = await client.post("/v1/accounts", json={"name": name})
+        assert response.status_code == 201
+
+    response = await client.get("/v1/accounts", params={"size": 1, "active": "true"})
+    next_cursor = response.json()["next_cursor"]
+    assert next_cursor is not None
+
+    response = await client.get(
+        "/v1/accounts", params={"size": 1, "cursor": next_cursor}
+    )
     assert response.status_code == 422
 
 

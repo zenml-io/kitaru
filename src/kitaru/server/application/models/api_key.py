@@ -15,15 +15,11 @@
 
 import uuid
 
-from pydantic import Field, PositiveInt
-
-from kitaru.server.base import FrozenModel
+from kitaru.server.base import ListFilter
 
 
-class ApiKeyFilter(FrozenModel):
+class ApiKeyFilter(ListFilter):
     """API key list filter."""
 
     name: str | None = None
     owner_id: uuid.UUID | None = None
-    page: PositiveInt = 1
-    page_size: int = Field(default=20, ge=1, le=1000)

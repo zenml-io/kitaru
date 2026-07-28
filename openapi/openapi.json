@@ -360,27 +360,22 @@
             "title": "Items",
             "type": "array"
           },
-          "page": {
-            "description": "Page number.",
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "description": "Items per page.",
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "description": "Total number of items across all pages.",
-            "title": "Total",
-            "type": "integer"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
           }
         },
         "required": [
           "items",
-          "total",
-          "page",
-          "page_size"
+          "next_cursor"
         ],
         "title": "Page[AccountResponse]",
         "type": "object"
@@ -395,27 +390,22 @@
             "title": "Items",
             "type": "array"
           },
-          "page": {
-            "description": "Page number.",
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "description": "Items per page.",
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "description": "Total number of items across all pages.",
-            "title": "Total",
-            "type": "integer"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
           }
         },
         "required": [
           "items",
-          "total",
-          "page",
-          "page_size"
+          "next_cursor"
         ],
         "title": "Page[ApiKeyResponse]",
         "type": "object"
@@ -430,27 +420,22 @@
             "title": "Items",
             "type": "array"
           },
-          "page": {
-            "description": "Page number.",
-            "title": "Page",
-            "type": "integer"
-          },
-          "page_size": {
-            "description": "Items per page.",
-            "title": "Page Size",
-            "type": "integer"
-          },
-          "total": {
-            "description": "Total number of items across all pages.",
-            "title": "Total",
-            "type": "integer"
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
           }
         },
         "required": [
           "items",
-          "total",
-          "page",
-          "page_size"
+          "next_cursor"
         ],
         "title": "Page[SecretResponse]",
         "type": "object"
@@ -799,30 +784,48 @@
         "operationId": "list_accounts_v1_accounts_get",
         "parameters": [
           {
-            "description": "Page number.",
+            "description": "Cursor from the previous page.",
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "description": "Page number.",
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
             }
           },
           {
             "description": "Items per page.",
             "in": "query",
-            "name": "page_size",
+            "name": "size",
             "required": false,
             "schema": {
               "default": 20,
               "description": "Items per page.",
               "maximum": 1000,
               "minimum": 1,
-              "title": "Page Size",
+              "title": "Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
             }
           },
           {
@@ -1032,30 +1035,48 @@
         "operationId": "list_api_keys_v1_api_keys_get",
         "parameters": [
           {
-            "description": "Page number.",
+            "description": "Cursor from the previous page.",
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "description": "Page number.",
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
             }
           },
           {
             "description": "Items per page.",
             "in": "query",
-            "name": "page_size",
+            "name": "size",
             "required": false,
             "schema": {
               "default": 20,
               "description": "Items per page.",
               "maximum": 1000,
               "minimum": 1,
-              "title": "Page Size",
+              "title": "Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
             }
           },
           {
@@ -1338,30 +1359,48 @@
         "operationId": "list_secrets_v1_secrets_get",
         "parameters": [
           {
-            "description": "Page number.",
+            "description": "Cursor from the previous page.",
             "in": "query",
-            "name": "page",
+            "name": "cursor",
             "required": false,
             "schema": {
-              "default": 1,
-              "description": "Page number.",
-              "minimum": 1,
-              "title": "Page",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
             }
           },
           {
             "description": "Items per page.",
             "in": "query",
-            "name": "page_size",
+            "name": "size",
             "required": false,
             "schema": {
               "default": 20,
               "description": "Items per page.",
               "maximum": 1000,
               "minimum": 1,
-              "title": "Page Size",
+              "title": "Size",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
             }
           },
           {

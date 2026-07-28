@@ -132,28 +132,29 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
             raise AccountNotFound(external_id)
         return row.to_domain()
 
-    async def query(self, account_filter: AccountFilter) -> tuple[list[Account], int]:
+    async def query(
+        self, account_filter: AccountFilter
+    ) -> tuple[list[Account], str | None]:
         """Query accounts matching a filter.
 
         Args:
             account_filter: Filter and pagination parameters.
 
         Returns:
-            Page of matching accounts and the total match count.
+            Page of matching accounts and the next cursor.
         """
         statement = select(AccountORM)
         if account_filter.name is not None:
             statement = statement.where(AccountORM.name == account_filter.name)
         if account_filter.active is not None:
             statement = statement.where(AccountORM.active == account_filter.active)
-        rows, total = await paginate(
+        rows, next_cursor = await paginate(
             self._session,
             statement,
-            order_by=AccountORM.id,
-            page=account_filter.page,
-            page_size=account_filter.page_size,
+            account_filter,
+            id_column=AccountORM.id,
         )
-        return [row.to_domain() for row in rows], total
+        return [row.to_domain() for row in rows], next_cursor
 
     async def update(self, account: Account) -> Account:
         """Persist changes to an existing account.

@@ -92,12 +92,10 @@ async def list_accounts(
         Page of accounts.
     """
     account_filter = account_list_params_to_filter(params)
-    accounts, total = await service.list_accounts(account_filter, actor=actor)
+    accounts, next_cursor = await service.list_accounts(account_filter, actor=actor)
     return Page[AccountResponse](
         items=[account_to_response(account) for account in accounts],
-        total=total,
-        page=params.page,
-        page_size=params.page_size,
+        next_cursor=next_cursor,
     )
 
 

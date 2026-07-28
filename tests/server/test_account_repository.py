@@ -31,6 +31,7 @@ from kitaru.server.domain.account import (
     AccountNotFound,
     DuplicateAccountName,
 )
+from kitaru.server.domain.base import ValidationError
 
 
 @pytest.fixture(params=["fake", "postgres"])
@@ -120,30 +121,110 @@ async def test_get_by_name_not_found(repository: AccountRepository) -> None:
 
 
 async def test_query(repository: AccountRepository) -> None:
-    """Query accounts with filters and pagination."""
+    """Query accounts newest-first with filters."""
     alice = await repository.create(Account(name="alice"))
     await repository.create(Account(name="bob"))
     carol = await repository.create(Account(name="carol", active=False))
 
-    accounts, total = await repository.query(AccountFilter())
-    assert total == 3
-    assert [account.name for account in accounts] == ["alice", "bob", "carol"]
+    accounts, next_cursor = await repository.query(AccountFilter())
+    assert next_cursor is None
+    assert [account.name for account in accounts] == ["carol", "bob", "alice"]
 
-    accounts, total = await repository.query(AccountFilter(name="alice"))
-    assert total == 1
+    accounts, next_cursor = await repository.query(AccountFilter(name="alice"))
+    assert next_cursor is None
     assert accounts[0] == alice
 
-    accounts, total = await repository.query(AccountFilter(active=False))
-    assert total == 1
+    accounts, next_cursor = await repository.query(AccountFilter(active=False))
+    assert next_cursor is None
     assert accounts[0] == carol
 
-    accounts, total = await repository.query(AccountFilter(page=2, page_size=2))
-    assert total == 3
-    assert [account.name for account in accounts] == ["carol"]
-
-    accounts, total = await repository.query(AccountFilter(name="missing"))
-    assert total == 0
+    accounts, next_cursor = await repository.query(AccountFilter(name="missing"))
+    assert next_cursor is None
     assert accounts == []
+
+
+async def test_query_sort_created_asc(repository: AccountRepository) -> None:
+    """Sort accounts oldest-first with sort=created:asc."""
+    alice = await repository.create(Account(name="alice"))
+    bob = await repository.create(Account(name="bob"))
+    carol = await repository.create(Account(name="carol"))
+
+    accounts, next_cursor = await repository.query(AccountFilter(sort="created:asc"))
+    assert next_cursor is None
+    assert accounts == [alice, bob, carol]
+
+
+async def test_query_walks_pages(repository: AccountRepository) -> None:
+    """Walk every page via next_cursor without duplicates or gaps."""
+    created = [await repository.create(Account(name=f"user-{i}")) for i in range(5)]
+    expected_order = list(reversed(created))
+
+    collected: list[Account] = []
+    cursor = None
+    while True:
+        accounts, next_cursor = await repository.query(
+            AccountFilter(cursor=cursor, size=2)
+        )
+        collected.extend(accounts)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == expected_order
+    assert len({account.id for account in collected}) == 5
+
+
+async def test_query_filter_persists_across_cursor(
+    repository: AccountRepository,
+) -> None:
+    """Keep a filter applied across every page of a cursor walk."""
+    for i in range(3):
+        await repository.create(Account(name=f"active-{i}", active=True))
+    for i in range(2):
+        await repository.create(Account(name=f"inactive-{i}", active=False))
+
+    collected: list[Account] = []
+    cursor = None
+    while True:
+        accounts, next_cursor = await repository.query(
+            AccountFilter(active=True, cursor=cursor, size=1)
+        )
+        collected.extend(accounts)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert len(collected) == 3
+    assert all(account.active for account in collected)
+
+
+async def test_query_invalid_cursor(repository: AccountRepository) -> None:
+    """Raise for a cursor string that fails to decode."""
+    with pytest.raises(ValidationError):
+        await repository.query(AccountFilter(cursor="not-a-valid-cursor"))
+
+
+async def test_query_cursor_sort_mismatch(repository: AccountRepository) -> None:
+    """Raise when a cursor is replayed with a different sort."""
+    await repository.create(Account(name="alice"))
+    await repository.create(Account(name="bob"))
+    _, next_cursor = await repository.query(AccountFilter(size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(
+            AccountFilter(cursor=next_cursor, size=1, sort="created:asc")
+        )
+
+
+async def test_query_cursor_filter_mismatch(repository: AccountRepository) -> None:
+    """Raise when a cursor is replayed after the filter changes."""
+    await repository.create(Account(name="alice"))
+    await repository.create(Account(name="bob"))
+    await repository.create(Account(name="carol"))
+    _, next_cursor = await repository.query(AccountFilter(active=True, size=1))
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(AccountFilter(cursor=next_cursor, size=1))
 
 
 async def test_update(repository: AccountRepository) -> None:
