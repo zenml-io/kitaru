@@ -272,7 +272,9 @@ def asgi_api_client(app: FastAPI) -> KitaruAPIClient:
     """
     client = KitaruAPIClient(base_url="http://test")
     client._http = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://test"
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+        headers=client._http.headers,
     )
     return client
 

@@ -19,6 +19,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
@@ -79,6 +80,19 @@ def get_app_settings(request: Request) -> APISettings:
     """
     settings: APISettings = request.app.state.settings
     return settings
+
+
+def get_analytics_client(request: Request) -> AnalyticsClient:
+    """Return the analytics client attached to the application state.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Analytics client for this process.
+    """
+    analytics: AnalyticsClient = request.app.state.analytics
+    return analytics
 
 
 def get_account_service(
