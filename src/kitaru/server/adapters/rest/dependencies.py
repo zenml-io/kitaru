@@ -37,8 +37,12 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
+)
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
 )
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
@@ -49,10 +53,13 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.device_service import DeviceService
+from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
 
@@ -158,6 +165,61 @@ def get_secret_service(
         repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         )
+    )
+
+
+def get_blob_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> BlobService:
+    """Return a blob service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Blob service bound to the SQL repository.
+    """
+    return BlobService(
+        repository=SQLBlobRepository(session),
+        max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+    )
+
+
+def get_evaluator_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return a plugin service bound to the evaluator kind.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.EVALUATOR,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+    )
+
+
+def get_importer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return a plugin service bound to the importer kind.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.IMPORTER,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
     )
 
 

@@ -11,21 +11,32 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Plugin filter and update command models."""
 
-from kitaru.server.adapters.db.orm.account import AccountORM
-from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
-from kitaru.server.adapters.db.orm.blob import BlobORM
-from kitaru.server.adapters.db.orm.device import DeviceORM
-from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
-from kitaru.server.adapters.db.orm.secret import SecretORM
+import uuid
+from typing import Any
 
-__all__ = [
-    "AccountORM",
-    "ApiKeyORM",
-    "BlobORM",
-    "DeviceORM",
-    "PluginORM",
-    "PluginVersionORM",
-    "SecretORM",
-]
+from kitaru.base import FrozenModel
+from kitaru.server.base import ListFilter
+from kitaru.server.domain.plugin import PluginKind
+
+
+class PluginFilter(ListFilter):
+    """Plugin list filter."""
+
+    kind: PluginKind
+    name: str | None = None
+    provider: str | None = None
+
+
+class PluginVersionFilter(ListFilter):
+    """Plugin version list filter."""
+
+    plugin_id: uuid.UUID
+
+
+class PluginUpdate(FrozenModel):
+    """Plugin update command."""
+
+    description: str | None = None
+    metadata: dict[str, Any] | None = None

@@ -11,21 +11,26 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Blob DTO conversions."""
 
-from kitaru.server.adapters.db.orm.account import AccountORM
-from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
-from kitaru.server.adapters.db.orm.blob import BlobORM
-from kitaru.server.adapters.db.orm.device import DeviceORM
-from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
-from kitaru.server.adapters.db.orm.secret import SecretORM
+from kitaru.api_models.v1.blob import BlobResponse
+from kitaru.server.domain.blob import Blob
 
-__all__ = [
-    "AccountORM",
-    "ApiKeyORM",
-    "BlobORM",
-    "DeviceORM",
-    "PluginORM",
-    "PluginVersionORM",
-    "SecretORM",
-]
+
+def blob_to_response(blob: Blob) -> BlobResponse:
+    """Convert a blob entity to its response DTO.
+
+    Args:
+        blob: Stored blob.
+
+    Returns:
+        Blob response.
+    """
+    assert blob.created is not None
+    return BlobResponse(
+        id=blob.id,
+        sha256=blob.sha256,
+        size=blob.size,
+        media_type=blob.media_type,
+        created=blob.created,
+    )

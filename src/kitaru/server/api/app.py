@@ -37,7 +37,10 @@ from kitaru.server.adapters.rest.routers import (
     accounts,
     api_keys,
     auth,
+    blobs,
     devices,
+    evaluators,
+    importers,
     info,
     secrets,
 )
@@ -50,6 +53,7 @@ from kitaru.server.domain.base import (
     ConflictError,
     DomainError,
     NotFoundError,
+    PayloadTooLargeError,
     ValidationError,
 )
 
@@ -58,8 +62,8 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     """Register JSON error responses for domain exceptions raised by routes.
 
     Clients receive HTTP 404 for ``NotFoundError``, 409 for ``ConflictError``,
-    422 for ``ValidationError``, and 500 for other ``DomainError`` subclasses.
-    Each body is ``{"detail": "<message>"}``.
+    413 for ``PayloadTooLargeError``, 422 for ``ValidationError``, and 500 for
+    other ``DomainError`` subclasses. Each body is ``{"detail": "<message>"}``.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -74,6 +78,13 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def conflict(request: Request, exc: ConflictError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(PayloadTooLargeError)
+    async def payload_too_large(
+        request: Request, exc: PayloadTooLargeError
+    ) -> JSONResponse:
+        _ = request
+        return JSONResponse(status_code=413, content={"detail": str(exc)})
 
     @app.exception_handler(ValidationError)
     async def validation(request: Request, exc: ValidationError) -> JSONResponse:
@@ -180,6 +191,9 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
+    app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
     app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
+    app.include_router(evaluators.router, prefix="/v1/evaluators", tags=["evaluators"])
+    app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
     return app

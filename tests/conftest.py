@@ -14,6 +14,7 @@
 """Shared test helpers and in-memory fakes."""
 
 import asyncio
+import hashlib
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -49,6 +50,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.device import DeviceFilter
+from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
@@ -64,8 +66,20 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
     encode_api_key,
 )
+from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
 from kitaru.server.domain.keys import generate_secret, hash_secret
+from kitaru.server.domain.plugin import (
+    DuplicatePluginName,
+    DuplicatePluginVersion,
+    Plugin,
+    PluginKind,
+    PluginNotFound,
+    PluginSource,
+    PluginVersion,
+    PluginVersionNotFound,
+    ScriptPluginSource,
+)
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -1077,4 +1091,375 @@ async def create_secret(
         values = {"password": SecretStr("hunter2")}
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
+
+
+class FakeBlobRepository:
+    """In-memory blob repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._blobs: dict[uuid.UUID, Blob] = {}
+        self._referenced: set[uuid.UUID] = set()
+
+    async def create(self, blob: Blob) -> tuple[Blob, bool]:
+        """Persist a new blob, deduping a concurrent identical upload.
+
+        Args:
+            blob: Blob to store.
+
+        Returns:
+            Stored blob and whether this call created it. A dedup hit
+            returns the existing row with its content left unloaded.
+        """
+        for other in self._blobs.values():
+            if other.sha256 == blob.sha256:
+                return other.model_copy(update={"data": b""}), False
+        now = datetime.now(UTC)
+        stored = blob.model_copy(update={"created": now})
+        self._blobs[stored.id] = stored
+        return stored.model_copy(), True
+
+    async def get(self, blob_id: uuid.UUID) -> Blob:
+        """Load a blob by id, content included.
+
+        Args:
+            blob_id: Id of the blob.
+
+        Raises:
+            BlobNotFound: No blob has this id.
+
+        Returns:
+            Stored blob.
+        """
+        blob = self._blobs.get(blob_id)
+        if blob is None:
+            raise BlobNotFound(blob_id)
+        return blob.model_copy()
+
+    async def delete(self, blob_id: uuid.UUID) -> None:
+        """Delete a blob by id.
+
+        Args:
+            blob_id: Id of the blob.
+
+        Raises:
+            BlobNotFound: No blob has this id.
+            BlobInUse: The blob is referenced by a plugin version.
+        """
+        if blob_id not in self._blobs:
+            raise BlobNotFound(blob_id)
+        if blob_id in self._referenced:
+            raise BlobInUse(blob_id)
+        del self._blobs[blob_id]
+
+    def mark_referenced(self, blob_id: uuid.UUID) -> None:
+        """Mark a blob as referenced by a plugin version, mirroring the FK restrict.
+
+        Args:
+            blob_id: Id of the referenced blob.
+        """
+        self._referenced.add(blob_id)
+
+
+async def create_blob(
+    repository: FakeBlobRepository,
+    owner_id: uuid.UUID,
+    content: bytes = b"blob-content",
+    media_type: str = "application/octet-stream",
+) -> Blob:
+    """Store a blob in the fake repository.
+
+    Args:
+        repository: Fake blob repository.
+        owner_id: Id of the owning account.
+        content: Blob content.
+        media_type: Content media type.
+
+    Returns:
+        Stored blob.
+    """
+    sha256 = hashlib.sha256(content).hexdigest()
+    blob, _ = await repository.create(
+        Blob(
+            owner_id=owner_id,
+            sha256=sha256,
+            size=len(content),
+            media_type=media_type,
+            data=content,
+        )
+    )
+    return blob
+
+
+class FakePluginRepository:
+    """In-memory plugin and plugin version repository."""
+
+    def __init__(self, blob_repository: FakeBlobRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            blob_repository: Blob repository, marked when a script version
+                references one of its blobs, mirroring the FK restrict.
+        """
+        self._plugins: dict[uuid.UUID, Plugin] = {}
+        self._versions: dict[uuid.UUID, PluginVersion] = {}
+        self._blob_repository = blob_repository
+
+    def _check_duplicate_name(self, plugin: Plugin) -> None:
+        for other in self._plugins.values():
+            if (
+                other.id != plugin.id
+                and other.kind == plugin.kind
+                and other.name == plugin.name
+            ):
+                raise DuplicatePluginName(plugin.kind, plugin.name)
+
+    async def create(self, plugin: Plugin) -> Plugin:
+        """Persist a new plugin.
+
+        Args:
+            plugin: Plugin to store.
+
+        Raises:
+            DuplicatePluginName: The (kind, name) pair is already registered.
+
+        Returns:
+            Stored plugin with timestamps set.
+        """
+        self._check_duplicate_name(plugin)
+        now = datetime.now(UTC)
+        stored = plugin.model_copy(update={"created": now, "updated": now})
+        self._plugins[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, plugin_id: uuid.UUID) -> Plugin:
+        """Load a plugin by id.
+
+        Args:
+            plugin_id: Id of the plugin.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+
+        Returns:
+            Stored plugin.
+        """
+        plugin = self._plugins.get(plugin_id)
+        if plugin is None:
+            raise PluginNotFound(plugin_id)
+        return plugin.model_copy()
+
+    async def query(
+        self, plugin_filter: PluginFilter
+    ) -> tuple[list[Plugin], str | None]:
+        """Query plugins matching a filter.
+
+        Args:
+            plugin_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching plugins and the next cursor.
+        """
+        plugins = [
+            plugin
+            for plugin in self._plugins.values()
+            if plugin.kind == plugin_filter.kind
+        ]
+        if plugin_filter.name is not None:
+            plugins = [
+                plugin for plugin in plugins if plugin.name == plugin_filter.name
+            ]
+        if plugin_filter.provider is not None:
+            plugins = [
+                plugin
+                for plugin in plugins
+                if plugin.provider == plugin_filter.provider
+            ]
+        page, next_cursor = _paginate_fake(plugins, plugin_filter)
+        return [plugin.model_copy() for plugin in page], next_cursor
+
+    async def update(self, plugin: Plugin) -> Plugin:
+        """Persist changes to an existing plugin.
+
+        Args:
+            plugin: Plugin with modified fields.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+            DuplicatePluginName: The (kind, name) pair is already registered.
+
+        Returns:
+            Stored plugin with the updated timestamp renewed.
+        """
+        stored = self._plugins.get(plugin.id)
+        if stored is None:
+            raise PluginNotFound(plugin.id)
+        self._check_duplicate_name(plugin)
+        now = _renewed_timestamp(stored.updated)
+        updated = plugin.model_copy(update={"created": stored.created, "updated": now})
+        self._plugins[plugin.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, plugin_id: uuid.UUID) -> None:
+        """Delete a plugin by id, cascading its versions.
+
+        Args:
+            plugin_id: Id of the plugin.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+        """
+        if plugin_id not in self._plugins:
+            raise PluginNotFound(plugin_id)
+        del self._plugins[plugin_id]
+        stale_ids = [
+            version_id
+            for version_id, version in self._versions.items()
+            if version.plugin_id == plugin_id
+        ]
+        for version_id in stale_ids:
+            del self._versions[version_id]
+
+    async def create_version(
+        self,
+        plugin_id: uuid.UUID,
+        source: PluginSource,
+        display_version: str | None,
+    ) -> PluginVersion:
+        """Persist a new plugin version with a server-assigned version number.
+
+        Args:
+            plugin_id: Id of the plugin.
+            source: Plugin code source.
+            display_version: Human-readable designator.
+
+        Raises:
+            PluginNotFound: No plugin has this id.
+            DuplicatePluginVersion: The version number is already registered.
+
+        Returns:
+            Stored plugin version with timestamps set.
+        """
+        stored_plugin = self._plugins.get(plugin_id)
+        if stored_plugin is None:
+            raise PluginNotFound(plugin_id)
+        version_number = stored_plugin.latest_version + 1
+        if any(
+            version.plugin_id == plugin_id and version.version == version_number
+            for version in self._versions.values()
+        ):
+            raise DuplicatePluginVersion(plugin_id, version_number)
+        self._plugins[plugin_id] = stored_plugin.model_copy(
+            update={"latest_version": version_number}
+        )
+        now = datetime.now(UTC)
+        version = PluginVersion(
+            plugin_id=plugin_id,
+            version=version_number,
+            display_version=display_version,
+            source=source,
+            created=now,
+            updated=now,
+        )
+        self._versions[version.id] = version
+        if isinstance(source, ScriptPluginSource) and self._blob_repository is not None:
+            self._blob_repository.mark_referenced(source.blob_id)
+        return version.model_copy()
+
+    async def get_version(self, plugin_id: uuid.UUID, version: int) -> PluginVersion:
+        """Load a plugin version by plugin id and version number.
+
+        Args:
+            plugin_id: Id of the plugin.
+            version: Version number.
+
+        Raises:
+            PluginVersionNotFound: No version with this number exists for
+                this plugin.
+
+        Returns:
+            Stored plugin version.
+        """
+        for stored in self._versions.values():
+            if stored.plugin_id == plugin_id and stored.version == version:
+                return stored.model_copy()
+        raise PluginVersionNotFound(plugin_id, version)
+
+    async def query_versions(
+        self, version_filter: PluginVersionFilter
+    ) -> tuple[list[PluginVersion], str | None]:
+        """Query plugin versions matching a filter.
+
+        Args:
+            version_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching plugin versions and the next cursor.
+        """
+        versions = [
+            version
+            for version in self._versions.values()
+            if version.plugin_id == version_filter.plugin_id
+        ]
+        page, next_cursor = _paginate_fake(versions, version_filter)
+        return [version.model_copy() for version in page], next_cursor
+
+    async def update_version(self, plugin_version: PluginVersion) -> PluginVersion:
+        """Persist changes to an existing plugin version.
+
+        Args:
+            plugin_version: Plugin version with modified fields.
+
+        Raises:
+            PluginVersionNotFound: No version has this id.
+
+        Returns:
+            Stored plugin version with the updated timestamp renewed.
+        """
+        stored = self._versions.get(plugin_version.id)
+        if stored is None:
+            raise PluginVersionNotFound(
+                plugin_version.plugin_id, plugin_version.version
+            )
+        now = _renewed_timestamp(stored.updated)
+        updated = plugin_version.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._versions[plugin_version.id] = updated
+        return updated.model_copy()
+
+
+async def create_plugin(
+    repository: FakePluginRepository,
+    owner_id: uuid.UUID,
+    kind: PluginKind,
+    name: str = "plugin",
+    description: str | None = None,
+    provider: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Plugin:
+    """Store a plugin in the fake repository.
+
+    Args:
+        repository: Fake plugin repository.
+        owner_id: Id of the owning account.
+        kind: Plugin kind.
+        name: Plugin name.
+        description: Plugin description.
+        provider: Source system, evaluators must leave this unset.
+        metadata: Arbitrary metadata.
+
+    Returns:
+        Stored plugin.
+    """
+    return await repository.create(
+        Plugin(
+            owner_id=owner_id,
+            kind=kind,
+            name=name,
+            description=description,
+            provider=provider,
+            metadata=metadata or {},
+        )
     )

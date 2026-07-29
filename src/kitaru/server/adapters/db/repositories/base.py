@@ -26,6 +26,7 @@ from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
 from kitaru.server.domain.base import DomainError, NotFoundError
 
 RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
+AddRowT = TypeVar("AddRowT", bound=UUIDPrimaryKeyMixin)
 
 ConstraintErrors = Mapping[str, Callable[[], DomainError]]
 
@@ -87,9 +88,13 @@ class BaseSQLRepository(Generic[RowT]):
         return {row.id: row for row in rows}
 
     async def _add(
-        self, row: RowT, constraints: ConstraintErrors | None = None
+        self, row: AddRowT, constraints: ConstraintErrors | None = None
     ) -> None:
         """Add a row and flush, translating constraint violations.
+
+        The row type is independent of the repository's own ``RowT``, so a
+        repository managing more than one ORM class can add any of them
+        through this one method.
 
         Args:
             row: Row to add.
