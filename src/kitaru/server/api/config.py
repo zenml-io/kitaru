@@ -16,7 +16,7 @@
 import uuid
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.config import Settings
@@ -65,6 +65,19 @@ class APISettings(Settings):
     DEFAULT_ACCOUNT_PASSWORD: str | None = None
 
     SECRET_ENCRYPTION_KEY: str = ""
+
+    MAX_BLOB_SIZE_BYTES: int = Field(
+        default=100 * 1024 * 1024,
+        ge=1,
+        le=1024 * 1024 * 1024,
+    )
+    MAX_EVALUATION_PAIRS: int = Field(default=100, ge=1)
+    TASK_HEARTBEAT_TIMEOUT_SECONDS: float = Field(default=60.0, gt=0)
+    TASK_MAX_ATTEMPTS: int = Field(default=3, ge=1)
+    TASK_STALENESS_SWEEP_LIMIT: int = Field(default=100, ge=1)
+    EVALUATOR_TASK_TIMEOUT_SECONDS: int = Field(default=300, ge=1)
+    IMPORTER_TASK_TIMEOUT_SECONDS: int = Field(default=600, ge=1)
+    MAX_TASK_RESULT_BYTES: int = Field(default=1024 * 1024, ge=1)
 
     ANALYTICS_OPT_IN: bool = True
 

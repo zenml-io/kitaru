@@ -25,6 +25,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
+from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -115,14 +116,8 @@ class ApiKeysResource:
         Returns:
             Async iterator over every API key.
         """
-        params = params or ApiKeyListParams()
-        while True:
-            page = await self.list(params)
-            for item in page.items:
-                yield item
-            if page.next_cursor is None:
-                break
-            params = params.model_copy(update={"cursor": page.next_cursor})
+        async for item in iterate_pages(params or ApiKeyListParams(), self.list):
+            yield item
 
     async def update(
         self, api_key_id: uuid.UUID, request: ApiKeyUpdateRequest

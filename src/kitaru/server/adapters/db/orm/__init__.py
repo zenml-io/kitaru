@@ -14,8 +14,52 @@
 """ORM table definitions."""
 
 from kitaru.server.adapters.db.orm.account import AccountORM
+from kitaru.server.adapters.db.orm.agent import AgentORM
+from kitaru.server.adapters.db.orm.agent_version import (
+    AgentVersionORM,
+    AgentVersionSecretORM,
+)
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
+from kitaru.server.adapters.db.orm.blob import BlobORM
+from kitaru.server.adapters.db.orm.cohort import CohortORM, CohortSessionORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
+from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.experiment import ExperimentORM
+from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
+from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.replay_config import ReplayConfigORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
+from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
+from kitaru.server.adapters.db.orm.task import TaskORM
+from kitaru.server.adapters.db.orm.worker import WorkerORM
 
-__all__ = ["AccountORM", "ApiKeyORM", "DeviceORM", "SecretORM"]
+__all__ = [
+    "AccountORM",
+    "AgentORM",
+    "AgentVersionORM",
+    "AgentVersionSecretORM",
+    "ApiKeyORM",
+    "BlobORM",
+    "CohortORM",
+    "CohortSessionORM",
+    "DeviceORM",
+    "EvaluationORM",
+    "ExperimentORM",
+    "ExperimentRunORM",
+    "JobORM",
+    "PluginORM",
+    "PluginVersionORM",
+    "ReplayConfigORM",
+    "ReplayORM",
+    "SecretORM",
+    "SessionNodeORM",
+    "SessionORM",
+    "TagLinkORM",
+    "TagORM",
+    "TaskORM",
+    "WorkerORM",
+]

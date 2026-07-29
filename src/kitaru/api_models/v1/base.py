@@ -15,9 +15,17 @@
 
 import uuid
 from datetime import datetime
+from math import isfinite
 from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, SecretStr
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    SecretStr,
+)
 
 PlainSerializedSecretStr = Annotated[
     SecretStr,
@@ -28,7 +36,7 @@ PlainSerializedSecretStr = Annotated[
 class RequestModel(BaseModel):
     """Request model."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
 class ListParams(RequestModel):
@@ -61,6 +69,8 @@ class DiscriminatedRequestModel(RequestModel):
 class ResponseModel(BaseModel):
     """Response model."""
 
+    model_config = ConfigDict(protected_namespaces=())
+
 
 class TimestampedResponseModel(ResponseModel):
     """Timestamped response model."""
@@ -90,4 +100,21 @@ class Page(ResponseModel, Generic[ItemT]):
 class ErrorBody(ResponseModel):
     """Error body."""
 
-    detail: str
+    detail: str = Field(description="Error detail.")
+
+
+def _validate_finite_json(value: Any) -> Any:
+    """Reject non-finite floats anywhere in a JSON-compatible value."""
+    if isinstance(value, float) and not isfinite(value):
+        raise ValueError("JSON numbers must be finite")
+    if isinstance(value, dict):
+        for item in value.values():
+            _validate_finite_json(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _validate_finite_json(item)
+    return value
+
+
+FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+JsonValue = Annotated[Any, AfterValidator(_validate_finite_json)]

@@ -34,5 +34,9 @@ class ConflictError(DomainError):
     """Raised when an operation conflicts with existing state."""
 
 
+class PayloadTooLargeError(DomainError):
+    """Raised when a payload exceeds a configured size limit."""
+
+
 class ValidationError(DomainError):
     """Raised when input fails domain shape or invariant checks."""

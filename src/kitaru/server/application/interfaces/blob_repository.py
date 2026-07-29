@@ -1,0 +1,16 @@
+"""Blob repository interface."""
+
+import uuid
+from typing import Protocol
+
+from kitaru.server.domain.blob import Blob
+
+
+class BlobRepository(Protocol):
+    """Blob persistence operations."""
+
+    async def create(self, blob: Blob) -> tuple[Blob, bool]: ...
+    async def get(self, blob_id: uuid.UUID) -> Blob: ...
+    async def get_content(self, blob_id: uuid.UUID) -> Blob: ...
+    async def get_by_sha256(self, sha256: str) -> Blob: ...
+    async def delete(self, blob_id: uuid.UUID) -> None: ...
