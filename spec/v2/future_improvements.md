@@ -4,19 +4,27 @@ Deferred by choice. Each entry names the improvement, the trigger that makes it 
 
 ## Worker auth via registration-issued tokens
 
-Workers authenticate with a plain account API key today, so any authenticated caller can write job transitions and read decrypted `secret_env` from `GET /v1/jobs/{id}/spec`. Issue a worker-scoped token at registration, require it on claim, heartbeat, and job updates, and restrict `get_spec` to the claiming worker. Trigger: running untrusted plugin code in shared deployments, or any hardening pass before exposing the API beyond a trusted team. Needs answers for token rotation on re-registration upserts, expiry, and worker-row deletion.
+Workers authenticate with a plain account API key today, so any authenticated caller can write task transitions and read decrypted `secret_env` from `GET /v1/tasks/{id}/spec`. Issue a worker-scoped token at registration, require it on claim, heartbeat, and task updates, and restrict `get_spec` to the claiming worker. Trigger: running untrusted plugin code in shared deployments, or any hardening pass before exposing the API beyond a trusted team. Needs answers for token rotation on re-registration upserts, expiry, and worker-row deletion.
 
-## Worker-only job status updates
+## Worker-only task status updates
 
-`PATCH /v1/jobs/{id}` is the executor surface, but any authenticated caller can write status transitions, guarded only by the attempt fence. Reject status writes from callers other than the claiming worker, leaving `POST /v1/jobs/{id}/cancel` as the only user-facing job write. Needs the worker identity from the registration-issued tokens above. Trigger: the same hardening pass, a forged transition corrupts settlement and run finalization. Hooks: the jobs router, `JobService.update_job`.
+`PATCH /v1/tasks/{id}` is the executor surface, but any authenticated caller can write status transitions, guarded only by the attempt fence. Reject status writes from callers other than the claiming worker, leaving `POST /v1/jobs/{id}/cancel` as the only user-facing write into the execution substrate. Needs the worker identity from the registration-issued tokens above. Trigger: the same hardening pass, a forged transition corrupts settlement and run finalization. Hooks: the tasks router, `TaskService.update_task`.
 
 ## Idempotency keys on job-creating POSTs
 
 Replays inside a run dedup naturally on unique (experiment_run_id, baseline_session_id), and imports dedup per session on unique (provider, external_id). Standalone `POST /v1/replays`, `POST /v1/evaluations`, and `POST /v1/session-runs` have no natural key, so a client retry after a timeout creates duplicate jobs. The client already sends an `Idempotency-Key` header held stable across retry attempts, add the server-side dedup table keyed on it when duplicate jobs start showing up in practice.
 
-## Job retry
+## Task retry
 
-Add `POST /v1/jobs/{id}/retry`, re-queueing a terminal failed, timed_out, abandoned, or canceled job. The sketch: move the job back to pending without resetting attempt (the fencing token stays monotonic), clear the claim and outcome fields, unlink but keep the failed attempt's session (`session.job_id` to null, freeing the one-session-per-job slot), and for replay jobs delete the evaluation children with their evaluation rows and reset the replay row to pending so fan-out and settlement re-run. Trigger: transient failures worth re-running without recreating the job. Hooks: `JobService`, the jobs router, the session repository unlink.
+Add `POST /v1/tasks/{id}/retry`, re-queueing a terminal failed, timed_out, abandoned, or canceled task. The sketch: move the task back to pending without resetting attempt (the fencing token stays monotonic), clear the claim and outcome fields, unlink but keep the failed attempt's session (`session.task_id` to null, freeing the one-session-per-task slot), delete the task's evaluation rows, and re-open the settled job (back to running, replay to its pre-settled status) so settlement re-runs when the retried task drains. Retrying an agent task additionally deletes the appended result evaluator tasks so the append re-runs against the new result session. Trigger: transient failures worth re-running without recreating the pipeline. Hooks: `TaskService`, `JobService.advance_job`, `replay_pipeline`, the session repository unlink.
+
+## Run-scoped workers
+
+No worker can scope itself to one experiment run today, only kinds, version capabilities, and a job pin exist. The mechanism is already in place: stamp an `experiment_run` label on every task of run-owned replays at fan-out, and a run worker sets a required selector on it. A `WorkerConfig.experiment_run_id` convenience can expand into that selector plus a run-terminal stop condition read via `client.experiment_runs.get`, keeping the wire scope generic labels. Trigger: dedicated worker pools per run, or CLI flows that launch a worker for one run and want it to exit on its own. Hooks: `replay_pipeline` task creation, `WorkerConfig`, the Worker stop check.
+
+## Declared task dependencies
+
+Tasks are appended by pipeline subscribers reacting to sibling completions, so a job's full shape becomes visible only as it executes. A declared `depends_on` (single task id) would let creators lay out the whole task set at creation: a `blocked` initial status, unblocking on parent completion, structural cancel when the parent goes terminal without completing. Needs a deferred-input mechanism for values that exist only after the parent runs (the result evaluator's `input_session_id`), which is the reason appending won initially. Trigger: pipelines whose task graph must be inspectable before execution, or a kind whose sequencing outgrows reaction-time appends. Hooks: the task model and claim query, `JobService.advance_job`, `replay_pipeline`.
 
 ## Smarter history matching via tool_definition
 
@@ -36,7 +44,7 @@ Scores carry no direction, so a reader comparing baseline and replay cannot tell
 
 ## Deployed and LLM-judge evaluator kinds
 
-Evaluators are registry plugins executed in a job process. A deployed evaluator would call an external endpoint, an LLM-judge evaluator would prompt a model directly from a config instead of code. Trigger: teams that want evaluation without shipping code. Hooks: `EvaluatorConfig`, `EvaluationHandler`, the evaluation flow.
+Evaluators are registry plugins executed in a task process. A deployed evaluator would call an external endpoint, an LLM-judge evaluator would prompt a model directly from a config instead of code. Trigger: teams that want evaluation without shipping code. Hooks: `EvaluatorConfig`, `EvaluationHandler`, the evaluation flow.
 
 ## Push-based run progress
 
@@ -48,7 +56,7 @@ Session node inputs and outputs are stored inline as JSONB with no size bound. C
 
 ## Surface no-live-worker to the job creator
 
-Creating a job that no live worker's scope can claim succeeds silently, the job sits pending with no visible reason. Add a caller-visible signal, a response field or a dedicated check endpoint the CLI polls, backed by a liveness-and-scope query over the worker table. Trigger: users repeatedly confused by pending jobs whose worker pool is missing or misscoped. Hooks: the job-creating services, the worker repository.
+Creating a job whose tasks no live worker's scope can claim succeeds silently, the tasks sit pending with no visible reason. Add a caller-visible signal, a response field or a dedicated check endpoint the CLI polls, backed by a liveness-and-scope query over the worker table matching selectors against the tasks' labels. Trigger: users repeatedly confused by pending jobs whose worker pool is missing or misscoped. Hooks: the job-creating services, the worker repository.
 
 ## Blob offload to object storage
 
@@ -56,16 +64,16 @@ Blobs are content-addressed bytes in the database. Large plugin payloads or impo
 
 ## Per-plugin secret references
 
-Evaluation and import jobs run without a run spec, so `secret_env` is empty and plugin credentials come from the worker's inherited environment. Add secret references on the plugin version or the evaluation and import requests, resolved into `secret_env` at spec build like run spec secrets. Trigger: shared workers where per-plugin credentials differ or must stay out of the worker environment. Hooks: the plugin registry, the spec builders.
+Evaluator and importer tasks run without a run spec, so `secret_env` is empty and plugin credentials come from the worker's inherited environment. Add secret references on the plugin version or the evaluation and import requests, resolved into `secret_env` at spec build like run spec secrets. Trigger: shared workers where per-plugin credentials differ or must stay out of the worker environment. Hooks: the plugin registry, the spec builders.
 
 ## Deduplicate concurrent blob materialization
 
-Two concurrently claimed jobs referencing the same plugin or payload blob can both miss the cache and download the same content. The atomic rename keeps the cache correct, the second download is just wasted bandwidth. Add a per-sha in-flight lock in the materialization helper so one download serves both. Trigger: high-concurrency workers on jobs sharing plugins or payloads. Hook: the blob materialization helper in `handlers/base.py`.
+Two concurrently claimed tasks referencing the same plugin or payload blob can both miss the cache and download the same content. The atomic rename keeps the cache correct, the second download is just wasted bandwidth. Add a per-sha in-flight lock in the materialization helper so one download serves both. Trigger: high-concurrency workers on tasks sharing plugins or payloads. Hook: the blob materialization helper in `handlers/base.py`.
 
 ## Comma-separated worker scope env lists
 
-`KITARU_WORKER_SCOPE__AGENT_VERSION_IDS` and `KITARU_WORKER_SCOPE__KINDS` take JSON lists, since pydantic-settings only auto-decodes JSON for nested list env values. Add a before-validator on `WorkerConfig` splitting un-bracketed values on commas. Trigger: deployment ergonomics complaints about quoting JSON in env vars. Hook: `WorkerConfig`.
+`KITARU_WORKER_SCOPE__KINDS` takes a JSON list, since pydantic-settings only auto-decodes JSON for nested list env values. Add a before-validator on `WorkerConfig` splitting un-bracketed values on commas. Trigger: deployment ergonomics complaints about quoting JSON in env vars. Hook: `WorkerConfig`.
 
 ## Time-gate the claim-time staleness sweep
 
-The sweep runs on every claim. Its no-op cost is one probe of the staleness partial index, which only holds in-flight jobs, so this is cheap at current scale. If claim volume grows enough that the probe shows up in profiles, add a per-process time gate: an in-memory last-swept timestamp, sweep at most once per few seconds per server replica. Staleness detection is heartbeat-timeout-granular, so a gate below that resolution changes nothing about detection latency.
+The sweep runs on every claim. Its no-op cost is one probe of the staleness partial index, which only holds in-flight tasks, so this is cheap at current scale. If claim volume grows enough that the probe shows up in profiles, add a per-process time gate: an in-memory last-swept timestamp, sweep at most once per few seconds per server replica. Staleness detection is heartbeat-timeout-granular, so a gate below that resolution changes nothing about detection latency.
