@@ -30,9 +30,11 @@ The worker relies on these client calls and models:
 
 `JobWithSpec` carries both the `JobResponse` and the full `JobSpecResponse`. The spec ships with every claim so execution never refetches it. There is no separate single-job claim endpoint, a job-pinned scope through the batch claim covers that case.
 
-`JobSpecResponse` fields the worker consumes: `kind`, `run` (command, working_dir, env, timeout_seconds), `secret_env`, and the per-kind `details`: replay (replay_id, inputs), session_run (inputs, name), score (config, plugin), import (plugin, payload with blob_id/sha256, params). The spec plugin is a union discriminated on `type`: script (entrypoint, blob_id, sha256) or package (entrypoint, pinned requirement).
+`JobSpecResponse` fields the worker consumes: `kind`, `timeout_seconds`, `run` (command, working_dir, env), `secret_env`, and the per-kind `details`: replay (replay_id, inputs), session_run (inputs, name), evaluation (evaluator_name, params, plugin), import (plugin, payload with blob_id/sha256, params). The spec plugin is a union discriminated on `type`: script (entrypoint, blob_id, sha256) or package (entrypoint, pinned requirement).
 
-Job kinds: `replay`, `session_run`, `score`, `import`. Job statuses the worker writes: `running`, `completed`, `failed`, `timed_out`, `canceled`. The worker reports process success as `completed` for every kind. The server owns the replay pipeline: completing a replay job fans out its score jobs in the same request, so a job-pinned claim scope sees the children as soon as the parent's completion returns, and the replay verdict settles server-side when the children finish. The result session of a replay or session run is linked by the agent-side adapter, which sets the job id on the session create request (see job.md), so the link exists before the process exits.
+`timeout_seconds` is always set by the server, for every kind, and is the only process timeout the worker knows. Evaluation and import jobs carry no `run`, so the worker builds their command itself but still takes their timeout from the spec. The worker holds no per-kind timeout constants.
+
+Job kinds: `replay`, `session_run`, `evaluation`, `import`. Job statuses the worker writes: `running`, `completed`, `failed`, `timed_out`, `canceled`. There is no canceling status: cancellation reaches the worker as a job id in `cancel_job_ids`, and the worker's terminal write is what settles it. The worker reports process success as `completed` for every kind. The server owns the replay pipeline: completing a replay job fans out its evaluation jobs in the same request, so a job-pinned claim scope sees the children as soon as the parent's completion returns, and the replay settles server-side when the children finish. The result session of a replay or session run is linked by the agent-side adapter, which sets the job id on the session create request (see job.md), so the link exists before the process exits.
 
 ## Package layout
 
@@ -47,7 +49,7 @@ src/kitaru/worker/
     __init__.py     # HANDLERS registry
     base.py         # JobHandler protocol, blob materialization helper
     agent.py        # AgentHandler (replay and session run)
-    score.py        # ScoreHandler
+    evaluation.py   # EvaluationHandler
     imports.py      # ImportHandler
   process.py        # JobProcess, ProcessResult, TailBuffer, run_job_process,
                     # build_process_env, parse_inline_dependencies, get_python_run_command
@@ -66,9 +68,7 @@ src/kitaru/job/            # code running inside the job process, see job.md
 | `LOG_TAIL_MAX_BYTES` | 8192 | Bytes of stdout/stderr kept per stream |
 | `MAX_INPUTS_ENV_BYTES` | 32768 | Threshold for passing inputs via env |
 | `MAX_RESULT_BYTES` | 1 MiB | Size cap for the job result file |
-| `SCORE_TIMEOUT_SECONDS` | 300 | Score process timeout when the spec carries no run |
-| `IMPORT_TIMEOUT_SECONDS` | 600 | Import process timeout |
-| `PAYLOAD_CACHE_MAX_BYTES` | 1 GiB | Payload cache budget |
+| `PAYLOAD_CACHE_MAX_BYTES` | 1 GiB | Payload cache budget, must stay at or above the server's max blob size |
 
 Blob cache roots default to `~/.cache/kitaru/blobs` (code, unbounded) and `~/.cache/kitaru/payloads` (payloads, budgeted). The defaults live in `worker.py` where the two caches are built, `BlobCache` itself has no default root, so the two instances can never silently share a directory.
 
@@ -98,7 +98,7 @@ class WorkerScope(FrozenModel):
 
 Validation: `experiment_run_id` and `job_id` are mutually exclusive. `kinds` and `agent_version_ids` must be non-empty when set.
 
-Semantics of `agent_version_ids`: scoping is per agent version, since versions differ in code and requirements and "this host can run it" is a property of the version, not the agent. The constraint applies to jobs that reference an agent version (replays, session runs, source-scorer jobs). Jobs without an agent version (registry score jobs, imports) pass the version filter, because they carry their own code and need no version environment. Excluding them is what `kinds` is for, so a version-pinned worker that should run nothing else sets both.
+Semantics of `agent_version_ids`: scoping is per agent version, since versions differ in code and requirements and "this host can run it" is a property of the version, not the agent. The constraint applies to jobs that reference an agent version (replays, session runs). Jobs without an agent version (evaluation jobs, imports) pass the version filter, because they carry their own code and need no version environment. Excluding them is what `kinds` is for, so a version-pinned worker that should run nothing else sets both.
 
 The scope is also the worker's completion contract: a scope pinned to a job or run drains and returns, an unpinned scope runs until stopped.
 
@@ -169,7 +169,7 @@ One private loop serves every scope, and every claim is the same batch call, fil
 | `job_id` | the job itself while pending, later its fan-out children | job and its children terminal |
 | `experiment_run_id` | the run's jobs and their fan-out children | run terminal |
 
-With a `job_id` scope there is no phase switch: the `id = :job_id OR parent_job_id = :job_id` filter returns the job on the first claim and the score children as the fan-out creates them. Because the fan-out happens inside the completion request, the children exist before the parent reads as completed, so the stop check (job terminal and no non-terminal children, read via the `parent_job_id` jobs filter) has no gap to race through. Empty claims are disambiguated by the stop condition read: a drained scope ends the loop, a job held by another worker keeps the loop polling until it goes terminal, a missing job surfaces the 404 from the read.
+With a `job_id` scope there is no phase switch: the `id = :job_id OR parent_job_id = :job_id` filter returns the job on the first claim and the evaluation children as the fan-out creates them. Because the fan-out happens inside the completion request, the children exist before the parent reads as completed, so the stop check (job terminal and no non-terminal children, read via the `parent_job_id` jobs filter) has no gap to race through. Empty claims are disambiguated by the stop condition read: a drained scope ends the loop, a job held by another worker keeps the loop polling until it goes terminal, a missing job surfaces the 404 from the read.
 
 Stop semantics: the stop condition is checked after every empty claim. The lifetime `timeout` is a deadline computed at entry, checked in the same place, and applies to every scope. When the loop decides to stop it stops claiming, waits for in-flight tasks to finish, and returns. Nothing hard-kills running jobs, the per-job timeouts bound those.
 
@@ -214,13 +214,13 @@ Responsibility: the status protocol and nothing else. The skeleton:
 3. `handler.prepare(ctx, job_id, spec)` builds the `JobProcess`. A prepare failure fails the job with `"Failed to prepare the <label> process: <exc>"`.
 4. Create a per-job temp directory and set `KITARU_JOB_RESULT_PATH` in the process env, uniformly for every kind. The directory is removed in a `finally`.
 5. `run_job_process(process, canceled)` supervises the subprocess.
-6. Report the outcome. Outcomes are ranked: a recorded exit code wins over the cancel event and the timeout, and the cancel event wins over the timeout. A kill (`returncode=None`) with the cancel event set reports as canceled, without it as timed out.
+6. Report the outcome. Outcomes are ranked: a recorded exit code wins over the cancel event and the timeout, and the cancel event wins over the timeout. A kill (`returncode=None`) with the cancel event set reports as canceled, without it as timed out. A process that exits before the kill lands reports its exit code even when a cancel was requested, and the server accepts that completion, so a cancel arriving at the finish line never discards a finished result.
    - Exit 0: read and JSON-parse the result file when it exists, then `PATCH status=completed` with the result attached, uniformly for every kind. A result file larger than `MAX_RESULT_BYTES` fails the job with `"<Label> process wrote a result larger than <max> bytes."`, one that does not parse as JSON fails it with `"<Label> process wrote an invalid JSON result."`. If the server rejects the transition with a 409 (missing or incomplete result session, missing required result), fetch the job and, when a result session is linked, the session, build a precise error (`"Agent process exited successfully without recording a result session."`, `"Result session <id> is <status>, not completed."`, or `"<Label> process exited successfully without writing a result."`), and fail the job.
    - Nonzero exit: fail with `"<Label> process exited with code <rc>."` plus the log tail. When the result file exists, fits the size cap, and parses as JSON, it rides the failed PATCH as the job result (partial import stats, for example), an unreadable file is ignored on this path.
    - Killed with the cancel event set: `PATCH status=canceled`.
    - Killed on timeout: `PATCH status=timed_out` with `"Job timed out after <n> seconds."` plus the tail.
 
-Failing a job is always `PATCH status=failed` with the error message. Every transition carries the attempt from the claim response, and the server rejects a mismatch with a 409 on all but canceled, meaning the job was requeued and re-claimed since. On the completion 409 path the runner therefore fetches the job first: when its attempt no longer matches the claim, the runner logs and returns without further updates instead of building the result-session error. A 409 on any other transition (failed, timed_out, canceled) is logged and the runner returns, the job belongs to another attempt now. A hard failure writing any transition, the initial running PATCH included, is logged and the attempt abandoned without retries: the un-heartbeated claim ages out through the staleness sweep, which requeues or abandons the job. The sweep is the universal safety net, the runner keeps no retry machinery for status writes. Process labels per kind: `Agent` for replay and session run, `Scorer` for score, `Importer` for import. The runner never knows which kinds require a result, it forwards what the file holds and the server validates at the transition.
+Failing a job is always `PATCH status=failed` with the error message. Every transition carries the attempt from the claim response, canceled included, and the server rejects a mismatch with a 409, meaning the job was requeued and re-claimed since. On the completion 409 path the runner therefore fetches the job first: when its attempt no longer matches the claim, the runner logs and returns without further updates instead of building the result-session error. A 409 on any other transition (failed, timed_out, canceled) is logged and the runner returns, the job belongs to another attempt now. A hard failure writing any transition, the initial running PATCH included, is logged and the attempt abandoned without retries: the un-heartbeated claim ages out through the staleness sweep, which requeues or abandons the job. The sweep is the universal safety net, the runner keeps no retry machinery for status writes. Process labels per kind: `Agent` for replay and session run, `Evaluator` for evaluation, `Importer` for import. The runner never knows which kinds require a result, it forwards what the file holds and the server validates at the transition.
 
 ### JobHandler and handlers (`handlers/`)
 
@@ -238,20 +238,21 @@ The protocol and the blob materialization helper live in `handlers/base.py`, eac
 
 **`AgentHandler`** (registered for both `replay` and `session_run`, which build identical processes):
 
-- Command, working dir, and timeout come from `spec.run`.
+- Command and working dir come from `spec.run`, timeout from `spec.timeout_seconds`.
 - Env: `build_process_env` plus `KITARU_JOB_SESSION_NAME` when `details.name` is set, plus `KITARU_JOB_INPUTS` with the JSON-encoded `details.inputs` when the encoding fits `MAX_INPUTS_ENV_BYTES` (agent code fetches the spec otherwise), plus `KITARU_JOB_REPLAY_ID` from `details.replay_id` for replay jobs.
 
-**`ScoreHandler`**:
+**`EvaluationHandler`**:
 
-- Source scorer (`details.plugin is None`): run `python -m kitaru.job score` in the agent's run environment, command `get_python_run_command("kitaru.job", ["score"], [])`, working dir and timeout from `spec.run`.
-- Registry scorer with a script plugin: materialize the plugin blob into the code cache, set `KITARU_JOB_PLUGIN_PATH` to the cached path, command `get_python_run_command("kitaru.job", ["score"], parse_inline_dependencies(path))`, no working dir, timeout `SCORE_TIMEOUT_SECONDS`.
-- Registry scorer with a package plugin: no materialization and no `KITARU_JOB_PLUGIN_PATH`, command `get_python_run_command("kitaru.job", ["score"], [plugin.requirement])`, no working dir, timeout as above.
+- Script plugin: materialize the plugin blob into the code cache, set `KITARU_JOB_PLUGIN_PATH` to the cached path, command `get_python_run_command("kitaru.job", ["evaluate"], parse_inline_dependencies(path))`, no working dir.
+- Package plugin: no materialization and no `KITARU_JOB_PLUGIN_PATH`, command `get_python_run_command("kitaru.job", ["evaluate"], [plugin.requirement])`, no working dir.
 
 **`ImportHandler`**:
 
 - Script plugin: materialize the importer code blob into the code cache and the payload blob into the payload cache, concurrently, set `KITARU_JOB_PLUGIN_PATH` and `KITARU_JOB_PAYLOAD_PATH`, dependencies `parse_inline_dependencies(code_path)`.
 - Package plugin: materialize only the payload blob, set `KITARU_JOB_PAYLOAD_PATH`, dependencies `[plugin.requirement]`.
-- Command `get_python_run_command("kitaru.job", ["import"], dependencies)`, no working dir, timeout `IMPORT_TIMEOUT_SECONDS`.
+- Command `get_python_run_command("kitaru.job", ["import"], dependencies)`, no working dir.
+
+Every handler takes `timeout_seconds` from the spec, never from a constant, so the `JobProcess` timeout has one source across all four kinds.
 
 Blob materialization: check the cache by sha256, on a miss download via `client.blobs.download(blob_id)` and `cache.put(sha256, content)`, which verifies the hash.
 
@@ -307,7 +308,7 @@ Content-addressed file cache keyed by sha256. `put` verifies the digest (raising
 
 ### Job-side package (`kitaru/job/`)
 
-Everything that runs inside the job process is its own package with its own spec, see `job.md`: the score and import flows, plugin loading, the scorer and parser contracts, and the env accessors for agent code. The worker's only knowledge of it is the `kitaru.job` program it puts into commands and the exit codes it interprets.
+Everything that runs inside the job process is its own package with its own spec, see `job.md`: the evaluation and import flows, plugin loading, the evaluator and parser contracts, and the env accessors for agent code. The worker's only knowledge of it is the `kitaru.job` program it puts into commands and the exit codes it interprets.
 
 ## Env contract
 
@@ -321,7 +322,7 @@ Variables the worker controls. All are cleared from the inherited environment be
 | `KITARU_JOB_INPUTS` | replay, session run | JSON inputs when within `MAX_INPUTS_ENV_BYTES` |
 | `KITARU_JOB_SESSION_NAME` | session run | Session name when the spec has one |
 | `KITARU_JOB_REPLAY_ID` | replay | Replay id from the spec details |
-| `KITARU_JOB_PLUGIN_PATH` | score, import with a script plugin | Cached script plugin path |
+| `KITARU_JOB_PLUGIN_PATH` | evaluation and import with a script plugin | Cached script plugin path |
 | `KITARU_JOB_PAYLOAD_PATH` | import | Cached payload path |
 | `KITARU_JOB_RESULT_PATH` | all | Path the job writes its JSON result to, in a worker-owned temp directory |
 
@@ -357,18 +358,18 @@ Requests per executed job:
 | Success transition | 1 |
 | Failure detail fetch | error path only |
 
-The success transition is attempted directly and the server validates it (a replay or session run without a completed result session gets a 409, so does a score or import completion without a result). The job's result rides the completion call, read from the result file, so recording it costs no request of its own. The worker fetches job and session details only to compose the error message. Pinned scopes additionally poll their target for the stop condition, a job pin also lists the children of its job.
+The success transition is attempted directly and the server validates it (a replay or session run without a completed result session gets a 409, so does an evaluation or import completion without a result). The job's result rides the completion call, read from the result file, so recording it costs no request of its own. The worker fetches job and session details only to compose the error message. Pinned scopes additionally poll their target for the stop condition, a job pin also lists the children of its job.
 
 ## Decisions
 
 - **Claim scoping is per agent version, not per agent.** Versions differ in code and requirements, so whether a host can run a job is a property of the version. The server-side counterparts change accordingly: the worker row stores the scope, and the claim filter works off `agent_version_id IN (...)` and `kind IN (...)` directly.
 - **Scope is one concept for filter, completion, and wire.** The same `WorkerScope` decides what a claim asks for and when the worker is done. It travels once, in the worker registration, and the server reads it from the worker row at claim time. Bounded scopes (job, run) drain and return, unbounded scopes run until stop event or deadline.
 - **No standalone claim endpoint.** A job-pinned scope through the batch claim covers the one-off case with one filter, including re-claiming a requeued parent. The fail-fast semantics of a dedicated endpoint are reconstructed by the stop condition read, and a job held by another worker is waited on instead of erroring.
-- **Version filter does not exclude version-less jobs.** Registry score jobs and imports carry their own code, so they match any worker unless `kinds` says otherwise. Exclusion is an explicit choice, not a side effect of pinning versions.
-- **Uniform success transition.** Process success is reported as `completed` for every kind. The server fans out a completed replay's score jobs within the completion request and settles the replay verdict when they finish. The worker never writes `scoring`.
+- **Version filter does not exclude version-less jobs.** Evaluation jobs and imports carry their own code, so they match any worker unless `kinds` says otherwise. Exclusion is an explicit choice, not a side effect of pinning versions.
+- **Uniform success transition.** Process success is reported as `completed` for every kind. The server fans out a completed replay's evaluation jobs within the completion request and settles the replay when they finish. The worker never writes `evaluating`.
 - **A recorded exit outranks cancel and timeout, cancel outranks timeout.** A process that exits before the kill lands is reported by its exit code, killing it late does not undo finished work. Between the kill reasons the cancel event wins, it is the server-driven signal and the timeout is the local bound.
 - **Strategy over subclasses for kinds.** The only variation is process construction, supervision and the status protocol are identical. Subclasses become the right call only if kinds ever diverge in the execute skeleton itself.
 - **Graceful stop only.** Timeout and stop event drain in-flight jobs rather than killing them. A hard-stop variant can be added later by setting the cancel events of all in-flight jobs, the plumbing supports it.
-- **The claim's attempt fences every executor status write.** A requeued and re-claimed job carries a higher attempt, so a stale worker's late transition is rejected with a 409 instead of overwriting the new claim. Canceled is the exception, it doubles as the user-facing cancel and stays unfenced for now. The heartbeat stamps only jobs the caller still owns, lost ones come back in `cancel_job_ids`.
+- **The claim's attempt fences every executor status write, with no exception.** A requeued and re-claimed job carries a higher attempt, so a stale worker's late transition is rejected with a 409 instead of overwriting the new claim. Canceled is fenced like the rest, because the user-facing cancel moved to `POST /v1/jobs/{id}/cancel`, which sets a request flag rather than writing a status. A stale worker confirming a cancel can no longer terminate somebody else's attempt. The heartbeat stamps only jobs the caller still owns, lost ones come back in `cancel_job_ids`.
 - **One worker registration per entry call.** Registration upserts by name, so restarts reuse the worker row. The config `name` default is hostname-pid.
 - **Package plugins install through uv, not the blob cache.** A package plugin ships as a pinned requirement passed to `uv run --with`, so uv's package cache replaces blob materialization and the first run pays the install inside the job timeout. Trust rests on the exact pin instead of a content hash, transitive dependencies stay unpinned, and the package index is worker environment configuration.
