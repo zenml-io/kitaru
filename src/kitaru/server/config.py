@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SKIP_DB_MIGRATION: bool = False
 
+    WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
+
     DB_HOST: str | None = None
     DB_PORT: int = 5432
     DB_USER: str = "postgres"

@@ -33,6 +33,8 @@ from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.devices import DevicesResource
 from kitaru.client.resources.info import InfoResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.tags import TagsResource
+from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
 
 
@@ -73,6 +75,8 @@ class KitaruAPIClient:
         self.devices = DevicesResource(self)
         self.info = InfoResource(self)
         self.secrets = SecretsResource(self)
+        self.tags = TagsResource(self)
+        self.workers = WorkersResource(self)
         self._auth: TokenProvider | None = None
         if credential_store is not None:
             self._auth = TokenProvider(base_url, credential_store, self.auth)

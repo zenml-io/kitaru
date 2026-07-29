@@ -35,6 +35,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.api_models.v1.task import WorkerScope
+from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client_id import ENV_CLIENT_ID
 from kitaru.client.credential_store import CredentialStore
@@ -50,6 +53,8 @@ from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.secret import SecretFilter
+from kitaru.server.application.models.tag import TagFilter
+from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
 from kitaru.server.database.service import DatabaseService
@@ -71,6 +76,15 @@ from kitaru.server.domain.secret import (
     Secret,
     SecretNotFound,
 )
+from kitaru.server.domain.tag import (
+    DuplicateTagLink,
+    DuplicateTagName,
+    Tag,
+    TagLink,
+    TagLinkNotFound,
+    TagNotFound,
+)
+from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.transport import RetryTransport
 
 TEST_DB_PREFIX = "kitaru_test"
@@ -1077,4 +1091,308 @@ async def create_secret(
         values = {"password": SecretStr("hunter2")}
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
+
+
+class FakeTagRepository:
+    """In-memory tag repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._tags: dict[uuid.UUID, Tag] = {}
+        self._links: dict[uuid.UUID, TagLink] = {}
+
+    def _check_duplicate_name(self, tag: Tag) -> None:
+        for other in self._tags.values():
+            if other.id != tag.id and other.name == tag.name:
+                raise DuplicateTagName(tag.name)
+
+    def _check_duplicate_link(self, link: TagLink) -> None:
+        for other in self._links.values():
+            if (
+                other.id != link.id
+                and other.tag_id == link.tag_id
+                and other.resource_type == link.resource_type
+                and other.resource_id == link.resource_id
+            ):
+                raise DuplicateTagLink(
+                    link.tag_id, link.resource_type, link.resource_id
+                )
+
+    async def create(self, tag: Tag) -> Tag:
+        """Persist a new tag.
+
+        Args:
+            tag: Tag to store.
+
+        Raises:
+            DuplicateTagName: The tag name is already registered.
+
+        Returns:
+            Stored tag with timestamps set.
+        """
+        self._check_duplicate_name(tag)
+        now = datetime.now(UTC)
+        stored = tag.model_copy(update={"created": now, "updated": now})
+        self._tags[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, tag_id: uuid.UUID) -> Tag:
+        """Load a tag by id.
+
+        Args:
+            tag_id: Id of the tag.
+
+        Raises:
+            TagNotFound: No tag has this id.
+
+        Returns:
+            Stored tag.
+        """
+        tag = self._tags.get(tag_id)
+        if tag is None:
+            raise TagNotFound(tag_id)
+        return tag.model_copy()
+
+    async def query(self, tag_filter: TagFilter) -> tuple[list[Tag], str | None]:
+        """Query tags matching a filter.
+
+        Args:
+            tag_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching tags and the next cursor.
+        """
+        tags = list(self._tags.values())
+        if tag_filter.name is not None:
+            tags = [tag for tag in tags if tag.name == tag_filter.name]
+        page, next_cursor = _paginate_fake(tags, tag_filter)
+        return [tag.model_copy() for tag in page], next_cursor
+
+    async def update(self, tag: Tag) -> Tag:
+        """Persist changes to an existing tag.
+
+        Args:
+            tag: Tag with modified fields.
+
+        Raises:
+            TagNotFound: No tag has this id.
+            DuplicateTagName: The tag name is already registered.
+
+        Returns:
+            Stored tag with the updated timestamp renewed.
+        """
+        stored = self._tags.get(tag.id)
+        if stored is None:
+            raise TagNotFound(tag.id)
+        self._check_duplicate_name(tag)
+        now = _renewed_timestamp(stored.updated)
+        updated = tag.model_copy(update={"created": stored.created, "updated": now})
+        self._tags[tag.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, tag_id: uuid.UUID) -> None:
+        """Delete a tag and its links.
+
+        Args:
+            tag_id: Id of the tag.
+
+        Raises:
+            TagNotFound: No tag has this id.
+        """
+        if tag_id not in self._tags:
+            raise TagNotFound(tag_id)
+        del self._tags[tag_id]
+        cascaded = [
+            link_id for link_id, link in self._links.items() if link.tag_id == tag_id
+        ]
+        for link_id in cascaded:
+            del self._links[link_id]
+
+    async def create_link(self, link: TagLink) -> TagLink:
+        """Persist a new tag link.
+
+        Args:
+            link: Tag link to store.
+
+        Raises:
+            TagNotFound: No tag has the link's tag id.
+            DuplicateTagLink: The tag is already linked to the resource.
+
+        Returns:
+            Stored tag link with timestamps set.
+        """
+        if link.tag_id not in self._tags:
+            raise TagNotFound(link.tag_id)
+        self._check_duplicate_link(link)
+        now = datetime.now(UTC)
+        stored = link.model_copy(update={"created": now, "updated": now})
+        self._links[stored.id] = stored
+        return stored.model_copy()
+
+    async def delete_link(
+        self,
+        tag_id: uuid.UUID,
+        resource_type: TagResourceType,
+        resource_id: uuid.UUID,
+    ) -> None:
+        """Delete a tag link by tag and resource.
+
+        Args:
+            tag_id: Id of the tag.
+            resource_type: Kind of the linked resource.
+            resource_id: Id of the linked resource.
+
+        Raises:
+            TagLinkNotFound: No link matches the tag and resource.
+        """
+        for link_id, link in self._links.items():
+            if (
+                link.tag_id == tag_id
+                and link.resource_type == resource_type
+                and link.resource_id == resource_id
+            ):
+                del self._links[link_id]
+                return
+        raise TagLinkNotFound(tag_id, resource_type, resource_id)
+
+
+async def create_tag(
+    repository: FakeTagRepository, owner_id: uuid.UUID, name: str = "smoke-test"
+) -> Tag:
+    """Store a tag in the fake repository.
+
+    Args:
+        repository: Fake tag repository.
+        owner_id: Id of the owning account.
+        name: Tag name.
+
+    Returns:
+        Stored tag.
+    """
+    return await repository.create(Tag(owner_id=owner_id, name=name))
+
+
+class FakeWorkerRepository:
+    """In-memory worker repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._workers: dict[uuid.UUID, Worker] = {}
+
+    async def register(self, worker: Worker) -> Worker:
+        """Persist a worker, refreshing an existing row with the same name.
+
+        Args:
+            worker: Worker to store or refresh.
+
+        Returns:
+            Stored worker with its id, created, and updated timestamp set.
+        """
+        for stored in self._workers.values():
+            if stored.name == worker.name:
+                refreshed = stored.model_copy()
+                refreshed.refresh(
+                    worker.scope, worker.runtime, worker.metadata, worker.last_seen_at
+                )
+                refreshed = refreshed.model_copy(
+                    update={"updated": _renewed_timestamp(stored.updated)}
+                )
+                self._workers[stored.id] = refreshed
+                return refreshed.model_copy()
+        now = datetime.now(UTC)
+        stored = worker.model_copy(update={"created": now, "updated": now})
+        self._workers[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, worker_id: uuid.UUID) -> Worker:
+        """Load a worker by id.
+
+        Args:
+            worker_id: Id of the worker.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+
+        Returns:
+            Stored worker.
+        """
+        worker = self._workers.get(worker_id)
+        if worker is None:
+            raise WorkerNotFound(worker_id)
+        return worker.model_copy()
+
+    async def query(
+        self, worker_filter: WorkerFilter
+    ) -> tuple[list[Worker], str | None]:
+        """Query workers matching a filter.
+
+        Args:
+            worker_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching workers and the next cursor.
+        """
+        workers = list(self._workers.values())
+        if worker_filter.name is not None:
+            workers = [
+                worker for worker in workers if worker.name == worker_filter.name
+            ]
+        if worker_filter.seen_after is not None:
+            workers = [
+                worker
+                for worker in workers
+                if worker.last_seen_at >= worker_filter.seen_after
+            ]
+        page, next_cursor = _paginate_fake(workers, worker_filter)
+        return [worker.model_copy() for worker in page], next_cursor
+
+    async def delete(self, worker_id: uuid.UUID) -> None:
+        """Delete a worker by id.
+
+        Args:
+            worker_id: Id of the worker.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+        """
+        if worker_id not in self._workers:
+            raise WorkerNotFound(worker_id)
+        del self._workers[worker_id]
+
+
+async def create_worker(
+    repository: FakeWorkerRepository,
+    owner_id: uuid.UUID,
+    name: str = "worker-1",
+    scope: WorkerScope | None = None,
+    runtime: WorkerRuntime | None = None,
+    metadata: dict[str, str] | None = None,
+    last_seen_at: datetime | None = None,
+) -> Worker:
+    """Store a worker in the fake repository.
+
+    Args:
+        repository: Fake worker repository.
+        owner_id: Id of the owning account.
+        name: Worker name.
+        scope: Claim scope the worker reports.
+        runtime: Runtime the worker reports.
+        metadata: Arbitrary metadata.
+        last_seen_at: Time of the worker's last heartbeat.
+
+    Returns:
+        Stored worker.
+    """
+    return await repository.register(
+        Worker(
+            owner_id=owner_id,
+            name=name,
+            scope=scope if scope is not None else WorkerScope(),
+            runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
+            metadata=metadata if metadata is not None else {},
+            last_seen_at=last_seen_at
+            if last_seen_at is not None
+            else datetime.now(UTC),
+        )
     )

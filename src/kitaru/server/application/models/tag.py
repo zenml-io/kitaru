@@ -11,21 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""ORM table definitions."""
+"""Tag filter model."""
 
-from kitaru.server.adapters.db.orm.account import AccountORM
-from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
-from kitaru.server.adapters.db.orm.device import DeviceORM
-from kitaru.server.adapters.db.orm.secret import SecretORM
-from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
-from kitaru.server.adapters.db.orm.worker import WorkerORM
+from kitaru.server.base import ListFilter
 
-__all__ = [
-    "AccountORM",
-    "ApiKeyORM",
-    "DeviceORM",
-    "SecretORM",
-    "TagLinkORM",
-    "TagORM",
-    "WorkerORM",
-]
+
+class TagFilter(ListFilter):
+    """Tag list filter."""
+
+    name: str | None = None

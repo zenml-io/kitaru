@@ -87,9 +87,14 @@ class BaseSQLRepository(Generic[RowT]):
         return {row.id: row for row in rows}
 
     async def _add(
-        self, row: RowT, constraints: ConstraintErrors | None = None
+        self, row: UUIDPrimaryKeyMixin, constraints: ConstraintErrors | None = None
     ) -> None:
         """Add a row and flush, translating constraint violations.
+
+        Typed against the mixin rather than this repository's bound `RowT`,
+        since a repository managing more than one table (a link table
+        alongside its owning table, for example) adds rows of a second class
+        through the same method.
 
         Args:
             row: Row to add.
