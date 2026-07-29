@@ -1,5 +1,22 @@
 import type { TraceStep, ValidationRow } from "./types.js";
 
+export type ReviewPresentation = "launcher" | "review";
+
+export function canUseFullscreen(
+  availableDisplayModes: readonly string[] | undefined,
+): boolean {
+  return availableDisplayModes?.includes("fullscreen") ?? false;
+}
+
+export function reviewPresentation(
+  displayMode: string | undefined,
+  compactInlineReview: boolean,
+): ReviewPresentation {
+  return displayMode === "fullscreen" || compactInlineReview
+    ? "review"
+    : "launcher";
+}
+
 export function orderedSteps(
   steps: TraceStep[],
   direction: "backward" | "forward",

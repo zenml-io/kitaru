@@ -93,16 +93,25 @@ MCP prompts, or say:
 Use the kitaru-error-discovery error-discovery prompt and start the review.
 ```
 
-The `start_error_discovery` tool opens the inline App.
+The `start_error_discovery` tool opens a compact inline launcher. Choose
+**Open full review** to ask the host for the MCP Apps standard fullscreen
+display mode. The full trace workspace renders after the host grants it.
+
+Every MCP App starts inside its host. This prototype does not open an ordinary
+browser tab because that tab would not inherit the App's MCP session and tool
+bridge. If a host does not advertise fullscreen support, the launcher says so
+and offers **Use compact inline review** as an explicit fallback.
 
 ## Five-minute rehearsed demo
 
 Five minutes is enough to demonstrate the state transitions, not to perform a
 careful evaluation. A real review should be slower.
 
-1. Invoke `error-discovery`. Confirm that the App opens with 12 discovery
-   traces, the request and final response are prominent, and execution is shown
-   outcome-backward.
+1. Invoke `error-discovery`. In the inline launcher, choose **Open full
+   review**. Confirm that the fullscreen App has 12 discovery traces, the
+   request and final response are prominent, and execution is shown
+   outcome-backward. If the host does not advertise fullscreen, use the clearly
+   labeled compact fallback.
 2. Open-code four traces across three scenarios. A reliable demo set is:
    - `af29f8e…`: note that the first upstream failure is the direct
      account-wide setting write despite a human-approval boundary; mark it

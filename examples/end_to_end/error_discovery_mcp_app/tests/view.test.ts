@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import type { TraceStep, ValidationRow } from "../src/types.js";
-import { orderedSteps, validationCounts } from "../src/view.js";
+import {
+  canUseFullscreen,
+  orderedSteps,
+  reviewPresentation,
+  validationCounts,
+} from "../src/view.js";
 
 describe("review UI helpers", () => {
+  it("uses fullscreen only when the host advertises it", () => {
+    expect(canUseFullscreen(["inline", "fullscreen"])).toBe(true);
+    expect(canUseFullscreen(["inline", "pip"])).toBe(false);
+    expect(canUseFullscreen(undefined)).toBe(false);
+  });
+
+  it("keeps the full workspace out of the inline card by default", () => {
+    expect(reviewPresentation("inline", false)).toBe("launcher");
+    expect(reviewPresentation("fullscreen", false)).toBe("review");
+    expect(reviewPresentation("inline", true)).toBe("review");
+  });
+
   it("reads execution from outcome backward by default", () => {
     const steps = [1, 2, 3].map(
       (index): TraceStep => ({

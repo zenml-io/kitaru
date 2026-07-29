@@ -75,6 +75,88 @@ button.quiet {
   background: transparent;
 }
 
+.launcher-shell {
+  overflow: hidden;
+  border: 1px solid var(--ed-border);
+  border-radius: 11px;
+  background: var(--ed-panel);
+}
+
+.launcher {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.launcher-copy {
+  max-width: 64ch;
+}
+
+.launcher-copy h1 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.launcher-copy > p:last-child {
+  margin: 0.45rem 0 0;
+  color: var(--ed-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.launcher-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+  border-top: 1px solid var(--ed-border);
+  border-bottom: 1px solid var(--ed-border);
+  padding: 0.75rem 0;
+  font-size: 0.75rem;
+}
+
+.launcher-facts dt {
+  color: var(--ed-muted);
+}
+
+.launcher-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.launcher-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.launcher-actions button {
+  min-width: 10rem;
+}
+
+.launcher-capability {
+  margin: -0.35rem 0 0;
+  color: var(--ed-muted);
+  font-size: 0.7rem;
+}
+
+.launcher-capability::before {
+  content: "○";
+  margin-right: 0.35rem;
+}
+
+.launcher-capability.supported {
+  color: var(--ed-ok);
+}
+
+.launcher-capability.supported::before {
+  content: "✓";
+}
+
 .shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -85,6 +167,16 @@ button.quiet {
   background: var(--ed-panel);
 }
 
+#app[data-display-mode="fullscreen"] {
+  height: 100dvh;
+}
+
+#app[data-display-mode="fullscreen"] .fullscreen-shell {
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -92,6 +184,19 @@ button.quiet {
   padding: 0.7rem 0.85rem;
   border-bottom: 1px solid var(--ed-border);
   background: var(--ed-panel);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-left: auto;
+}
+
+.display-control {
+  min-height: 28px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
 }
 
 .brand {
@@ -116,9 +221,22 @@ button.quiet {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-left: auto;
   color: var(--ed-muted);
   font-size: 0.78rem;
+}
+
+@media (min-width: 761px) {
+  .fullscreen-shell .workspace {
+    grid-template-columns: 220px minmax(420px, 1fr) 340px;
+  }
+
+  .fullscreen-shell .reading {
+    padding: 1.2rem 1.5rem 1.5rem;
+  }
+
+  .fullscreen-shell .sidepanel {
+    padding: 1rem;
+  }
 }
 
 .progress-track {
@@ -630,6 +748,30 @@ pre {
 }
 
 @media (max-width: 480px) {
+  .launcher-actions {
+    display: grid;
+  }
+
+  .launcher-actions button {
+    width: 100%;
+  }
+
+  .launcher-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .launcher-facts dd + dt {
+    margin-top: 0.35rem;
+  }
+
+  .topbar-actions {
+    gap: 0.35rem;
+  }
+
+  .display-control {
+    max-width: 8rem;
+  }
+
   .workspace {
     display: block;
     overflow-y: auto;

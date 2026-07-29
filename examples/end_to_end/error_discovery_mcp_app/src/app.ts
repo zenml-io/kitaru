@@ -3,6 +3,7 @@ import {
   applyDocumentTheme,
   applyHostFonts,
   applyHostStyleVariables,
+  type McpUiDisplayMode,
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -13,7 +14,14 @@ import type {
   ReviewSnapshot,
   ScorerRubricDraft,
 } from "./types.js";
-import { formatJson, orderedSteps, shortId, validationCounts } from "./view.js";
+import {
+  canUseFullscreen,
+  formatJson,
+  orderedSteps,
+  reviewPresentation,
+  shortId,
+  validationCounts,
+} from "./view.js";
 import "./styles.css";
 
 const root = document.getElementById("app")!;
@@ -26,6 +34,10 @@ let executionDirection: "backward" | "forward" = "backward";
 let notice = "";
 let noticeIsError = false;
 let pollTimer: number | undefined;
+let displayMode: McpUiDisplayMode = "inline";
+let availableDisplayModes: McpUiDisplayMode[] = [];
+let compactInlineReview = false;
+let displayModeRequestPending = false;
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -135,11 +147,64 @@ async function askClaude(text: string): Promise<void> {
 }
 
 function handleHostContext(ctx: McpUiHostContext): void {
+  const previousDisplayMode = displayMode;
+  const previousAvailableDisplayModes = availableDisplayModes.join(",");
   if (ctx.theme) applyDocumentTheme(ctx.theme);
   if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
   if (ctx.styles?.css?.fonts) applyHostFonts(ctx.styles.css.fonts);
   if (ctx.safeAreaInsets) {
     root.style.padding = `${ctx.safeAreaInsets.top}px ${ctx.safeAreaInsets.right}px ${ctx.safeAreaInsets.bottom}px ${ctx.safeAreaInsets.left}px`;
+  }
+  if (ctx.displayMode !== undefined) {
+    displayMode = ctx.displayMode;
+  }
+  if (ctx.availableDisplayModes !== undefined) {
+    availableDisplayModes = ctx.availableDisplayModes;
+  }
+  root.dataset.displayMode = displayMode;
+  if (previousDisplayMode === "fullscreen" && displayMode === "inline") {
+    compactInlineReview = false;
+  }
+  if (
+    snapshot &&
+    (previousDisplayMode !== displayMode ||
+      previousAvailableDisplayModes !== availableDisplayModes.join(","))
+  ) {
+    render();
+  }
+}
+
+async function requestDisplayMode(mode: McpUiDisplayMode): Promise<void> {
+  if (!availableDisplayModes.includes(mode)) {
+    notice =
+      mode === "fullscreen"
+        ? "This host has not advertised fullscreen support. Use the compact inline fallback or open the App in a host that supports fullscreen."
+        : "This host has not advertised inline mode.";
+    noticeIsError = false;
+    renderNotice();
+    return;
+  }
+  try {
+    displayModeRequestPending = true;
+    notice = "";
+    render();
+    const result = await app.requestDisplayMode({ mode });
+    displayMode = result.mode;
+    root.dataset.displayMode = result.mode;
+    compactInlineReview = false;
+    if (result.mode !== mode) {
+      notice = `The host kept the App in ${result.mode} mode.`;
+      noticeIsError = false;
+    }
+  } catch (error) {
+    notice =
+      error instanceof Error
+        ? error.message
+        : "The host could not change the App display mode.";
+    noticeIsError = true;
+  } finally {
+    displayModeRequestPending = false;
+    render();
   }
 }
 
@@ -170,12 +235,19 @@ function render(): void {
     );
     return;
   }
+  if (reviewPresentation(displayMode, compactInlineReview) === "launcher") {
+    renderLauncher();
+    return;
+  }
   if (snapshot.phase === "revealed" && snapshot.validationRows) {
     renderValidation();
     return;
   }
 
-  const shell = element("main", "shell");
+  const shell = element(
+    "main",
+    `shell${displayMode === "fullscreen" ? " fullscreen-shell" : ""}`,
+  );
   shell.append(renderTopbar());
   const workspace = element("div", "workspace");
   workspace.append(renderQueue(), renderTrace(), renderSidePanel());
@@ -199,7 +271,77 @@ function render(): void {
   }
 }
 
-function renderTopbar(): HTMLElement {
+function renderLauncher(): void {
+  const shell = element("main", "launcher-shell");
+  shell.append(renderTopbar(false));
+  const launcher = element("section", "launcher");
+  const copy = element("div", "launcher-copy");
+  copy.append(
+    element("p", "section-label", "Trace review workspace"),
+    element("h1", undefined, "Open the full review"),
+    element(
+      "p",
+      undefined,
+      "Trace reading, note-taking, comparison, and scorer validation need more room than an inline chat card.",
+    ),
+  );
+  const facts = element("dl", "launcher-facts");
+  facts.append(
+    element("dt", undefined, "Current trace"),
+    element("dd", undefined, snapshot!.currentTrace.scenarioTitle),
+    element("dt", undefined, "Progress"),
+    element(
+      "dd",
+      undefined,
+      `${snapshot!.progress.reviewed} of ${snapshot!.progress.total} traces reviewed`,
+    ),
+    element("dt", undefined, "Saved state"),
+    element("dd", undefined, `Session ${shortId(snapshot!.sessionId)}`),
+  );
+  const actions = element("div", "launcher-actions");
+  const fullscreen = button(
+    displayModeRequestPending ? "Opening…" : "Open full review",
+    () => requestDisplayMode("fullscreen"),
+    "primary",
+  );
+  fullscreen.disabled =
+    displayModeRequestPending || !canUseFullscreen(availableDisplayModes);
+  actions.append(fullscreen);
+  if (!canUseFullscreen(availableDisplayModes)) {
+    actions.append(
+      button("Use compact inline review", () => {
+        compactInlineReview = true;
+        notice =
+          "Compact fallback enabled. Some hosts may still constrain scrolling or height.";
+        noticeIsError = false;
+        render();
+      }),
+    );
+  }
+  const capability = element(
+    "p",
+    canUseFullscreen(availableDisplayModes)
+      ? "launcher-capability supported"
+      : "launcher-capability",
+    canUseFullscreen(availableDisplayModes)
+      ? "Fullscreen is available in this host."
+      : "This host has not advertised fullscreen. The compact fallback remains available.",
+  );
+  launcher.append(copy, facts, actions, capability, renderNoticeNode());
+  shell.append(launcher);
+  root.replaceChildren(shell);
+}
+
+function renderNoticeNode(): HTMLElement {
+  const node = element("div", noticeIsError ? "notice error" : "notice", notice);
+  node.id = "notice";
+  node.hidden = !notice;
+  node.setAttribute("role", noticeIsError ? "alert" : "status");
+  node.setAttribute("aria-live", noticeIsError ? "assertive" : "polite");
+  return node;
+}
+
+function renderTopbar(showDisplayControls = true): HTMLElement {
   const topbar = element("header", "topbar");
   const brand = element("div", "brand");
   brand.append(
@@ -224,7 +366,29 @@ function renderTopbar(): HTMLElement {
       `${snapshot!.progress.reviewed}/${snapshot!.progress.total}`,
     ),
   );
-  topbar.append(brand, progress);
+  const actions = element("div", "topbar-actions");
+  actions.append(progress);
+  if (showDisplayControls && displayMode === "fullscreen") {
+    const exit = button(
+      displayModeRequestPending ? "Closing…" : "Exit fullscreen",
+      () => requestDisplayMode("inline"),
+      "quiet display-control",
+    );
+    exit.disabled = displayModeRequestPending;
+    actions.append(exit);
+  } else if (showDisplayControls && compactInlineReview) {
+    actions.append(
+      button(
+        "Back to launcher",
+        () => {
+          compactInlineReview = false;
+          render();
+        },
+        "quiet display-control",
+      ),
+    );
+  }
+  topbar.append(brand, actions);
   return topbar;
 }
 
@@ -917,7 +1081,10 @@ async function loadTrace(traceId: string): Promise<void> {
 function renderValidation(): void {
   const rows = snapshot!.validationRows!;
   const counts = validationCounts(rows);
-  const shell = element("main", "shell");
+  const shell = element(
+    "main",
+    `shell${displayMode === "fullscreen" ? " fullscreen-shell" : ""}`,
+  );
   shell.append(renderTopbar());
   const workspace = element("div", "workspace");
   const validation = element("section", "validation");
