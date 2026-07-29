@@ -59,6 +59,9 @@ server = [
     "cryptography>=49.0.0",
     "packaging>=24.0",
 ]
+worker = [
+    "pydantic-settings>=2.14",
+]
 
 [project.urls]
 Homepage = "https://kitaru.ai"
