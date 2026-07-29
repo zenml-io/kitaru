@@ -56,6 +56,7 @@ def test_unique_selector_keys_accepted() -> None:
             LabelSelector(key="region", values=["b"]),
         ]
     )
+    assert scope.selectors is not None
     assert len(scope.selectors) == 2
 
 
