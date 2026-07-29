@@ -18,7 +18,12 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.evaluation import EvaluationListParams, EvaluationResponse
+from kitaru.api_models.v1.evaluation import (
+    EvaluationBatchCreateRequest,
+    EvaluationListParams,
+    EvaluationResponse,
+)
+from kitaru.api_models.v1.job import JobResponse
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -34,6 +39,26 @@ class EvaluationsResource:
             client: API client used to send requests.
         """
         self._client = client
+
+    async def create(self, request: EvaluationBatchCreateRequest) -> JobResponse:
+        """Score every input session with every evaluator.
+
+        Args:
+            request: Evaluation batch create request.
+
+        Raises:
+            APIError: The request failed, including 422 when the pair count
+                exceeds the cap or an input session does not exist.
+
+        Returns:
+            Created job.
+        """
+        response = await self._client.request(
+            "POST",
+            "/v1/evaluations",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return JobResponse.model_validate(response.json())
 
     async def get(self, evaluation_id: uuid.UUID) -> EvaluationResponse:
         """Get an evaluation by id.

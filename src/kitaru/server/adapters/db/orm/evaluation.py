@@ -49,6 +49,7 @@ EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY = foreign_key_name(
     "evaluation", ["evaluator_version_id"]
 )
 EVALUATION_SESSION_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["session_id"])
+EVALUATION_TASK_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["task_id"])
 EVALUATION_TASK_ID_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
     "evaluation", ["task_id", "name"]
 )
@@ -134,6 +135,12 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=EVALUATION_SESSION_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["task_id"],
+            ["task.id"],
+            name=EVALUATION_TASK_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
         UniqueConstraint(
             "task_id", "name", name=EVALUATION_TASK_ID_NAME_UNIQUE_CONSTRAINT
         ),
@@ -154,8 +161,6 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     evaluator_version_id: Mapped[uuid.UUID | None]
     session_id: Mapped[uuid.UUID]
-    # No foreign key yet: the task table does not exist in this branch, a
-    # later wave adds the constraint.
     task_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     data_type: Mapped[str] = mapped_column(String(DATA_TYPE_LENGTH))

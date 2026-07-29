@@ -48,6 +48,20 @@ class BlobRepository(Protocol):
         """
         ...
 
+    async def get_metadata(self, blob_id: uuid.UUID) -> Blob:
+        """Load a blob's metadata by id, leaving its content unloaded.
+
+        Args:
+            blob_id: Id of the blob.
+
+        Raises:
+            BlobNotFound: No blob has this id.
+
+        Returns:
+            Blob with an empty content placeholder.
+        """
+        ...
+
     async def delete(self, blob_id: uuid.UUID) -> None:
         """Delete a blob by id.
 
@@ -56,6 +70,7 @@ class BlobRepository(Protocol):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version.
+            BlobInUse: The blob is referenced by a plugin version or an
+                import task.
         """
         ...

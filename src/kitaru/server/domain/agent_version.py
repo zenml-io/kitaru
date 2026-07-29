@@ -64,6 +64,18 @@ def validate_display_version(value: str) -> str:
 DisplayVersion = Annotated[str, AfterValidator(validate_display_version)]
 
 
+class AgentVersionWithoutRunSpec(ValidationError):
+    """Raised when an agent version without a run spec is asked to run."""
+
+    def __init__(self, agent_version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            agent_version_id: Id of the agent version.
+        """
+        super().__init__(f"Agent version {agent_version_id} has no run spec")
+
+
 class InvalidTimeout(ValidationError):
     """Raised when a run spec timeout is not positive."""
 

@@ -22,6 +22,7 @@ from conftest import (
     FakeAgentRepository,
     FakeCohortRepository,
     FakeSessionRepository,
+    FakeTaskRepository,
     asgi_api_client,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest
@@ -65,7 +66,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         repository=agent_repository
     )
     app.dependency_overrides[get_session_service] = lambda: SessionService(
-        repository=session_repository
+        repository=session_repository, task_repository=FakeTaskRepository()
     )
     app.dependency_overrides[get_cohort_service] = lambda: CohortService(
         repository=cohort_repository,

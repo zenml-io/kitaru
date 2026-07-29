@@ -112,6 +112,8 @@ class SessionRepository(Protocol):
             SessionNotFound: No session has this id.
             SessionInUse: The session belongs to a cohort and cannot be
                 deleted.
+            SessionInUseByTask: The session is a task's input or result
+                session and cannot be deleted.
         """
         ...
 

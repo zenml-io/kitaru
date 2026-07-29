@@ -109,6 +109,18 @@ class PluginVersionNotFound(NotFoundError):
         super().__init__(f"Version {version} of plugin {plugin_id} was not found")
 
 
+class PluginVersionIdNotFound(NotFoundError):
+    """Raised when a plugin version lookup by id does not resolve."""
+
+    def __init__(self, plugin_version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            plugin_version_id: Id of the missing plugin version.
+        """
+        super().__init__(f"Plugin version {plugin_version_id} was not found")
+
+
 class InvalidPluginProvider(ValidationError):
     """Raised when an evaluator plugin carries a provider."""
 

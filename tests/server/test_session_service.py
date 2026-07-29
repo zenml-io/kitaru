@@ -14,10 +14,17 @@
 """Tests for session use cases."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
-from conftest import FakeSessionRepository, create_session
+from conftest import (
+    FakeSessionRepository,
+    FakeTaskRepository,
+    create_agent_task,
+    create_import_task,
+    create_session,
+)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.session import (
@@ -32,6 +39,12 @@ from kitaru.server.domain.session import (
     SessionNotFound,
     SessionStatusCannotBeCleared,
 )
+from kitaru.server.domain.task import (
+    Task,
+    TaskNotFound,
+    TaskNotRunning,
+    TaskResultSessionAlreadyLinked,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -43,9 +56,25 @@ def repository() -> FakeSessionRepository:
 
 
 @pytest.fixture
-def service(repository: FakeSessionRepository) -> SessionService:
-    """Provide a session service backed by the fake repository."""
-    return SessionService(repository=repository)
+def task_repository() -> FakeTaskRepository:
+    """Provide a fake task repository."""
+    return FakeTaskRepository()
+
+
+@pytest.fixture
+def service(
+    repository: FakeSessionRepository, task_repository: FakeTaskRepository
+) -> SessionService:
+    """Provide a session service backed by the fake repositories."""
+    return SessionService(repository=repository, task_repository=task_repository)
+
+
+async def _running_agent_task(task_repository: FakeTaskRepository) -> Task:
+    """Store an agent task claimed by a worker and running."""
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    task.claim(uuid.uuid4(), datetime.now(UTC))
+    task.start(datetime.now(UTC))
+    return await task_repository.update(task)
 
 
 async def test_create_session_defaults_status_in_progress(
@@ -299,3 +328,94 @@ async def test_create_session_helper_defaults(
     session = await create_session(repository, owner_id, agent_id=uuid.uuid4())
     assert session.owner_id == owner_id
     assert session.status == SessionStatus.IN_PROGRESS
+
+
+async def test_create_session_requires_the_named_task_to_exist(
+    service: SessionService,
+) -> None:
+    """A session naming an unknown task conflicts."""
+    with pytest.raises(TaskNotFound):
+        await service.create_session(
+            SessionCreate(
+                agent_id=uuid.uuid4(),
+                origin=SessionOrigin.RECORDED,
+                task_id=uuid.uuid4(),
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_requires_the_named_task_to_be_running(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """A session naming a pending task conflicts."""
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    with pytest.raises(TaskNotRunning):
+        await service.create_session(
+            SessionCreate(
+                agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_links_an_agent_tasks_result_session(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """Creating a session for a running agent task links it as the result session."""
+    task = await _running_agent_task(task_repository)
+    session = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
+        ),
+        actor=ACTOR,
+    )
+    stored_task = await task_repository.get(task.id)
+    assert stored_task.result_session_id == session.id
+
+
+async def test_create_session_rejects_a_second_link_to_an_agent_task(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """A second session cannot link to an agent task that already has one."""
+    task = await _running_agent_task(task_repository)
+    await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(TaskResultSessionAlreadyLinked):
+        await service.create_session(
+            SessionCreate(
+                agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_links_many_sessions_to_an_import_task(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """An import task links every session it creates, not just one."""
+    task = await create_import_task(task_repository, uuid.uuid4())
+    task.claim(uuid.uuid4(), datetime.now(UTC))
+    task.start(datetime.now(UTC))
+    await task_repository.update(task)
+
+    first = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.IMPORTED, task_id=task.id
+        ),
+        actor=ACTOR,
+    )
+    second = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.IMPORTED, task_id=task.id
+        ),
+        actor=ACTOR,
+    )
+    assert first.task_id == task.id
+    assert second.task_id == task.id
+    stored_task = await task_repository.get(task.id)
+    assert stored_task.result_session_id is None

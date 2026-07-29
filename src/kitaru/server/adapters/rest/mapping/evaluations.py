@@ -14,11 +14,13 @@
 """Evaluation DTO conversions."""
 
 from kitaru.api_models.v1.evaluation import (
+    EvaluationBatchCreateRequest,
     EvaluationListParams,
     EvaluationResponse,
     EvaluationResult,
 )
 from kitaru.api_models.v1.session import SessionEvaluationsRequest
+from kitaru.server.adapters.rest.mapping.replay_config import evaluator_config_input
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
@@ -26,6 +28,7 @@ from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
     EvaluationMerge,
 )
+from kitaru.server.application.models.job import EvaluationBatchCreate
 from kitaru.server.domain.evaluation import Evaluation
 
 
@@ -47,6 +50,23 @@ def evaluation_list_params_to_filter(params: EvaluationListParams) -> Evaluation
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,
+    )
+
+
+def evaluation_batch_create_to_command(
+    body: EvaluationBatchCreateRequest,
+) -> EvaluationBatchCreate:
+    """Convert an evaluation batch create request to its command.
+
+    Args:
+        body: Evaluation batch create request.
+
+    Returns:
+        Evaluation batch create command.
+    """
+    return EvaluationBatchCreate(
+        input_session_ids=body.input_session_ids,
+        evaluators=[evaluator_config_input(config) for config in body.evaluators],
     )
 
 

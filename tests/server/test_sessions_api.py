@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -24,6 +25,8 @@ from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeTaskRepository,
+    create_agent_task,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -75,17 +78,26 @@ def node_repository() -> FakeSessionNodeRepository:
 
 
 @pytest.fixture
+def task_repository() -> FakeTaskRepository:
+    """Provide the fake task repository backing the app."""
+    return FakeTaskRepository()
+
+
+@pytest.fixture
 async def client(
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     tag_repository: FakeTagRepository,
     evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed session services."""
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
-    session_service = SessionService(repository=session_repository)
+    session_service = SessionService(
+        repository=session_repository, task_repository=task_repository
+    )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository
     )
@@ -472,3 +484,33 @@ async def test_delete_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.delete(f"/v1/sessions/{uuid.uuid4()}")
     assert response.status_code == 404
+
+
+async def test_create_session_conflicts_when_task_not_running(
+    client: httpx.AsyncClient, task_repository: FakeTaskRepository
+) -> None:
+    """Observe HTTP 409 when the named task is not running."""
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    response = await client.post(
+        "/v1/sessions", json=_session_body(task_id=str(task.id))
+    )
+    assert response.status_code == 409
+
+
+async def test_create_session_links_the_agent_task_result_session(
+    client: httpx.AsyncClient, task_repository: FakeTaskRepository
+) -> None:
+    """Creating a session for a running agent task links it as the result session."""
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    task.claim(uuid.uuid4(), datetime.now(UTC))
+    task.start(datetime.now(UTC))
+    await task_repository.update(task)
+
+    response = await client.post(
+        "/v1/sessions", json=_session_body(task_id=str(task.id))
+    )
+    assert response.status_code == 201
+    session_id = response.json()["id"]
+
+    stored_task = await task_repository.get(task.id)
+    assert str(stored_task.result_session_id) == session_id

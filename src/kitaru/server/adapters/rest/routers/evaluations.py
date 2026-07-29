@@ -16,20 +16,57 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.evaluation import EvaluationListParams, EvaluationResponse
+from kitaru.api_models.v1.evaluation import (
+    EvaluationBatchCreateRequest,
+    EvaluationListParams,
+    EvaluationResponse,
+)
+from kitaru.api_models.v1.job import JobResponse
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_evaluation_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_evaluation_service,
+    get_job_service,
+)
 from kitaru.server.adapters.rest.mapping.evaluations import (
+    evaluation_batch_create_to_command,
     evaluation_list_params_to_filter,
     evaluation_to_response,
 )
+from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.job_service import JobService
 
 router = APIRouter(route_class=CommitRoute)
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_evaluations(
+    body: EvaluationBatchCreateRequest,
+    service: Annotated[JobService, Depends(get_job_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> JobResponse:
+    """Score every input session with every evaluator, as one job.
+
+    Clients observe HTTP 201 on success, 404 when an evaluator or version
+    does not exist, and 422 when the pair count exceeds the cap or an input
+    session does not exist.
+
+    Args:
+        body: Evaluation batch create request.
+        service: Job service.
+        actor: Caller context.
+
+    Returns:
+        Created job.
+    """
+    command = evaluation_batch_create_to_command(body)
+    job = await service.create_evaluations(command, actor=actor)
+    return job_to_response(job)
 
 
 @router.get("")

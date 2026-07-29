@@ -39,10 +39,14 @@ from kitaru.client.resources.evaluations import EvaluationsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
 from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
+from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.info import InfoResource
+from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.session_runs import SessionRunsResource
 from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
+from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
 
@@ -90,10 +94,14 @@ class KitaruAPIClient:
         self.evaluators = EvaluatorsResource(self)
         self.experiments = ExperimentsResource(self)
         self.importers = ImportersResource(self)
+        self.imports = ImportsResource(self)
         self.info = InfoResource(self)
+        self.jobs = JobsResource(self)
         self.secrets = SecretsResource(self)
+        self.session_runs = SessionRunsResource(self)
         self.sessions = SessionsResource(self)
         self.tags = TagsResource(self)
+        self.tasks = TasksResource(self)
         self.workers = WorkersResource(self)
         self._auth: TokenProvider | None = None
         if credential_store is not None:

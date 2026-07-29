@@ -56,6 +56,7 @@ from kitaru.server.adapters.db.repositories.evaluation_repository import (
 from kitaru.server.adapters.db.repositories.experiment_repository import (
     SQLExperimentRepository,
 )
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -69,13 +70,16 @@ from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
 from kitaru.server.adapters.rest.commit_route import attach_request_session
+from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DevicePolicy
+from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
@@ -87,6 +91,7 @@ from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
@@ -94,6 +99,8 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
@@ -298,9 +305,102 @@ def get_session_service(
         session: Request-scoped database session.
 
     Returns:
-        Session service bound to the SQL repository.
+        Session service bound to the SQL repositories.
     """
-    return SessionService(repository=SQLSessionRepository(session))
+    return SessionService(
+        repository=SQLSessionRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
+
+
+def get_task_policy(settings: APISettings) -> TaskPolicy:
+    """Build the task execution policy from the process settings.
+
+    Args:
+        settings: API settings for this process.
+
+    Returns:
+        Task execution policy.
+    """
+    return TaskPolicy(
+        heartbeat_timeout_seconds=settings.TASK_HEARTBEAT_TIMEOUT_SECONDS,
+        retry_limit=settings.TASK_RETRY_LIMIT,
+        sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
+        evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
+        importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
+        max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
+        evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
+    )
+
+
+def _build_task_transitions(session: AsyncSession) -> TaskTransitions:
+    """Build the request-scoped task transition dispatch.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Transition dispatch publishing on the request's event dispatcher.
+    """
+    return TaskTransitions(
+        task_repository=SQLTaskRepository(session),
+        job_repository=SQLJobRepository(session),
+        dispatcher=build_event_dispatcher(session),
+    )
+
+
+def get_job_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> JobService:
+    """Return a job service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Job service bound to the SQL repositories.
+    """
+    return JobService(
+        repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        transitions=_build_task_transitions(session),
+        policy=get_task_policy(settings),
+    )
+
+
+def get_task_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> TaskService:
+    """Return a task service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Task service bound to the SQL repositories.
+    """
+    return TaskService(
+        repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+        transitions=_build_task_transitions(session),
+        policy=get_task_policy(settings),
+    )
 
 
 def get_session_node_service(

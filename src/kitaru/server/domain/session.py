@@ -74,6 +74,18 @@ class SessionInUse(ConflictError):
         )
 
 
+class SessionInUseByTask(ConflictError):
+    """Raised when a session is referenced by a task and cannot be deleted."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session that cannot be deleted.
+        """
+        super().__init__(f"Session {session_id} is in use by a task")
+
+
 class SessionStatusCannotBeCleared(ValidationError):
     """Raised when a session update tries to clear the status."""
 
@@ -232,6 +244,18 @@ class Session(DomainModel):
             metadata: New metadata.
         """
         self.metadata = metadata
+
+    def link_task(self, task_id: uuid.UUID) -> None:
+        """Set the task this session was produced by.
+
+        Args:
+            task_id: Id of the producing task.
+        """
+        self.task_id = task_id
+
+    def unlink_task(self) -> None:
+        """Clear the task this session was produced by."""
+        self.task_id = None
 
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.

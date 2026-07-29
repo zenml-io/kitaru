@@ -15,23 +15,46 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 
-from conftest import FakeWorkerRepository, asgi_api_client
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeBlobRepository,
+    FakeJobRepository,
+    FakePluginRepository,
+    FakeSecretRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    FakeWorkerRepository,
+    asgi_api_client,
+    create_agent_task,
+    create_job,
+)
 from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
+    WorkerHeartbeatRequest,
     WorkerListParams,
     WorkerResponse,
     WorkerRuntime,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
-from kitaru.server.adapters.rest.dependencies import authorize, get_worker_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_task_service,
+    get_worker_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.task import TaskPolicy
+from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 
@@ -41,13 +64,53 @@ RUNTIME = WorkerRuntime(platform="bare")
 
 
 @pytest.fixture
-async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
-    """Provide an API client routed to the app with a fake-backed service."""
+def worker_repository() -> FakeWorkerRepository:
+    """Provide the fake worker repository backing the app."""
+    return FakeWorkerRepository()
+
+
+@pytest.fixture
+def task_repository() -> FakeTaskRepository:
+    """Provide the fake task repository backing the app."""
+    return FakeTaskRepository(sessions=FakeSessionRepository())
+
+
+@pytest.fixture
+def job_repository(task_repository: FakeTaskRepository) -> FakeJobRepository:
+    """Provide the fake job repository backing the app."""
+    return FakeJobRepository(tasks=task_repository)
+
+
+@pytest.fixture
+async def api_client(
+    worker_repository: FakeWorkerRepository,
+    task_repository: FakeTaskRepository,
+    job_repository: FakeJobRepository,
+) -> AsyncGenerator[KitaruAPIClient, None]:
+    """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
-    service = WorkerService(repository=FakeWorkerRepository())
+    service = WorkerService(repository=worker_repository)
+    agents = FakeAgentRepository()
+    transitions = TaskTransitions(
+        task_repository=task_repository,
+        job_repository=job_repository,
+        dispatcher=EventDispatcher(),
+    )
+    task_service = TaskService(
+        repository=task_repository,
+        worker_repository=worker_repository,
+        session_repository=FakeSessionRepository(),
+        agent_version_repository=FakeAgentVersionRepository(agents),
+        plugin_repository=FakePluginRepository(),
+        blob_repository=FakeBlobRepository(),
+        secret_repository=FakeSecretRepository(),
+        transitions=transitions,
+        policy=TaskPolicy(),
+    )
     app.dependency_overrides[get_worker_service] = lambda: service
+    app.dependency_overrides[get_task_service] = lambda: task_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
@@ -147,3 +210,33 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
     await api_client.workers.delete(created.id)
     with pytest.raises(NotFoundError):
         await api_client.workers.get(created.id)
+
+
+async def test_heartbeat(
+    api_client: KitaruAPIClient,
+    job_repository: FakeJobRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Report held tasks through the SDK, receiving cancel_task_ids."""
+    worker = await api_client.workers.create(
+        WorkerCreateRequest(
+            name="worker-1", scope=WorkerScope(), runtime=RUNTIME, metadata={}
+        )
+    )
+    job = await create_job(job_repository, ACCOUNT.id)
+    task = await create_agent_task(task_repository, job.id)
+    task.claim(worker.id, datetime.now(UTC))
+    await task_repository.update(task)
+
+    response = await api_client.workers.heartbeat(
+        worker.id, WorkerHeartbeatRequest(task_ids=[task.id])
+    )
+    assert response.cancel_task_ids == []
+
+
+async def test_heartbeat_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error for an unknown worker id."""
+    with pytest.raises(NotFoundError):
+        await api_client.workers.heartbeat(
+            uuid.uuid4(), WorkerHeartbeatRequest(task_ids=[])
+        )
