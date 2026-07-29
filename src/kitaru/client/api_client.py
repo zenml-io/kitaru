@@ -32,7 +32,10 @@ from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
+from kitaru.client.resources.blobs import BlobsResource
 from kitaru.client.resources.devices import DevicesResource
+from kitaru.client.resources.evaluators import EvaluatorsResource
+from kitaru.client.resources.importers import ImportersResource
 from kitaru.client.resources.info import InfoResource
 from kitaru.client.resources.secrets import SecretsResource
 from kitaru.client.resources.tags import TagsResource
@@ -76,7 +79,10 @@ class KitaruAPIClient:
         self.agent_versions = AgentVersionsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
+        self.blobs = BlobsResource(self)
         self.devices = DevicesResource(self)
+        self.evaluators = EvaluatorsResource(self)
+        self.importers = ImportersResource(self)
         self.info = InfoResource(self)
         self.secrets = SecretsResource(self)
         self.tags = TagsResource(self)
@@ -107,6 +113,7 @@ class KitaruAPIClient:
         params: dict[str, Any] | None = None,
         json: Any = None,
         data: dict[str, str] | None = None,
+        files: dict[str, tuple[str | None, bytes, str]] | None = None,
         headers: dict[str, str] | None = None,
         authenticate: bool = True,
     ) -> httpx.Response:
@@ -122,6 +129,8 @@ class KitaruAPIClient:
             params: Query parameters.
             json: JSON request body.
             data: Form request body.
+            files: Multipart file fields, filename/content/content-type per
+                field.
             headers: Additional request headers.
             authenticate: Whether to attach a bearer token from the credential
                 store. The login endpoints send their own credential.
@@ -143,6 +152,7 @@ class KitaruAPIClient:
                 params=params,
                 json=json,
                 data=data,
+                files=files,
                 headers=request_headers or None,
             )
 

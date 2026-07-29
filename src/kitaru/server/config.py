@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     SKIP_DB_MIGRATION: bool = False
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
+    MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
 
     DB_HOST: str | None = None
     DB_PORT: int = 5432
