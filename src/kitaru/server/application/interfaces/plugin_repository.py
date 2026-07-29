@@ -17,7 +17,7 @@ import uuid
 from typing import Protocol
 
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
-from kitaru.server.domain.plugin import Plugin, PluginSource, PluginVersion
+from kitaru.server.domain.plugin import Plugin, PluginKind, PluginSource, PluginVersion
 
 
 class PluginRepository(Protocol):
@@ -45,6 +45,21 @@ class PluginRepository(Protocol):
 
         Raises:
             PluginNotFound: No plugin has this id.
+
+        Returns:
+            Stored plugin.
+        """
+        ...
+
+    async def get_by_name(self, kind: PluginKind, name: str) -> Plugin:
+        """Load a plugin by kind and name.
+
+        Args:
+            kind: Plugin kind.
+            name: Plugin name.
+
+        Raises:
+            PluginNotFound: No plugin has this kind and name.
 
         Returns:
             Stored plugin.

@@ -57,6 +57,7 @@ from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.device import DeviceFilter
+from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.models.session import SessionFilter
@@ -92,6 +93,11 @@ from kitaru.server.domain.api_key import (
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
+from kitaru.server.domain.experiment import (
+    DuplicateExperimentName,
+    Experiment,
+    ExperimentNotFound,
+)
 from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
@@ -104,6 +110,7 @@ from kitaru.server.domain.plugin import (
     PluginVersionNotFound,
     ScriptPluginSource,
 )
+from kitaru.server.domain.replay_config import ReplayConfig, ReplayConfigNotFound
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -1597,6 +1604,30 @@ class FakeTagRepository:
                 return
         raise TagLinkNotFound(tag_id, resource_type, resource_id)
 
+    def has_link(
+        self,
+        resource_type: TagResourceType,
+        resource_id: uuid.UUID,
+        tag_name: str,
+    ) -> bool:
+        """Report whether a resource carries a tag, mirroring the tag EXISTS join.
+
+        Args:
+            resource_type: Kind of the linked resource.
+            resource_id: Id of the linked resource.
+            tag_name: Tag name to look up.
+
+        Returns:
+            Whether a link ties the resource to a tag with this name.
+        """
+        tag_ids = {tag.id for tag in self._tags.values() if tag.name == tag_name}
+        return any(
+            link.resource_type == resource_type
+            and link.resource_id == resource_id
+            and link.tag_id in tag_ids
+            for link in self._links.values()
+        )
+
 
 async def create_tag(
     repository: FakeTagRepository, owner_id: uuid.UUID, name: str = "smoke-test"
@@ -2278,6 +2309,24 @@ class FakePluginRepository:
             raise PluginNotFound(plugin_id)
         return plugin.model_copy()
 
+    async def get_by_name(self, kind: PluginKind, name: str) -> Plugin:
+        """Load a plugin by kind and name.
+
+        Args:
+            kind: Plugin kind.
+            name: Plugin name.
+
+        Raises:
+            PluginNotFound: No plugin has this kind and name.
+
+        Returns:
+            Stored plugin.
+        """
+        for plugin in self._plugins.values():
+            if plugin.kind == kind and plugin.name == name:
+                return plugin.model_copy()
+        raise PluginNotFound(name)
+
     async def query(
         self, plugin_filter: PluginFilter
     ) -> tuple[list[Plugin], str | None]:
@@ -2489,5 +2538,219 @@ async def create_plugin(
             description=description,
             provider=provider,
             metadata=metadata or {},
+        )
+    )
+
+
+class FakeExperimentRepository:
+    """In-memory experiment and replay config repository."""
+
+    def __init__(self, tag_repository: FakeTagRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tag_repository: Tag repository, queried for the tag filter,
+                mirroring the tag EXISTS join.
+        """
+        self._experiments: dict[uuid.UUID, Experiment] = {}
+        self._configs: dict[uuid.UUID, ReplayConfig] = {}
+        self._tag_repository = tag_repository
+
+    def _check_duplicate_name(self, experiment: Experiment) -> None:
+        for other in self._experiments.values():
+            if other.id != experiment.id and other.name == experiment.name:
+                raise DuplicateExperimentName(experiment.name)
+
+    async def create(self, experiment: Experiment) -> Experiment:
+        """Persist a new experiment.
+
+        Args:
+            experiment: Experiment to store.
+
+        Raises:
+            DuplicateExperimentName: The experiment name is already
+                registered.
+
+        Returns:
+            Stored experiment with timestamps set.
+        """
+        self._check_duplicate_name(experiment)
+        now = datetime.now(UTC)
+        stored = experiment.model_copy(update={"created": now, "updated": now})
+        self._experiments[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, experiment_id: uuid.UUID) -> Experiment:
+        """Load an experiment by id.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+
+        Returns:
+            Stored experiment.
+        """
+        experiment = self._experiments.get(experiment_id)
+        if experiment is None:
+            raise ExperimentNotFound(experiment_id)
+        return experiment.model_copy()
+
+    async def query(
+        self, experiment_filter: ExperimentFilter
+    ) -> tuple[list[Experiment], str | None]:
+        """Query experiments matching a filter.
+
+        Args:
+            experiment_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching experiments and the next cursor.
+        """
+        experiments = list(self._experiments.values())
+        if experiment_filter.name is not None:
+            experiments = [
+                experiment
+                for experiment in experiments
+                if experiment.name == experiment_filter.name
+            ]
+        if experiment_filter.tag is not None:
+            assert self._tag_repository is not None
+            experiments = [
+                experiment
+                for experiment in experiments
+                if self._tag_repository.has_link(
+                    TagResourceType.EXPERIMENT, experiment.id, experiment_filter.tag
+                )
+            ]
+        page, next_cursor = _paginate_fake(experiments, experiment_filter)
+        return [experiment.model_copy() for experiment in page], next_cursor
+
+    async def update(self, experiment: Experiment) -> Experiment:
+        """Persist changes to an existing experiment.
+
+        Args:
+            experiment: Experiment with modified fields.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+            DuplicateExperimentName: The experiment name is already
+                registered.
+
+        Returns:
+            Stored experiment with the updated timestamp renewed.
+        """
+        stored = self._experiments.get(experiment.id)
+        if stored is None:
+            raise ExperimentNotFound(experiment.id)
+        self._check_duplicate_name(experiment)
+        now = _renewed_timestamp(stored.updated)
+        updated = experiment.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._experiments[experiment.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, experiment_id: uuid.UUID) -> None:
+        """Delete an experiment by id.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+        """
+        if experiment_id not in self._experiments:
+            raise ExperimentNotFound(experiment_id)
+        del self._experiments[experiment_id]
+
+    async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
+        """Persist a new replay config.
+
+        Args:
+            config: Replay config to store.
+
+        Returns:
+            Stored replay config with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = config.model_copy(update={"created": now, "updated": now})
+        self._configs[stored.id] = stored
+        return stored.model_copy()
+
+    async def get_replay_config(self, config_id: uuid.UUID) -> ReplayConfig:
+        """Load a replay config by id.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Raises:
+            ReplayConfigNotFound: No replay config has this id.
+
+        Returns:
+            Stored replay config.
+        """
+        config = self._configs.get(config_id)
+        if config is None:
+            raise ReplayConfigNotFound(config_id)
+        return config.model_copy()
+
+    async def get_many_replay_configs(
+        self, config_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, ReplayConfig]:
+        """Load replay configs by id, in one bulk fetch.
+
+        Args:
+            config_ids: Ids of the replay configs.
+
+        Returns:
+            Replay configs keyed by id, missing ids omitted.
+        """
+        return {
+            config_id: self._configs[config_id].model_copy()
+            for config_id in config_ids
+            if config_id in self._configs
+        }
+
+    async def delete_replay_config(self, config_id: uuid.UUID) -> None:
+        """Delete a replay config by id.
+
+        Args:
+            config_id: Id of the replay config.
+
+        Raises:
+            ReplayConfigNotFound: No replay config has this id.
+        """
+        if config_id not in self._configs:
+            raise ReplayConfigNotFound(config_id)
+        del self._configs[config_id]
+
+
+async def create_experiment(
+    repository: FakeExperimentRepository,
+    owner_id: uuid.UUID,
+    replay_config_id: uuid.UUID,
+    name: str = "smoke-test",
+    description: str | None = None,
+) -> Experiment:
+    """Store an experiment in the fake repository.
+
+    Args:
+        repository: Fake experiment repository.
+        owner_id: Id of the owning account.
+        replay_config_id: Id of the experiment's replay config.
+        name: Experiment name.
+        description: Experiment description.
+
+    Returns:
+        Stored experiment.
+    """
+    return await repository.create(
+        Experiment(
+            owner_id=owner_id,
+            name=name,
+            description=description,
+            replay_config_id=replay_config_id,
         )
     )

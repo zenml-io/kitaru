@@ -110,6 +110,33 @@ async def test_get_not_found(setup: Setup) -> None:
         await repository.get(missing_id)
 
 
+async def test_get_by_name(setup: Setup) -> None:
+    """Load a plugin by kind and name."""
+    repository, owner_id = setup
+    created = await repository.create(
+        _plugin(owner_id, kind=PluginKind.EVALUATOR, name="accuracy")
+    )
+    loaded = await repository.get_by_name(PluginKind.EVALUATOR, "accuracy")
+    assert loaded == created
+
+
+async def test_get_by_name_scoped_to_kind(setup: Setup) -> None:
+    """Raise when the name is registered under a different kind."""
+    repository, owner_id = setup
+    await repository.create(
+        _plugin(owner_id, kind=PluginKind.IMPORTER, name="langfuse-import")
+    )
+    with pytest.raises(PluginNotFound):
+        await repository.get_by_name(PluginKind.EVALUATOR, "langfuse-import")
+
+
+async def test_get_by_name_not_found(setup: Setup) -> None:
+    """Raise for an unknown plugin name."""
+    repository, _ = setup
+    with pytest.raises(PluginNotFound, match="Plugin missing was not found"):
+        await repository.get_by_name(PluginKind.EVALUATOR, "missing")
+
+
 async def test_query_scoped_to_kind(setup: Setup) -> None:
     """Query only plugins of the requested kind."""
     repository, owner_id = setup

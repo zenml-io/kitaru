@@ -35,6 +35,7 @@ from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.blobs import BlobsResource
 from kitaru.client.resources.devices import DevicesResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
+from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
 from kitaru.client.resources.info import InfoResource
 from kitaru.client.resources.secrets import SecretsResource
@@ -83,6 +84,7 @@ class KitaruAPIClient:
         self.blobs = BlobsResource(self)
         self.devices = DevicesResource(self)
         self.evaluators = EvaluatorsResource(self)
+        self.experiments = ExperimentsResource(self)
         self.importers = ImportersResource(self)
         self.info = InfoResource(self)
         self.secrets = SecretsResource(self)

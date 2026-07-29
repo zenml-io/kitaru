@@ -34,6 +34,7 @@ from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
     Plugin,
+    PluginKind,
     PluginNotFound,
     PluginSource,
     PluginVersion,
@@ -94,6 +95,27 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
             Stored plugin.
         """
         row = await self._get_row(plugin_id)
+        return row.to_domain()
+
+    async def get_by_name(self, kind: PluginKind, name: str) -> Plugin:
+        """Load a plugin by kind and name.
+
+        Args:
+            kind: Plugin kind.
+            name: Plugin name.
+
+        Raises:
+            PluginNotFound: No plugin has this kind and name.
+
+        Returns:
+            Stored plugin.
+        """
+        statement = select(PluginORM).where(
+            PluginORM.kind == kind.value, PluginORM.name == name
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            raise PluginNotFound(name)
         return row.to_domain()
 
     async def query(
