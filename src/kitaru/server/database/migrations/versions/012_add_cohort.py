@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "012_add_cohort"
-down_revision = "010_add_session"
+down_revision = "011_add_experiment"
 branch_labels = None
 depends_on = None
 
