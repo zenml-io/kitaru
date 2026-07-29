@@ -45,6 +45,7 @@ from kitaru.server.adapters.rest.routers import (
     importers,
     info,
     secrets,
+    sessions,
     tags,
     workers,
 )
@@ -204,6 +205,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(evaluators.router, prefix="/v1/evaluators", tags=["evaluators"])
     app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
     app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
     app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
     return app

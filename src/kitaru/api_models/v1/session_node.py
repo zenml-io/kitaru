@@ -86,6 +86,18 @@ class SessionNodeCreateRequest(RequestModel):
     )
 
 
+class SessionNodeListParams(RequestModel):
+    """Session node list params."""
+
+    cursor: str | None = Field(
+        default=None, description="Cursor from the previous page."
+    )
+    size: int = Field(default=20, ge=1, le=1000, description="Items per page.")
+    include_payloads: bool = Field(
+        default=False, description="Include inputs, outputs, and attributes."
+    )
+
+
 class SessionNodeBatchRequest(RequestModel):
     """Session node batch request."""
 

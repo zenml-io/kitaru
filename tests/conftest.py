@@ -17,9 +17,10 @@ import asyncio
 import hashlib
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -36,6 +37,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
@@ -57,6 +59,8 @@ from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.secret import SecretFilter
+from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
@@ -85,6 +89,7 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
     encode_api_key,
 )
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
 from kitaru.server.domain.keys import generate_secret, hash_secret
@@ -104,6 +109,13 @@ from kitaru.server.domain.secret import (
     Secret,
     SecretNotFound,
 )
+from kitaru.server.domain.session import (
+    DuplicateSessionExternalId,
+    Session,
+    SessionNotFound,
+    SessionRollups,
+)
+from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
     DuplicateTagName,
@@ -1600,6 +1612,389 @@ async def create_tag(
         Stored tag.
     """
     return await repository.create(Tag(owner_id=owner_id, name=name))
+
+
+class FakeSessionRepository:
+    """In-memory session repository."""
+
+    def __init__(self, tags: FakeTagRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tags: Fake tag repository, consulted by the ``tag`` filter.
+        """
+        self._sessions: dict[uuid.UUID, Session] = {}
+        self._tags = tags
+
+    def _check_duplicate_external_id(self, session: Session) -> None:
+        if session.provider is None or session.external_id is None:
+            return
+        for other in self._sessions.values():
+            if (
+                other.id != session.id
+                and other.provider == session.provider
+                and other.external_id == session.external_id
+            ):
+                raise DuplicateSessionExternalId(session.provider, session.external_id)
+
+    async def create(self, session: Session) -> Session:
+        """Persist a new session.
+
+        Args:
+            session: Session to store.
+
+        Raises:
+            DuplicateSessionExternalId: The provider and external id pair is
+                already registered.
+
+        Returns:
+            Stored session with timestamps set.
+        """
+        self._check_duplicate_external_id(session)
+        now = datetime.now(UTC)
+        stored = session.model_copy(update={"created": now, "updated": now})
+        self._sessions[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+        """Load a session by id.
+
+        Args:
+            session_id: Id of the session.
+            exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
+
+        Raises:
+            SessionNotFound: No session has this id.
+
+        Returns:
+            Stored session.
+        """
+        _ = exclusive
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise SessionNotFound(session_id)
+        return session.model_copy()
+
+    def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
+        """Resolve the ids of sessions linked to a tag by name.
+
+        Args:
+            tag_name: Name of the tag to resolve.
+
+        Returns:
+            Ids of sessions linked to the tag.
+        """
+        if self._tags is None:
+            return set()
+        tag_id = next(
+            (tag.id for tag in self._tags._tags.values() if tag.name == tag_name),
+            None,
+        )
+        if tag_id is None:
+            return set()
+        return {
+            link.resource_id
+            for link in self._tags._links.values()
+            if link.tag_id == tag_id and link.resource_type == TagResourceType.SESSION
+        }
+
+    async def query(
+        self, session_filter: SessionFilter
+    ) -> tuple[list[Session], str | None]:
+        """Query sessions matching a filter.
+
+        Args:
+            session_filter: Filter and pagination parameters.
+
+        Raises:
+            ValidationError: ``has_evaluation`` is set.
+
+        Returns:
+            Page of matching sessions and the next cursor.
+        """
+        if session_filter.has_evaluation is not None:
+            raise ValidationError("has_evaluation filtering is not available yet")
+        sessions = list(self._sessions.values())
+        if session_filter.agent_id is not None:
+            sessions = [s for s in sessions if s.agent_id == session_filter.agent_id]
+        if session_filter.agent_version_id is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.agent_version_id == session_filter.agent_version_id
+            ]
+        if session_filter.task_id is not None:
+            sessions = [s for s in sessions if s.task_id == session_filter.task_id]
+        if session_filter.origin is not None:
+            sessions = [s for s in sessions if s.origin == session_filter.origin]
+        if session_filter.status is not None:
+            sessions = [s for s in sessions if s.status == session_filter.status]
+        if session_filter.provider is not None:
+            sessions = [s for s in sessions if s.provider == session_filter.provider]
+        if session_filter.external_id is not None:
+            sessions = [
+                s for s in sessions if s.external_id == session_filter.external_id
+            ]
+        if session_filter.name is not None:
+            sessions = [s for s in sessions if s.name == session_filter.name]
+        if session_filter.tag is not None:
+            tagged_ids = self._session_ids_tagged(session_filter.tag)
+            sessions = [s for s in sessions if s.id in tagged_ids]
+        if session_filter.started_after is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.started_at is not None
+                and s.started_at >= session_filter.started_after
+            ]
+        if session_filter.started_before is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.started_at is not None
+                and s.started_at <= session_filter.started_before
+            ]
+        if session_filter.ended_after is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.ended_at is not None and s.ended_at >= session_filter.ended_after
+            ]
+        if session_filter.ended_before is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.ended_at is not None and s.ended_at <= session_filter.ended_before
+            ]
+        if session_filter.min_cost is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.cost is not None and s.cost >= session_filter.min_cost
+            ]
+        if session_filter.max_cost is not None:
+            sessions = [
+                s
+                for s in sessions
+                if s.cost is not None and s.cost <= session_filter.max_cost
+            ]
+        page, next_cursor = _paginate_fake(sessions, session_filter)
+        return [s.model_copy() for s in page], next_cursor
+
+    async def update(self, session: Session) -> Session:
+        """Persist changes to an existing session.
+
+        Args:
+            session: Session with modified fields.
+
+        Raises:
+            SessionNotFound: No session has this id.
+            DuplicateSessionExternalId: The provider and external id pair is
+                already registered.
+
+        Returns:
+            Stored session with the updated timestamp renewed.
+        """
+        stored = self._sessions.get(session.id)
+        if stored is None:
+            raise SessionNotFound(session.id)
+        self._check_duplicate_external_id(session)
+        now = _renewed_timestamp(stored.updated)
+        updated = session.model_copy(update={"created": stored.created, "updated": now})
+        self._sessions[session.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, session_id: uuid.UUID) -> None:
+        """Delete a session by id.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            SessionNotFound: No session has this id.
+        """
+        if session_id not in self._sessions:
+            raise SessionNotFound(session_id)
+        del self._sessions[session_id]
+
+    async def apply_rollups(
+        self, session_id: uuid.UUID, deltas: SessionRollups
+    ) -> None:
+        """Apply rollup deltas to a session's cost, tokens, and call counts.
+
+        Args:
+            session_id: Id of the session.
+            deltas: Rollup deltas to add.
+
+        Raises:
+            SessionNotFound: No session has this id.
+        """
+        stored = self._sessions.get(session_id)
+        if stored is None:
+            raise SessionNotFound(session_id)
+        tokens = stored.tokens if stored.tokens is not None else TokenUsage()
+        new_tokens = TokenUsage(
+            input_tokens=(tokens.input_tokens or 0) + deltas.input_tokens,
+            output_tokens=(tokens.output_tokens or 0) + deltas.output_tokens,
+            cached_input_tokens=(tokens.cached_input_tokens or 0)
+            + deltas.cached_input_tokens,
+            reasoning_tokens=(tokens.reasoning_tokens or 0) + deltas.reasoning_tokens,
+        )
+        now = _renewed_timestamp(stored.updated)
+        updated = stored.model_copy(
+            update={
+                "cost": (stored.cost if stored.cost is not None else Decimal(0))
+                + deltas.cost,
+                "tokens": new_tokens,
+                "llm_call_count": stored.llm_call_count + deltas.llm_call_count,
+                "tool_call_count": stored.tool_call_count + deltas.tool_call_count,
+                "updated": now,
+            }
+        )
+        self._sessions[session_id] = updated
+
+
+async def create_session(
+    repository: FakeSessionRepository,
+    owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    **overrides: Any,
+) -> Session:
+    """Store a session in the fake repository.
+
+    Args:
+        repository: Fake session repository.
+        owner_id: Id of the owning account.
+        agent_id: Id of the agent the session belongs to.
+        **overrides: Additional session fields.
+
+    Returns:
+        Stored session.
+    """
+    values: dict[str, Any] = {
+        "owner_id": owner_id,
+        "agent_id": agent_id,
+        "origin": SessionOrigin.RECORDED,
+    }
+    values.update(overrides)
+    return await repository.create(Session(**values))
+
+
+def _paginate_fake_by_index(
+    nodes: list[SessionNode], session_node_filter: SessionNodeFilter
+) -> tuple[list[SessionNode], str | None]:
+    """Apply index-ascending cursor pagination to an in-memory node list.
+
+    Args:
+        nodes: Candidate nodes already filtered by session id.
+        session_node_filter: Filter carrying the cursor and size.
+
+    Returns:
+        Page of matching nodes and the next cursor.
+    """
+    filter_hash = session_node_filter.compute_filter_hash()
+    cursor = None
+    if session_node_filter.cursor is not None:
+        cursor = decode_cursor(
+            session_node_filter.cursor, session_node_filter.sort, filter_hash
+        )
+
+    ordered = sorted(nodes, key=lambda node: node.index)
+    if cursor is not None:
+        last_index = int(cursor.id)
+        ordered = [node for node in ordered if node.index > last_index]
+
+    page = ordered[: session_node_filter.size + 1]
+    next_cursor = None
+    if len(page) > session_node_filter.size:
+        page = page[: session_node_filter.size]
+        next_cursor = encode_cursor(
+            session_node_filter.sort, str(page[-1].index), filter_hash
+        )
+    return page, next_cursor
+
+
+class FakeSessionNodeRepository:
+    """In-memory session node repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._nodes: dict[uuid.UUID, SessionNode] = {}
+
+    async def get_by_indexes(
+        self, session_id: uuid.UUID, indexes: Sequence[int]
+    ) -> dict[int, SessionNode]:
+        """Bulk-load the stored nodes of a session at the given indexes.
+
+        Args:
+            session_id: Id of the owning session.
+            indexes: Indexes to load.
+
+        Returns:
+            Stored nodes keyed by index, missing indexes omitted.
+        """
+        wanted = set(indexes)
+        return {
+            node.index: node.model_copy()
+            for node in self._nodes.values()
+            if node.session_id == session_id and node.index in wanted
+        }
+
+    async def upsert_batch(
+        self, session_id: uuid.UUID, nodes: list[SessionNode]
+    ) -> list[SessionNode]:
+        """Insert or replace nodes upserted on (session, index).
+
+        Args:
+            session_id: Id of the owning session.
+            nodes: Fully resolved nodes to store, in batch order.
+
+        Returns:
+            Stored nodes in batch order.
+        """
+        _ = session_id
+        stored: list[SessionNode] = []
+        for node in nodes:
+            existing = self._nodes.get(node.id)
+            now = datetime.now(UTC)
+            created = existing.created if existing is not None else now
+            updated = (
+                _renewed_timestamp(existing.updated) if existing is not None else now
+            )
+            row = node.model_copy(update={"created": created, "updated": updated})
+            self._nodes[node.id] = row
+            stored.append(row.model_copy())
+        return stored
+
+    async def query(
+        self, session_node_filter: SessionNodeFilter
+    ) -> tuple[list[SessionNode], str | None]:
+        """Query the nodes of a session, ordered by index ascending.
+
+        Args:
+            session_node_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching nodes and the next cursor.
+        """
+        nodes = [
+            node
+            for node in self._nodes.values()
+            if node.session_id == session_node_filter.session_id
+        ]
+        page, next_cursor = _paginate_fake_by_index(nodes, session_node_filter)
+        result = []
+        for node in page:
+            if session_node_filter.include_payloads:
+                result.append(node.model_copy())
+            else:
+                result.append(
+                    node.model_copy(
+                        update={"inputs": None, "outputs": None, "attributes": None}
+                    )
+                )
+        return result, next_cursor
 
 
 class FakeWorkerRepository:

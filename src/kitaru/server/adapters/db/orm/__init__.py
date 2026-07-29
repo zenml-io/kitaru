@@ -22,6 +22,8 @@ from kitaru.server.adapters.db.orm.blob import BlobORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.orm.worker import WorkerORM
 
@@ -36,6 +38,8 @@ __all__ = [
     "PluginORM",
     "PluginVersionORM",
     "SecretORM",
+    "SessionNodeORM",
+    "SessionORM",
     "TagLinkORM",
     "TagORM",
     "WorkerORM",
