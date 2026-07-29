@@ -16,7 +16,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.orm.worker import (
@@ -96,6 +96,32 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         """
         row = await self._get_row(worker_id)
         return row.to_domain()
+
+    async def update_last_seen_at(self, worker_id: uuid.UUID, now: datetime) -> None:
+        """Stamp the time the worker was last seen.
+
+        This is a Core-level statement rather than an ORM attribute mutation,
+        so the ``updated`` timestamp needs to be stamped here explicitly, the
+        ``onupdate`` client-side default never fires for it.
+
+        Args:
+            worker_id: Id of the worker.
+            now: Current time.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
+        """
+        statement = (
+            update(WorkerORM)
+            .where(WorkerORM.id == worker_id)
+            .values(last_seen_at=now, updated=now)
+            .returning(WorkerORM.id)
+            .execution_options(synchronize_session="fetch")
+        )
+        updated = (await self._session.scalars(statement)).one_or_none()
+        if updated is None:
+            raise WorkerNotFound(worker_id)
+        await self._session.flush()
 
     async def query(
         self, worker_filter: WorkerFilter

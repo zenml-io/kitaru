@@ -18,6 +18,7 @@ import uuid
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.session import (
     SessionCreate,
@@ -29,35 +30,54 @@ from kitaru.server.domain.session import (
     SessionStatus,
     SessionStatusCannotBeCleared,
 )
+from kitaru.server.domain.task import AgentTask, TaskResultSessionAlreadyLinked
 
 
 class SessionService:
     """Session use cases."""
 
-    def __init__(self, repository: SessionRepository) -> None:
+    def __init__(
+        self, repository: SessionRepository, task_repository: TaskRepository
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Session repository.
+            task_repository: Task repository, for the create-time task link.
         """
         self._repository = repository
+        self._tasks = task_repository
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
     ) -> Session:
         """Create a session owned by the caller.
 
+        A session naming a task requires that task to be running. An agent
+        task links exactly one session and gets its result session written in
+        the same transaction, an import task links every session it creates.
+
         Args:
             command: Fields for the new session.
             actor: Caller context.
 
         Raises:
+            TaskNotFound: No task has the named id.
+            TaskNotRunning: The named task is not running.
+            TaskResultSessionAlreadyLinked: The named agent task already
+                links a session.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
         Returns:
             Created session.
         """
+        task = None
+        if command.task_id is not None:
+            task = await self._tasks.get(command.task_id, exclusive=True)
+            task.check_running()
+            if isinstance(task, AgentTask) and task.result_session_id is not None:
+                raise TaskResultSessionAlreadyLinked(task.id)
         session = Session(
             owner_id=actor.account.id,
             agent_id=command.agent_id,
@@ -80,7 +100,11 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
-        return await self._repository.create(session)
+        stored = await self._repository.create(session)
+        if isinstance(task, AgentTask):
+            task.link_result_session(stored.id)
+            await self._tasks.update(task)
+        return stored
 
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.

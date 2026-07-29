@@ -14,6 +14,7 @@
 """Worker repository interface."""
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.worker import WorkerFilter
@@ -45,6 +46,18 @@ class WorkerRepository(Protocol):
 
         Returns:
             Stored worker.
+        """
+        ...
+
+    async def update_last_seen_at(self, worker_id: uuid.UUID, now: datetime) -> None:
+        """Stamp the time the worker was last seen.
+
+        Args:
+            worker_id: Id of the worker.
+            now: Current time.
+
+        Raises:
+            WorkerNotFound: No worker has this id.
         """
         ...
 

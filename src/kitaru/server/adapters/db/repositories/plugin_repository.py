@@ -42,6 +42,7 @@ from kitaru.server.domain.plugin import (
     PluginNotFound,
     PluginSource,
     PluginVersion,
+    PluginVersionIdNotFound,
     PluginVersionNotFound,
     ScriptPluginSource,
 )
@@ -276,6 +277,23 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
             PluginVersionORM.plugin_id == plugin_id, PluginVersionORM.version == version
         )
         row = await self._get_version_row(statement, plugin_id, version)
+        return row.to_domain()
+
+    async def get_version_by_id(self, plugin_version_id: uuid.UUID) -> PluginVersion:
+        """Load a plugin version by id.
+
+        Args:
+            plugin_version_id: Id of the plugin version.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has this id.
+
+        Returns:
+            Stored plugin version.
+        """
+        row = await self._session.get(PluginVersionORM, plugin_version_id)
+        if row is None:
+            raise PluginVersionIdNotFound(plugin_version_id)
         return row.to_domain()
 
     async def query_versions(

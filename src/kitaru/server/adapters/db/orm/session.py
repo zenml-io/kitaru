@@ -50,6 +50,7 @@ SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
 SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
+SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
 SESSION_AGENT_ID_STARTED_AT_INDEX = index_name("session", ["agent_id", "started_at"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
 SESSION_TASK_ID_INDEX = index_name("session", ["task_id"])
@@ -80,6 +81,15 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=SESSION_OWNER_ID_FOREIGN_KEY
         ),
+        # Session and task reference each other, so this side of the cycle is
+        # created as a separate ALTER statement.
+        ForeignKeyConstraint(
+            ["task_id"],
+            ["task.id"],
+            name=SESSION_TASK_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
         Index(SESSION_AGENT_ID_STARTED_AT_INDEX, "agent_id", "started_at"),
         Index(SESSION_STATUS_INDEX, "status"),
         Index(SESSION_TASK_ID_INDEX, "task_id"),
@@ -89,8 +99,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID | None]
-    # No foreign key yet: the task resource does not exist in this branch, a
-    # later wave adds the constraint and the one-session-per-task check.
     task_id: Mapped[uuid.UUID | None]
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))

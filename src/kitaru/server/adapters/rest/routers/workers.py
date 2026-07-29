@@ -22,6 +22,8 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
+    WorkerHeartbeatRequest,
+    WorkerHeartbeatResponse,
     WorkerListParams,
     WorkerResponse,
 )
@@ -29,6 +31,7 @@ from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_app_settings,
+    get_task_service,
     get_worker_service,
 )
 from kitaru.server.adapters.rest.mapping.workers import (
@@ -37,6 +40,7 @@ from kitaru.server.adapters.rest.mapping.workers import (
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.worker_service import WorkerService
 
 router = APIRouter(route_class=CommitRoute)
@@ -134,6 +138,32 @@ async def get_worker(
     return worker_to_response(
         worker, datetime.now(UTC), settings.WORKER_LIVENESS_TIMEOUT_SECONDS
     )
+
+
+@router.post("/{worker_id}/heartbeat")
+async def heartbeat_worker(
+    worker_id: uuid.UUID,
+    body: WorkerHeartbeatRequest,
+    service: Annotated[TaskService, Depends(get_task_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> WorkerHeartbeatResponse:
+    """Report the tasks a worker currently holds.
+
+    Clients observe HTTP 200 on success and 404 when no worker has this id.
+
+    Args:
+        worker_id: Id of the worker.
+        body: Worker heartbeat request.
+        service: Task service.
+        actor: Caller context.
+
+    Returns:
+        Held tasks the worker should stop running.
+    """
+    cancel_task_ids = await service.heartbeat_worker(
+        worker_id, body.task_ids, actor=actor
+    )
+    return WorkerHeartbeatResponse(cancel_task_ids=cancel_task_ids)
 
 
 @router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)

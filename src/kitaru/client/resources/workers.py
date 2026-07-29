@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
+    WorkerHeartbeatRequest,
+    WorkerHeartbeatResponse,
     WorkerListParams,
     WorkerResponse,
 )
@@ -57,6 +59,28 @@ class WorkersResource:
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return WorkerResponse.model_validate(response.json())
+
+    async def heartbeat(
+        self, worker_id: uuid.UUID, request: WorkerHeartbeatRequest
+    ) -> WorkerHeartbeatResponse:
+        """Report the tasks a worker currently holds.
+
+        Args:
+            worker_id: Id of the worker.
+            request: Worker heartbeat request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing worker.
+
+        Returns:
+            Held tasks the worker should stop running.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/workers/{worker_id}/heartbeat",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return WorkerHeartbeatResponse.model_validate(response.json())
 
     async def get(self, worker_id: uuid.UUID) -> WorkerResponse:
         """Get a worker by id.

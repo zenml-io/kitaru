@@ -22,6 +22,7 @@ import pytest
 from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
+    FakeTaskRepository,
     asgi_api_client,
 )
 from kitaru.api_models.v1.session import (
@@ -66,7 +67,9 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
-    session_service = SessionService(repository=session_repository)
+    session_service = SessionService(
+        repository=session_repository, task_repository=FakeTaskRepository()
+    )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository
     )

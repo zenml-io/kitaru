@@ -19,7 +19,12 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeSessionNodeRepository, FakeSessionRepository, create_session
+from conftest import (
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+    create_session,
+)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.application.models.auth import AuthContext
@@ -64,7 +69,9 @@ def service(
 @pytest.fixture
 def session_service(session_repository: FakeSessionRepository) -> SessionService:
     """Provide a session service sharing the fake session repository."""
-    return SessionService(repository=session_repository)
+    return SessionService(
+        repository=session_repository, task_repository=FakeTaskRepository()
+    )
 
 
 @pytest.fixture

@@ -145,6 +145,20 @@ class PluginRepository(Protocol):
         """
         ...
 
+    async def get_version_by_id(self, plugin_version_id: uuid.UUID) -> PluginVersion:
+        """Load a plugin version by id.
+
+        Args:
+            plugin_version_id: Id of the plugin version.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has this id.
+
+        Returns:
+            Stored plugin version.
+        """
+        ...
+
     async def query_versions(
         self, version_filter: PluginVersionFilter
     ) -> tuple[list[PluginVersion], str | None]:

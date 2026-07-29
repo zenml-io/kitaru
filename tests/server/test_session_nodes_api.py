@@ -20,7 +20,11 @@ from typing import Any
 import httpx
 import pytest
 
-from conftest import FakeSessionNodeRepository, FakeSessionRepository
+from conftest import (
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTaskRepository,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_session_node_service,
@@ -59,7 +63,9 @@ async def client(
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
-    session_service = SessionService(repository=session_repository)
+    session_service = SessionService(
+        repository=session_repository, task_repository=FakeTaskRepository()
+    )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository
     )

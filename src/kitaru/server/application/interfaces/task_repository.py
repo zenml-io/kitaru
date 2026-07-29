@@ -1,0 +1,152 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Task repository interface."""
+
+import uuid
+from collections.abc import Sequence
+from datetime import datetime
+from typing import Protocol
+
+from kitaru.api_models.v1.task import WorkerScope
+from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.domain.task import Task
+
+
+class TaskRepository(Protocol):
+    """Task persistence operations."""
+
+    async def create(self, task: Task) -> Task:
+        """Persist a new task.
+
+        Args:
+            task: Task to store.
+
+        Raises:
+            DuplicateEvaluationTask: The job already holds an evaluator task
+                for this input session and plugin version.
+
+        Returns:
+            Stored task with timestamps set.
+        """
+        ...
+
+    async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:
+        """Load a task by id.
+
+        Args:
+            task_id: Id of the task.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
+
+        Raises:
+            TaskNotFound: No task has this id.
+
+        Returns:
+            Stored task.
+        """
+        ...
+
+    async def get_many(self, task_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Task]:
+        """Bulk-load tasks by id, keyed by id, missing ids omitted.
+
+        Args:
+            task_ids: Ids of the tasks to load.
+
+        Returns:
+            Stored tasks keyed by id.
+        """
+        ...
+
+    async def query(self, task_filter: TaskFilter) -> tuple[list[Task], str | None]:
+        """Query tasks matching a filter.
+
+        ``stale_before`` matches in-flight tasks whose last heartbeat, or
+        claim time when they never heartbeated, is older than the bound.
+
+        Args:
+            task_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching tasks and the next cursor.
+        """
+        ...
+
+    async def list_by_job(self, job_id: uuid.UUID) -> list[Task]:
+        """Load every task of a job, ordered by id.
+
+        Args:
+            job_id: Id the tasks belong to.
+
+        Returns:
+            Tasks of the job in creation order.
+        """
+        ...
+
+    async def update(self, task: Task) -> Task:
+        """Persist changes to an existing task.
+
+        Args:
+            task: Task with modified fields.
+
+        Raises:
+            TaskNotFound: No task has this id.
+
+        Returns:
+            Stored task with the updated timestamp renewed.
+        """
+        ...
+
+    async def claim_pending(
+        self, scope: WorkerScope, worker_id: uuid.UUID, limit: int, now: datetime
+    ) -> list[Task]:
+        """Hand pending tasks matching a scope to a worker, oldest first.
+
+        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent claims
+        never hand the same task to two workers and never block on each
+        other.
+
+        Args:
+            scope: Claim scope narrowing the queue.
+            worker_id: Worker claiming the tasks.
+            limit: Maximum number of tasks to claim.
+            now: Current time.
+
+        Returns:
+            Claimed tasks carrying their incremented attempt.
+        """
+        ...
+
+    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
+        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+
+        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent sweeps
+        take disjoint tasks.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of tasks to lock.
+
+        Returns:
+            Locked stale tasks.
+        """
+        ...
+
+    async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
+        """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+
+        Args:
+            job_id: Id the tasks belong to.
+            now: Current time.
+        """
+        ...

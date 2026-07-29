@@ -29,6 +29,10 @@ from kitaru.server.adapters.db.orm.session import (
     SessionORM,
 )
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
+from kitaru.server.adapters.db.orm.task import (
+    TASK_INPUT_SESSION_ID_FOREIGN_KEY,
+    TASK_RESULT_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -37,6 +41,7 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
+    SessionInUseByTask,
     SessionNotFound,
     SessionRollups,
 )
@@ -279,10 +284,20 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             SessionNotFound: No session has this id.
             SessionInUse: The session belongs to a cohort and cannot be
                 deleted.
+            SessionInUseByTask: The session is a task's input or result
+                session and cannot be deleted.
         """
         await self._delete_row(
             session_id,
-            {COHORT_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id)},
+            {
+                COHORT_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id),
+                TASK_INPUT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
+                    session_id
+                ),
+                TASK_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
+                    session_id
+                ),
+            },
         )
 
     async def apply_rollups(
