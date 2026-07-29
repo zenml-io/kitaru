@@ -19,8 +19,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionEvaluationsRequest,
     SessionListParams,
     SessionResponse,
     SessionUpdateRequest,
@@ -33,8 +35,13 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_evaluation_service,
     get_session_node_service,
     get_session_service,
+)
+from kitaru.server.adapters.rest.mapping.evaluations import (
+    merged_evaluation_to_response,
+    session_evaluations_request_to_merges,
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
     session_node_batch_to_upserts,
@@ -48,6 +55,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_update_to_command,
 )
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -88,9 +96,8 @@ async def list_sessions(
 ) -> Page[SessionResponse]:
     """List sessions.
 
-    Clients observe HTTP 200 on success, 422 on invalid pagination
-    parameters, and 422 when ``has_evaluation`` is set, which is not yet
-    available.
+    Clients observe HTTP 200 on success and 422 on invalid pagination
+    parameters.
 
     Args:
         service: Session service.
@@ -239,3 +246,30 @@ async def list_session_nodes(
         ],
         next_cursor=next_cursor,
     )
+
+
+@router.post("/{session_id}/evaluations")
+async def merge_session_evaluations(
+    session_id: uuid.UUID,
+    body: SessionEvaluationsRequest,
+    service: Annotated[EvaluationService, Depends(get_evaluation_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> list[EvaluationResponse]:
+    """Merge manual evaluations into a session.
+
+    A resent name overwrites its score, value, data type, and explanation.
+    Clients observe HTTP 200 on success, 404 when no session has this id,
+    and 422 when the request names the same evaluation twice.
+
+    Args:
+        session_id: Id of the session to merge evaluations into.
+        body: Session evaluations request.
+        service: Evaluation service.
+        actor: Caller context.
+
+    Returns:
+        Stored evaluations in request order.
+    """
+    commands = session_evaluations_request_to_merges(body)
+    evaluations = await service.merge_evaluations(session_id, commands, actor=actor)
+    return [merged_evaluation_to_response(evaluation) for evaluation in evaluations]

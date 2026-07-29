@@ -18,8 +18,10 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionEvaluationsRequest,
     SessionListParams,
     SessionResponse,
     SessionUpdateRequest,
@@ -105,6 +107,33 @@ class SessionsResource:
             json=batch.model_dump(mode="json", exclude_unset=True),
         )
         return [SessionNodeResponse.model_validate(item) for item in response.json()]
+
+    async def merge_evaluations(
+        self, session_id: uuid.UUID, request: SessionEvaluationsRequest
+    ) -> list[EvaluationResponse]:
+        """Merge manual evaluations into a session.
+
+        A resent name overwrites its score, value, data type, and
+        explanation.
+
+        Args:
+            session_id: Id of the session to merge evaluations into.
+            request: Session evaluations request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session and 422 when the request names the same evaluation
+                twice.
+
+        Returns:
+            Stored evaluations in request order.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/sessions/{session_id}/evaluations",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return [EvaluationResponse.model_validate(item) for item in response.json()]
 
     async def list(
         self,

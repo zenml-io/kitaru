@@ -19,6 +19,7 @@ from kitaru.server.domain.names import (
     RESERVED_SEPARATORS,
     InvalidName,
     validate_account_name,
+    validate_evaluation_name,
     validate_name,
 )
 
@@ -85,3 +86,21 @@ def test_invalid_account_names_rejected(name: str) -> None:
     """Reject names that are empty, boundary separated, or outside the set."""
     with pytest.raises(InvalidName):
         validate_account_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["accuracy", "accuracy.v2", "accuracy_v2", "accuracy-v2", "a.b-c_d"],
+)
+def test_valid_evaluation_names_pass(name: str) -> None:
+    """Accept the dot separator a qualified evaluator name may use."""
+    assert validate_evaluation_name(name) == name
+
+
+@pytest.mark.parametrize(
+    "name", ["", ".accuracy", "accuracy.", "a b", "a/b", "a:b", "a@b", "ä"]
+)
+def test_invalid_evaluation_names_rejected(name: str) -> None:
+    """Reject names that are empty, boundary separated, or outside the set."""
+    with pytest.raises(InvalidName):
+        validate_evaluation_name(name)

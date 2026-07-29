@@ -19,9 +19,15 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeSessionNodeRepository, FakeSessionRepository, FakeTagRepository
+from conftest import (
+    FakeEvaluationRepository,
+    FakeSessionNodeRepository,
+    FakeSessionRepository,
+    FakeTagRepository,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    get_evaluation_service,
     get_session_node_service,
     get_session_service,
     get_tag_service,
@@ -29,6 +35,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -46,9 +53,19 @@ def tag_repository() -> FakeTagRepository:
 
 
 @pytest.fixture
-def session_repository(tag_repository: FakeTagRepository) -> FakeSessionRepository:
-    """Provide the fake session repository backing the app, tag-aware."""
-    return FakeSessionRepository(tags=tag_repository)
+def evaluation_repository() -> FakeEvaluationRepository:
+    """Provide the fake evaluation repository backing the app."""
+    return FakeEvaluationRepository()
+
+
+@pytest.fixture
+def session_repository(
+    tag_repository: FakeTagRepository,
+    evaluation_repository: FakeEvaluationRepository,
+) -> FakeSessionRepository:
+    """Provide the fake session repository backing the app, tag- and
+    evaluation-aware."""
+    return FakeSessionRepository(tags=tag_repository, evaluations=evaluation_repository)
 
 
 @pytest.fixture
@@ -62,6 +79,7 @@ async def client(
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     tag_repository: FakeTagRepository,
+    evaluation_repository: FakeEvaluationRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed session services."""
     app = create_app(
@@ -72,9 +90,13 @@ async def client(
         repository=node_repository, session_repository=session_repository
     )
     tag_service = TagService(repository=tag_repository)
+    evaluation_service = EvaluationService(
+        repository=evaluation_repository, session_repository=session_repository
+    )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[get_tag_service] = lambda: tag_service
+    app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -285,11 +307,92 @@ async def test_list_sessions_filters_by_cost_bounds(
     assert [item["id"] for item in items] == [cheap["id"]]
 
 
-async def test_list_sessions_has_evaluation_not_implemented(
+async def test_list_sessions_filters_by_has_evaluation(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 422 when has_evaluation is set."""
+    """Filter sessions by whether they have a stored evaluation."""
+    scored = (await client.post("/v1/sessions", json=_session_body())).json()
+    unscored = (await client.post("/v1/sessions", json=_session_body())).json()
+    await client.post(
+        f"/v1/sessions/{scored['id']}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
+    )
+
     response = await client.get("/v1/sessions", params={"has_evaluation": "true"})
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [scored["id"]]
+
+    response = await client.get("/v1/sessions", params={"has_evaluation": "false"})
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [unscored["id"]]
+
+
+async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
+    """Merge manual evaluations into a session."""
+    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    response = await client.post(
+        f"/v1/sessions/{created['id']}/evaluations",
+        json={
+            "evaluations": [
+                {"name": "accuracy", "score": 0.9},
+                {"name": "verdict", "value": "good"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body] == ["accuracy", "verdict"]
+    assert body[0]["score"] == 0.9
+    assert body[0]["evaluator_version_id"] is None
+    assert body[0]["evaluator_name"] is None
+    assert body[1]["value"] == "good"
+
+
+async def test_merge_session_evaluations_overwrites_matching_name(
+    client: httpx.AsyncClient,
+) -> None:
+    """Resending a name overwrites its score, value, and data type."""
+    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    first = (
+        await client.post(
+            f"/v1/sessions/{created['id']}/evaluations",
+            json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
+        )
+    ).json()
+    second = (
+        await client.post(
+            f"/v1/sessions/{created['id']}/evaluations",
+            json={"evaluations": [{"name": "accuracy", "value": "high"}]},
+        )
+    ).json()
+    assert second[0]["id"] == first[0]["id"]
+    assert second[0]["value"] == "high"
+    assert second[0]["score"] is None
+
+
+async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for a missing session."""
+    response = await client.post(
+        f"/v1/sessions/{uuid.uuid4()}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
+    )
+    assert response.status_code == 404
+
+
+async def test_merge_session_evaluations_rejects_duplicate_name(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 when the request names the same evaluation twice."""
+    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    response = await client.post(
+        f"/v1/sessions/{created['id']}/evaluations",
+        json={
+            "evaluations": [
+                {"name": "accuracy", "score": 0.9},
+                {"name": "accuracy", "score": 0.1},
+            ]
+        },
+    )
     assert response.status_code == 422
 
 

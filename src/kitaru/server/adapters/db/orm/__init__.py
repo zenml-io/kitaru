@@ -20,6 +20,7 @@ from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecre
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
 from kitaru.server.adapters.db.orm.blob import BlobORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
+from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.orm.session import SessionORM
@@ -35,6 +36,7 @@ __all__ = [
     "ApiKeyORM",
     "BlobORM",
     "DeviceORM",
+    "EvaluationORM",
     "PluginORM",
     "PluginVersionORM",
     "SecretORM",

@@ -14,6 +14,7 @@
 """Tests for schema naming helpers."""
 
 from kitaru.server.adapters.db.orm.orm_utils import (
+    check_constraint_name,
     index_name,
     unique_constraint_name,
 )
@@ -32,6 +33,13 @@ def test_index_name_multiple_columns() -> None:
 def test_unique_constraint_name_single_column() -> None:
     """Build a unique constraint name from one column."""
     assert unique_constraint_name("agent", ["name"]) == "uq_agent_name"
+
+
+def test_check_constraint_name_single_column() -> None:
+    """Build a check constraint name from one column."""
+    assert (
+        check_constraint_name("evaluation", ["data_type"]) == "ck_evaluation_data_type"
+    )
 
 
 def test_names_truncate_to_identifier_limit() -> None:

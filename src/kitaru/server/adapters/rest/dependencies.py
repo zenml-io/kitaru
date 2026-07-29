@@ -47,6 +47,9 @@ from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobReposi
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
+from kitaru.server.adapters.db.repositories.evaluation_repository import (
+    SQLEvaluationRepository,
+)
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -75,6 +78,7 @@ from kitaru.server.application.services.agent_version_service import (
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.device_service import DeviceService
+from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
@@ -304,6 +308,23 @@ def get_session_node_service(
     """
     return SessionNodeService(
         repository=SQLSessionNodeRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_evaluation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EvaluationService:
+    """Return an evaluation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Evaluation service bound to the SQL repositories.
+    """
+    return EvaluationService(
+        repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session),
     )
 
