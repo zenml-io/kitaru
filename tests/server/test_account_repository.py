@@ -56,6 +56,14 @@ async def test_create_sets_timestamps(repository: AccountRepository) -> None:
     assert account.updated is not None
 
 
+async def test_ensure_is_idempotent(repository: AccountRepository) -> None:
+    """Return the same canonical account across repeated ensures."""
+    account = Account(id=uuid.uuid4(), name="cloud-workspace")
+    created = await repository.ensure(account)
+    existing = await repository.ensure(account)
+    assert existing == created
+
+
 async def test_create_duplicate_name(repository: AccountRepository) -> None:
     """Reject a second account with the same name."""
     await repository.create(Account(name="alice"))

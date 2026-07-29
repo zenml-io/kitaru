@@ -1,26 +1,20 @@
 # syntax=docker/dockerfile:1
 
-ARG PYTHON_VERSION=3.13
+ARG PYTHON_IMAGE=python:3.13-slim-bookworm@sha256:9d7f287598e1a5a978c015ee176d8216435aaf335ed69ac3c38dd1bbb10e8d64
+ARG UV_IMAGE=docker.io/astral/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36
 ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
-ARG KITARU_VERSION=""
 
-FROM python:${PYTHON_VERSION}-slim-bookworm AS base
+FROM ${UV_IMAGE} AS uv
+
+FROM ${PYTHON_IMAGE} AS base
 
 ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 
-RUN set -ex && \
-  apt-get update && \
-  apt-get upgrade -y && \
-  apt-get install -y --no-install-recommends curl && \
-  apt-get autoremove -y && \
-  apt-get clean -y && \
-  rm -rf /var/lib/apt/lists/*
-
-COPY --from=docker.io/astral/uv:latest /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 RUN groupadd --gid $USER_GID $USERNAME && \
   useradd --uid $USER_UID --gid $USER_GID -m $USERNAME
@@ -35,10 +29,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 FROM base AS builder
 
-ARG KITARU_VERSION
+COPY dist/*.whl /tmp/wheels/
+COPY dist/kitaru-server-requirements.txt /tmp/kitaru-server-requirements.txt
 
 RUN uv venv /app/.venv && \
-  uv pip install "kitaru[server]${KITARU_VERSION:+==$KITARU_VERSION}"
+  wheel="$(find /tmp/wheels -name '*.whl' -print -quit)" && \
+  test -n "$wheel" && \
+  uv pip install --requirement /tmp/kitaru-server-requirements.txt && \
+  uv pip install --no-deps "$wheel"
 
 FROM base AS runtime
 

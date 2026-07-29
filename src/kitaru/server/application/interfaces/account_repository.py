@@ -37,6 +37,17 @@ class AccountRepository(Protocol):
         """
         ...
 
+    async def ensure(self, account: Account) -> Account:
+        """Return an account, creating it atomically when missing.
+
+        Args:
+            account: Account with the canonical ID and name.
+
+        Returns:
+            Existing or newly stored account.
+        """
+        ...
+
     async def get(self, account_id: uuid.UUID) -> Account:
         """Load an account by id.
 
