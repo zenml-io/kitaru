@@ -40,11 +40,15 @@ class ExperimentRepository(Protocol):
         """
         ...
 
-    async def get(self, experiment_id: uuid.UUID) -> Experiment:
+    async def get(
+        self, experiment_id: uuid.UUID, exclusive: bool = False
+    ) -> Experiment:
         """Load an experiment by id.
 
         Args:
             experiment_id: Id of the experiment.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
@@ -91,6 +95,7 @@ class ExperimentRepository(Protocol):
 
         Raises:
             ExperimentNotFound: No experiment has this id.
+            ExperimentInUse: The experiment has runs.
         """
         ...
 
@@ -140,5 +145,6 @@ class ExperimentRepository(Protocol):
 
         Raises:
             ReplayConfigNotFound: No replay config has this id.
+            ReplayConfigInUse: A replay references the replay config.
         """
         ...

@@ -238,7 +238,7 @@ async def test_update_replay_config_id(setup: Setup) -> None:
     old_config = await repository.create_replay_config(_config(owner_id))
     new_config = await repository.create_replay_config(_config(owner_id))
     created = await repository.create(_experiment(owner_id, old_config.id))
-    created.update_replay_config_id(new_config.id)
+    created.update_replay_config_id(new_config.id, has_runs=False)
     updated = await repository.update(created)
     assert updated.replay_config_id == new_config.id
 

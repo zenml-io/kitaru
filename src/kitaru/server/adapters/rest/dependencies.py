@@ -56,9 +56,15 @@ from kitaru.server.adapters.db.repositories.evaluation_repository import (
 from kitaru.server.adapters.db.repositories.experiment_repository import (
     SQLExperimentRepository,
 )
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
+)
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
 )
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
@@ -90,9 +96,13 @@ from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.plugin_service import PluginService
+from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -202,9 +212,12 @@ def get_agent_version_service(
         session: Request-scoped database session.
 
     Returns:
-        Agent version service bound to the SQL repository.
+        Agent version service bound to the SQL repositories.
     """
-    return AgentVersionService(repository=SQLAgentVersionRepository(session))
+    return AgentVersionService(
+        repository=SQLAgentVersionRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
 
 
 def get_api_key_service(
@@ -434,6 +447,55 @@ def get_experiment_service(
     return ExperimentService(
         repository=SQLExperimentRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        experiment_run_repository=SQLExperimentRunRepository(session),
+        cohort_repository=SQLCohortRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        job_repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
+
+
+def get_replay_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ReplayService:
+    """Return a replay service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Replay service bound to the SQL repositories.
+    """
+    return ReplayService(
+        repository=SQLReplayRepository(session),
+        experiment_repository=SQLExperimentRepository(session),
+        experiment_run_repository=SQLExperimentRunRepository(session),
+        job_repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+        session_repository=SQLSessionRepository(session),
+        session_node_repository=SQLSessionNodeRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+    )
+
+
+def get_experiment_run_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentRunService:
+    """Return an experiment run service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment run service bound to the SQL repositories.
+    """
+    return ExperimentRunService(
+        repository=SQLExperimentRunRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        job_repository=SQLJobRepository(session),
+        transitions=_build_task_transitions(session),
     )
 
 

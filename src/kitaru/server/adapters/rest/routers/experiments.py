@@ -25,8 +25,16 @@ from kitaru.api_models.v1.experiment import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
+from kitaru.api_models.v1.experiment_run import (
+    ExperimentRunCreateRequest,
+    ExperimentRunResponse,
+)
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_experiment_service
+from kitaru.server.adapters.rest.mapping.experiment_runs import (
+    experiment_run_create_to_command,
+    experiment_run_to_response,
+)
 from kitaru.server.adapters.rest.mapping.experiments import (
     experiment_create_to_command,
     experiment_list_params_to_filter,
@@ -164,3 +172,30 @@ async def delete_experiment(
         actor: Caller context.
     """
     await service.delete_experiment(experiment_id, actor=actor)
+
+
+@router.post("/{experiment_id}/runs", status_code=status.HTTP_201_CREATED)
+async def start_run(
+    experiment_id: uuid.UUID,
+    body: ExperimentRunCreateRequest,
+    service: Annotated[ExperimentService, Depends(get_experiment_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ExperimentRunResponse:
+    """Start an experiment run, fanning out one replay per cohort session.
+
+    Clients observe HTTP 201 on success, 404 when the experiment, the
+    cohort, or the resolved agent version does not exist, and 422 when the
+    cohort has no sessions or the resolved agent version has no run spec.
+
+    Args:
+        experiment_id: Id of the experiment.
+        body: Experiment run create request.
+        service: Experiment service.
+        actor: Caller context.
+
+    Returns:
+        Created run.
+    """
+    command = experiment_run_create_to_command(body)
+    run, counts = await service.start_run(experiment_id, command, actor=actor)
+    return experiment_run_to_response(run, counts)

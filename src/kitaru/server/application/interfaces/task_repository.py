@@ -150,3 +150,41 @@ class TaskRepository(Protocol):
             now: Current time.
         """
         ...
+
+    async def get_scored_evaluator_version_ids(
+        self, input_session_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Read the evaluator versions that already completed against a session.
+
+        Args:
+            input_session_id: Id of the scored session.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session.
+        """
+        ...
+
+    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
+        """Report whether any task references an agent version.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Returns:
+            Whether a task references the agent version.
+        """
+        ...
+
+    async def get_agent_tasks_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Task]:
+        """Bulk-load the agent task of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Agent tasks keyed by job id, jobs without an agent task omitted.
+        """
+        ...

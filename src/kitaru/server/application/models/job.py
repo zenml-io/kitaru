@@ -28,6 +28,7 @@ class JobFilter(ListFilter):
     """Job list filter."""
 
     status: JobStatus | None = None
+    job_ids: list[uuid.UUID] | None = None
 
 
 class SessionRunCreate(FrozenModel):

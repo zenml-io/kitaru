@@ -38,8 +38,10 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from kitaru.api_models.v1.evaluation import EvaluationDataType
+from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus, WorkerScope
@@ -54,6 +56,7 @@ from kitaru.server.adapters.auth.control_plane import (
 )
 from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
+from kitaru.server.api.composition import register_subscribers
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -67,8 +70,10 @@ from kitaru.server.application.models.cohort import CohortFilter, CohortSessions
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
+from kitaru.server.application.models.experiment_run import ExperimentRunFilter
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
+from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
@@ -76,7 +81,12 @@ from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
+from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.base import ListFilter
@@ -111,7 +121,13 @@ from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
+    ExperimentInUse,
     ExperimentNotFound,
+)
+from kitaru.server.domain.experiment_run import (
+    DuplicateExperimentRunNumber,
+    ExperimentRun,
+    ExperimentRunNotFound,
 )
 from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
@@ -128,7 +144,17 @@ from kitaru.server.domain.plugin import (
     PluginVersionNotFound,
     ScriptPluginSource,
 )
-from kitaru.server.domain.replay_config import ReplayConfig, ReplayConfigNotFound
+from kitaru.server.domain.replay import (
+    DuplicateReplayForBaseline,
+    Replay,
+    ReplayAlreadyExistsForJob,
+    ReplayNotFound,
+)
+from kitaru.server.domain.replay_config import (
+    ReplayConfig,
+    ReplayConfigInUse,
+    ReplayConfigNotFound,
+)
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
@@ -2047,9 +2073,22 @@ def _paginate_fake_by_index(
 class FakeSessionNodeRepository:
     """In-memory session node repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(
+        self,
+        sessions: "FakeSessionRepository | None" = None,
+        cohorts: "FakeCohortRepository | None" = None,
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            sessions: Fake session repository, consulted by the agent-scope
+                history search.
+            cohorts: Fake cohort repository, consulted by the cohort-scope
+                history search.
+        """
         self._nodes: dict[uuid.UUID, SessionNode] = {}
+        self._sessions = sessions
+        self._cohorts = cohorts
 
     async def get_by_indexes(
         self, session_id: uuid.UUID, indexes: Sequence[int]
@@ -2124,6 +2163,88 @@ class FakeSessionNodeRepository:
                     )
                 )
         return result, next_cursor
+
+    def _newest_match(self, candidates: list[SessionNode]) -> SessionNode | None:
+        """Pick the highest-id node from a candidate list.
+
+        Args:
+            candidates: Matching nodes.
+
+        Returns:
+            Highest-id node, or ``None`` when the list is empty.
+        """
+        if not candidates:
+            return None
+        return max(candidates, key=lambda node: node.id).model_copy()
+
+    async def find_latest_by_cache_key_in_session(
+        self, session_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key within one session.
+
+        Args:
+            session_id: Id of the session to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        return self._newest_match(
+            [
+                node
+                for node in self._nodes.values()
+                if node.session_id == session_id and node.cache_key == cache_key
+            ]
+        )
+
+    async def find_latest_by_cache_key_in_agent(
+        self, agent_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across an agent's recorded history.
+
+        Args:
+            agent_id: Id of the agent to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        assert self._sessions is not None
+        session_ids = {
+            session.id
+            for session in self._sessions._sessions.values()
+            if session.agent_id == agent_id
+            and session.origin in (SessionOrigin.RECORDED, SessionOrigin.IMPORTED)
+        }
+        return self._newest_match(
+            [
+                node
+                for node in self._nodes.values()
+                if node.session_id in session_ids and node.cache_key == cache_key
+            ]
+        )
+
+    async def find_latest_by_cache_key_in_cohort(
+        self, cohort_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across a cohort's sessions.
+
+        Args:
+            cohort_id: Id of the cohort to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        assert self._cohorts is not None
+        session_ids = set(self._cohorts._members.get(cohort_id, []))
+        return self._newest_match(
+            [
+                node
+                for node in self._nodes.values()
+                if node.session_id in session_ids and node.cache_key == cache_key
+            ]
+        )
 
 
 class FakeCohortRepository:
@@ -2929,16 +3050,27 @@ async def create_plugin(
 class FakeExperimentRepository:
     """In-memory experiment and replay config repository."""
 
-    def __init__(self, tag_repository: FakeTagRepository | None = None) -> None:
+    def __init__(
+        self,
+        tag_repository: FakeTagRepository | None = None,
+        experiment_run_repository: "FakeExperimentRunRepository | None" = None,
+        replay_repository: "FakeReplayRepository | None" = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             tag_repository: Tag repository, queried for the tag filter,
                 mirroring the tag EXISTS join.
+            experiment_run_repository: Experiment run repository, restricting
+                the delete when the experiment has runs.
+            replay_repository: Replay repository, restricting the replay
+                config delete when a replay still references it.
         """
         self._experiments: dict[uuid.UUID, Experiment] = {}
         self._configs: dict[uuid.UUID, ReplayConfig] = {}
         self._tag_repository = tag_repository
+        self._experiment_run_repository = experiment_run_repository
+        self._replay_repository = replay_repository
 
     def _check_duplicate_name(self, experiment: Experiment) -> None:
         for other in self._experiments.values():
@@ -2964,11 +3096,14 @@ class FakeExperimentRepository:
         self._experiments[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, experiment_id: uuid.UUID) -> Experiment:
+    async def get(
+        self, experiment_id: uuid.UUID, exclusive: bool = False
+    ) -> Experiment:
         """Load an experiment by id.
 
         Args:
             experiment_id: Id of the experiment.
+            exclusive: Whether to lock the row, a no-op in memory.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
@@ -2976,6 +3111,7 @@ class FakeExperimentRepository:
         Returns:
             Stored experiment.
         """
+        _ = exclusive
         experiment = self._experiments.get(experiment_id)
         if experiment is None:
             raise ExperimentNotFound(experiment_id)
@@ -3044,9 +3180,15 @@ class FakeExperimentRepository:
 
         Raises:
             ExperimentNotFound: No experiment has this id.
+            ExperimentInUse: The experiment has runs.
         """
         if experiment_id not in self._experiments:
             raise ExperimentNotFound(experiment_id)
+        if self._experiment_run_repository is not None and any(
+            run.experiment_id == experiment_id
+            for run in self._experiment_run_repository._runs.values()
+        ):
+            raise ExperimentInUse(experiment_id)
         del self._experiments[experiment_id]
 
     async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
@@ -3105,9 +3247,15 @@ class FakeExperimentRepository:
 
         Raises:
             ReplayConfigNotFound: No replay config has this id.
+            ReplayConfigInUse: A replay references the replay config.
         """
         if config_id not in self._configs:
             raise ReplayConfigNotFound(config_id)
+        if self._replay_repository is not None and any(
+            replay.replay_config_id == config_id
+            for replay in self._replay_repository._replays.values()
+        ):
+            raise ReplayConfigInUse(config_id)
         del self._configs[config_id]
 
 
@@ -3136,6 +3284,431 @@ async def create_experiment(
             name=name,
             description=description,
             replay_config_id=replay_config_id,
+        )
+    )
+
+
+class FakeReplayRepository:
+    """In-memory replay repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._replays: dict[uuid.UUID, Replay] = {}
+
+    def _check_duplicate_baseline(self, replay: Replay) -> None:
+        for other in self._replays.values():
+            if (
+                other.id != replay.id
+                and other.experiment_run_id is not None
+                and other.experiment_run_id == replay.experiment_run_id
+                and other.baseline_session_id == replay.baseline_session_id
+            ):
+                raise DuplicateReplayForBaseline(
+                    replay.experiment_run_id, replay.baseline_session_id
+                )
+
+    def _check_unique_job(self, replay: Replay) -> None:
+        for other in self._replays.values():
+            if other.id != replay.id and other.job_id == replay.job_id:
+                raise ReplayAlreadyExistsForJob(replay.job_id)
+
+    async def create(self, replay: Replay) -> Replay:
+        """Persist a new replay.
+
+        Args:
+            replay: Replay to store.
+
+        Raises:
+            DuplicateReplayForBaseline: The run already holds a replay for
+                this baseline session.
+            ReplayAlreadyExistsForJob: The job already has a replay.
+
+        Returns:
+            Stored replay with timestamps set.
+        """
+        self._check_duplicate_baseline(replay)
+        self._check_unique_job(replay)
+        now = datetime.now(UTC)
+        stored = replay.model_copy(update={"created": now, "updated": now})
+        self._replays[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, replay_id: uuid.UUID) -> Replay:
+        """Load a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+
+        Returns:
+            Stored replay.
+        """
+        replay = self._replays.get(replay_id)
+        if replay is None:
+            raise ReplayNotFound(replay_id)
+        return replay.model_copy()
+
+    async def get_by_job_id(self, job_id: uuid.UUID) -> Replay | None:
+        """Load the replay owning a job, if any.
+
+        Args:
+            job_id: Id of the job.
+
+        Returns:
+            Stored replay, or ``None`` when the job holds no replay.
+        """
+        for replay in self._replays.values():
+            if replay.job_id == job_id:
+                return replay.model_copy()
+        return None
+
+    async def query(
+        self, replay_filter: ReplayFilter
+    ) -> tuple[list[Replay], str | None]:
+        """Query replays matching a filter.
+
+        Args:
+            replay_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching replays and the next cursor.
+        """
+        replays = list(self._replays.values())
+        if replay_filter.experiment_run_id is not None:
+            replays = [
+                r
+                for r in replays
+                if r.experiment_run_id == replay_filter.experiment_run_id
+            ]
+        if replay_filter.baseline_session_id is not None:
+            replays = [
+                r
+                for r in replays
+                if r.baseline_session_id == replay_filter.baseline_session_id
+            ]
+        if replay_filter.status is not None:
+            replays = [r for r in replays if r.status == replay_filter.status]
+        page, next_cursor = _paginate_fake(replays, replay_filter)
+        return [r.model_copy() for r in page], next_cursor
+
+    async def list_by_experiment_run(
+        self, experiment_run_id: uuid.UUID
+    ) -> list[Replay]:
+        """Load every replay of an experiment run.
+
+        Args:
+            experiment_run_id: Id of the run.
+
+        Returns:
+            Replays of the run, in creation order.
+        """
+        matches = [
+            r
+            for r in self._replays.values()
+            if r.experiment_run_id == experiment_run_id
+        ]
+        return [r.model_copy() for r in sorted(matches, key=lambda r: r.id)]
+
+    async def update(self, replay: Replay) -> Replay:
+        """Persist changes to an existing replay.
+
+        Args:
+            replay: Replay with modified fields.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+
+        Returns:
+            Stored replay with the updated timestamp renewed.
+        """
+        stored = self._replays.get(replay.id)
+        if stored is None:
+            raise ReplayNotFound(replay.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = replay.model_copy(update={"created": stored.created, "updated": now})
+        self._replays[replay.id] = updated
+        return updated.model_copy()
+
+    async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
+        """Count an experiment run's replays by status.
+
+        Args:
+            experiment_run_id: Id of the run.
+
+        Returns:
+            Replay counts by status.
+        """
+        counts = await self.count_by_status_many([experiment_run_id])
+        return counts.get(experiment_run_id, ReplayStatusCounts())
+
+    async def count_by_status_many(
+        self, experiment_run_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, ReplayStatusCounts]:
+        """Bulk-count replays by status for many experiment runs.
+
+        Args:
+            experiment_run_ids: Ids of the runs.
+
+        Returns:
+            Replay status counts keyed by run id, missing ids holding zero
+            counts.
+        """
+        run_ids = set(experiment_run_ids)
+        tallies: dict[uuid.UUID, dict[ReplayStatus, int]] = {}
+        for replay in self._replays.values():
+            if replay.experiment_run_id not in run_ids:
+                continue
+            tally = tallies.setdefault(replay.experiment_run_id, {})
+            tally[replay.status] = tally.get(replay.status, 0) + 1
+        return {
+            run_id: ReplayStatusCounts(
+                pending=tally.get(ReplayStatus.PENDING, 0),
+                evaluating=tally.get(ReplayStatus.EVALUATING, 0),
+                completed=tally.get(ReplayStatus.COMPLETED, 0),
+                failed=tally.get(ReplayStatus.FAILED, 0),
+                canceled=tally.get(ReplayStatus.CANCELED, 0),
+            )
+            for run_id, tally in tallies.items()
+        }
+
+    async def exists_for_replay_config(self, replay_config_id: uuid.UUID) -> bool:
+        """Report whether any replay references a replay config.
+
+        Args:
+            replay_config_id: Id of the replay config.
+
+        Returns:
+            Whether a replay references the replay config.
+        """
+        return any(
+            replay.replay_config_id == replay_config_id
+            for replay in self._replays.values()
+        )
+
+
+async def create_replay(
+    repository: FakeReplayRepository,
+    owner_id: uuid.UUID,
+    job_id: uuid.UUID,
+    replay_config_id: uuid.UUID,
+    baseline_session_id: uuid.UUID,
+    experiment_run_id: uuid.UUID | None = None,
+    evaluate_baselines: bool = False,
+    status: ReplayStatus = ReplayStatus.PENDING,
+) -> Replay:
+    """Store a replay in the fake repository.
+
+    Args:
+        repository: Fake replay repository.
+        owner_id: Id of the owning account.
+        job_id: Id of the job running the replay.
+        replay_config_id: Id of the replay's config.
+        baseline_session_id: Id of the session replayed.
+        experiment_run_id: Run this replay belongs to, ``None`` for a
+            standalone replay.
+        evaluate_baselines: Whether the baseline session is also scored.
+        status: Replay status.
+
+    Returns:
+        Stored replay.
+    """
+    return await repository.create(
+        Replay(
+            owner_id=owner_id,
+            job_id=job_id,
+            experiment_run_id=experiment_run_id,
+            replay_config_id=replay_config_id,
+            baseline_session_id=baseline_session_id,
+            evaluate_baselines=evaluate_baselines,
+            status=status,
+        )
+    )
+
+
+class FakeExperimentRunRepository:
+    """In-memory experiment run repository."""
+
+    def __init__(self, tag_repository: FakeTagRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tag_repository: Tag repository, queried for the tag filter,
+                mirroring the tag EXISTS join.
+        """
+        self._runs: dict[uuid.UUID, ExperimentRun] = {}
+        self._tag_repository = tag_repository
+
+    async def create(self, run: ExperimentRun) -> ExperimentRun:
+        """Persist a new experiment run.
+
+        Args:
+            run: Experiment run to store.
+
+        Raises:
+            DuplicateExperimentRunNumber: The experiment already has a run
+                with this number.
+
+        Returns:
+            Stored experiment run with timestamps set.
+        """
+        for other in self._runs.values():
+            if (
+                other.id != run.id
+                and other.experiment_id == run.experiment_id
+                and other.number == run.number
+            ):
+                raise DuplicateExperimentRunNumber(run.experiment_id, run.number)
+        now = datetime.now(UTC)
+        stored = run.model_copy(update={"created": now, "updated": now})
+        self._runs[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(
+        self, experiment_run_id: uuid.UUID, exclusive: bool = False
+    ) -> ExperimentRun:
+        """Load an experiment run by id.
+
+        Args:
+            experiment_run_id: Id of the run.
+            exclusive: Whether to lock the row, a no-op in memory.
+
+        Raises:
+            ExperimentRunNotFound: No run has this id.
+
+        Returns:
+            Stored experiment run.
+        """
+        _ = exclusive
+        run = self._runs.get(experiment_run_id)
+        if run is None:
+            raise ExperimentRunNotFound(experiment_run_id)
+        return run.model_copy()
+
+    async def query(
+        self, run_filter: ExperimentRunFilter
+    ) -> tuple[list[ExperimentRun], str | None]:
+        """Query experiment runs matching a filter.
+
+        Args:
+            run_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching runs and the next cursor.
+        """
+        runs = list(self._runs.values())
+        if run_filter.experiment_id is not None:
+            runs = [r for r in runs if r.experiment_id == run_filter.experiment_id]
+        if run_filter.status is not None:
+            runs = [r for r in runs if r.status == run_filter.status]
+        if run_filter.tag is not None:
+            assert self._tag_repository is not None
+            runs = [
+                r
+                for r in runs
+                if self._tag_repository.has_link(
+                    TagResourceType.EXPERIMENT_RUN, r.id, run_filter.tag
+                )
+            ]
+        page, next_cursor = _paginate_fake(runs, run_filter)
+        return [r.model_copy() for r in page], next_cursor
+
+    async def update(self, run: ExperimentRun) -> ExperimentRun:
+        """Persist changes to an existing experiment run.
+
+        Args:
+            run: Experiment run with modified fields.
+
+        Raises:
+            ExperimentRunNotFound: No run has this id.
+
+        Returns:
+            Stored experiment run with the updated timestamp renewed.
+        """
+        stored = self._runs.get(run.id)
+        if stored is None:
+            raise ExperimentRunNotFound(run.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = run.model_copy(update={"created": stored.created, "updated": now})
+        self._runs[run.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, experiment_run_id: uuid.UUID) -> None:
+        """Delete an experiment run by id.
+
+        Args:
+            experiment_run_id: Id of the run.
+
+        Raises:
+            ExperimentRunNotFound: No run has this id.
+        """
+        if experiment_run_id not in self._runs:
+            raise ExperimentRunNotFound(experiment_run_id)
+        del self._runs[experiment_run_id]
+
+    async def get_max_number(self, experiment_id: uuid.UUID) -> int:
+        """Read the highest run number an experiment has assigned.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Highest assigned run number, or 0 when the experiment has no runs.
+        """
+        numbers = [
+            run.number
+            for run in self._runs.values()
+            if run.experiment_id == experiment_id
+        ]
+        return max(numbers, default=0)
+
+    async def exists_for_experiment(self, experiment_id: uuid.UUID) -> bool:
+        """Report whether an experiment has any run.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Whether the experiment has any run.
+        """
+        return any(run.experiment_id == experiment_id for run in self._runs.values())
+
+
+async def create_experiment_run(
+    repository: FakeExperimentRunRepository,
+    owner_id: uuid.UUID,
+    experiment_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+    agent_version_id: uuid.UUID,
+    number: int = 1,
+    evaluate_baselines: bool = False,
+    status: ExperimentRunStatus = ExperimentRunStatus.RUNNING,
+) -> ExperimentRun:
+    """Store an experiment run in the fake repository.
+
+    Args:
+        repository: Fake experiment run repository.
+        owner_id: Id of the owning account.
+        experiment_id: Id of the experiment this run belongs to.
+        cohort_id: Id of the cohort whose sessions are replayed.
+        agent_version_id: Id of the agent version to replay with.
+        number: Run number within the experiment.
+        evaluate_baselines: Whether baseline sessions are also scored.
+        status: Run status.
+
+    Returns:
+        Stored experiment run.
+    """
+    return await repository.create(
+        ExperimentRun(
+            owner_id=owner_id,
+            experiment_id=experiment_id,
+            number=number,
+            cohort_id=cohort_id,
+            agent_version_id=agent_version_id,
+            evaluate_baselines=evaluate_baselines,
+            status=status,
         )
     )
 
@@ -3299,6 +3872,32 @@ class FakeEvaluationRepository:
             evaluation.session_id == session_id
             for evaluation in self._evaluations.values()
         )
+
+    async def create_task_evaluations(
+        self, evaluations: list[Evaluation]
+    ) -> list[Evaluation]:
+        """Insert evaluation rows produced by a completed evaluator task.
+
+        Args:
+            evaluations: Fully resolved evaluations to store, in result order.
+
+        Returns:
+            Stored evaluations in result order.
+        """
+        stored: list[Evaluation] = []
+        for evaluation in evaluations:
+            now = datetime.now(UTC)
+            row = evaluation.model_copy(update={"created": now, "updated": now})
+            self._evaluations[row.id] = row
+            stored.append(row.model_copy())
+            if (
+                row.evaluator_version_id is not None
+                and self._plugin_repository is not None
+            ):
+                self._plugin_repository.mark_version_referenced(
+                    row.evaluator_version_id
+                )
+        return stored
 
 
 async def create_evaluation(
@@ -3697,6 +4296,58 @@ class FakeTaskRepository:
             if task.job_id == job_id:
                 del self._tasks[task_id]
 
+    async def get_scored_evaluator_version_ids(
+        self, input_session_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Read the evaluator versions that already completed against a session.
+
+        Args:
+            input_session_id: Id of the scored session.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session.
+        """
+        return {
+            task.plugin_version_id
+            for task in self._tasks.values()
+            if isinstance(task, EvaluationTask)
+            and task.input_session_id == input_session_id
+            and task.status is TaskStatus.COMPLETED
+        }
+
+    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
+        """Report whether any task references an agent version.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Returns:
+            Whether a task references the agent version.
+        """
+        return any(
+            isinstance(task, AgentTask) and task.agent_version_id == agent_version_id
+            for task in self._tasks.values()
+        )
+
+    async def get_agent_tasks_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Task]:
+        """Bulk-load the agent task of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Agent tasks keyed by job id, jobs without an agent task omitted.
+        """
+        job_id_set = set(job_ids)
+        return {
+            task.job_id: task.model_copy()
+            for task in self._tasks.values()
+            if isinstance(task, AgentTask) and task.job_id in job_id_set
+        }
+
 
 def _is_stale_before(task: Task, bound: datetime) -> bool:
     """Report whether a task last showed a sign of life before a bound.
@@ -3848,6 +4499,48 @@ async def create_import_task(
     return stored
 
 
+class TaskSubstrate(NamedTuple):
+    """Fake repositories shared by every job- and task-driving service builder."""
+
+    sessions: FakeSessionRepository
+    agents: FakeAgentRepository
+    agent_versions: FakeAgentVersionRepository
+    blobs: FakeBlobRepository
+    plugins: FakePluginRepository
+    secrets: FakeSecretRepository
+    workers: FakeWorkerRepository
+    tasks: FakeTaskRepository
+    jobs: FakeJobRepository
+
+
+def _build_task_substrate() -> TaskSubstrate:
+    """Wire the fake repositories every job- and task-driving service needs.
+
+    Returns:
+        Fake repositories shared by job, task, and replay service builders.
+    """
+    sessions = FakeSessionRepository()
+    agents = FakeAgentRepository()
+    agent_versions = FakeAgentVersionRepository(agents)
+    blobs = FakeBlobRepository()
+    plugins = FakePluginRepository(blob_repository=blobs)
+    secrets = FakeSecretRepository()
+    workers = FakeWorkerRepository()
+    tasks = FakeTaskRepository(sessions=sessions)
+    jobs = FakeJobRepository(tasks=tasks)
+    return TaskSubstrate(
+        sessions=sessions,
+        agents=agents,
+        agent_versions=agent_versions,
+        blobs=blobs,
+        plugins=plugins,
+        secrets=secrets,
+        workers=workers,
+        tasks=tasks,
+        jobs=jobs,
+    )
+
+
 class JobAndTaskServices(NamedTuple):
     """Job and task services sharing one set of fake repositories."""
 
@@ -3879,17 +4572,126 @@ def build_job_and_task_services(
     Returns:
         Job and task services plus their backing fake repositories.
     """
-    sessions = FakeSessionRepository()
-    agents = FakeAgentRepository()
-    agent_versions = FakeAgentVersionRepository(agents)
-    blobs = FakeBlobRepository()
-    plugins = FakePluginRepository(blob_repository=blobs)
-    secrets = FakeSecretRepository()
-    workers = FakeWorkerRepository()
-    tasks = FakeTaskRepository(sessions=sessions)
-    jobs = FakeJobRepository(tasks=tasks)
+    substrate = _build_task_substrate()
     transitions = TaskTransitions(
-        task_repository=tasks, job_repository=jobs, dispatcher=EventDispatcher()
+        task_repository=substrate.tasks,
+        job_repository=substrate.jobs,
+        dispatcher=EventDispatcher(),
+    )
+    task_policy = policy if policy is not None else TaskPolicy()
+    task_service = TaskService(
+        repository=substrate.tasks,
+        worker_repository=substrate.workers,
+        session_repository=substrate.sessions,
+        agent_version_repository=substrate.agent_versions,
+        plugin_repository=substrate.plugins,
+        blob_repository=substrate.blobs,
+        secret_repository=substrate.secrets,
+        transitions=transitions,
+        policy=task_policy,
+    )
+    job_service = JobService(
+        repository=substrate.jobs,
+        task_repository=substrate.tasks,
+        session_repository=substrate.sessions,
+        agent_repository=substrate.agents,
+        agent_version_repository=substrate.agent_versions,
+        plugin_repository=substrate.plugins,
+        blob_repository=substrate.blobs,
+        transitions=transitions,
+        policy=task_policy,
+    )
+    return JobAndTaskServices(
+        job_service=job_service,
+        task_service=task_service,
+        jobs=substrate.jobs,
+        tasks=substrate.tasks,
+        sessions=substrate.sessions,
+        agents=substrate.agents,
+        agent_versions=substrate.agent_versions,
+        plugins=substrate.plugins,
+        blobs=substrate.blobs,
+        secrets=substrate.secrets,
+        workers=substrate.workers,
+    )
+
+
+class ReplayServices(NamedTuple):
+    """Replay, experiment, and experiment run services sharing one set of fakes."""
+
+    experiment_service: ExperimentService
+    experiment_run_service: ExperimentRunService
+    replay_service: ReplayService
+    job_service: JobService
+    task_service: TaskService
+    experiments: FakeExperimentRepository
+    experiment_runs: FakeExperimentRunRepository
+    replays: FakeReplayRepository
+    jobs: FakeJobRepository
+    tasks: FakeTaskRepository
+    sessions: FakeSessionRepository
+    session_nodes: FakeSessionNodeRepository
+    agents: FakeAgentRepository
+    agent_versions: FakeAgentVersionRepository
+    cohorts: FakeCohortRepository
+    plugins: FakePluginRepository
+    blobs: FakeBlobRepository
+    secrets: FakeSecretRepository
+    workers: FakeWorkerRepository
+    evaluations: FakeEvaluationRepository
+    tags: FakeTagRepository
+
+
+def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
+    """Wire fake-backed replay, experiment, and run services sharing one dispatcher.
+
+    Mirrors the production wiring in ``composition.py`` and
+    ``dependencies.py``: the event dispatcher carries the same subscribers
+    registered on the request-scoped dispatcher, so a task transition applied
+    through one service drives the replay pipeline and run finalization the
+    same way it does in production.
+
+    Args:
+        policy: Task execution policy, defaults applied when omitted.
+
+    Returns:
+        Replay, experiment, and run services plus their backing fake
+        repositories.
+    """
+    substrate = _build_task_substrate()
+    sessions = substrate.sessions
+    agents = substrate.agents
+    agent_versions = substrate.agent_versions
+    blobs = substrate.blobs
+    plugins = substrate.plugins
+    secrets = substrate.secrets
+    workers = substrate.workers
+    tasks = substrate.tasks
+    jobs = substrate.jobs
+    tags = FakeTagRepository()
+    cohorts = FakeCohortRepository(sessions=sessions, tags=tags)
+    session_nodes = FakeSessionNodeRepository(sessions=sessions, cohorts=cohorts)
+    replays = FakeReplayRepository()
+    experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
+    experiments = FakeExperimentRepository(
+        tag_repository=tags,
+        experiment_run_repository=experiment_runs,
+        replay_repository=replays,
+    )
+    evaluations = FakeEvaluationRepository(plugin_repository=plugins)
+
+    dispatcher = EventDispatcher()
+    register_subscribers(
+        dispatcher,
+        job_repository=jobs,
+        task_repository=tasks,
+        replay_repository=replays,
+        experiment_repository=experiments,
+        experiment_run_repository=experiment_runs,
+        evaluation_repository=evaluations,
+    )
+    transitions = TaskTransitions(
+        task_repository=tasks, job_repository=jobs, dispatcher=dispatcher
     )
     task_policy = policy if policy is not None else TaskPolicy()
     task_service = TaskService(
@@ -3914,16 +4716,53 @@ def build_job_and_task_services(
         transitions=transitions,
         policy=task_policy,
     )
-    return JobAndTaskServices(
+    experiment_service = ExperimentService(
+        repository=experiments,
+        plugin_repository=plugins,
+        experiment_run_repository=experiment_runs,
+        cohort_repository=cohorts,
+        agent_version_repository=agent_versions,
+        replay_repository=replays,
+        job_repository=jobs,
+        task_repository=tasks,
+    )
+    replay_service = ReplayService(
+        repository=replays,
+        experiment_repository=experiments,
+        experiment_run_repository=experiment_runs,
+        job_repository=jobs,
+        task_repository=tasks,
+        session_repository=sessions,
+        session_node_repository=session_nodes,
+        agent_version_repository=agent_versions,
+        plugin_repository=plugins,
+    )
+    experiment_run_service = ExperimentRunService(
+        repository=experiment_runs,
+        replay_repository=replays,
+        job_repository=jobs,
+        transitions=transitions,
+    )
+    return ReplayServices(
+        experiment_service=experiment_service,
+        experiment_run_service=experiment_run_service,
+        replay_service=replay_service,
         job_service=job_service,
         task_service=task_service,
+        experiments=experiments,
+        experiment_runs=experiment_runs,
+        replays=replays,
         jobs=jobs,
         tasks=tasks,
         sessions=sessions,
+        session_nodes=session_nodes,
         agents=agents,
         agent_versions=agent_versions,
+        cohorts=cohorts,
         plugins=plugins,
         blobs=blobs,
         secrets=secrets,
         workers=workers,
+        evaluations=evaluations,
+        tags=tags,
     )

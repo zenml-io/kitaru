@@ -19,6 +19,7 @@ from typing import Any, TypeVar
 
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.domain.job import Job
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.task import Task
 
 
@@ -40,6 +41,13 @@ class JobSettled(Event):
     """Job settled event."""
 
     job: Job
+
+
+@dataclass(frozen=True)
+class ReplaySettled(Event):
+    """Replay settled event."""
+
+    replay: Replay
 
 
 EventT = TypeVar("EventT", bound=Event)

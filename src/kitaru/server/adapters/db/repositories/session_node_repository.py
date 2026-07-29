@@ -16,14 +16,19 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import defer
 
+from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.server.adapters.db.orm.cohort_session import CohortSessionORM
+from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
 from kitaru.server.adapters.db.pagination import paginate_by_index
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session_node import SessionNode
+
+RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
 
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
@@ -114,3 +119,86 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             row.to_domain(include_payloads=session_node_filter.include_payloads)
             for row in rows
         ], next_cursor
+
+    async def _latest_match(
+        self, statement: Select[tuple[SessionNodeORM]]
+    ) -> SessionNode | None:
+        """Run a cache-key search statement and return its newest match.
+
+        Args:
+            statement: Filtered select, ordering and limit not yet applied.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        statement = statement.order_by(SessionNodeORM.id.desc()).limit(1)
+        row = (await self._session.scalars(statement)).one_or_none()
+        return row.to_domain(include_payloads=True) if row is not None else None
+
+    async def find_latest_by_cache_key_in_session(
+        self, session_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key within one session.
+
+        Args:
+            session_id: Id of the session to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        return await self._latest_match(
+            select(SessionNodeORM).where(
+                SessionNodeORM.session_id == session_id,
+                SessionNodeORM.cache_key == cache_key,
+            )
+        )
+
+    async def find_latest_by_cache_key_in_agent(
+        self, agent_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across an agent's recorded history.
+
+        Only sessions with a recorded or imported origin are searched, so a
+        replay's own result session is never a match.
+
+        Args:
+            agent_id: Id of the agent to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        return await self._latest_match(
+            select(SessionNodeORM)
+            .join(SessionORM, SessionORM.id == SessionNodeORM.session_id)
+            .where(
+                SessionORM.agent_id == agent_id,
+                SessionORM.origin.in_(RECORDED_HISTORY_ORIGINS),
+                SessionNodeORM.cache_key == cache_key,
+            )
+        )
+
+    async def find_latest_by_cache_key_in_cohort(
+        self, cohort_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across a cohort's sessions.
+
+        Args:
+            cohort_id: Id of the cohort to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        return await self._latest_match(
+            select(SessionNodeORM)
+            .join(
+                CohortSessionORM,
+                CohortSessionORM.session_id == SessionNodeORM.session_id,
+            )
+            .where(
+                CohortSessionORM.cohort_id == cohort_id,
+                SessionNodeORM.cache_key == cache_key,
+            )
+        )

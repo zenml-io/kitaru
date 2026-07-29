@@ -262,7 +262,7 @@ async def test_update(setup: Setup) -> None:
     )
     created.update_display_version("v1.1")
     created.update_description("Second cut")
-    created.update_capabilities(AgentCapabilities(tools=["search"]))
+    created.update_capabilities(AgentCapabilities(tools=["search"]), has_tasks=False)
     updated = await repository.update(created)
     assert updated.display_version == "v1.1"
     assert updated.description == "Second cut"
@@ -298,7 +298,7 @@ async def test_update_replaces_run_spec_and_secret_links(setup: Setup) -> None:
     )
     new_secret_ids = [await make_secret_id()]
     new_run_spec = RunSpec(command="new.sh", secret_ids=new_secret_ids)
-    created.update_run_spec(new_run_spec)
+    created.update_run_spec(new_run_spec, has_tasks=False)
     updated = await repository.update(created)
     assert updated.run_spec == new_run_spec
 
@@ -317,7 +317,7 @@ async def test_update_clears_run_spec_and_secret_links(setup: Setup) -> None:
             run_spec=RunSpec(command="run.sh", secret_ids=[await make_secret_id()]),
         )
     )
-    created.update_run_spec(None)
+    created.update_run_spec(None, has_tasks=False)
     updated = await repository.update(created)
     assert updated.run_spec is None
     loaded = await repository.get(created.id)

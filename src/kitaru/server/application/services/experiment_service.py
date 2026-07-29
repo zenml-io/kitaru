@@ -13,46 +13,90 @@
 #  permissions and limitations under the License.
 """Experiment use cases."""
 
+import contextlib
 import uuid
+from datetime import UTC, datetime
 
+from kitaru.server.application.interfaces.agent_version_repository import (
+    AgentVersionRepository,
+)
+from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
+from kitaru.server.application.interfaces.experiment_run_repository import (
+    ExperimentRunRepository,
+)
+from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.cohort import CohortSessionsFilter
 from kitaru.server.application.models.experiment import (
     ExperimentCreate,
     ExperimentFilter,
     ExperimentUpdate,
 )
+from kitaru.server.application.models.experiment_run import ExperimentRunCreate
+from kitaru.server.application.models.replay import ReplayStatusCounts
+from kitaru.server.application.services.agent_version_resolution import (
+    resolve_agent_version,
+)
 from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
+from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
+from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.replay_config import (
     EvaluatorConfig,
     ReplayConfig,
+    ReplayConfigInUse,
     ReplayOverride,
     ToolPolicy,
     default_tool_policy,
 )
+from kitaru.server.domain.session import Session
+from kitaru.server.utils import paginate_all
 
 
 class ExperimentService:
     """Experiment use cases."""
 
     def __init__(
-        self, repository: ExperimentRepository, plugin_repository: PluginRepository
+        self,
+        repository: ExperimentRepository,
+        plugin_repository: PluginRepository,
+        experiment_run_repository: ExperimentRunRepository,
+        cohort_repository: CohortRepository,
+        agent_version_repository: AgentVersionRepository,
+        replay_repository: ReplayRepository,
+        job_repository: JobRepository,
+        task_repository: TaskRepository,
     ) -> None:
         """Initialize the service.
 
         Args:
             repository: Experiment and replay config repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            experiment_run_repository: Experiment run repository.
+            cohort_repository: Cohort repository, for run fan-out.
+            agent_version_repository: Agent version repository.
+            replay_repository: Replay repository, for run fan-out and
+                progress.
+            job_repository: Job repository, for run fan-out.
+            task_repository: Task repository, for run fan-out.
         """
         self._repository = repository
         self._plugin_repository = plugin_repository
+        self._experiment_runs = experiment_run_repository
+        self._cohorts = cohort_repository
+        self._agent_versions = agent_version_repository
+        self._replays = replay_repository
+        self._jobs = job_repository
+        self._tasks = task_repository
 
     async def _create_replay_config(
         self,
@@ -79,6 +123,17 @@ class ExperimentService:
             evaluators=evaluators,
         )
         return await self._repository.create_replay_config(config)
+
+    async def _delete_replay_config_if_unreferenced(
+        self, replay_config_id: uuid.UUID
+    ) -> None:
+        """Delete a replay config unless a replay still references it.
+
+        Args:
+            replay_config_id: Id of the replay config.
+        """
+        with contextlib.suppress(ReplayConfigInUse):
+            await self._repository.delete_replay_config(replay_config_id)
 
     async def create_experiment(
         self, command: ExperimentCreate, actor: AuthContext
@@ -169,8 +224,9 @@ class ExperimentService:
         """Partially update an experiment and, if touched, its replay config.
 
         When the command sets any of ``override``, ``tool_policy``, or
-        ``evaluators``, a new replay config row replaces the current one and
-        the old row is deleted, since nothing else references it yet.
+        ``evaluators``, a new replay config row replaces the current one,
+        rejected when the experiment already has runs. The old row is
+        deleted unless a replay still references it.
 
         Args:
             experiment_id: Id of the experiment.
@@ -188,6 +244,8 @@ class ExperimentService:
                 resolve to the same evaluator version.
             DuplicateExperimentName: The experiment name is already
                 registered.
+            ExperimentFrozen: The experiment has runs and the command
+                touches its replay config.
 
         Returns:
             Updated experiment and its current replay config.
@@ -209,6 +267,7 @@ class ExperimentService:
             )
             return experiment, config
 
+        has_runs = await self._experiment_runs.exists_for_experiment(experiment_id)
         current_config = await self._repository.get_replay_config(
             experiment.replay_config_id
         )
@@ -232,9 +291,9 @@ class ExperimentService:
             experiment.owner_id, override, tool_policy, evaluators
         )
         old_config_id = experiment.replay_config_id
-        experiment.update_replay_config_id(new_config.id)
+        experiment.update_replay_config_id(new_config.id, has_runs)
         experiment = await self._repository.update(experiment)
-        await self._repository.delete_replay_config(old_config_id)
+        await self._delete_replay_config_if_unreferenced(old_config_id)
         return experiment, new_config
 
     async def delete_experiment(
@@ -253,3 +312,83 @@ class ExperimentService:
         experiment = await self._repository.get(experiment_id)
         await self._repository.delete(experiment_id)
         await self._repository.delete_replay_config(experiment.replay_config_id)
+
+    async def _resolve_cohort_session_ids(self, cohort_id: uuid.UUID) -> list[Session]:
+        """Read every member session of a cohort, in cohort order.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Returns:
+            Member sessions, in cohort order.
+        """
+        return await paginate_all(
+            lambda cursor: self._cohorts.list_sessions(
+                CohortSessionsFilter(cohort_id=cohort_id, cursor=cursor)
+            )
+        )
+
+    async def start_run(
+        self,
+        experiment_id: uuid.UUID,
+        command: ExperimentRunCreate,
+        actor: AuthContext,
+    ) -> tuple[ExperimentRun, ReplayStatusCounts]:
+        """Start an experiment run, fanning out one replay per cohort session.
+
+        Every replay points at the experiment's replay config and the run's
+        id. The run number is server-assigned per experiment, computed under
+        a lock of the experiment row.
+
+        Args:
+            experiment_id: Id of the experiment.
+            command: Cohort, agent version, and baseline scoring flag for
+                the run.
+            actor: Caller context.
+
+        Raises:
+            ExperimentNotFound: No experiment has this id.
+            CohortNotFound: No cohort has the given id.
+            ValidationError: The cohort has no sessions, or the resolved
+                agent version has no run spec.
+            AgentVersionNotFound: No agent version has the given id.
+
+        Returns:
+            Created run and its replay counts by status.
+        """
+        experiment = await self._repository.get(experiment_id, exclusive=True)
+        cohort = await self._cohorts.get(command.cohort_id)
+        if cohort.session_count == 0:
+            raise ValidationError(f"Cohort {cohort.id} has no sessions")
+        agent_version = await resolve_agent_version(
+            command.agent_version_id, self._agent_versions
+        )
+        config = await self._repository.get_replay_config(experiment.replay_config_id)
+        sessions = await self._resolve_cohort_session_ids(cohort.id)
+
+        number = await self._experiment_runs.get_max_number(experiment_id) + 1
+        run = ExperimentRun(
+            owner_id=actor.account.id,
+            experiment_id=experiment_id,
+            number=number,
+            cohort_id=cohort.id,
+            agent_version_id=agent_version.id,
+            evaluate_baselines=command.evaluate_baselines,
+        )
+        run.start(datetime.now(UTC))
+        run = await self._experiment_runs.create(run)
+
+        for session in sessions:
+            await create_replay_pipeline(
+                baseline=session,
+                agent_version_id=agent_version.id,
+                config=config,
+                evaluate_baselines=command.evaluate_baselines,
+                experiment_run_id=run.id,
+                actor=actor,
+                replay_repository=self._replays,
+                job_repository=self._jobs,
+                task_repository=self._tasks,
+            )
+        counts = await self._replays.count_by_status(run.id)
+        return run, counts

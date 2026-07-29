@@ -25,6 +25,10 @@ from kitaru.server.adapters.db.orm.experiment import (
     ExperimentORM,
     ReplayConfigORM,
 )
+from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
+)
+from kitaru.server.adapters.db.orm.replay import REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -33,9 +37,14 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
+    ExperimentInUse,
     ExperimentNotFound,
 )
-from kitaru.server.domain.replay_config import ReplayConfig, ReplayConfigNotFound
+from kitaru.server.domain.replay_config import (
+    ReplayConfig,
+    ReplayConfigInUse,
+    ReplayConfigNotFound,
+)
 
 
 class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
@@ -78,11 +87,15 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         )
         return row.to_domain()
 
-    async def get(self, experiment_id: uuid.UUID) -> Experiment:
+    async def get(
+        self, experiment_id: uuid.UUID, exclusive: bool = False
+    ) -> Experiment:
         """Load an experiment by id.
 
         Args:
             experiment_id: Id of the experiment.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
@@ -90,7 +103,11 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         Returns:
             Stored experiment.
         """
-        row = await self._get_row(experiment_id)
+        row = await self._session.get(
+            self.orm_class, experiment_id, with_for_update=exclusive
+        )
+        if row is None:
+            raise ExperimentNotFound(experiment_id)
         return row.to_domain()
 
     async def query(
@@ -158,8 +175,16 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
 
         Raises:
             ExperimentNotFound: No experiment has this id.
+            ExperimentInUse: The experiment has runs.
         """
-        await self._delete_row(experiment_id)
+        await self._delete_row(
+            experiment_id,
+            {
+                EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY: lambda: ExperimentInUse(
+                    experiment_id
+                )
+            },
+        )
 
     async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
         """Persist a new replay config.
@@ -231,6 +256,7 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
 
         Raises:
             ReplayConfigNotFound: No replay config has this id.
+            ReplayConfigInUse: A replay references the replay config.
         """
         row = await self._get_replay_config_row(config_id)
         try:
@@ -238,4 +264,11 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
                 await self._session.delete(row)
                 await self._session.flush()
         except IntegrityError as exc:
-            self._raise_translated(exc, None)
+            self._raise_translated(
+                exc,
+                {
+                    REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY: lambda: ReplayConfigInUse(
+                        config_id
+                    )
+                },
+            )

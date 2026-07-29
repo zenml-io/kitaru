@@ -37,11 +37,13 @@ from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.devices import DevicesResource
 from kitaru.client.resources.evaluations import EvaluationsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
+from kitaru.client.resources.experiment_runs import ExperimentRunsResource
 from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
 from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.info import InfoResource
 from kitaru.client.resources.jobs import JobsResource
+from kitaru.client.resources.replays import ReplaysResource
 from kitaru.client.resources.secrets import SecretsResource
 from kitaru.client.resources.session_runs import SessionRunsResource
 from kitaru.client.resources.sessions import SessionsResource
@@ -93,10 +95,12 @@ class KitaruAPIClient:
         self.evaluations = EvaluationsResource(self)
         self.evaluators = EvaluatorsResource(self)
         self.experiments = ExperimentsResource(self)
+        self.experiment_runs = ExperimentRunsResource(self)
         self.importers = ImportersResource(self)
         self.imports = ImportsResource(self)
         self.info = InfoResource(self)
         self.jobs = JobsResource(self)
+        self.replays = ReplaysResource(self)
         self.secrets = SecretsResource(self)
         self.session_runs = SessionRunsResource(self)
         self.sessions = SessionsResource(self)

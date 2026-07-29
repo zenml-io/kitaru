@@ -25,7 +25,12 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicyOnMiss,
 )
 from kitaru.base import FrozenModel
-from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
+from kitaru.server.domain.base import (
+    ConflictError,
+    DomainModel,
+    NotFoundError,
+    ValidationError,
+)
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -40,6 +45,18 @@ class ReplayConfigNotFound(NotFoundError):
             replay_config_id: Id of the missing replay config.
         """
         super().__init__(f"Replay config {replay_config_id} was not found")
+
+
+class ReplayConfigInUse(ConflictError):
+    """Raised when a replay config is referenced by a replay and cannot be deleted."""
+
+    def __init__(self, replay_config_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_config_id: Id of the replay config.
+        """
+        super().__init__(f"Replay config {replay_config_id} is in use by a replay")
 
 
 class ReplayOverride(FrozenModel):

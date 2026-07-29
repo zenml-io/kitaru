@@ -24,8 +24,10 @@ from kitaru.server.adapters.db.orm.cohort_session import CohortSessionORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.experiment import ExperimentORM, ReplayConfigORM
+from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
@@ -45,10 +47,12 @@ __all__ = [
     "DeviceORM",
     "EvaluationORM",
     "ExperimentORM",
+    "ExperimentRunORM",
     "JobORM",
     "PluginORM",
     "PluginVersionORM",
     "ReplayConfigORM",
+    "ReplayORM",
     "SecretORM",
     "SessionNodeORM",
     "SessionORM",
