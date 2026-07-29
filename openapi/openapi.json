@@ -1027,6 +1027,43 @@
             "description": "Control plane API the server accepts credentials from.",
             "title": "Control Plane Api Url"
           },
+          "dashboard_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URL the dashboard is reachable at.",
+            "title": "Dashboard Url"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Server ID.",
+            "title": "Id"
+          },
+          "server_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "URL the server API is reachable at.",
+            "title": "Server Url"
+          },
           "version": {
             "description": "Kitaru version the server runs.",
             "title": "Version",
@@ -2057,7 +2094,7 @@
     },
     "/v1/info": {
       "get": {
-        "description": "Report how this server authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present. It carries no deployment detail\nbeyond what a caller needs to log in.\n\nArgs:\n    settings: Service settings governing auth behavior.\n\nReturns:\n    Server info.",
+        "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n\nReturns:\n    Server info.",
         "operationId": "get_info_v1_info_get",
         "responses": {
           "200": {

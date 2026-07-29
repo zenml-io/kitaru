@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Server info API models."""
 
+import uuid
 from enum import StrEnum
 
 from pydantic import Field
@@ -31,8 +32,20 @@ class AuthScheme(StrEnum):
 class ServerInfoResponse(ResponseModel):
     """Server info response."""
 
+    id: uuid.UUID | None = Field(
+        default=None,
+        description="Server ID.",
+    )
     version: str = Field(description="Kitaru version the server runs.")
     auth_scheme: AuthScheme = Field(description="Scheme used to authenticate requests.")
+    server_url: str | None = Field(
+        default=None,
+        description="URL the server API is reachable at.",
+    )
+    dashboard_url: str | None = Field(
+        default=None,
+        description="URL the dashboard is reachable at.",
+    )
     control_plane_api_url: str | None = Field(
         default=None,
         description="Control plane API the server accepts credentials from.",
