@@ -98,3 +98,48 @@ required solving beyond what the documents describe.
   `SessionNodeListParams` model (cursor, size, include_payloads) added to
   `api_models`, and a `paginate_by_index` helper next to `paginate`.
 - Date-bound filters are inclusive on both ends.
+
+## Experiments and replay config
+
+- `effective_inputs` gates on `override.prompt`: dict inputs get their
+  `prompt` (and `system_prompt` when set) keys replaced, non-dict inputs are
+  replaced wholesale by the override prompt. Model and model_params
+  overrides never touch inputs. The spec leaves the input shape undefined.
+- An omitted `tool_policy` defaults to a passthrough-only policy.
+- Updating any of override, tool_policy, or evaluators builds a new
+  replay_config row (unchanged fields carried over) and deletes the old row
+  in the same transaction. Explicit null clears override only, tool_policy
+  and evaluators cannot clear.
+- The domain `EvaluatorConfig` stores the resolved version int and
+  `evaluator_version_id` alongside the name, so responses echo what was
+  resolved without a join.
+- `PluginRepository.get_by_name(kind, name)` was added for evaluator
+  resolution, and the application layer uses an `EvaluatorConfigInput`
+  model since it cannot import wire DTOs.
+- No freeze check on `update_replay_config_id` while runs do not exist.
+
+## Cohorts
+
+- `Cohort.check_members` validates list shape only, the service does the
+  existence and agent-match checks via a new `SessionRepository.get_many`.
+- A minimal `CohortSessionsListParams` (cursor, size) was added, the list
+  order is fixed by cohort position.
+- `paginate_join_by_index` was added for paginating sessions by the link
+  table's index column.
+- Deleting a session in a cohort surfaces `SessionInUse` via the FK
+  restriction. Agent deletion while cohorts reference it stays a raw
+  integrity error for now.
+
+## Evaluations
+
+- Manual evaluation upserts have no session-status gate, any status
+  accepts them.
+- A duplicate name within one request is a 422.
+- The manual upsert preserves row id, owner, and created via
+  `INSERT ... ON CONFLICT DO UPDATE`.
+- Evaluation names get their own `validate_evaluation_name` in
+  `domain/names.py` since resource names reserve the dot character.
+- `EvaluationWithEvaluator` named tuple carries the denormalized evaluator
+  name and version from the repository join.
+- Deleting an evaluator with stored evaluations surfaces `PluginInUse`.
+- `evaluation.task_id` was created without an FK, the tasks wave adds it.
