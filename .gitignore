@@ -264,6 +264,8 @@ AGENTS.override.md
 !.agents/skills/kitaru-docs/**
 !.agents/skills/kitaru-tests-release/
 !.agents/skills/kitaru-tests-release/**
+!.agents/skills/error-discovery/
+!.agents/skills/error-discovery/SKILL.md
 
 # Agent Skills
 .pi/

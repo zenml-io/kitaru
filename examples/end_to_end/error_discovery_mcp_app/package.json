@@ -1,0 +1,43 @@
+{
+  "name": "@kitaru/error-discovery-mcp-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bounded MCP App prototype for trace-grounded error discovery",
+  "scripts": {
+    "build:fixtures": "node scripts/build-fixtures.mjs",
+    "build:ui": "cross-env INPUT=mcp-app.html vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build": "npm run build:fixtures && npm run typecheck && npm run build:ui && npm run build:server",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "npm run build:fixtures && npm run build:ui && vitest run",
+    "serve": "tsx main.ts",
+    "serve:http": "tsx main.ts",
+    "serve:stdio": "tsx main.ts --stdio",
+    "start": "node dist/main.js",
+    "start:stdio": "node dist/main.js --stdio",
+    "smoke:stdio": "node scripts/smoke-stdio.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "cors": "2.8.5",
+    "express": "5.1.0",
+    "zod": "4.1.13"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.0",
+    "@types/node": "22.10.0",
+    "cross-env": "10.1.0",
+    "jsdom": "26.1.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "6.4.3",
+    "vite-plugin-singlefile": "2.3.0",
+    "vitest": "3.2.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

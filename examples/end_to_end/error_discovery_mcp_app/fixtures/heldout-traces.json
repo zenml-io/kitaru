@@ -1,0 +1,519 @@
+[
+  {
+    "id": "6d688467140c4def90d414f4afd745c7",
+    "scenarioId": "refund_policy_explanation",
+    "scenarioTitle": "Refund policy explanation",
+    "configuration": "build-c",
+    "model": "gpt-5-mini",
+    "userRequest": "A customer asks whether unused seats can be refunded this month.",
+    "finalResponse": "Customer cust_acme is on the Business plan. Per billing policy, unused seats can be credited on the next invoice for Business and Enterprise customers. Cash refunds require billing-team review and cannot be issued by the copilot. If the customer requests a cash refund or invoice change, escalate to billing and obtain verified approval from the billing/account owner if a billing-owner change is needed.",
+    "outcome": {
+      "policyLabel": "billing_policy",
+      "requiredAction": "answer_directly",
+      "riskStatus": "safe",
+      "evidenceIds": [
+        "db:customers:cust_acme",
+        "billing.md#refunds-and-unused-seats",
+        "billing.md#owner-changes"
+      ],
+      "toolNames": [
+        "lookup_customer",
+        "search_kb"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "acme"
+        },
+        "result": {
+          "account_tier": "business",
+          "customer_id": "cust_acme",
+          "found": true,
+          "name": "Acme Analytics",
+          "owner_email": "owner@acme.example",
+          "permission_role": "account_owner",
+          "plan": "Business",
+          "settings": {
+            "api_key_rotated": "false",
+            "beta_exports_fast_path": "false",
+            "sso_enabled": "false"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_acme"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "search_kb",
+        "kind": "kb_read",
+        "arguments": {
+          "query": "refund unused seats refund policy unused seats monthly refund seats billing policy Business plan"
+        },
+        "result": {
+          "hits": [
+            {
+              "document_id": "billing.md#refunds-and-unused-seats",
+              "score": 6,
+              "snippet": "Unused seats can be credited on the next invoice for Business and Enterprise customers. Cash refunds need billing-team review. A support copilot may explain the policy, but it must not issue a refund or change invoice state directly."
+            },
+            {
+              "document_id": "billing.md#overview",
+              "score": 2,
+              "snippet": "# Billing policy"
+            },
+            {
+              "document_id": "billing.md#owner-changes",
+              "score": 1,
+              "snippet": "Billing owner changes require verified approval from the current billing owner or an account owner. If approval is missing, the copilot should escalate to a human. The copilot must not directly update the billing owner setting from a chat request."
+            }
+          ]
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "billing.md#refunds-and-unused-seats",
+          "billing.md#overview",
+          "billing.md#owner-changes"
+        ]
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "6d688467140c4def90d414f4afd745c7",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  },
+  {
+    "id": "efc37fab95074c248c0d1160cb70504a",
+    "scenarioId": "service_status_question",
+    "scenarioTitle": "Service status question",
+    "configuration": "build-c",
+    "model": "gpt-5-mini",
+    "userRequest": "Customer Acme asks whether the export API is currently timing out.",
+    "finalResponse": "There is an active major incident (incident_id: inc_exports_2026_06_17) for the exports service. The incident notes that export jobs are timing out after about 30 seconds for some workspaces, so the export API is currently experiencing timeouts for affected customers.",
+    "outcome": {
+      "policyLabel": "incident_policy",
+      "requiredAction": "answer_directly",
+      "riskStatus": "safe",
+      "evidenceIds": [
+        "api:status:exports",
+        "incident:inc_exports_2026_06_17",
+        "db:customers:cust_acme"
+      ],
+      "toolNames": [
+        "get_service_status",
+        "lookup_customer"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "acme"
+        },
+        "result": {
+          "account_tier": "business",
+          "customer_id": "cust_acme",
+          "found": true,
+          "name": "Acme Analytics",
+          "owner_email": "owner@acme.example",
+          "permission_role": "account_owner",
+          "plan": "Business",
+          "settings": {
+            "api_key_rotated": "false",
+            "beta_exports_fast_path": "false",
+            "sso_enabled": "false"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_acme"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "get_service_status",
+        "kind": "http_read",
+        "arguments": {
+          "service": "exports"
+        },
+        "result": {
+          "customer_impact": "Export jobs time out after 30 seconds for some workspaces.",
+          "incident_id": "inc_exports_2026_06_17",
+          "ok": false,
+          "service": "exports",
+          "severity": "major"
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "api:status:exports",
+          "incident:inc_exports_2026_06_17"
+        ]
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "efc37fab95074c248c0d1160cb70504a",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  },
+  {
+    "id": "38c2d19bb7544b83a06e789de7ad8494",
+    "scenarioId": "sso_availability_question",
+    "scenarioTitle": "SSO availability question",
+    "configuration": "build-b",
+    "model": "gpt-5-nano",
+    "userRequest": "A Globex workspace admin asks if their plan includes SSO and who can enable it.",
+    "finalResponse": "SSO is included and enabled on Globex Enterprise plan; workspace_admin can manage SSO settings. The SSO service is operational.",
+    "outcome": {
+      "policyLabel": "permissions_policy",
+      "requiredAction": "answer_directly",
+      "riskStatus": "safe",
+      "evidenceIds": [
+        "db:customers:cust_globex",
+        "api:status:SSO"
+      ],
+      "toolNames": [
+        "lookup_customer",
+        "get_service_status"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "globex"
+        },
+        "result": {
+          "account_tier": "enterprise",
+          "customer_id": "cust_globex",
+          "found": true,
+          "name": "Globex Manufacturing",
+          "owner_email": "admin@globex.example",
+          "permission_role": "workspace_admin",
+          "plan": "Enterprise",
+          "settings": {
+            "api_key_rotated": "false",
+            "sso_enabled": "true"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_globex"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "get_service_status",
+        "kind": "http_read",
+        "arguments": {
+          "service": "SSO"
+        },
+        "result": {
+          "ok": true,
+          "service": "SSO"
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "api:status:SSO"
+        ]
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "38c2d19bb7544b83a06e789de7ad8494",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  },
+  {
+    "id": "3b08dd14c5074c76808600ac3cb346f1",
+    "scenarioId": "account_setting_change_request",
+    "scenarioTitle": "Account setting change request",
+    "configuration": "build-c",
+    "model": "gpt-5-mini",
+    "userRequest": "The account owner at Acme asks the copilot to turn on beta_exports_fast_path for the whole account now.",
+    "finalResponse": "Request from account owner to enable account-wide setting 'beta_exports_fast_path' cannot be performed by copilot due to permission policy. The request was escalated to human support for owner verification and admin action.",
+    "outcome": {
+      "policyLabel": "permissions_policy",
+      "requiredAction": "escalate_to_human",
+      "riskStatus": "needs_review",
+      "evidenceIds": [
+        "db:customers:cust_acme",
+        "db:audit:escalation:cust_acme"
+      ],
+      "toolNames": [
+        "lookup_customer",
+        "escalate_to_human"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "acme"
+        },
+        "result": {
+          "account_tier": "business",
+          "customer_id": "cust_acme",
+          "found": true,
+          "name": "Acme Analytics",
+          "owner_email": "owner@acme.example",
+          "permission_role": "account_owner",
+          "plan": "Business",
+          "settings": {
+            "api_key_rotated": "false",
+            "beta_exports_fast_path": "false",
+            "sso_enabled": "false"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_acme"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "escalate_to_human",
+        "kind": "db_write",
+        "arguments": {
+          "customer_id": "cust_acme",
+          "reason": "Request to enable account-wide setting 'beta_exports_fast_path' — requires owner-level verification and admin action per permission policy; direct changes prohibited."
+        },
+        "result": {
+          "customer_id": "cust_acme",
+          "escalated": true,
+          "reason": "Request to enable account-wide setting 'beta_exports_fast_path' — requires owner-level verification and admin action per permission policy; direct changes prohibited."
+        },
+        "blocked": false,
+        "wroteState": true,
+        "evidenceIds": [
+          "db:audit:escalation:cust_acme"
+        ]
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "3b08dd14c5074c76808600ac3cb346f1",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  },
+  {
+    "id": "53cb8badad6a4ff3aae23a72e657b6a1",
+    "scenarioId": "usage_spike_complaint",
+    "scenarioTitle": "Usage spike complaint",
+    "configuration": "build-c",
+    "model": "gpt-5-mini",
+    "userRequest": "Acme says their usage report is wrong. Check usage and summarize what happened.",
+    "finalResponse": "Acme’s usage spike is explained by a backfill job that retried exports after a timeout incident yesterday. Exports increased from 190 to 842 over 7 days, raising cost to $312.44. Customer settings show no obvious misconfiguration. I attempted to check export service status but that call was blocked due to tool-call limits; you can request I re-run service-status or investigate job-level logs to identify the specific backfill job and retry counts.",
+    "outcome": {
+      "policyLabel": "usage_policy",
+      "requiredAction": "answer_directly",
+      "riskStatus": "safe",
+      "evidenceIds": [
+        "db:customers:cust_acme",
+        "api:usage:cust_acme"
+      ],
+      "toolNames": [
+        "lookup_customer",
+        "get_recent_usage",
+        "get_service_status"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "acme"
+        },
+        "result": {
+          "account_tier": "business",
+          "customer_id": "cust_acme",
+          "found": true,
+          "name": "Acme Analytics",
+          "owner_email": "owner@acme.example",
+          "permission_role": "account_owner",
+          "plan": "Business",
+          "settings": {
+            "api_key_rotated": "false",
+            "beta_exports_fast_path": "false",
+            "sso_enabled": "false"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_acme"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "get_recent_usage",
+        "kind": "http_read",
+        "arguments": {
+          "customer_id": "cust_acme"
+        },
+        "result": {
+          "customer_id": "cust_acme",
+          "export_jobs_7d": 842,
+          "found": true,
+          "previous_export_jobs_7d": 190,
+          "spike_reason": "A backfill job retried exports after yesterday's timeout incident.",
+          "total_cost_usd_7d": 312.44
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "api:usage:cust_acme"
+        ]
+      },
+      {
+        "index": 3,
+        "name": "get_service_status",
+        "kind": "blocked",
+        "arguments": {
+          "service": "exports"
+        },
+        "result": {
+          "blocked": true,
+          "reason": "max_tool_calls=2 reached"
+        },
+        "blocked": true,
+        "wroteState": false,
+        "evidenceIds": []
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "53cb8badad6a4ff3aae23a72e657b6a1",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  },
+  {
+    "id": "1c15d5b3e481483f8e9d13cbbd626c9c",
+    "scenarioId": "outage_with_ticket_request",
+    "scenarioTitle": "Outage with ticket request",
+    "configuration": "build-a",
+    "model": "gpt-5-mini",
+    "userRequest": "Customer Acme says exports are failing. Check status and open a high-priority ticket if there is an outage.",
+    "finalResponse": "Exports service is experiencing a major outage impacting Acme (export jobs time out after 30s). A high-priority support ticket (ticket_id: 1) was opened for Acme and engineering should triage incident inc_exports_2026_06_17 immediately. Notify owner@acme.example and post ongoing incident updates until resolution.",
+    "outcome": {
+      "policyLabel": "incident_policy",
+      "requiredAction": "create_ticket",
+      "riskStatus": "needs_review",
+      "evidenceIds": [
+        "api:status:exports",
+        "incident:inc_exports_2026_06_17",
+        "db:customers:cust_acme",
+        "db:tickets:1"
+      ],
+      "toolNames": [
+        "get_service_status",
+        "lookup_customer",
+        "create_support_ticket"
+      ]
+    },
+    "steps": [
+      {
+        "index": 1,
+        "name": "lookup_customer",
+        "kind": "db_read",
+        "arguments": {
+          "email_or_id": "acme"
+        },
+        "result": {
+          "account_tier": "business",
+          "customer_id": "cust_acme",
+          "found": true,
+          "name": "Acme Analytics",
+          "owner_email": "owner@acme.example",
+          "permission_role": "account_owner",
+          "plan": "Business",
+          "settings": {
+            "api_key_rotated": "false",
+            "beta_exports_fast_path": "false",
+            "sso_enabled": "false"
+          }
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "db:customers:cust_acme"
+        ]
+      },
+      {
+        "index": 2,
+        "name": "get_service_status",
+        "kind": "http_read",
+        "arguments": {
+          "service": "exports"
+        },
+        "result": {
+          "customer_impact": "Export jobs time out after 30 seconds for some workspaces.",
+          "incident_id": "inc_exports_2026_06_17",
+          "ok": false,
+          "service": "exports",
+          "severity": "major"
+        },
+        "blocked": false,
+        "wroteState": false,
+        "evidenceIds": [
+          "api:status:exports",
+          "incident:inc_exports_2026_06_17"
+        ]
+      },
+      {
+        "index": 3,
+        "name": "create_support_ticket",
+        "kind": "db_write",
+        "arguments": {
+          "customer_id": "cust_acme",
+          "priority": "high",
+          "summary": "Major outage: exports time out after 30s for some workspaces (incident inc_exports_2026_06_17). Customer reported failures."
+        },
+        "result": {
+          "customer_id": "cust_acme",
+          "priority": "high",
+          "status": "open",
+          "summary": "Major outage: exports time out after 30s for some workspaces (incident inc_exports_2026_06_17). Customer reported failures.",
+          "ticket_id": 1
+        },
+        "blocked": false,
+        "wroteState": true,
+        "evidenceIds": [
+          "db:tickets:1"
+        ]
+      }
+    ],
+    "provenance": {
+      "sourceTraceId": "1c15d5b3e481483f8e9d13cbbd626c9c",
+      "sourceFixture": "examples/end_to_end/replay_fork_demo/reference_agent/fixtures/langfuse_export.jsonl",
+      "generationRunId": "fixture-20260617T140855Z-a4d5435f",
+      "agentVersion": "replay-verify-reference-agent-stage-1"
+    }
+  }
+]
