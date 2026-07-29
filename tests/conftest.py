@@ -16,6 +16,7 @@
 import asyncio
 import hashlib
 import os
+import sys
 import uuid
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
@@ -159,6 +160,11 @@ from kitaru.server.domain.task import (
 )
 from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.transport import RetryTransport
+
+# Why: test modules import shared fakes with a bare `from conftest import ...`.
+# A subdirectory conftest (tests/worker/conftest.py) can shadow that name on
+# sys.path in subset runs, so register this module under the bare name first.
+sys.modules.setdefault("conftest", sys.modules[__name__])
 
 TEST_DB_PREFIX = "kitaru_test"
 
