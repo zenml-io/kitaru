@@ -44,6 +44,9 @@ from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.cohort_repository import (
+    SQLCohortRepository,
+)
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
@@ -77,6 +80,7 @@ from kitaru.server.application.services.agent_version_service import (
 )
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.blob_service import BlobService
+from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.plugin_service import PluginService
@@ -326,6 +330,24 @@ def get_experiment_service(
     return ExperimentService(
         repository=SQLExperimentRepository(session),
         plugin_repository=SQLPluginRepository(session),
+    )
+
+
+def get_cohort_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CohortService:
+    """Return a cohort service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Cohort service bound to the SQL repositories.
+    """
+    return CohortService(
+        repository=SQLCohortRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        session_repository=SQLSessionRepository(session),
     )
 
 

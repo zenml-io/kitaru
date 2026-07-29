@@ -107,3 +107,46 @@ async def paginate_by_index(
         last_index = getattr(rows[-1], index_column.key)
         next_cursor = encode_cursor(list_filter.sort, str(last_index), filter_hash)
     return rows, next_cursor
+
+
+async def paginate_join_by_index(
+    session: AsyncSession,
+    statement: Select[tuple[RowT, int]],
+    list_filter: ListFilter,
+    index_column: InstrumentedAttribute[int],
+) -> tuple[Sequence[RowT], str | None]:
+    """Execute a filtered two-column select as one page plus the next cursor.
+
+    Like ``paginate_by_index``, but for an entity paginated by an index
+    column that lives on a joined link table rather than on the entity
+    itself. The statement selects the entity alongside the index column, and
+    each result row is unpacked before being returned.
+
+    Args:
+        session: Database session for the query.
+        statement: Filtered select of the entity and its index column,
+            without ordering or pagination.
+        list_filter: List filter carrying the cursor, size, and filter hash.
+        index_column: Integer column defining the sort order.
+
+    Returns:
+        Page of matching entities and the next cursor, or None on the last
+        page.
+    """
+    filter_hash = list_filter.compute_filter_hash()
+    cursor = None
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
+
+    statement = statement.order_by(index_column.asc())
+    if cursor is not None:
+        statement = statement.where(index_column > int(cursor.id))
+
+    statement = statement.limit(list_filter.size + 1)
+    rows = (await session.execute(statement)).all()
+    next_cursor = None
+    if len(rows) > list_filter.size:
+        rows = rows[: list_filter.size]
+        last_index = rows[-1][1]
+        next_cursor = encode_cursor(list_filter.sort, str(last_index), filter_hash)
+    return [row[0] for row in rows], next_cursor

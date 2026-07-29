@@ -14,6 +14,7 @@
 """Session repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
@@ -67,6 +68,19 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_many(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Session]:
+        """Bulk-load sessions by id, keyed by id, missing ids omitted.
+
+        Args:
+            session_ids: Ids of the sessions to load.
+
+        Returns:
+            Stored sessions keyed by id.
+        """
+        ...
+
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -93,6 +107,8 @@ class SessionRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session belongs to a cohort and cannot be
+                deleted.
         """
         ...
 
