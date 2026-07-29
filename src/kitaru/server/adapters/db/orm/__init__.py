@@ -14,8 +14,19 @@
 """ORM table definitions."""
 
 from kitaru.server.adapters.db.orm.account import AccountORM
+from kitaru.server.adapters.db.orm.agent import AgentORM
+from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
+from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecretORM
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 
-__all__ = ["AccountORM", "ApiKeyORM", "DeviceORM", "SecretORM"]
+__all__ = [
+    "AccountORM",
+    "AgentORM",
+    "AgentVersionORM",
+    "AgentVersionSecretORM",
+    "ApiKeyORM",
+    "DeviceORM",
+    "SecretORM",
+]

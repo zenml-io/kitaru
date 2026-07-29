@@ -35,6 +35,8 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 )
 from kitaru.server.adapters.rest.routers import (
     accounts,
+    agent_versions,
+    agents,
     api_keys,
     auth,
     devices,
@@ -179,6 +181,10 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(info.router, prefix="/v1/info", tags=["info"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
+    app.include_router(agents.router, prefix="/v1/agents", tags=["agents"])
+    app.include_router(
+        agent_versions.router, prefix="/v1/agent-versions", tags=["agent-versions"]
+    )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
