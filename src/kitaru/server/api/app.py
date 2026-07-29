@@ -42,6 +42,8 @@ from kitaru.server.adapters.rest.routers import (
     devices,
     info,
     secrets,
+    tags,
+    workers,
 )
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
@@ -188,4 +190,6 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
+    app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
     return app

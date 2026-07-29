@@ -49,6 +49,10 @@ from kitaru.server.adapters.db.repositories.device_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.worker_repository import (
+    SQLWorkerRepository,
+)
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -61,6 +65,8 @@ from kitaru.server.application.services.agent_version_service import (
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.secret_service import SecretService
+from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
 
@@ -225,6 +231,34 @@ def get_device_service(
             trusted_expiration_minutes=settings.TRUSTED_DEVICE_EXPIRATION_MINUTES,
         ),
     )
+
+
+def get_tag_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TagService:
+    """Return a tag service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Tag service bound to the SQL repository.
+    """
+    return TagService(repository=SQLTagRepository(session))
+
+
+def get_worker_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WorkerService:
+    """Return a worker service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Worker service bound to the SQL repository.
+    """
+    return WorkerService(repository=SQLWorkerRepository(session))
 
 
 def get_auth_service(

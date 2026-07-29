@@ -20,6 +20,8 @@ from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecre
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
+from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
+from kitaru.server.adapters.db.orm.worker import WorkerORM
 
 __all__ = [
     "AccountORM",
@@ -29,4 +31,7 @@ __all__ = [
     "ApiKeyORM",
     "DeviceORM",
     "SecretORM",
+    "TagLinkORM",
+    "TagORM",
+    "WorkerORM",
 ]
