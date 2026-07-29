@@ -167,3 +167,54 @@ required solving beyond what the documents describe.
   1 MiB, evaluation pair cap 100.
 - `create_evaluations` inserts tasks directly instead of `add_task`, the
   job was created in the same call and cannot have settled.
+
+## Replays, pipeline, and experiment runs
+
+- `effective_inputs` is applied once, when the pipeline builds the agent
+  task's inputs. The adapter still fetches the override from the replay for
+  model and prompt handling at run time.
+- Tool lookup with agent scope restricts to sessions with origin recorded
+  or imported, so a replay's own result sessions never serve history. All
+  scopes pick the newest match by id, UUIDv7 ids sort by creation time.
+- Run numbers come from `max(number) + 1` under an exclusive lock of the
+  experiment row, the spec defines no counter column on experiment. The
+  unique (experiment_id, number) constraint is the backstop.
+- The freeze checks the spec's `(frozen)` annotations imply are booleans
+  passed into the domain mutators: experiments reject config changes once
+  runs exist, agent versions reject run_spec and capability changes once
+  tasks reference them. The services run the existence probes.
+- `ExperimentInUse` and `ReplayConfigInUse` were added, deleting an
+  experiment with runs and deleting a referenced config now map to 409
+  instead of raw integrity errors. Config rows deleted on experiment
+  update survive when replays reference them.
+- Run progress is one grouped count per query over the
+  (experiment_run_id, status) index.
+- `_resolve_cohort_session_ids` returns sessions rather than ids, the
+  id-only shape forced a redundant refetch.
+
+## Worker package
+
+- A `worker` extra on pyproject carries pydantic-settings.
+- Constants live next to their primary consumer instead of one constants
+  module, which also avoids a config/heartbeat/worker import cycle.
+- A 409 on any non-completion transition is handled uniformly (log and
+  return), the spec only special-cases the completion 409.
+- The client-side job settled check compares against the terminal
+  `JobStatus` values directly, the domain's settled property is server
+  code the client cannot import.
+- Raw `httpx.TransportError` escaping the client's retries is treated like
+  a non-409 API error everywhere the runner and heartbeat write.
+
+## Task package
+
+- `ParsedNode` mirrors `SessionNodeCreateRequest` minus index and parent
+  fields, plus `children`. Parsed trees are single-parent only.
+- `session_request` takes the task id as an explicit parameter, the flow
+  owns it.
+- API failures during import are sampled as `ImportFailure` rows with the
+  item's 1-based stream ordinal as the line.
+- A bad process kind exits 2 through argparse, runtime failures exit 1.
+- `tests/task` shares fixtures through `task_fixtures.py` instead of a
+  second conftest module. The root conftest registers itself under the
+  bare `conftest` name so subset runs resolve shared fakes consistently,
+  and the worker env fixture lives there gated by test path.
