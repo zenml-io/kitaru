@@ -49,6 +49,12 @@ from kitaru.server.adapters.db.repositories.device_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.session_node_repository import (
+    SQLSessionNodeRepository,
+)
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
@@ -65,6 +71,10 @@ from kitaru.server.application.services.agent_version_service import (
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.secret_service import SecretService
+from kitaru.server.application.services.session_node_service import (
+    SessionNodeService,
+)
+from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
@@ -202,6 +212,37 @@ def get_secret_service(
         repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         )
+    )
+
+
+def get_session_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionService:
+    """Return a session service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Session service bound to the SQL repository.
+    """
+    return SessionService(repository=SQLSessionRepository(session))
+
+
+def get_session_node_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionNodeService:
+    """Return a session node service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Session node service bound to the SQL repositories.
+    """
+    return SessionNodeService(
+        repository=SQLSessionNodeRepository(session),
+        session_repository=SQLSessionRepository(session),
     )
 
 
