@@ -19,7 +19,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAgentRepository, FakeAgentVersionRepository
+from conftest import FakeAgentRepository, FakeAgentVersionRepository, FakeTaskRepository
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
@@ -53,7 +53,8 @@ async def client(
     )
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
-        repository=FakeAgentVersionRepository(agent_repository)
+        repository=FakeAgentVersionRepository(agent_repository),
+        task_repository=FakeTaskRepository(),
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service

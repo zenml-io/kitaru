@@ -1,0 +1,342 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Contract tests for experiment run repositories."""
+
+import uuid
+from collections.abc import AsyncGenerator, Awaitable, Callable
+
+import pytest
+
+from conftest import (
+    FakeExperimentRunRepository,
+    pg_session,
+    postgres_available,
+)
+from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.server.adapters.db.repositories.account_repository import (
+    SQLAccountRepository,
+)
+from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
+from kitaru.server.adapters.db.repositories.cohort_repository import (
+    SQLCohortRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_repository import (
+    SQLExperimentRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
+from kitaru.server.application.interfaces.experiment_run_repository import (
+    ExperimentRunRepository,
+)
+from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.cohort import Cohort
+from kitaru.server.domain.experiment import Experiment
+from kitaru.server.domain.experiment_run import (
+    DuplicateExperimentRunNumber,
+    ExperimentRun,
+    ExperimentRunNotFound,
+)
+from kitaru.server.domain.replay_config import (
+    PassthroughConfig,
+    ReplayConfig,
+    ToolPolicy,
+)
+
+Setup = tuple[
+    ExperimentRunRepository,
+    uuid.UUID,
+    Callable[[], Awaitable[uuid.UUID]],
+    Callable[[], Awaitable[uuid.UUID]],
+    Callable[[], Awaitable[uuid.UUID]],
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
+    """Provide each run repository implementation, an owner id, and factories
+    for a fresh experiment id, cohort id, and agent version id."""
+    if request.param == "fake":
+        owner_id = uuid.uuid4()
+
+        async def make_experiment_id() -> uuid.UUID:
+            return uuid.uuid4()
+
+        async def make_cohort_id() -> uuid.UUID:
+            return uuid.uuid4()
+
+        async def make_agent_version_id() -> uuid.UUID:
+            return uuid.uuid4()
+
+        yield (
+            FakeExperimentRunRepository(),
+            owner_id,
+            make_experiment_id,
+            make_cohort_id,
+            make_agent_version_id,
+        )
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agents_repository = SQLAgentRepository(session)
+        agent = await agents_repository.create(Agent(owner_id=owner.id, name="agent"))
+        agent_versions_repository = SQLAgentVersionRepository(session)
+        experiments_repository = SQLExperimentRepository(session)
+        cohorts_repository = SQLCohortRepository(session)
+
+        async def make_experiment_id() -> uuid.UUID:
+            config = await experiments_repository.create_replay_config(
+                ReplayConfig(
+                    owner_id=owner.id,
+                    tool_policy=ToolPolicy(default=PassthroughConfig()),
+                    evaluators=[],
+                )
+            )
+            experiment = await experiments_repository.create(
+                Experiment(
+                    owner_id=owner.id,
+                    name=f"exp-{uuid.uuid4().hex[:8]}",
+                    replay_config_id=config.id,
+                )
+            )
+            return experiment.id
+
+        async def make_cohort_id() -> uuid.UUID:
+            cohort = await cohorts_repository.create(
+                Cohort(
+                    owner_id=owner.id,
+                    name=f"cohort-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent.id,
+                    session_count=0,
+                ),
+                [],
+            )
+            return cohort.id
+
+        async def make_agent_version_id() -> uuid.UUID:
+            version = await agent_versions_repository.create(
+                AgentVersion(owner_id=owner.id, agent_id=agent.id)
+            )
+            return version.id
+
+        yield (
+            SQLExperimentRunRepository(session),
+            owner.id,
+            make_experiment_id,
+            make_cohort_id,
+            make_agent_version_id,
+        )
+
+
+def _run(
+    owner_id: uuid.UUID,
+    experiment_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+    agent_version_id: uuid.UUID,
+    number: int = 1,
+) -> ExperimentRun:
+    return ExperimentRun(
+        owner_id=owner_id,
+        experiment_id=experiment_id,
+        number=number,
+        cohort_id=cohort_id,
+        agent_version_id=agent_version_id,
+    )
+
+
+async def test_create_sets_timestamps(setup: Setup) -> None:
+    """Store a new run with both timestamps set."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    run = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_id(),
+            await make_agent_version_id(),
+        )
+    )
+    assert run.status is ExperimentRunStatus.RUNNING
+    assert run.created is not None
+    assert run.updated is not None
+
+
+async def test_get(setup: Setup) -> None:
+    """Load a stored run by id."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    created = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_id(),
+            await make_agent_version_id(),
+        )
+    )
+    loaded = await repository.get(created.id)
+    assert loaded == created
+
+
+async def test_get_not_found(setup: Setup) -> None:
+    """Raise for an unknown run id."""
+    repository, *_ = setup
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        ExperimentRunNotFound, match=f"Experiment run {missing_id} was not found"
+    ):
+        await repository.get(missing_id)
+
+
+async def test_duplicate_run_number_conflicts(setup: Setup) -> None:
+    """Reject a second run with the same (experiment, number) pair."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    experiment_id = await make_experiment_id()
+    agent_version_id = await make_agent_version_id()
+    await repository.create(
+        _run(
+            owner_id, experiment_id, await make_cohort_id(), agent_version_id, number=1
+        )
+    )
+    with pytest.raises(DuplicateExperimentRunNumber):
+        await repository.create(
+            _run(
+                owner_id,
+                experiment_id,
+                await make_cohort_id(),
+                agent_version_id,
+                number=1,
+            )
+        )
+
+
+async def test_update_renews_timestamp(setup: Setup) -> None:
+    """Persist status changes and renew the updated timestamp."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    created = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_id(),
+            await make_agent_version_id(),
+        )
+    )
+    created.cancel()
+    updated = await repository.update(created)
+    assert updated.status is ExperimentRunStatus.CANCELING
+    assert updated.created == created.created
+    assert updated.updated is not None
+    assert created.updated is not None
+    assert updated.updated >= created.updated
+
+
+async def test_delete(setup: Setup) -> None:
+    """Delete a stored run."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    created = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_id(),
+            await make_agent_version_id(),
+        )
+    )
+    await repository.delete(created.id)
+    with pytest.raises(ExperimentRunNotFound):
+        await repository.get(created.id)
+
+
+async def test_query_filters_by_experiment_and_status(setup: Setup) -> None:
+    """Filter runs by experiment id and status."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    experiment_id = await make_experiment_id()
+    agent_version_id = await make_agent_version_id()
+    matching = await repository.create(
+        _run(owner_id, experiment_id, await make_cohort_id(), agent_version_id)
+    )
+    other_experiment = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_id(),
+            agent_version_id,
+        )
+    )
+
+    runs, next_cursor = await repository.query(
+        ExperimentRunFilter(experiment_id=experiment_id)
+    )
+    assert next_cursor is None
+    assert [run.id for run in runs] == [matching.id]
+
+    runs, _ = await repository.query(
+        ExperimentRunFilter(status=ExperimentRunStatus.RUNNING)
+    )
+    assert {run.id for run in runs} >= {matching.id, other_experiment.id}
+
+
+async def test_get_max_number(setup: Setup) -> None:
+    """Read the highest run number, 0 when the experiment has no runs."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    experiment_id = await make_experiment_id()
+    agent_version_id = await make_agent_version_id()
+    assert await repository.get_max_number(experiment_id) == 0
+    await repository.create(
+        _run(
+            owner_id, experiment_id, await make_cohort_id(), agent_version_id, number=1
+        )
+    )
+    await repository.create(
+        _run(
+            owner_id, experiment_id, await make_cohort_id(), agent_version_id, number=2
+        )
+    )
+    assert await repository.get_max_number(experiment_id) == 2
+
+
+async def test_exists_for_experiment(setup: Setup) -> None:
+    """Report whether an experiment has any run."""
+    repository, owner_id, make_experiment_id, make_cohort_id, make_agent_version_id = (
+        setup
+    )
+    experiment_id = await make_experiment_id()
+    assert await repository.exists_for_experiment(experiment_id) is False
+    await repository.create(
+        _run(
+            owner_id,
+            experiment_id,
+            await make_cohort_id(),
+            await make_agent_version_id(),
+        )
+    )
+    assert await repository.exists_for_experiment(experiment_id) is True

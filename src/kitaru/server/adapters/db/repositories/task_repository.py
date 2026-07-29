@@ -19,7 +19,7 @@ from datetime import datetime
 
 from sqlalchemy import ColumnElement, func, not_, or_, select, update
 
-from kitaru.api_models.v1.task import TaskStatus, WorkerScope
+from kitaru.api_models.v1.task import TaskKind, TaskStatus, WorkerScope
 from kitaru.server.adapters.db.orm.task import (
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
     TaskORM,
@@ -277,3 +277,58 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         await self._session.execute(statement)
         await self._session.flush()
+
+    async def get_scored_evaluator_version_ids(
+        self, input_session_id: uuid.UUID
+    ) -> set[uuid.UUID]:
+        """Read the evaluator versions that already completed against a session.
+
+        Args:
+            input_session_id: Id of the scored session.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session.
+        """
+        statement = select(TaskORM.plugin_version_id).where(
+            TaskORM.input_session_id == input_session_id,
+            TaskORM.status == TaskStatus.COMPLETED.value,
+            TaskORM.plugin_version_id.is_not(None),
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {row for row in rows if row is not None}
+
+    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
+        """Report whether any task references an agent version.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Returns:
+            Whether a task references the agent version.
+        """
+        statement = select(
+            select(TaskORM.id)
+            .where(TaskORM.agent_version_id == agent_version_id)
+            .exists()
+        )
+        return bool(await self._session.scalar(statement))
+
+    async def get_agent_tasks_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Task]:
+        """Bulk-load the agent task of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Agent tasks keyed by job id, jobs without an agent task omitted.
+        """
+        if not job_ids:
+            return {}
+        statement = select(TaskORM).where(
+            TaskORM.job_id.in_(job_ids), TaskORM.kind == TaskKind.AGENT.value
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {row.job_id: row.to_domain() for row in rows}

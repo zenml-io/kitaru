@@ -18,7 +18,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeAgentRepository, FakeAgentVersionRepository, asgi_api_client
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeTaskRepository,
+    asgi_api_client,
+)
 from kitaru.api_models.v1.agent import (
     AgentCreateRequest,
     AgentListParams,
@@ -61,7 +66,8 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     agent_repository = FakeAgentRepository()
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
-        repository=FakeAgentVersionRepository(agent_repository)
+        repository=FakeAgentVersionRepository(agent_repository),
+        task_repository=FakeTaskRepository(),
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service

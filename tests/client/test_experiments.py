@@ -19,9 +19,10 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import (
-    FakeExperimentRepository,
     FakePluginRepository,
+    ReplayServices,
     asgi_api_client,
+    build_replay_services,
     create_plugin,
 )
 from kitaru.api_models.v1.experiment import (
@@ -40,7 +41,6 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
 
@@ -50,24 +50,26 @@ SOURCE = PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg
 
 
 @pytest.fixture
-def plugin_repository() -> FakePluginRepository:
-    """Provide a fake plugin repository."""
-    return FakePluginRepository()
+def services() -> ReplayServices:
+    """Provide fake-backed experiment, replay, and run services."""
+    return build_replay_services()
 
 
 @pytest.fixture
-async def api_client(
-    plugin_repository: FakePluginRepository,
-) -> AsyncGenerator[KitaruAPIClient, None]:
+def plugin_repository(services: ReplayServices) -> FakePluginRepository:
+    """Provide a fake plugin repository."""
+    return services.plugins
+
+
+@pytest.fixture
+async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
-    experiment_repository = FakeExperimentRepository()
-    service = ExperimentService(
-        repository=experiment_repository, plugin_repository=plugin_repository
+    app.dependency_overrides[get_experiment_service] = lambda: (
+        services.experiment_service
     )
-    app.dependency_overrides[get_experiment_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client

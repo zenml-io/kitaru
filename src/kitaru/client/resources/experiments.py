@@ -24,6 +24,10 @@ from kitaru.api_models.v1.experiment import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
+from kitaru.api_models.v1.experiment_run import (
+    ExperimentRunCreateRequest,
+    ExperimentRunResponse,
+)
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -155,3 +159,27 @@ class ExperimentsResource:
                 experiment.
         """
         await self._client.request("DELETE", f"/v1/experiments/{experiment_id}")
+
+    async def start_run(
+        self, experiment_id: uuid.UUID, request: ExperimentRunCreateRequest
+    ) -> ExperimentRunResponse:
+        """Start an experiment run, fanning out one replay per cohort session.
+
+        Args:
+            experiment_id: Id of the experiment.
+            request: Experiment run create request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                experiment, cohort, or agent version, and 422 for an empty
+                cohort or a missing agent version resolution.
+
+        Returns:
+            Created run.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/experiments/{experiment_id}/runs",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ExperimentRunResponse.model_validate(response.json())

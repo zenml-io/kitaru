@@ -20,8 +20,11 @@ import pytest
 from conftest import (
     FakeExperimentRepository,
     FakePluginRepository,
-    FakeTagRepository,
+    ReplayServices,
+    build_replay_services,
+    create_experiment_run,
     create_plugin,
+    create_replay,
 )
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
@@ -34,7 +37,12 @@ from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.experiment import DuplicateExperimentName, ExperimentNotFound
+from kitaru.server.domain.experiment import (
+    DuplicateExperimentName,
+    ExperimentFrozen,
+    ExperimentInUse,
+    ExperimentNotFound,
+)
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind, PluginNotFound
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
@@ -50,23 +58,27 @@ SOURCE = PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg
 
 
 @pytest.fixture
-def plugin_repository() -> FakePluginRepository:
+def services() -> ReplayServices:
+    """Provide fake-backed experiment, replay, and run services."""
+    return build_replay_services()
+
+
+@pytest.fixture
+def plugin_repository(services: ReplayServices) -> FakePluginRepository:
     """Provide a fake plugin repository."""
-    return FakePluginRepository()
+    return services.plugins
 
 
 @pytest.fixture
-def repository() -> FakeExperimentRepository:
+def repository(services: ReplayServices) -> FakeExperimentRepository:
     """Provide a fake experiment repository."""
-    return FakeExperimentRepository()
+    return services.experiments
 
 
 @pytest.fixture
-def service(
-    repository: FakeExperimentRepository, plugin_repository: FakePluginRepository
-) -> ExperimentService:
+def service(services: ReplayServices) -> ExperimentService:
     """Provide an experiment service backed by the fake repositories."""
-    return ExperimentService(repository=repository, plugin_repository=plugin_repository)
+    return services.experiment_service
 
 
 async def _register_evaluator(
@@ -198,14 +210,12 @@ async def test_list_experiments(
 
 
 async def test_list_experiments_by_tag(
+    services: ReplayServices,
+    service: ExperimentService,
     plugin_repository: FakePluginRepository,
 ) -> None:
     """Filter experiments by a tag linked to the resource."""
-    tag_repository = FakeTagRepository()
-    repository = FakeExperimentRepository(tag_repository=tag_repository)
-    service = ExperimentService(
-        repository=repository, plugin_repository=plugin_repository
-    )
+    tag_repository = services.tags
     await _register_evaluator(plugin_repository)
     tagged_command = ExperimentCreate(
         name="tagged", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
@@ -286,6 +296,37 @@ async def test_update_experiment_new_evaluators_replaces_config(
     assert new_config.evaluators[0].evaluator == "relevance"
     with pytest.raises(ReplayConfigNotFound):
         await repository.get_replay_config(old_config.id)
+
+
+async def test_update_experiment_old_config_survives_when_a_replay_references_it(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    repository: FakeExperimentRepository,
+    services: ReplayServices,
+) -> None:
+    """Keep the old replay config when a replay still points at it."""
+    await _register_evaluator(plugin_repository)
+    await _register_evaluator(plugin_repository, name="relevance")
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+    created, old_config = await service.create_experiment(command, actor=ACTOR)
+    await create_replay(
+        services.replays,
+        ACTOR.account.id,
+        job_id=uuid.uuid4(),
+        replay_config_id=old_config.id,
+        baseline_session_id=uuid.uuid4(),
+    )
+
+    await service.update_experiment(
+        created.id,
+        ExperimentUpdate(evaluators=[EvaluatorConfigInput(evaluator="relevance")]),
+        actor=ACTOR,
+    )
+    # Survives because a replay still references it, unlike the ordinary case.
+    survived = await repository.get_replay_config(old_config.id)
+    assert survived.id == old_config.id
 
 
 async def test_update_experiment_cannot_clear_evaluators(
@@ -376,3 +417,76 @@ async def test_delete_experiment_not_found(service: ExperimentService) -> None:
     """Raise for an unknown experiment id."""
     with pytest.raises(ExperimentNotFound):
         await service.delete_experiment(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_update_experiment_config_frozen_once_it_has_runs(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    services: ReplayServices,
+) -> None:
+    """Reject a replay config update once the experiment has a run."""
+    await _register_evaluator(plugin_repository)
+    await _register_evaluator(plugin_repository, name="relevance")
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+    created, _ = await service.create_experiment(command, actor=ACTOR)
+    await create_experiment_run(
+        services.experiment_runs,
+        ACTOR.account.id,
+        experiment_id=created.id,
+        cohort_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+    )
+    with pytest.raises(ExperimentFrozen):
+        await service.update_experiment(
+            created.id,
+            ExperimentUpdate(evaluators=[EvaluatorConfigInput(evaluator="relevance")]),
+            actor=ACTOR,
+        )
+
+
+async def test_update_experiment_name_unaffected_by_runs(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    services: ReplayServices,
+) -> None:
+    """A name-only update stays legal once the experiment has a run."""
+    await _register_evaluator(plugin_repository)
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+    created, _ = await service.create_experiment(command, actor=ACTOR)
+    await create_experiment_run(
+        services.experiment_runs,
+        ACTOR.account.id,
+        experiment_id=created.id,
+        cohort_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+    )
+    updated, _ = await service.update_experiment(
+        created.id, ExperimentUpdate(name="renamed"), actor=ACTOR
+    )
+    assert updated.name == "renamed"
+
+
+async def test_delete_experiment_conflicts_once_it_has_runs(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    services: ReplayServices,
+) -> None:
+    """Reject deleting an experiment that has runs."""
+    await _register_evaluator(plugin_repository)
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+    created, _ = await service.create_experiment(command, actor=ACTOR)
+    await create_experiment_run(
+        services.experiment_runs,
+        ACTOR.account.id,
+        experiment_id=created.id,
+        cohort_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+    )
+    with pytest.raises(ExperimentInUse):
+        await service.delete_experiment(created.id, actor=ACTOR)

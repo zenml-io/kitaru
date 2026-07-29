@@ -47,6 +47,32 @@ AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
 
 
+async def add_task(
+    task: Task, repository: JobRepository, task_repository: TaskRepository
+) -> Task:
+    """Append a task to an unsettled job.
+
+    Shared with the replay pipeline, which appends tasks to a replay's job
+    from outside the request that created it.
+
+    Args:
+        task: Task to append.
+        repository: Job repository.
+        task_repository: Task repository.
+
+    Raises:
+        JobNotFound: No job has the task's job id.
+        JobAlreadySettled: The job already reached a terminal status.
+
+    Returns:
+        Created task.
+    """
+    job = await repository.get(task.job_id, exclusive=True)
+    if job.settled:
+        raise JobAlreadySettled(job.id)
+    return await task_repository.create(task)
+
+
 class JobService:
     """Job use cases."""
 
@@ -198,10 +224,7 @@ class JobService:
         Returns:
             Created task.
         """
-        job = await self._repository.get(task.job_id, exclusive=True)
-        if job.settled:
-            raise JobAlreadySettled(job.id)
-        return await self._tasks.create(task)
+        return await add_task(task, self._repository, self._tasks)
 
     async def advance_job(self, job_id: uuid.UUID) -> None:
         """Propagate an abort failure and settle the job once its tasks drain.

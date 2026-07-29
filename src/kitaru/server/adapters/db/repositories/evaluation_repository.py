@@ -195,3 +195,24 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
         ).all()
         by_name = {row.name: row for row in rows}
         return [by_name[evaluation.name].to_domain() for evaluation in evaluations]
+
+    async def create_task_evaluations(
+        self, evaluations: list[Evaluation]
+    ) -> list[Evaluation]:
+        """Insert evaluation rows produced by a completed evaluator task.
+
+        Args:
+            evaluations: Fully resolved evaluations to store, in result order.
+
+        Returns:
+            Stored evaluations in result order.
+        """
+        if not evaluations:
+            return []
+        rows = [
+            EvaluationORM(**EvaluationORM.column_values(evaluation))
+            for evaluation in evaluations
+        ]
+        self._session.add_all(rows)
+        await self._flush()
+        return [row.to_domain() for row in rows]

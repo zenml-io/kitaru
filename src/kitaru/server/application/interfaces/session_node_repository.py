@@ -67,3 +67,48 @@ class SessionNodeRepository(Protocol):
             Page of matching nodes and the next cursor.
         """
         ...
+
+    async def find_latest_by_cache_key_in_session(
+        self, session_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key within one session.
+
+        Args:
+            session_id: Id of the session to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        ...
+
+    async def find_latest_by_cache_key_in_agent(
+        self, agent_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across an agent's recorded history.
+
+        Only sessions with a recorded or imported origin are searched, so a
+        replay's own result session is never a match.
+
+        Args:
+            agent_id: Id of the agent to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        ...
+
+    async def find_latest_by_cache_key_in_cohort(
+        self, cohort_id: uuid.UUID, cache_key: str
+    ) -> SessionNode | None:
+        """Find the newest node with a cache key across a cohort's sessions.
+
+        Args:
+            cohort_id: Id of the cohort to search.
+            cache_key: Tool call cache key to match.
+
+        Returns:
+            Highest-id matching node, or ``None`` on a miss.
+        """
+        ...

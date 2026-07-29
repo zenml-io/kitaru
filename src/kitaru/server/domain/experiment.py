@@ -47,6 +47,33 @@ class DuplicateExperimentName(ConflictError):
         super().__init__(f"Experiment name '{name}' is already registered")
 
 
+class ExperimentInUse(ConflictError):
+    """Raised when an experiment has runs and cannot be deleted."""
+
+    def __init__(self, experiment_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            experiment_id: Id of the experiment.
+        """
+        super().__init__(f"Experiment {experiment_id} has runs and cannot be deleted")
+
+
+class ExperimentFrozen(ConflictError):
+    """Raised when an experiment's replay config is touched while it has runs."""
+
+    def __init__(self, experiment_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            experiment_id: Id of the experiment.
+        """
+        super().__init__(
+            f"Experiment {experiment_id} has runs and its replay config "
+            "cannot be changed"
+        )
+
+
 class Experiment(DomainModel):
     """Experiment."""
 
@@ -74,10 +101,18 @@ class Experiment(DomainModel):
         """
         self.description = description
 
-    def update_replay_config_id(self, replay_config_id: uuid.UUID) -> None:
+    def update_replay_config_id(
+        self, replay_config_id: uuid.UUID, has_runs: bool
+    ) -> None:
         """Point the experiment at a different replay config.
 
         Args:
             replay_config_id: Id of the new replay config.
+            has_runs: Whether the experiment already has runs.
+
+        Raises:
+            ExperimentFrozen: ``has_runs`` is set.
         """
+        if has_runs:
+            raise ExperimentFrozen(self.id)
         self.replay_config_id = replay_config_id

@@ -19,7 +19,13 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeExperimentRepository, FakePluginRepository, create_plugin
+from conftest import (
+    FakeExperimentRepository,
+    FakePluginRepository,
+    ReplayServices,
+    build_replay_services,
+    create_plugin,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_service,
@@ -27,7 +33,6 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
 
@@ -37,30 +42,32 @@ SOURCE = PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg
 
 
 @pytest.fixture
-def plugin_repository() -> FakePluginRepository:
+def services() -> ReplayServices:
+    """Provide fake-backed experiment, replay, and run services."""
+    return build_replay_services()
+
+
+@pytest.fixture
+def plugin_repository(services: ReplayServices) -> FakePluginRepository:
     """Provide the fake plugin repository backing the app."""
-    return FakePluginRepository()
+    return services.plugins
 
 
 @pytest.fixture
-def experiment_repository() -> FakeExperimentRepository:
+def experiment_repository(services: ReplayServices) -> FakeExperimentRepository:
     """Provide the fake experiment repository backing the app."""
-    return FakeExperimentRepository()
+    return services.experiments
 
 
 @pytest.fixture
-async def client(
-    experiment_repository: FakeExperimentRepository,
-    plugin_repository: FakePluginRepository,
-) -> AsyncGenerator[httpx.AsyncClient, None]:
+async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed experiment services."""
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
-    service = ExperimentService(
-        repository=experiment_repository, plugin_repository=plugin_repository
+    app.dependency_overrides[get_experiment_service] = lambda: (
+        services.experiment_service
     )
-    app.dependency_overrides[get_experiment_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

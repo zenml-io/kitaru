@@ -78,3 +78,16 @@ class EvaluationRepository(Protocol):
             Stored evaluations in request order.
         """
         ...
+
+    async def create_task_evaluations(
+        self, evaluations: list[Evaluation]
+    ) -> list[Evaluation]:
+        """Insert evaluation rows produced by a completed evaluator task.
+
+        Args:
+            evaluations: Fully resolved evaluations to store, in result order.
+
+        Returns:
+            Stored evaluations in result order.
+        """
+        ...
