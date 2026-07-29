@@ -27,6 +27,7 @@ class AuthScheme(StrEnum):
     NONE = "none"
     LOCAL = "local"
     CONTROL_PLANE = "control_plane"
+    CLOUD = "cloud"
 
 
 class ServerInfoResponse(ResponseModel):

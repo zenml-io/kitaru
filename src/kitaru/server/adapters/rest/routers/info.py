@@ -43,7 +43,7 @@ async def get_info(
         Server info.
     """
     control_plane_api_url = None
-    if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+    if settings.AUTH_SCHEME in (AuthScheme.CONTROL_PLANE, AuthScheme.CLOUD):
         control_plane_api_url = settings.CONTROL_PLANE_API_URL.rstrip("/")
     return ServerInfoResponse(
         id=None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID,

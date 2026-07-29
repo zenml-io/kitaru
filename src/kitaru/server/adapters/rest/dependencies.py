@@ -24,8 +24,10 @@ from kitaru.analytics.client import AnalyticsClient
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
+    AuthenticationServiceUnavailableError,
     AuthService,
 )
+from kitaru.server.adapters.auth.cloud_auth_service import CloudAuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneClient,
@@ -687,11 +689,18 @@ def get_auth_service(
     account_repository = SQLAccountRepository(session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
-    if client is not None:
+    cloud_credential_resolver = None
+    if client is not None and settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
             server_id=settings.SERVER_ID,
+        )
+    elif client is not None and settings.AUTH_SCHEME is AuthScheme.CLOUD:
+        cloud_credential_resolver = CloudAuthService(
+            server_id=settings.SERVER_ID,
+            control_plane=client,
+            account_repository=account_repository,
         )
     return AuthService(
         settings=settings,
@@ -700,6 +709,7 @@ def get_auth_service(
         password_hasher=BcryptPasswordHasher(),
         device_service=device_service,
         control_plane=control_plane,
+        cloud_credential_resolver=cloud_credential_resolver,
     )
 
 
@@ -749,6 +759,7 @@ def require_local_account_management(
 
 
 async def authorize(
+    request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         RequestCredential | None, Depends(get_optional_bearer_credential)
@@ -761,6 +772,7 @@ async def authorize(
     default account. Other schemes require a bearer credential.
 
     Args:
+        request: Incoming HTTP request.
         settings: Service settings governing auth behavior.
         credential: Bearer token plus optional CSRF token.
         auth_service: Authentication service for the current request.
@@ -789,9 +801,28 @@ async def authorize(
             credential=credential.token,
             csrf_token=credential.csrf_token,
             from_cookie=credential.from_cookie,
+            action=_request_action(request.method),
         )
+    except AuthenticationServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+
+
+def _request_action(method: str) -> str:
+    """Map an HTTP method to a Cloud RBAC action."""
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        return "read"
+    if method == "POST":
+        return "create"
+    if method in {"PUT", "PATCH"}:
+        return "update"
+    if method == "DELETE":
+        return "delete"
+    return "read"

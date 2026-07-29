@@ -25,6 +25,10 @@ dist/
 build/
 *.whl
 *.tar.gz
+!dist/
+dist/*
+!dist/*.whl
+!dist/kitaru-server-requirements.txt
 
 # Local UI bundle cache used by Justfile helpers. Source Docker builds should
 # only receive the generated package UI files explicitly allow-listed below.

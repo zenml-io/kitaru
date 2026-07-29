@@ -15,12 +15,13 @@
 
 import uuid
 from typing import Self
+from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import SettingsConfigDict
 
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.server.config import Settings
+from kitaru.server.config import DatabaseAuthMethod, Settings
 
 # Sentinel meaning the server has not been enrolled with a control plane.
 UNSET_SERVER_ID = uuid.UUID(int=0)
@@ -57,6 +58,7 @@ class APISettings(Settings):
     SERVER_URL: str = ""
 
     CONTROL_PLANE_API_URL: str = ""
+    CONTROL_PLANE_ALLOWED_HOSTS: list[str] = Field(default_factory=list)
     CONTROL_PLANE_TIMEOUT_SECONDS: float = 10.0
     CONTROL_PLANE_CONNECTION_POOL_SIZE: int = 20
     CONTROL_PLANE_RETRY_CONNECT: int = 2
@@ -128,11 +130,39 @@ class APISettings(Settings):
             and not self.JWT_SIGNING_KEY
         ):
             raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
-        if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+        if self.AUTH_SCHEME in (AuthScheme.CONTROL_PLANE, AuthScheme.CLOUD):
             if not self.CONTROL_PLANE_API_URL:
                 raise ValueError("Set KITARU_SERVER_CONTROL_PLANE_API_URL")
             if self.SERVER_ID == UNSET_SERVER_ID:
                 raise ValueError("Set KITARU_SERVER_SERVER_ID")
+        if self.AUTH_SCHEME is AuthScheme.CLOUD:
+            parsed_control_plane_url = urlparse(self.CONTROL_PLANE_API_URL)
+            if (
+                parsed_control_plane_url.scheme != "https"
+                or not parsed_control_plane_url.hostname
+                or parsed_control_plane_url.username
+                or parsed_control_plane_url.password
+            ):
+                raise ValueError(
+                    "KITARU_SERVER_CONTROL_PLANE_API_URL must be an HTTPS URL "
+                    "without embedded credentials"
+                )
+            if (
+                self.CONTROL_PLANE_ALLOWED_HOSTS
+                and parsed_control_plane_url.hostname
+                not in self.CONTROL_PLANE_ALLOWED_HOSTS
+            ):
+                raise ValueError(
+                    "KITARU_SERVER_CONTROL_PLANE_API_URL host is not allowed"
+                )
+            if self.DB_AUTH_METHOD is not DatabaseAuthMethod.AWS_IAM:
+                raise ValueError(
+                    "Cloud mode requires KITARU_SERVER_DB_AUTH_METHOD=aws_iam"
+                )
+            if self.CREATE_DB_IF_MISSING:
+                raise ValueError(
+                    "Cloud mode requires KITARU_SERVER_CREATE_DB_IF_MISSING=false"
+                )
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")
         return self

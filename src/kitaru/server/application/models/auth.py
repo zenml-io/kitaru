@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Authentication and caller context for use cases."""
 
+import uuid
+
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.account import Account
 
@@ -21,4 +23,5 @@ class AuthContext(FrozenModel):
     """Resolved caller for application use cases."""
 
     account: Account
+    principal_id: uuid.UUID | None = None
     csrf_token: str | None = None
