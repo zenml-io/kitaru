@@ -637,6 +637,9 @@ server = [
     { name = "uuid-utils" },
     { name = "uvicorn" },
 ]
+worker = [
+    { name = "pydantic-settings" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -659,13 +662,14 @@ requires-dist = [
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
+    { name = "pydantic-settings", marker = "extra == 'worker'", specifier = ">=2.14" },
     { name = "pyjwt", marker = "extra == 'server'", specifier = ">=2.13" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'server'", specifier = ">=2.0.51" },
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["server"]
+provides-extras = ["server", "worker"]
 
 [package.metadata.requires-dev]
 dev = [
