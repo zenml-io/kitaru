@@ -18,6 +18,9 @@ from collections.abc import Callable
 
 from sqlalchemy import Select, select, update
 
+from kitaru.server.adapters.db.orm.evaluation import (
+    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.orm.plugin import (
     PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT,
     PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY,
@@ -34,6 +37,7 @@ from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
     Plugin,
+    PluginInUse,
     PluginKind,
     PluginNotFound,
     PluginSource,
@@ -174,8 +178,16 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
 
         Raises:
             PluginNotFound: No plugin has this id.
+            PluginInUse: A version is referenced by a stored evaluation.
         """
-        await self._delete_row(plugin_id)
+        await self._delete_row(
+            plugin_id,
+            {
+                EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY: lambda: PluginInUse(
+                    plugin_id
+                )
+            },
+        )
 
     async def create_version(
         self,

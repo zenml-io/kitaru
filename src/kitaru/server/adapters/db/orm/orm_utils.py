@@ -54,3 +54,16 @@ def foreign_key_name(table: str, columns: list[str]) -> str:
         Constraint name of the form ``fk_<table>_<columns>``.
     """
     return f"fk_{table}_{'_'.join(columns)}"[:_MAX_IDENTIFIER_LENGTH]
+
+
+def check_constraint_name(table: str, columns: list[str]) -> str:
+    """Build the name for a check constraint.
+
+    Args:
+        table: Table the constraint belongs to.
+        columns: Columns the constraint references, in order.
+
+    Returns:
+        Constraint name of the form ``ck_<table>_<columns>``.
+    """
+    return f"ck_{table}_{'_'.join(columns)}"[:_MAX_IDENTIFIER_LENGTH]

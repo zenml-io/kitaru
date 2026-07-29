@@ -60,6 +60,9 @@ class SessionRepository(Protocol):
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
+        ``has_evaluation`` filters on whether the session has at least one
+        stored evaluation.
+
         Args:
             session_filter: Filter and pagination parameters.
 

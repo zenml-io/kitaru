@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
@@ -52,12 +53,16 @@ from kitaru.server.adapters.auth.control_plane import (
 from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationWithEvaluator,
+)
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.cohort import CohortFilter, CohortSessionsFilter
 from kitaru.server.application.models.device import DeviceFilter
+from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.secret import SecretFilter
@@ -91,10 +96,10 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
     encode_api_key,
 )
-from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
 from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
+from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
@@ -105,6 +110,7 @@ from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
     Plugin,
+    PluginInUse,
     PluginKind,
     PluginNotFound,
     PluginSource,
@@ -1651,14 +1657,24 @@ async def create_tag(
 class FakeSessionRepository:
     """In-memory session repository."""
 
-    def __init__(self, tags: FakeTagRepository | None = None) -> None:
+    def __init__(
+        self,
+        tags: FakeTagRepository | None = None,
+        evaluations: "FakeEvaluationRepository | None" = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             tags: Fake tag repository, consulted by the ``tag`` filter.
+            evaluations: Fake evaluation repository, consulted by the
+                ``has_evaluation`` filter. Defaults to an empty, unwired
+                repository so the filter always matches something sensible.
         """
         self._sessions: dict[uuid.UUID, Session] = {}
         self._tags = tags
+        self._evaluations = (
+            evaluations if evaluations is not None else FakeEvaluationRepository()
+        )
         self._cohort_membership_counts: dict[uuid.UUID, int] = {}
 
     def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
@@ -1763,14 +1779,9 @@ class FakeSessionRepository:
         Args:
             session_filter: Filter and pagination parameters.
 
-        Raises:
-            ValidationError: ``has_evaluation`` is set.
-
         Returns:
             Page of matching sessions and the next cursor.
         """
-        if session_filter.has_evaluation is not None:
-            raise ValidationError("has_evaluation filtering is not available yet")
         sessions = list(self._sessions.values())
         if session_filter.agent_id is not None:
             sessions = [s for s in sessions if s.agent_id == session_filter.agent_id]
@@ -1797,6 +1808,13 @@ class FakeSessionRepository:
         if session_filter.tag is not None:
             tagged_ids = self._session_ids_tagged(session_filter.tag)
             sessions = [s for s in sessions if s.id in tagged_ids]
+        if session_filter.has_evaluation is not None:
+            sessions = [
+                s
+                for s in sessions
+                if self._evaluations.has_evaluation(s.id)
+                == session_filter.has_evaluation
+            ]
         if session_filter.started_after is not None:
             sessions = [
                 s
@@ -2526,6 +2544,18 @@ class FakePluginRepository:
         self._plugins: dict[uuid.UUID, Plugin] = {}
         self._versions: dict[uuid.UUID, PluginVersion] = {}
         self._blob_repository = blob_repository
+        self._referenced_version_ids: set[uuid.UUID] = set()
+
+    def mark_version_referenced(self, version_id: uuid.UUID) -> None:
+        """Mark a plugin version as referenced by a stored evaluation.
+
+        Mirrors the FK restrict, called by
+        ``FakeEvaluationRepository.merge_session_evaluations``.
+
+        Args:
+            version_id: Id of the referenced plugin version.
+        """
+        self._referenced_version_ids.add(version_id)
 
     def _check_duplicate_name(self, plugin: Plugin) -> None:
         for other in self._plugins.values():
@@ -2648,15 +2678,19 @@ class FakePluginRepository:
 
         Raises:
             PluginNotFound: No plugin has this id.
+            PluginInUse: A version is referenced by a stored evaluation.
         """
         if plugin_id not in self._plugins:
             raise PluginNotFound(plugin_id)
-        del self._plugins[plugin_id]
         stale_ids = [
             version_id
             for version_id, version in self._versions.items()
             if version.plugin_id == plugin_id
         ]
+        for version_id in stale_ids:
+            if version_id in self._referenced_version_ids:
+                raise PluginInUse(plugin_id)
+        del self._plugins[plugin_id]
         for version_id in stale_ids:
             del self._versions[version_id]
 
@@ -3016,3 +3050,205 @@ async def create_experiment(
             replay_config_id=replay_config_id,
         )
     )
+
+
+class FakeEvaluationRepository:
+    """In-memory evaluation repository."""
+
+    def __init__(self, plugin_repository: FakePluginRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            plugin_repository: Fake plugin repository, consulted to
+                denormalize the evaluator name and version.
+        """
+        self._evaluations: dict[uuid.UUID, Evaluation] = {}
+        self._plugin_repository = plugin_repository
+
+    def _evaluator_info(
+        self, evaluator_version_id: uuid.UUID | None
+    ) -> tuple[str | None, int | None]:
+        """Resolve the evaluator name and version for a plugin version id.
+
+        Args:
+            evaluator_version_id: Id of the referenced plugin version.
+
+        Returns:
+            Evaluator name and version, both ``None`` when unresolved.
+        """
+        if evaluator_version_id is None or self._plugin_repository is None:
+            return None, None
+        version = self._plugin_repository._versions.get(evaluator_version_id)
+        if version is None:
+            return None, None
+        plugin = self._plugin_repository._plugins.get(version.plugin_id)
+        if plugin is None:
+            return None, None
+        return plugin.name, version.version
+
+    async def get(self, evaluation_id: uuid.UUID) -> EvaluationWithEvaluator:
+        """Load an evaluation by id, joined with its evaluator name and version.
+
+        Args:
+            evaluation_id: Id of the evaluation.
+
+        Raises:
+            EvaluationNotFound: No evaluation has this id.
+
+        Returns:
+            Stored evaluation paired with its evaluator name and version.
+        """
+        evaluation = self._evaluations.get(evaluation_id)
+        if evaluation is None:
+            raise EvaluationNotFound(evaluation_id)
+        name, version = self._evaluator_info(evaluation.evaluator_version_id)
+        return EvaluationWithEvaluator(evaluation.model_copy(), name, version)
+
+    async def query(
+        self, evaluation_filter: EvaluationFilter
+    ) -> tuple[list[EvaluationWithEvaluator], str | None]:
+        """Query evaluations matching a filter.
+
+        Args:
+            evaluation_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching evaluations and the next cursor.
+        """
+        evaluations = list(self._evaluations.values())
+        if evaluation_filter.session_id is not None:
+            evaluations = [
+                e for e in evaluations if e.session_id == evaluation_filter.session_id
+            ]
+        if evaluation_filter.task_id is not None:
+            evaluations = [
+                e for e in evaluations if e.task_id == evaluation_filter.task_id
+            ]
+        if evaluation_filter.evaluator_version_id is not None:
+            evaluations = [
+                e
+                for e in evaluations
+                if e.evaluator_version_id == evaluation_filter.evaluator_version_id
+            ]
+        if evaluation_filter.name is not None:
+            evaluations = [e for e in evaluations if e.name == evaluation_filter.name]
+        if evaluation_filter.data_type is not None:
+            evaluations = [
+                e for e in evaluations if e.data_type == evaluation_filter.data_type
+            ]
+        page, next_cursor = _paginate_fake(evaluations, evaluation_filter)
+        items = [
+            EvaluationWithEvaluator(
+                evaluation.model_copy(),
+                *self._evaluator_info(evaluation.evaluator_version_id),
+            )
+            for evaluation in page
+        ]
+        return items, next_cursor
+
+    async def merge_session_evaluations(
+        self, session_id: uuid.UUID, evaluations: list[Evaluation]
+    ) -> list[Evaluation]:
+        """Insert or replace manual evaluations upserted on (session, name).
+
+        Args:
+            session_id: Id of the session the evaluations belong to.
+            evaluations: Fully resolved evaluations to store, in request
+                order.
+
+        Returns:
+            Stored evaluations in request order.
+        """
+        _ = session_id
+        stored: list[Evaluation] = []
+        for evaluation in evaluations:
+            existing = next(
+                (
+                    e
+                    for e in self._evaluations.values()
+                    if e.session_id == evaluation.session_id
+                    and e.task_id is None
+                    and e.name == evaluation.name
+                ),
+                None,
+            )
+            now = datetime.now(UTC)
+            if existing is None:
+                row = evaluation.model_copy(update={"created": now, "updated": now})
+            else:
+                row = evaluation.model_copy(
+                    update={
+                        "id": existing.id,
+                        "owner_id": existing.owner_id,
+                        "created": existing.created,
+                        "updated": _renewed_timestamp(existing.updated),
+                    }
+                )
+            self._evaluations[row.id] = row
+            stored.append(row.model_copy())
+            if (
+                row.evaluator_version_id is not None
+                and self._plugin_repository is not None
+            ):
+                self._plugin_repository.mark_version_referenced(
+                    row.evaluator_version_id
+                )
+        return stored
+
+    def has_evaluation(self, session_id: uuid.UUID) -> bool:
+        """Report whether a session has at least one stored evaluation.
+
+        Mirrors the EXISTS probe the SQL repository runs against the
+        evaluation table.
+
+        Args:
+            session_id: Id of the session.
+
+        Returns:
+            Whether the session has at least one stored evaluation.
+        """
+        return any(
+            evaluation.session_id == session_id
+            for evaluation in self._evaluations.values()
+        )
+
+
+async def create_evaluation(
+    repository: FakeEvaluationRepository,
+    owner_id: uuid.UUID,
+    session_id: uuid.UUID,
+    name: str = "accuracy",
+    data_type: EvaluationDataType = EvaluationDataType.FLOAT,
+    score: float | bool | None = 0.9,
+    value: str | None = None,
+    explanation: str | None = None,
+    evaluator_version_id: uuid.UUID | None = None,
+) -> Evaluation:
+    """Store an evaluation in the fake repository through its merge upsert.
+
+    Args:
+        repository: Fake evaluation repository.
+        owner_id: Id of the owning account.
+        session_id: Id of the session being scored.
+        name: Evaluation name.
+        data_type: Data type of the result.
+        score: Numeric or boolean score.
+        value: Label or string value.
+        explanation: Free-form explanation.
+        evaluator_version_id: Evaluator version that produced the result.
+
+    Returns:
+        Stored evaluation.
+    """
+    evaluation = Evaluation(
+        owner_id=owner_id,
+        evaluator_version_id=evaluator_version_id,
+        session_id=session_id,
+        name=name,
+        data_type=data_type,
+        score=score,
+        value=value,
+        explanation=explanation,
+    )
+    stored = await repository.merge_session_evaluations(session_id, [evaluation])
+    return stored[0]

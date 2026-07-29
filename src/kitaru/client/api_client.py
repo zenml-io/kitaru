@@ -35,6 +35,7 @@ from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.blobs import BlobsResource
 from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.devices import DevicesResource
+from kitaru.client.resources.evaluations import EvaluationsResource
 from kitaru.client.resources.evaluators import EvaluatorsResource
 from kitaru.client.resources.experiments import ExperimentsResource
 from kitaru.client.resources.importers import ImportersResource
@@ -85,6 +86,7 @@ class KitaruAPIClient:
         self.blobs = BlobsResource(self)
         self.cohorts = CohortsResource(self)
         self.devices = DevicesResource(self)
+        self.evaluations = EvaluationsResource(self)
         self.evaluators = EvaluatorsResource(self)
         self.experiments = ExperimentsResource(self)
         self.importers = ImportersResource(self)

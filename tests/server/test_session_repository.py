@@ -21,21 +21,29 @@ from decimal import Decimal
 import pytest
 
 from conftest import (
+    FakeEvaluationRepository,
     FakeSessionRepository,
     FakeTagRepository,
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
+from kitaru.server.adapters.db.repositories.evaluation_repository import (
+    SQLEvaluationRepository,
+)
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
@@ -43,7 +51,7 @@ from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
@@ -52,16 +60,26 @@ from kitaru.server.domain.session import (
 )
 from kitaru.server.domain.tag import Tag, TagLink
 
-Setup = tuple[SessionRepository, uuid.UUID, uuid.UUID, TagRepository]
+Setup = tuple[
+    SessionRepository, uuid.UUID, uuid.UUID, TagRepository, EvaluationRepository
+]
 
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each session repository implementation, an owner id, an agent
-    id to attach sessions to, and a tag repository sharing its backend."""
+    id to attach sessions to, a tag repository, and an evaluation repository,
+    the last two sharing the session repository's backend."""
     if request.param == "fake":
         tags = FakeTagRepository()
-        yield FakeSessionRepository(tags=tags), uuid.uuid4(), uuid.uuid4(), tags
+        evaluations = FakeEvaluationRepository()
+        yield (
+            FakeSessionRepository(tags=tags, evaluations=evaluations),
+            uuid.uuid4(),
+            uuid.uuid4(),
+            tags,
+            evaluations,
+        )
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -75,12 +93,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             owner.id,
             agent.id,
             SQLTagRepository(session),
+            SQLEvaluationRepository(session),
         )
 
 
 async def test_create_sets_timestamps_and_defaults(setup: Setup) -> None:
     """Store a new session with both timestamps and default rollups."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     session = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -97,7 +116,7 @@ async def test_create_sets_timestamps_and_defaults(setup: Setup) -> None:
 
 async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
     """Reject a second session with the same provider and external id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
             owner_id=owner_id,
@@ -123,7 +142,7 @@ async def test_create_allows_null_provider_and_external_id_repeatedly(
     setup: Setup,
 ) -> None:
     """Allow many sessions with no provider and external id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     first = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -135,7 +154,7 @@ async def test_create_allows_null_provider_and_external_id_repeatedly(
 
 async def test_get(setup: Setup) -> None:
     """Load a stored session by id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -145,7 +164,7 @@ async def test_get(setup: Setup) -> None:
 
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
-    repository, _, _, _ = setup
+    repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
         await repository.get(missing_id)
@@ -153,7 +172,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 async def test_get_exclusive(setup: Setup) -> None:
     """Load a session with an exclusive lock without error."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -163,7 +182,7 @@ async def test_get_exclusive(setup: Setup) -> None:
 
 async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     """Filter sessions by origin and status."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     recorded = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -192,7 +211,7 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
 
 async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
     """Filter sessions by provider and external id together."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
             owner_id=owner_id,
@@ -221,7 +240,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
 
 async def test_query_filters_by_date_bounds(setup: Setup) -> None:
     """Filter sessions by started_after/before and ended_after/before."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     early = await repository.create(
         Session(
             owner_id=owner_id,
@@ -264,7 +283,7 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
 
 async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
     """Filter sessions by min_cost and max_cost."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     cheap = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -281,16 +300,38 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
     assert [s.id for s in sessions] == [cheap.id]
 
 
-async def test_query_has_evaluation_not_implemented(setup: Setup) -> None:
-    """Raise when the has_evaluation filter is set."""
-    repository, _, _, _ = setup
-    with pytest.raises(ValidationError):
-        await repository.query(SessionFilter(has_evaluation=True))
+async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
+    """Filter sessions by whether they have a stored evaluation."""
+    repository, owner_id, agent_id, _, evaluations = setup
+    scored = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    unscored = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    await evaluations.merge_session_evaluations(
+        scored.id,
+        [
+            Evaluation(
+                owner_id=owner_id,
+                session_id=scored.id,
+                name="accuracy",
+                data_type=EvaluationDataType.FLOAT,
+                score=0.9,
+            )
+        ],
+    )
+
+    sessions, _ = await repository.query(SessionFilter(has_evaluation=True))
+    assert [s.id for s in sessions] == [scored.id]
+
+    sessions, _ = await repository.query(SessionFilter(has_evaluation=False))
+    assert [s.id for s in sessions] == [unscored.id]
 
 
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = [
         await repository.create(
             Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
@@ -316,7 +357,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
 async def test_update(setup: Setup) -> None:
     """Persist field changes and renew the updated timestamp."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -338,7 +379,7 @@ async def test_update(setup: Setup) -> None:
 
 async def test_update_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     session = Session(
         owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED
     )
@@ -349,7 +390,7 @@ async def test_update_not_found(setup: Setup) -> None:
 async def test_update_duplicate_external_id(setup: Setup) -> None:
     """Reject an update that collides with another session's provider and
     external id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
             owner_id=owner_id,
@@ -375,7 +416,7 @@ async def test_update_duplicate_external_id(setup: Setup) -> None:
 
 async def test_delete(setup: Setup) -> None:
     """Delete a stored session."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -386,7 +427,7 @@ async def test_delete(setup: Setup) -> None:
 
 async def test_delete_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
-    repository, _, _, _ = setup
+    repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
         await repository.delete(missing_id)
@@ -394,7 +435,7 @@ async def test_delete_not_found(setup: Setup) -> None:
 
 async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
     """Add deltas atomically, coalescing null cost and tokens to zero."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )
@@ -422,7 +463,7 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
 
 async def test_apply_rollups_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
-    repository, _, _, _ = setup
+    repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound):
         await repository.apply_rollups(missing_id, SessionRollups())
@@ -430,7 +471,7 @@ async def test_apply_rollups_not_found(setup: Setup) -> None:
 
 async def test_query_filters_by_tag(setup: Setup) -> None:
     """Filter sessions linked to a tag through tag_link."""
-    repository, owner_id, agent_id, tags = setup
+    repository, owner_id, agent_id, tags, _ = setup
     tagged = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
     )

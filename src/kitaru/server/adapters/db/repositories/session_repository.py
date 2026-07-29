@@ -23,6 +23,7 @@ from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.cohort_session import (
     COHORT_SESSION_SESSION_ID_FOREIGN_KEY,
 )
+from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.session import (
     SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
@@ -31,7 +32,7 @@ from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
-from kitaru.server.domain.base import NotFoundError, ValidationError
+from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
@@ -118,19 +119,15 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
+        ``has_evaluation`` filters on whether the session has at least one
+        stored evaluation.
+
         Args:
             session_filter: Filter and pagination parameters.
-
-        Raises:
-            ValidationError: ``has_evaluation`` is set. Evaluation rows do
-                not exist yet in this branch.
 
         Returns:
             Page of matching sessions and the next cursor.
         """
-        if session_filter.has_evaluation is not None:
-            raise ValidationError("has_evaluation filtering is not available yet")
-
         statement = select(SessionORM)
         if session_filter.agent_id is not None:
             statement = statement.where(SessionORM.agent_id == session_filter.agent_id)
@@ -168,6 +165,16 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 .correlate(SessionORM)
             )
             statement = statement.where(tag_exists.exists())
+        if session_filter.has_evaluation is not None:
+            evaluation_exists = (
+                select(EvaluationORM.id)
+                .where(EvaluationORM.session_id == SessionORM.id)
+                .correlate(SessionORM)
+            )
+            if session_filter.has_evaluation:
+                statement = statement.where(evaluation_exists.exists())
+            else:
+                statement = statement.where(~evaluation_exists.exists())
         if session_filter.started_after is not None:
             statement = statement.where(
                 SessionORM.started_at >= session_filter.started_after

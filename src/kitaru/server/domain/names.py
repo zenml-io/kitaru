@@ -29,6 +29,10 @@ DEFAULT_ALLOWED_SEPARATORS = frozenset({"-", "_"})
 # under an OAuth2 control plane, so account names carry the email separators.
 ACCOUNT_ALLOWED_SEPARATORS = frozenset({"-", "_", ".", "+", "@"})
 
+# An evaluator may emit a qualified display form like "accuracy.v2", so
+# evaluation names carry the dot separator alongside the default set.
+EVALUATION_ALLOWED_SEPARATORS = frozenset({"-", "_", "."})
+
 MAX_NAME_LENGTH = 255
 
 
@@ -80,6 +84,22 @@ def validate_account_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
     return _validate(value, ACCOUNT_ALLOWED_SEPARATORS, max_length)
 
 
+def validate_evaluation_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
+    """Validate an evaluation name, which allows the dot separator.
+
+    Args:
+        value: Name to validate.
+        max_length: Maximum name length.
+
+    Raises:
+        InvalidName: ``value`` violates the name rules.
+
+    Returns:
+        Validated name.
+    """
+    return _validate(value, EVALUATION_ALLOWED_SEPARATORS, max_length)
+
+
 def _validate(value: str, allowed_separators: frozenset[str], max_length: int) -> str:
     """Check a name against a character set.
 
@@ -111,3 +131,4 @@ def _validate(value: str, allowed_separators: frozenset[str], max_length: int) -
 
 Name = Annotated[str, AfterValidator(validate_name)]
 AccountName = Annotated[str, AfterValidator(validate_account_name)]
+EvaluationName = Annotated[str, AfterValidator(validate_evaluation_name)]

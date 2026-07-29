@@ -50,6 +50,9 @@ from kitaru.server.adapters.db.repositories.cohort_repository import (
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
+from kitaru.server.adapters.db.repositories.evaluation_repository import (
+    SQLEvaluationRepository,
+)
 from kitaru.server.adapters.db.repositories.experiment_repository import (
     SQLExperimentRepository,
 )
@@ -82,6 +85,7 @@ from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.device_service import DeviceService
+from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.secret_service import SecretService
@@ -347,6 +351,23 @@ def get_cohort_service(
     return CohortService(
         repository=SQLCohortRepository(session),
         agent_repository=SQLAgentRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_evaluation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EvaluationService:
+    """Return an evaluation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Evaluation service bound to the SQL repositories.
+    """
+    return EvaluationService(
+        repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session),
     )
 
