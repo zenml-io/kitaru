@@ -56,6 +56,7 @@ from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
+from kitaru.server.application.models.cohort import CohortFilter, CohortSessionsFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.secret import SecretFilter
@@ -91,6 +92,7 @@ from kitaru.server.domain.api_key import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
+from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
 from kitaru.server.domain.keys import generate_secret, hash_secret
 from kitaru.server.domain.plugin import (
@@ -112,6 +114,7 @@ from kitaru.server.domain.secret import (
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
+    SessionInUse,
     SessionNotFound,
     SessionRollups,
 )
@@ -1625,6 +1628,28 @@ class FakeSessionRepository:
         """
         self._sessions: dict[uuid.UUID, Session] = {}
         self._tags = tags
+        self._cohort_membership_counts: dict[uuid.UUID, int] = {}
+
+    def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
+        """Record that one more cohort references this session.
+
+        Mirrors the SQL repository's restricting foreign key from
+        ``cohort_session.session_id``.
+
+        Args:
+            session_id: Id of the session.
+        """
+        self._cohort_membership_counts[session_id] = (
+            self._cohort_membership_counts.get(session_id, 0) + 1
+        )
+
+    def _unmark_cohort_member(self, session_id: uuid.UUID) -> None:
+        """Record that one fewer cohort references this session.
+
+        Args:
+            session_id: Id of the session.
+        """
+        self._cohort_membership_counts[session_id] -= 1
 
     def _check_duplicate_external_id(self, session: Session) -> None:
         if session.provider is None or session.external_id is None:
@@ -1782,6 +1807,23 @@ class FakeSessionRepository:
         page, next_cursor = _paginate_fake(sessions, session_filter)
         return [s.model_copy() for s in page], next_cursor
 
+    async def get_many(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Session]:
+        """Bulk-load sessions by id, keyed by id, missing ids omitted.
+
+        Args:
+            session_ids: Ids of the sessions to load.
+
+        Returns:
+            Stored sessions keyed by id.
+        """
+        return {
+            session_id: self._sessions[session_id].model_copy()
+            for session_id in session_ids
+            if session_id in self._sessions
+        }
+
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -1813,9 +1855,13 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session belongs to a cohort and cannot be
+                deleted.
         """
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
+        if self._cohort_membership_counts.get(session_id, 0) > 0:
+            raise SessionInUse(session_id)
         del self._sessions[session_id]
 
     async def apply_rollups(
@@ -1995,6 +2041,222 @@ class FakeSessionNodeRepository:
                     )
                 )
         return result, next_cursor
+
+
+class FakeCohortRepository:
+    """In-memory cohort repository."""
+
+    def __init__(
+        self,
+        sessions: FakeSessionRepository,
+        tags: FakeTagRepository | None = None,
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            sessions: Fake session repository, to mark member sessions
+                in-cohort and to hydrate the member listing.
+            tags: Fake tag repository, consulted by the ``tag`` filter.
+        """
+        self._cohorts: dict[uuid.UUID, Cohort] = {}
+        self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
+        self._sessions = sessions
+        self._tags = tags
+
+    def _check_duplicate_name(self, cohort: Cohort) -> None:
+        for other in self._cohorts.values():
+            if other.id != cohort.id and other.name == cohort.name:
+                raise DuplicateCohortName(cohort.name)
+
+    async def create(self, cohort: Cohort, session_ids: Sequence[uuid.UUID]) -> Cohort:
+        """Persist a new cohort with its fixed member sessions, in order.
+
+        Args:
+            cohort: Cohort to store.
+            session_ids: Ordered member session ids, immutable afterward.
+
+        Raises:
+            DuplicateCohortName: The cohort name is already registered.
+
+        Returns:
+            Stored cohort with timestamps set.
+        """
+        self._check_duplicate_name(cohort)
+        now = datetime.now(UTC)
+        stored = cohort.model_copy(update={"created": now, "updated": now})
+        self._cohorts[stored.id] = stored
+        self._members[stored.id] = list(session_ids)
+        for session_id in session_ids:
+            self._sessions._mark_cohort_member(session_id)
+        return stored.model_copy()
+
+    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+        """Load a cohort by id.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+
+        Returns:
+            Stored cohort.
+        """
+        cohort = self._cohorts.get(cohort_id)
+        if cohort is None:
+            raise CohortNotFound(cohort_id)
+        return cohort.model_copy()
+
+    def _cohort_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
+        """Resolve the ids of cohorts linked to a tag by name.
+
+        Args:
+            tag_name: Name of the tag to resolve.
+
+        Returns:
+            Ids of cohorts linked to the tag.
+        """
+        if self._tags is None:
+            return set()
+        tag_id = next(
+            (tag.id for tag in self._tags._tags.values() if tag.name == tag_name),
+            None,
+        )
+        if tag_id is None:
+            return set()
+        return {
+            link.resource_id
+            for link in self._tags._links.values()
+            if link.tag_id == tag_id and link.resource_type == TagResourceType.COHORT
+        }
+
+    async def query(
+        self, cohort_filter: CohortFilter
+    ) -> tuple[list[Cohort], str | None]:
+        """Query cohorts matching a filter.
+
+        Args:
+            cohort_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching cohorts and the next cursor.
+        """
+        cohorts = list(self._cohorts.values())
+        if cohort_filter.name is not None:
+            cohorts = [c for c in cohorts if c.name == cohort_filter.name]
+        if cohort_filter.tag is not None:
+            tagged_ids = self._cohort_ids_tagged(cohort_filter.tag)
+            cohorts = [c for c in cohorts if c.id in tagged_ids]
+        page, next_cursor = _paginate_fake(cohorts, cohort_filter)
+        return [c.model_copy() for c in page], next_cursor
+
+    async def update(self, cohort: Cohort) -> Cohort:
+        """Persist changes to an existing cohort.
+
+        Args:
+            cohort: Cohort with modified fields.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+            DuplicateCohortName: The cohort name is already registered.
+
+        Returns:
+            Stored cohort with the updated timestamp renewed.
+        """
+        stored = self._cohorts.get(cohort.id)
+        if stored is None:
+            raise CohortNotFound(cohort.id)
+        self._check_duplicate_name(cohort)
+        now = _renewed_timestamp(stored.updated)
+        updated = cohort.model_copy(update={"created": stored.created, "updated": now})
+        self._cohorts[cohort.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, cohort_id: uuid.UUID) -> None:
+        """Delete a cohort by id.
+
+        Deleting a cohort cascades its member links.
+
+        Args:
+            cohort_id: Id of the cohort.
+
+        Raises:
+            CohortNotFound: No cohort has this id.
+        """
+        if cohort_id not in self._cohorts:
+            raise CohortNotFound(cohort_id)
+        del self._cohorts[cohort_id]
+        for session_id in self._members.pop(cohort_id, []):
+            self._sessions._unmark_cohort_member(session_id)
+
+    async def list_sessions(
+        self, sessions_filter: CohortSessionsFilter
+    ) -> tuple[list[Session], str | None]:
+        """List a cohort's member sessions in cohort order.
+
+        Args:
+            sessions_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of member sessions and the next cursor.
+        """
+        member_ids = self._members.get(sessions_filter.cohort_id, [])
+        sessions_by_id = await self._sessions.get_many(member_ids)
+        indexed = [
+            (index, sessions_by_id[session_id])
+            for index, session_id in enumerate(member_ids)
+            if session_id in sessions_by_id
+        ]
+
+        filter_hash = sessions_filter.compute_filter_hash()
+        if sessions_filter.cursor is not None:
+            cursor = decode_cursor(
+                sessions_filter.cursor, sessions_filter.sort, filter_hash
+            )
+            last_index = int(cursor.id)
+            indexed = [item for item in indexed if item[0] > last_index]
+
+        page = indexed[: sessions_filter.size + 1]
+        next_cursor = None
+        if len(page) > sessions_filter.size:
+            page = page[: sessions_filter.size]
+            next_cursor = encode_cursor(
+                sessions_filter.sort, str(page[-1][0]), filter_hash
+            )
+        return [session.model_copy() for _, session in page], next_cursor
+
+
+async def create_cohort(
+    repository: FakeCohortRepository,
+    owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    session_ids: Sequence[uuid.UUID],
+    name: str = "cohort",
+    description: str | None = None,
+) -> Cohort:
+    """Store a cohort in the fake repository.
+
+    Args:
+        repository: Fake cohort repository.
+        owner_id: Id of the owning account.
+        agent_id: Id of the agent the cohort's sessions belong to.
+        session_ids: Ordered member session ids.
+        name: Cohort name.
+        description: Cohort description.
+
+    Returns:
+        Stored cohort.
+    """
+    return await repository.create(
+        Cohort(
+            owner_id=owner_id,
+            name=name,
+            description=description,
+            agent_id=agent_id,
+            session_count=len(session_ids),
+        ),
+        session_ids,
+    )
 
 
 class FakeWorkerRepository:

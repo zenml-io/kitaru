@@ -40,6 +40,7 @@ from kitaru.server.adapters.rest.routers import (
     api_keys,
     auth,
     blobs,
+    cohorts,
     devices,
     evaluators,
     importers,
@@ -201,6 +202,7 @@ def create_app(settings: APISettings) -> FastAPI:
     )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
+    app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
     app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
     app.include_router(evaluators.router, prefix="/v1/evaluators", tags=["evaluators"])
     app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])

@@ -45,6 +45,15 @@ class CohortListParams(ListParams):
     tag: str | None = Field(default=None, description="Filter on tag name.")
 
 
+class CohortSessionsListParams(RequestModel):
+    """Cohort sessions list params."""
+
+    cursor: str | None = Field(
+        default=None, description="Cursor from the previous page."
+    )
+    size: int = Field(default=20, ge=1, le=1000, description="Items per page.")
+
+
 class CohortResponse(OwnedResponseModel):
     """Cohort response."""
 

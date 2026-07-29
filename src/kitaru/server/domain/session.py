@@ -60,6 +60,20 @@ class DuplicateSessionExternalId(ConflictError):
         )
 
 
+class SessionInUse(ConflictError):
+    """Raised when a session belongs to a cohort and cannot be deleted."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session that cannot be deleted.
+        """
+        super().__init__(
+            f"Session {session_id} belongs to a cohort and cannot be deleted"
+        )
+
+
 class SessionStatusCannotBeCleared(ValidationError):
     """Raised when a session update tries to clear the status."""
 

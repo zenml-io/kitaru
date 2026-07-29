@@ -14,11 +14,15 @@
 """SQL session repository."""
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import CursorResult, func, select, update
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.orm.cohort_session import (
+    COHORT_SESSION_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.orm.session import (
     SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
@@ -31,6 +35,7 @@ from kitaru.server.domain.base import NotFoundError, ValidationError
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
+    SessionInUse,
     SessionNotFound,
     SessionRollups,
 )
@@ -189,6 +194,20 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         )
         return [row.to_domain() for row in rows], next_cursor
 
+    async def get_many(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Session]:
+        """Bulk-load sessions by id, keyed by id, missing ids omitted.
+
+        Args:
+            session_ids: Ids of the sessions to load.
+
+        Returns:
+            Stored sessions keyed by id.
+        """
+        rows = await self._load_by_ids(list(session_ids))
+        return {session_id: row.to_domain() for session_id, row in rows.items()}
+
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -251,8 +270,13 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session belongs to a cohort and cannot be
+                deleted.
         """
-        await self._delete_row(session_id)
+        await self._delete_row(
+            session_id,
+            {COHORT_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id)},
+        )
 
     async def apply_rollups(
         self, session_id: uuid.UUID, deltas: SessionRollups
