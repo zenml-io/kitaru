@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.server.adapters.rest.dependencies import get_app_settings
-from kitaru.server.api.config import APISettings
+from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
 
 router = APIRouter()
 
@@ -31,11 +31,10 @@ KITARU_VERSION = version("kitaru")
 async def get_info(
     settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> ServerInfoResponse:
-    """Report how this server authenticates its callers.
+    """Report how this server identifies itself and authenticates its callers.
 
     The endpoint is unauthenticated, because a client has to read it before it
-    can know which credential to present. It carries no deployment detail
-    beyond what a caller needs to log in.
+    can know which credential to present.
 
     Args:
         settings: Service settings governing auth behavior.
@@ -47,7 +46,10 @@ async def get_info(
     if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
         control_plane_api_url = settings.CONTROL_PLANE_API_URL.rstrip("/")
     return ServerInfoResponse(
+        id=None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID,
         version=KITARU_VERSION,
         auth_scheme=settings.AUTH_SCHEME,
+        server_url=settings.SERVER_URL.rstrip("/") or None,
+        dashboard_url=settings.DASHBOARD_URL.rstrip("/") or None,
         control_plane_api_url=control_plane_api_url,
     )
