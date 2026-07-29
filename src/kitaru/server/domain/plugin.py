@@ -45,13 +45,13 @@ class PluginKind(StrEnum):
 class PluginNotFound(NotFoundError):
     """Raised when a plugin lookup does not resolve."""
 
-    def __init__(self, plugin_id: uuid.UUID) -> None:
+    def __init__(self, plugin: uuid.UUID | str) -> None:
         """Initialize the error.
 
         Args:
-            plugin_id: Id of the missing plugin.
+            plugin: Id or name of the missing plugin.
         """
-        super().__init__(f"Plugin {plugin_id} was not found")
+        super().__init__(f"Plugin {plugin} was not found")
 
 
 class DuplicatePluginName(ConflictError):
