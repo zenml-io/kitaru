@@ -162,11 +162,22 @@ from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.transport import RetryTransport
 
 # Why: test modules import shared fakes with a bare `from conftest import ...`.
-# A subdirectory conftest (tests/worker/conftest.py) can shadow that name on
-# sys.path in subset runs, so register this module under the bare name first.
+# A subdirectory conftest module would shadow that name on sys.path in subset
+# runs, so register this module under the bare name and keep this file the
+# only conftest in the tree.
 sys.modules.setdefault("conftest", sys.modules[__name__])
 
 TEST_DB_PREFIX = "kitaru_test"
+
+
+@pytest.fixture(autouse=True)
+def worker_api_env(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Set the API environment worker tests re-assert into every process."""
+    if "tests/worker" in str(request.node.path):
+        monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
+        monkeypatch.setenv("KITARU_API_KEY", "test-key")
 
 
 def db_settings(**overrides: Any) -> APISettings:
