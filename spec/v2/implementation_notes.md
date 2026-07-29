@@ -143,3 +143,27 @@ required solving beyond what the documents describe.
   name and version from the repository join.
 - Deleting an evaluator with stored evaluations surfaces `PluginInUse`.
 - `evaluation.task_id` was created without an FK, the tasks wave adds it.
+
+## Jobs and tasks core
+
+- The agent task label convention writes
+  `{"agent_version": str(agent_version_id)}`, the spec names the key but
+  not the value.
+- `request_cancel` on a pending task moves it straight to canceled without
+  stamping `cancel_requested_at`, no in-flight process ever saw a request.
+- Canceling an already settled job is a 409 (`JobAlreadySettled`).
+- Unknown input session ids in `POST /v1/evaluations` fail the whole
+  request as a 422 naming the id.
+- Task reads report the effective status a sweep would write without
+  mutating the row, the sweep stays the single status writer.
+- The events substrate (`application/events.py` plus `api/composition.py`)
+  ships with no registered subscribers in this wave.
+  `build_event_dispatcher` is the extension point the pipeline subscribers
+  hook into.
+- Session-task linking errors: `TaskNotFound` 404, `TaskNotRunning` 409,
+  `TaskResultSessionAlreadyLinked` 409. Import tasks link many sessions.
+- New server settings: task heartbeat timeout 60s, retry limit 3, sweep
+  batch 100, evaluator timeout 300s, importer timeout 600s, result cap
+  1 MiB, evaluation pair cap 100.
+- `create_evaluations` inserts tasks directly instead of `add_task`, the
+  job was created in the same call and cannot have settled.
