@@ -34,6 +34,12 @@ from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import (
+    SQLAgentRepository,
+)
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
@@ -48,6 +54,10 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.agent_service import AgentService
+from kitaru.server.application.services.agent_version_service import (
+    AgentVersionService,
+)
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.application.services.secret_service import SecretService
@@ -125,6 +135,34 @@ def get_account_service(
         repository=SQLAccountRepository(session),
         password_hasher=BcryptPasswordHasher(),
     )
+
+
+def get_agent_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentService:
+    """Return an agent service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Agent service bound to the SQL repository.
+    """
+    return AgentService(repository=SQLAgentRepository(session))
+
+
+def get_agent_version_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentVersionService:
+    """Return an agent version service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Agent version service bound to the SQL repository.
+    """
+    return AgentVersionService(repository=SQLAgentVersionRepository(session))
 
 
 def get_api_key_service(

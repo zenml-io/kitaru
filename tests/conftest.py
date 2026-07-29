@@ -47,6 +47,8 @@ from kitaru.server.adapters.db.orm.base import Base
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.account import AccountFilter
+from kitaru.server.application.models.agent import AgentFilter
+from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.secret import SecretFilter
@@ -57,6 +59,18 @@ from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
     DuplicateAccountName,
+)
+from kitaru.server.domain.agent import (
+    Agent,
+    AgentInUse,
+    AgentNotFound,
+    DuplicateAgentName,
+)
+from kitaru.server.domain.agent_version import (
+    AgentCapabilities,
+    AgentVersion,
+    AgentVersionNotFound,
+    RunSpec,
 )
 from kitaru.server.domain.api_key import (
     ApiKey,
@@ -1077,4 +1091,305 @@ async def create_secret(
         values = {"password": SecretStr("hunter2")}
     return await repository.create(
         Secret(owner_id=owner_id, name=name, internal=internal, values=values)
+    )
+
+
+class FakeAgentRepository:
+    """In-memory agent repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._agents: dict[uuid.UUID, Agent] = {}
+        self._version_counts: dict[uuid.UUID, int] = {}
+
+    def _check_duplicate_name(self, agent: Agent) -> None:
+        for other in self._agents.values():
+            if other.id != agent.id and other.name == agent.name:
+                raise DuplicateAgentName(agent.name)
+
+    def _increment_latest_version(self, agent_id: uuid.UUID) -> int:
+        """Bump and return the agent's version counter.
+
+        Mirrors the SQL repository's ``UPDATE ... RETURNING`` bump.
+
+        Args:
+            agent_id: Id of the agent to bump.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            New version number.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise AgentNotFound(agent_id)
+        agent.latest_version += 1
+        self._version_counts[agent_id] += 1
+        return agent.latest_version
+
+    def _decrement_version_count(self, agent_id: uuid.UUID) -> None:
+        """Record that one fewer agent version references this agent.
+
+        Args:
+            agent_id: Id of the agent.
+        """
+        self._version_counts[agent_id] -= 1
+
+    async def create(self, agent: Agent) -> Agent:
+        """Persist a new agent.
+
+        Args:
+            agent: Agent to store.
+
+        Raises:
+            DuplicateAgentName: The agent name is already registered.
+
+        Returns:
+            Stored agent with timestamps set.
+        """
+        self._check_duplicate_name(agent)
+        now = datetime.now(UTC)
+        stored = agent.model_copy(update={"created": now, "updated": now})
+        self._agents[stored.id] = stored
+        self._version_counts[stored.id] = 0
+        return stored.model_copy()
+
+    async def get(self, agent_id: uuid.UUID) -> Agent:
+        """Load an agent by id.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            Stored agent.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None:
+            raise AgentNotFound(agent_id)
+        return agent.model_copy()
+
+    async def query(self, agent_filter: AgentFilter) -> tuple[list[Agent], str | None]:
+        """Query agents matching a filter.
+
+        Args:
+            agent_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching agents and the next cursor.
+        """
+        agents = list(self._agents.values())
+        if agent_filter.name is not None:
+            agents = [agent for agent in agents if agent.name == agent_filter.name]
+        page, next_cursor = _paginate_fake(agents, agent_filter)
+        return [agent.model_copy() for agent in page], next_cursor
+
+    async def update(self, agent: Agent) -> Agent:
+        """Persist changes to an existing agent.
+
+        Args:
+            agent: Agent with modified fields.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+            DuplicateAgentName: The agent name is already registered.
+
+        Returns:
+            Stored agent with the updated timestamp renewed.
+        """
+        stored = self._agents.get(agent.id)
+        if stored is None:
+            raise AgentNotFound(agent.id)
+        self._check_duplicate_name(agent)
+        now = _renewed_timestamp(stored.updated)
+        updated = agent.model_copy(update={"created": stored.created, "updated": now})
+        self._agents[agent.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, agent_id: uuid.UUID) -> None:
+        """Delete an agent by id.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+            AgentInUse: The agent has versions and cannot be deleted.
+        """
+        if agent_id not in self._agents:
+            raise AgentNotFound(agent_id)
+        if self._version_counts.get(agent_id, 0) > 0:
+            raise AgentInUse(agent_id)
+        del self._agents[agent_id]
+        del self._version_counts[agent_id]
+
+
+async def create_agent(
+    repository: FakeAgentRepository,
+    owner_id: uuid.UUID,
+    name: str = "assistant",
+    description: str | None = None,
+) -> Agent:
+    """Store an agent in the fake repository.
+
+    Args:
+        repository: Fake agent repository.
+        owner_id: Id of the owning account.
+        name: Agent name.
+        description: Agent description.
+
+    Returns:
+        Stored agent.
+    """
+    return await repository.create(
+        Agent(owner_id=owner_id, name=name, description=description)
+    )
+
+
+class FakeAgentVersionRepository:
+    """In-memory agent version repository."""
+
+    def __init__(self, agents: FakeAgentRepository) -> None:
+        """Initialize the repository.
+
+        Args:
+            agents: Fake agent repository sharing the version counter.
+        """
+        self._agents = agents
+        self._versions: dict[uuid.UUID, AgentVersion] = {}
+
+    async def create(self, agent_version: AgentVersion) -> AgentVersion:
+        """Persist a new agent version.
+
+        Args:
+            agent_version: Agent version to store.
+
+        Raises:
+            AgentNotFound: No agent has the given agent id.
+
+        Returns:
+            Stored agent version with its assigned version number and
+            timestamps set.
+        """
+        version_number = self._agents._increment_latest_version(agent_version.agent_id)
+        now = datetime.now(UTC)
+        stored = agent_version.model_copy(
+            update={"version": version_number, "created": now, "updated": now}
+        )
+        self._versions[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, agent_version_id: uuid.UUID) -> AgentVersion:
+        """Load an agent version by id.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Stored agent version.
+        """
+        agent_version = self._versions.get(agent_version_id)
+        if agent_version is None:
+            raise AgentVersionNotFound(agent_version_id)
+        return agent_version.model_copy()
+
+    async def query(
+        self, agent_version_filter: AgentVersionFilter
+    ) -> tuple[list[AgentVersion], str | None]:
+        """Query agent versions matching a filter.
+
+        Args:
+            agent_version_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching agent versions and the next cursor.
+        """
+        versions = list(self._versions.values())
+        if agent_version_filter.agent_id is not None:
+            versions = [
+                version
+                for version in versions
+                if version.agent_id == agent_version_filter.agent_id
+            ]
+        page, next_cursor = _paginate_fake(versions, agent_version_filter)
+        return [version.model_copy() for version in page], next_cursor
+
+    async def update(self, agent_version: AgentVersion) -> AgentVersion:
+        """Persist changes to an existing agent version.
+
+        Args:
+            agent_version: Agent version with modified fields.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Stored agent version with the updated timestamp renewed.
+        """
+        stored = self._versions.get(agent_version.id)
+        if stored is None:
+            raise AgentVersionNotFound(agent_version.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = agent_version.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._versions[agent_version.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, agent_version_id: uuid.UUID) -> None:
+        """Delete an agent version by id.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+        """
+        stored = self._versions.get(agent_version_id)
+        if stored is None:
+            raise AgentVersionNotFound(agent_version_id)
+        del self._versions[agent_version_id]
+        self._agents._decrement_version_count(stored.agent_id)
+
+
+async def create_agent_version(
+    repository: FakeAgentVersionRepository,
+    agent_id: uuid.UUID,
+    owner_id: uuid.UUID,
+    display_version: str | None = None,
+    description: str | None = None,
+    run_spec: RunSpec | None = None,
+    capabilities: AgentCapabilities | None = None,
+) -> AgentVersion:
+    """Store an agent version in the fake repository.
+
+    Args:
+        repository: Fake agent version repository.
+        agent_id: Id of the agent this version belongs to.
+        owner_id: Id of the owning account.
+        display_version: Human-readable designator.
+        description: Version description.
+        run_spec: Run spec.
+        capabilities: Agent capabilities, empty when omitted.
+
+    Returns:
+        Stored agent version.
+    """
+    return await repository.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            display_version=display_version,
+            description=description,
+            run_spec=run_spec,
+            capabilities=capabilities
+            if capabilities is not None
+            else AgentCapabilities(),
+        )
     )

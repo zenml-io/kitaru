@@ -28,6 +28,8 @@ from kitaru.client.auth import TokenProvider
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
+from kitaru.client.resources.agent_versions import AgentVersionsResource
+from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
 from kitaru.client.resources.devices import DevicesResource
@@ -68,6 +70,8 @@ class KitaruAPIClient:
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
         self.accounts = AccountsResource(self)
+        self.agents = AgentsResource(self)
+        self.agent_versions = AgentVersionsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
         self.devices = DevicesResource(self)
