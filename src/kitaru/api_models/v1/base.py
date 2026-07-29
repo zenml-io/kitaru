@@ -13,22 +13,59 @@
 #  permissions and limitations under the License.
 """Shared DTO bases, pagination envelope, and error body."""
 
+import math
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer, SecretStr
+from pydantic import (
+    AllowInfNan,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    SecretStr,
+)
 
 PlainSerializedSecretStr = Annotated[
     SecretStr,
     PlainSerializer(lambda value: value.get_secret_value(), when_used="json"),
 ]
 
+FiniteFloat = Annotated[float, AllowInfNan(False)]
+
+
+def _check_finite(value: Any) -> Any:
+    """Reject non-finite floats anywhere in a nested value.
+
+    Args:
+        value: Value to check.
+
+    Raises:
+        ValueError: A float in the value is inf or nan.
+
+    Returns:
+        The value unchanged.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Value must be finite")
+    if isinstance(value, dict):
+        for item in value.values():
+            _check_finite(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _check_finite(item)
+    return value
+
+
+JsonValue = Annotated[Any, BeforeValidator(_check_finite)]
+
 
 class RequestModel(BaseModel):
     """Request model."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
 class ListParams(RequestModel):
@@ -60,6 +97,8 @@ class DiscriminatedRequestModel(RequestModel):
 
 class ResponseModel(BaseModel):
     """Response model."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
 
 class TimestampedResponseModel(ResponseModel):
