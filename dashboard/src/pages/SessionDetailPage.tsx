@@ -1,7 +1,7 @@
 import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
 import { useList, useOne } from "../api/hooks";
-import type { Evaluation, Replay } from "../api/types";
+import type { Evaluation } from "../api/types";
 import { StatusBadge } from "../components/Badge";
 import { IdLink, IdText } from "../components/IdLink";
 import { JsonViewer } from "../components/JsonViewer";
@@ -18,6 +18,7 @@ import {
   formatTokens,
   shortId,
 } from "../lib/format";
+import { REPLAY_COLUMNS } from "./ReplaysPage";
 import { TraceTree } from "./TraceTree";
 
 const EVALUATION_COLUMNS: Column<Evaluation>[] = [
@@ -62,46 +63,6 @@ function EvaluationsTab({ sessionId }: { sessionId: string }) {
     />
   );
 }
-
-const REPLAY_COLUMNS: Column<Replay>[] = [
-  {
-    header: "ID",
-    cell: (replay) => <IdLink id={replay.id} to={`/replays/${replay.id}`} />,
-  },
-  {
-    header: "Status",
-    cell: (replay) => <StatusBadge status={replay.status} />,
-  },
-  {
-    header: "Result session",
-    cell: (replay) =>
-      replay.result_session_id ? (
-        <IdLink
-          id={replay.result_session_id}
-          to={`/sessions/${replay.result_session_id}`}
-        />
-      ) : (
-        "—"
-      ),
-  },
-  {
-    header: "Experiment run",
-    cell: (replay) =>
-      replay.experiment_run_id ? (
-        <IdLink
-          id={replay.experiment_run_id}
-          to={`/runs/${replay.experiment_run_id}`}
-        />
-      ) : (
-        "standalone"
-      ),
-  },
-  {
-    header: "Created",
-    cell: (replay) => formatDate(replay.created),
-    className: "whitespace-nowrap text-zinc-500",
-  },
-];
 
 function ReplaysTab({ sessionId }: { sessionId: string }) {
   const list = useList(

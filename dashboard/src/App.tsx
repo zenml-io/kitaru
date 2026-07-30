@@ -3,7 +3,9 @@ import { Layout } from "./components/Layout";
 import { AgentDetailPage, AgentsPage } from "./pages/AgentsPage";
 import { CohortDetailPage, CohortsPage } from "./pages/CohortsPage";
 import { EvaluatorDetailPage, EvaluatorsPage } from "./pages/EvaluatorsPage";
+import { ExperimentRunPage } from "./pages/ExperimentRunPage";
 import { ExperimentDetailPage, ExperimentsPage } from "./pages/ExperimentsPage";
+import { ReplayDetailPage, ReplaysPage } from "./pages/ReplaysPage";
 import { SessionDetailPage } from "./pages/SessionDetailPage";
 import { SessionsPage } from "./pages/SessionsPage";
 
@@ -29,7 +31,9 @@ export function App() {
         <Route path="/cohorts/:id" element={<CohortDetailPage />} />
         <Route path="/experiments" element={<ExperimentsPage />} />
         <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
-        <Route path="/replays" element={<Placeholder title="Replays" />} />
+        <Route path="/runs/:id" element={<ExperimentRunPage />} />
+        <Route path="/replays" element={<ReplaysPage />} />
+        <Route path="/replays/:id" element={<ReplayDetailPage />} />
         <Route path="/evaluators" element={<EvaluatorsPage />} />
         <Route path="/evaluators/:id" element={<EvaluatorDetailPage />} />
         <Route path="/ops" element={<Placeholder title="Ops" />} />
