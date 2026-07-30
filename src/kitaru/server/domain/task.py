@@ -495,18 +495,6 @@ class Task(DomainModel):
         self.error = error
         self.ended_at = now
 
-    def mark_heartbeat(self, now: datetime) -> None:
-        """Stamp the time the holding worker last reported the task.
-
-        Args:
-            now: Current time.
-
-        Raises:
-            IllegalTaskStatusTransition: The task is not in flight.
-        """
-        self._require_status({TaskStatus.CLAIMED, TaskStatus.RUNNING}, self.status)
-        self.heartbeat_at = now
-
     def link_result_session(self, session_id: uuid.UUID) -> None:
         """Link the session this task produced.
 

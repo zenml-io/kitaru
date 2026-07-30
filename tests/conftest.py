@@ -4260,6 +4260,37 @@ class FakeTaskRepository:
         )
         return [task.model_copy() for task in stale[:limit]]
 
+    async def stamp_heartbeats(
+        self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
+    ) -> dict[uuid.UUID, datetime | None]:
+        """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
+
+        Args:
+            task_ids: Candidate task ids.
+            worker_id: Worker that must still hold the tasks.
+            now: Current time.
+
+        Returns:
+            Cancel request time by id for every stamped task.
+        """
+        stamped: dict[uuid.UUID, datetime | None] = {}
+        for task_id in task_ids:
+            task = self._tasks.get(task_id)
+            if (
+                task is None
+                or task.worker_id != worker_id
+                or task.status not in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            ):
+                continue
+            self._tasks[task_id] = task.model_copy(
+                update={
+                    "heartbeat_at": now,
+                    "updated": _renewed_timestamp(task.updated),
+                }
+            )
+            stamped[task_id] = task.cancel_requested_at
+        return stamped
+
     async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
         """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
 

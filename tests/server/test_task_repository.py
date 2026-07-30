@@ -397,6 +397,57 @@ async def test_stamp_cancel_requested_skips_terminal_tasks(setup: Setup) -> None
     assert reloaded_completed.cancel_requested_at is None
 
 
+async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
+    setup: Setup,
+) -> None:
+    """Stamp heartbeat_at on owned in-flight tasks, leaving other fields alone."""
+    start = datetime.now(UTC)
+    held = _agent_task(setup)
+    held.claim(setup.worker_id, start)
+    held.start(start)
+    held.link_result_session(setup.session_id)
+    stored_held = await setup.tasks.create(held)
+
+    canceling = _agent_task(setup)
+    canceling.claim(setup.worker_id, start)
+    canceling.start(start)
+    canceling.request_cancel(start)
+    stored_canceling = await setup.tasks.create(canceling)
+
+    completed = EvaluationTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        input_session_id=setup.session_id,
+    )
+    completed.claim(setup.worker_id, start)
+    completed.start(start)
+    completed.complete([{"name": "exact_match", "score": 1.0}], start)
+    stored_completed = await setup.tasks.create(completed)
+
+    now = datetime.now(UTC)
+    stamped = await setup.tasks.stamp_heartbeats(
+        [stored_held.id, stored_canceling.id, stored_completed.id],
+        setup.worker_id,
+        now,
+    )
+    assert stamped == {
+        stored_held.id: None,
+        stored_canceling.id: stored_canceling.cancel_requested_at,
+    }
+    assert await setup.tasks.stamp_heartbeats([stored_held.id], uuid.uuid4(), now) == {}
+
+    reloaded_held = await setup.tasks.get(stored_held.id)
+    assert isinstance(reloaded_held, AgentTask)
+    assert reloaded_held.heartbeat_at == now
+    assert reloaded_held.status is TaskStatus.RUNNING
+    assert reloaded_held.result_session_id == setup.session_id
+
+    reloaded_completed = await setup.tasks.get(stored_completed.id)
+    assert reloaded_completed.heartbeat_at != now
+    assert reloaded_completed.status is TaskStatus.COMPLETED
+    assert reloaded_completed.result == [{"name": "exact_match", "score": 1.0}]
+
+
 async def test_claim_pending_skip_locked_never_double_claims() -> None:
     """Concurrent claims never hand the same pending task to two workers."""
     if not await postgres_available():

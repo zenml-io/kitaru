@@ -142,6 +142,24 @@ class TaskRepository(Protocol):
         """
         ...
 
+    async def stamp_heartbeats(
+        self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
+    ) -> dict[uuid.UUID, datetime | None]:
+        """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
+
+        Writes only the heartbeat column, so a stamp cannot overwrite fields
+        concurrent writers committed since the caller last read the tasks.
+
+        Args:
+            task_ids: Candidate task ids.
+            worker_id: Worker that must still hold the tasks.
+            now: Current time.
+
+        Returns:
+            Cancel request time by id for every stamped task.
+        """
+        ...
+
     async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
         """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
 

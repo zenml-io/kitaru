@@ -162,16 +162,10 @@ class TaskService:
         _ = actor
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
-        tasks = await self._repository.get_many(list(task_ids))
+        stamped = await self._repository.stamp_heartbeats(task_ids, worker_id, now)
         cancel_task_ids: list[uuid.UUID] = []
         for task_id in task_ids:
-            task = tasks.get(task_id)
-            if task is None or task.worker_id != worker_id or task.terminal:
-                cancel_task_ids.append(task_id)
-                continue
-            task.mark_heartbeat(now)
-            await self._repository.update(task)
-            if task.cancel_requested_at is not None:
+            if task_id not in stamped or stamped[task_id] is not None:
                 cancel_task_ids.append(task_id)
         return cancel_task_ids
 

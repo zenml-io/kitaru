@@ -258,20 +258,68 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         rows = (await self._session.scalars(statement)).all()
         return [row.to_domain() for row in rows]
 
+    async def stamp_heartbeats(
+        self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
+    ) -> dict[uuid.UUID, datetime | None]:
+        """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
+
+        Writes only the heartbeat column, so a stamp cannot overwrite fields
+        concurrent writers committed since the caller last read the tasks.
+        Rows are locked in id order.
+
+        Args:
+            task_ids: Candidate task ids.
+            worker_id: Worker that must still hold the tasks.
+            now: Current time.
+
+        Returns:
+            Cancel request time by id for every stamped task.
+        """
+        if not task_ids:
+            return {}
+        locked = (
+            select(TaskORM.id)
+            .where(
+                TaskORM.id.in_(list(task_ids)),
+                TaskORM.worker_id == worker_id,
+                TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
+            )
+            .order_by(TaskORM.id.asc())
+            .with_for_update()
+        )
+        statement = (
+            update(TaskORM)
+            .where(TaskORM.id.in_(locked))
+            .values(heartbeat_at=now, updated=now)
+            .returning(TaskORM.id, TaskORM.cancel_requested_at)
+            .execution_options(synchronize_session=False)
+        )
+        rows = (await self._session.execute(statement)).all()
+        await self._session.flush()
+        return {task_id: cancel_requested_at for task_id, cancel_requested_at in rows}
+
     async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
         """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+
+        Rows are locked in id order.
 
         Args:
             job_id: Id the tasks belong to.
             now: Current time.
         """
-        statement = (
-            update(TaskORM)
+        locked = (
+            select(TaskORM.id)
             .where(
                 TaskORM.job_id == job_id,
                 not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
                 TaskORM.cancel_requested_at.is_(None),
             )
+            .order_by(TaskORM.id.asc())
+            .with_for_update()
+        )
+        statement = (
+            update(TaskORM)
+            .where(TaskORM.id.in_(locked))
             .values(cancel_requested_at=now, updated=now)
             .execution_options(synchronize_session="fetch")
         )
