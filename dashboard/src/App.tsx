@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
+import { SessionDetailPage } from "./pages/SessionDetailPage";
+import { SessionsPage } from "./pages/SessionsPage";
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -15,7 +17,8 @@ export function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/sessions" replace />} />
-        <Route path="/sessions" element={<Placeholder title="Sessions" />} />
+        <Route path="/sessions" element={<SessionsPage />} />
+        <Route path="/sessions/:id" element={<SessionDetailPage />} />
         <Route path="/agents" element={<Placeholder title="Agents" />} />
         <Route path="/cohorts" element={<Placeholder title="Cohorts" />} />
         <Route
