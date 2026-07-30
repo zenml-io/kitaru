@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.local
+
+# The root .gitignore excludes lib/ for Python build output; this lib is source.
+!src/lib/
