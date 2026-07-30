@@ -34,25 +34,93 @@ from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import (
+    SQLAgentRepository,
+)
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
+)
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.cohort_repository import (
+    SQLCohortRepository,
+)
+from kitaru.server.adapters.db.repositories.cohort_version_repository import (
+    SQLCohortVersionRepository,
 )
 from kitaru.server.adapters.db.repositories.device_repository import (
     SQLDeviceRepository,
 )
+from kitaru.server.adapters.db.repositories.evaluation_repository import (
+    SQLEvaluationRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_repository import (
+    SQLExperimentRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.session_node_repository import (
+    SQLSessionNodeRepository,
+)
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
+from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
+from kitaru.server.adapters.db.repositories.worker_repository import (
+    SQLWorkerRepository,
+)
 from kitaru.server.adapters.rest.commit_route import attach_request_session
+from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DevicePolicy
+from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.agent_service import AgentService
+from kitaru.server.application.services.agent_version_service import (
+    AgentVersionService,
+)
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.blob_service import BlobService
+from kitaru.server.application.services.cohort_service import CohortService
+from kitaru.server.application.services.cohort_version_service import (
+    CohortVersionService,
+)
 from kitaru.server.application.services.device_service import DeviceService
+from kitaru.server.application.services.evaluation_service import EvaluationService
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
+from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.plugin_service import PluginService
+from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
+from kitaru.server.application.services.session_node_service import (
+    SessionNodeService,
+)
+from kitaru.server.application.services.session_service import SessionService
+from kitaru.server.application.services.tag_service import TagService
+from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
 
@@ -127,6 +195,37 @@ def get_account_service(
     )
 
 
+def get_agent_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentService:
+    """Return an agent service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Agent service bound to the SQL repository.
+    """
+    return AgentService(repository=SQLAgentRepository(session))
+
+
+def get_agent_version_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AgentVersionService:
+    """Return an agent version service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Agent version service bound to the SQL repositories.
+    """
+    return AgentVersionService(
+        repository=SQLAgentVersionRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
+
+
 def get_api_key_service(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ApiKeyService:
@@ -161,6 +260,304 @@ def get_secret_service(
     )
 
 
+def get_blob_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> BlobService:
+    """Return a blob service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Blob service bound to the SQL repository.
+    """
+    return BlobService(
+        repository=SQLBlobRepository(session),
+        max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+    )
+
+
+def get_evaluator_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return a plugin service bound to the evaluator kind.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.EVALUATOR,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+    )
+
+
+def get_importer_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PluginService:
+    """Return a plugin service bound to the importer kind.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Plugin service bound to the SQL repositories.
+    """
+    return PluginService(
+        kind=PluginKind.IMPORTER,
+        repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+    )
+
+
+def get_session_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionService:
+    """Return a session service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Session service bound to the SQL repositories.
+    """
+    return SessionService(
+        repository=SQLSessionRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
+
+
+def get_task_policy(settings: APISettings) -> TaskPolicy:
+    """Build the task execution policy from the process settings.
+
+    Args:
+        settings: API settings for this process.
+
+    Returns:
+        Task execution policy.
+    """
+    return TaskPolicy(
+        heartbeat_timeout_seconds=settings.TASK_HEARTBEAT_TIMEOUT_SECONDS,
+        retry_limit=settings.TASK_RETRY_LIMIT,
+        sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
+        evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
+        importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
+        max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
+        evaluation_pair_limit=settings.EVALUATION_PAIR_LIMIT,
+    )
+
+
+def _build_task_transitions(session: AsyncSession) -> TaskTransitions:
+    """Build the request-scoped task transition dispatch.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Transition dispatch publishing on the request's event dispatcher.
+    """
+    return TaskTransitions(
+        task_repository=SQLTaskRepository(session),
+        job_repository=SQLJobRepository(session),
+        dispatcher=build_event_dispatcher(session),
+    )
+
+
+def get_job_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> JobService:
+    """Return a job service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Job service bound to the SQL repositories.
+    """
+    return JobService(
+        repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        transitions=_build_task_transitions(session),
+        policy=get_task_policy(settings),
+    )
+
+
+def get_task_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> TaskService:
+    """Return a task service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Task service bound to the SQL repositories.
+    """
+    return TaskService(
+        repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        blob_repository=SQLBlobRepository(session),
+        secret_repository=SQLSecretRepository(
+            session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+        ),
+        transitions=_build_task_transitions(session),
+        policy=get_task_policy(settings),
+    )
+
+
+def get_session_node_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SessionNodeService:
+    """Return a session node service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Session node service bound to the SQL repositories.
+    """
+    return SessionNodeService(
+        repository=SQLSessionNodeRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_experiment_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentService:
+    """Return an experiment service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment service bound to the SQL repositories.
+    """
+    return ExperimentService(
+        repository=SQLExperimentRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+        experiment_run_repository=SQLExperimentRunRepository(session),
+        cohort_version_repository=SQLCohortVersionRepository(session),
+        session_repository=SQLSessionRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        job_repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+    )
+
+
+def get_replay_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ReplayService:
+    """Return a replay service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Replay service bound to the SQL repositories.
+    """
+    return ReplayService(
+        repository=SQLReplayRepository(session),
+        experiment_repository=SQLExperimentRepository(session),
+        experiment_run_repository=SQLExperimentRunRepository(session),
+        job_repository=SQLJobRepository(session),
+        task_repository=SQLTaskRepository(session),
+        session_repository=SQLSessionRepository(session),
+        session_node_repository=SQLSessionNodeRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
+        plugin_repository=SQLPluginRepository(session),
+    )
+
+
+def get_experiment_run_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExperimentRunService:
+    """Return an experiment run service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Experiment run service bound to the SQL repositories.
+    """
+    return ExperimentRunService(
+        repository=SQLExperimentRunRepository(session),
+        replay_repository=SQLReplayRepository(session),
+        job_repository=SQLJobRepository(session),
+        transitions=_build_task_transitions(session),
+    )
+
+
+def get_cohort_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CohortService:
+    """Return a cohort service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Cohort service bound to the SQL repositories.
+    """
+    return CohortService(
+        repository=SQLCohortRepository(session),
+        agent_repository=SQLAgentRepository(session),
+    )
+
+
+def get_cohort_version_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CohortVersionService:
+    """Return a cohort version service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Cohort version service bound to the SQL repositories.
+    """
+    return CohortVersionService(
+        repository=SQLCohortVersionRepository(session),
+        cohort_repository=SQLCohortRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_evaluation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> EvaluationService:
+    """Return an evaluation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Evaluation service bound to the SQL repositories.
+    """
+    return EvaluationService(
+        repository=SQLEvaluationRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
 def get_device_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -187,6 +584,34 @@ def get_device_service(
             trusted_expiration_minutes=settings.TRUSTED_DEVICE_EXPIRATION_MINUTES,
         ),
     )
+
+
+def get_tag_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TagService:
+    """Return a tag service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Tag service bound to the SQL repository.
+    """
+    return TagService(repository=SQLTagRepository(session))
+
+
+def get_worker_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WorkerService:
+    """Return a worker service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Worker service bound to the SQL repository.
+    """
+    return WorkerService(repository=SQLWorkerRepository(session))
 
 
 def get_auth_service(

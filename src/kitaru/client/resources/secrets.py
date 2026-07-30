@@ -25,6 +25,7 @@ from kitaru.api_models.v1.secret import (
     SecretUpdateRequest,
     SecretWithValuesResponse,
 )
+from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -133,14 +134,8 @@ class SecretsResource:
         Returns:
             Async iterator over every secret without values.
         """
-        params = params or SecretListParams()
-        while True:
-            page = await self.list(params)
-            for item in page.items:
-                yield item
-            if page.next_cursor is None:
-                break
-            params = params.model_copy(update={"cursor": page.next_cursor})
+        async for item in iterate_pages(params or SecretListParams(), self.list):
+            yield item
 
     async def update(
         self, secret_id: uuid.UUID, request: SecretUpdateRequest

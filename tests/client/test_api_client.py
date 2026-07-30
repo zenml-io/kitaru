@@ -158,6 +158,38 @@ async def test_no_retry_for_streaming_request_body() -> None:
     assert len(requests) == 1
 
 
+def test_client_registers_every_resource() -> None:
+    """Expose every endpoint group as an attribute on the client."""
+    client = KitaruAPIClient("http://test")
+    expected = {
+        "accounts",
+        "agents",
+        "agent_versions",
+        "api_keys",
+        "auth",
+        "blobs",
+        "cohorts",
+        "cohort_versions",
+        "devices",
+        "evaluations",
+        "evaluators",
+        "experiments",
+        "experiment_runs",
+        "importers",
+        "imports",
+        "info",
+        "jobs",
+        "replays",
+        "secrets",
+        "session_runs",
+        "sessions",
+        "tags",
+        "tasks",
+        "workers",
+    }
+    assert expected <= vars(client).keys()
+
+
 async def test_streaming_response_is_not_consumed() -> None:
     """Return a successful response with its stream unread."""
 

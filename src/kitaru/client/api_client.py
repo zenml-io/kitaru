@@ -14,6 +14,7 @@
 """Kitaru API client."""
 
 import os
+from collections.abc import AsyncIterable
 from types import TracebackType
 from typing import Any
 
@@ -28,11 +29,29 @@ from kitaru.client.auth import TokenProvider
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
+from kitaru.client.resources.agent_versions import AgentVersionsResource
+from kitaru.client.resources.agents import AgentsResource
 from kitaru.client.resources.api_keys import ApiKeysResource
 from kitaru.client.resources.auth import AuthResource
+from kitaru.client.resources.blobs import BlobsResource
+from kitaru.client.resources.cohort_versions import CohortVersionsResource
+from kitaru.client.resources.cohorts import CohortsResource
 from kitaru.client.resources.devices import DevicesResource
+from kitaru.client.resources.evaluations import EvaluationsResource
+from kitaru.client.resources.evaluators import EvaluatorsResource
+from kitaru.client.resources.experiment_runs import ExperimentRunsResource
+from kitaru.client.resources.experiments import ExperimentsResource
+from kitaru.client.resources.importers import ImportersResource
+from kitaru.client.resources.imports import ImportsResource
 from kitaru.client.resources.info import InfoResource
+from kitaru.client.resources.jobs import JobsResource
+from kitaru.client.resources.replays import ReplaysResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.session_runs import SessionRunsResource
+from kitaru.client.resources.sessions import SessionsResource
+from kitaru.client.resources.tags import TagsResource
+from kitaru.client.resources.tasks import TasksResource
+from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
 
 
@@ -68,11 +87,29 @@ class KitaruAPIClient:
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
         self.accounts = AccountsResource(self)
+        self.agents = AgentsResource(self)
+        self.agent_versions = AgentVersionsResource(self)
         self.api_keys = ApiKeysResource(self)
         self.auth = AuthResource(self)
+        self.blobs = BlobsResource(self)
+        self.cohorts = CohortsResource(self)
+        self.cohort_versions = CohortVersionsResource(self)
         self.devices = DevicesResource(self)
+        self.evaluations = EvaluationsResource(self)
+        self.evaluators = EvaluatorsResource(self)
+        self.experiments = ExperimentsResource(self)
+        self.experiment_runs = ExperimentRunsResource(self)
+        self.importers = ImportersResource(self)
+        self.imports = ImportsResource(self)
         self.info = InfoResource(self)
+        self.jobs = JobsResource(self)
+        self.replays = ReplaysResource(self)
         self.secrets = SecretsResource(self)
+        self.session_runs = SessionRunsResource(self)
+        self.sessions = SessionsResource(self)
+        self.tags = TagsResource(self)
+        self.tasks = TasksResource(self)
+        self.workers = WorkersResource(self)
         self._auth: TokenProvider | None = None
         if credential_store is not None:
             self._auth = TokenProvider(base_url, credential_store, self.auth)
@@ -99,6 +136,8 @@ class KitaruAPIClient:
         params: dict[str, Any] | None = None,
         json: Any = None,
         data: dict[str, str] | None = None,
+        files: dict[str, tuple[str | None, bytes, str]] | None = None,
+        content: bytes | AsyncIterable[bytes] | None = None,
         headers: dict[str, str] | None = None,
         authenticate: bool = True,
     ) -> httpx.Response:
@@ -114,6 +153,9 @@ class KitaruAPIClient:
             params: Query parameters.
             json: JSON request body.
             data: Form request body.
+            files: Multipart file fields, filename/content/content-type per
+                field.
+            content: Raw or streaming request body.
             headers: Additional request headers.
             authenticate: Whether to attach a bearer token from the credential
                 store. The login endpoints send their own credential.
@@ -135,6 +177,8 @@ class KitaruAPIClient:
                 params=params,
                 json=json,
                 data=data,
+                files=files,
+                content=content,
                 headers=request_headers or None,
             )
 

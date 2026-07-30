@@ -1,0 +1,261 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Sessions resource."""
+
+import uuid
+from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
+
+from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.evaluation import EvaluationResponse
+from kitaru.api_models.v1.session import (
+    SessionCreateRequest,
+    SessionEvaluationsRequest,
+    SessionListParams,
+    SessionResponse,
+    SessionUpdateRequest,
+)
+from kitaru.api_models.v1.session_node import (
+    SessionNodeBatchRequest,
+    SessionNodeListParams,
+    SessionNodeResponse,
+)
+from kitaru.client.resources.pagination import iterate_pages
+
+if TYPE_CHECKING:
+    from kitaru.client.api_client import KitaruAPIClient
+
+
+class SessionsResource:
+    """Session API methods."""
+
+    def __init__(self, client: "KitaruAPIClient") -> None:
+        """Initialize the resource.
+
+        Args:
+            client: API client used to send requests.
+        """
+        self._client = client
+
+    async def create(self, request: SessionCreateRequest) -> SessionResponse:
+        """Create a session.
+
+        Args:
+            request: Session create request.
+
+        Raises:
+            APIError: The request failed, including 409 for a duplicate
+                provider and external id pair.
+
+        Returns:
+            Created session.
+        """
+        response = await self._client.request(
+            "POST",
+            "/v1/sessions",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return SessionResponse.model_validate(response.json())
+
+    async def get(self, session_id: uuid.UUID) -> SessionResponse:
+        """Get a session by id.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session.
+
+        Returns:
+            Stored session.
+        """
+        response = await self._client.request("GET", f"/v1/sessions/{session_id}")
+        return SessionResponse.model_validate(response.json())
+
+    async def ingest_nodes(
+        self, session_id: uuid.UUID, batch: SessionNodeBatchRequest
+    ) -> list[SessionNodeResponse]:
+        """Ingest a batch of session nodes.
+
+        An index already stored is replaced whole.
+
+        Args:
+            session_id: Id of the session to ingest into.
+            batch: Session node batch request.
+
+        Raises:
+            APIError: The request failed, including 409 when the session
+                does not currently accept node ingestion.
+
+        Returns:
+            Stored nodes in batch order.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/sessions/{session_id}/nodes",
+            json=batch.model_dump(mode="json", exclude_unset=True),
+        )
+        return [SessionNodeResponse.model_validate(item) for item in response.json()]
+
+    async def merge_evaluations(
+        self, session_id: uuid.UUID, request: SessionEvaluationsRequest
+    ) -> list[EvaluationResponse]:
+        """Merge manual evaluations into a session.
+
+        A resent name overwrites its score, value, data type, and
+        explanation.
+
+        Args:
+            session_id: Id of the session to merge evaluations into.
+            request: Session evaluations request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session and 422 when the request names the same evaluation
+                twice.
+
+        Returns:
+            Stored evaluations in request order.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/sessions/{session_id}/evaluations",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return [EvaluationResponse.model_validate(item) for item in response.json()]
+
+    async def list(
+        self,
+        params: SessionListParams | None = None,
+    ) -> Page[SessionResponse]:
+        """List sessions.
+
+        Args:
+            params: Session list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Page of sessions.
+        """
+        params = params or SessionListParams()
+        response = await self._client.request(
+            "GET",
+            "/v1/sessions",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
+        return Page[SessionResponse].model_validate(response.json())
+
+    async def iter(
+        self,
+        params: SessionListParams | None = None,
+    ) -> AsyncIterator[SessionResponse]:
+        """Iterate over all sessions.
+
+        Args:
+            params: Session list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every session.
+        """
+        async for item in iterate_pages(params or SessionListParams(), self.list):
+            yield item
+
+    async def update(
+        self, session_id: uuid.UUID, request: SessionUpdateRequest
+    ) -> SessionResponse:
+        """Update a session.
+
+        Args:
+            session_id: Id of the session.
+            request: Session update request, unset fields stay unchanged.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session and 409 for an illegal status transition.
+
+        Returns:
+            Updated session.
+        """
+        response = await self._client.request(
+            "PATCH",
+            f"/v1/sessions/{session_id}",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return SessionResponse.model_validate(response.json())
+
+    async def delete(self, session_id: uuid.UUID) -> None:
+        """Delete a session.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session.
+        """
+        await self._client.request("DELETE", f"/v1/sessions/{session_id}")
+
+    async def list_nodes(
+        self,
+        session_id: uuid.UUID,
+        params: SessionNodeListParams | None = None,
+    ) -> Page[SessionNodeResponse]:
+        """List the nodes of a session, ordered by index ascending.
+
+        Args:
+            session_id: Id of the session.
+            params: Session node list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Page of session nodes, ordered by index.
+        """
+        params = params or SessionNodeListParams()
+        response = await self._client.request(
+            "GET",
+            f"/v1/sessions/{session_id}/nodes",
+            params=params.model_dump(mode="json", exclude_unset=True),
+        )
+        return Page[SessionNodeResponse].model_validate(response.json())
+
+    async def iter_nodes(
+        self,
+        session_id: uuid.UUID,
+        params: SessionNodeListParams | None = None,
+    ) -> AsyncIterator[SessionNodeResponse]:
+        """Iterate over every node of a session, ordered by index ascending.
+
+        Args:
+            session_id: Id of the session.
+            params: Session node list params.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Async iterator over every node of the session.
+        """
+        async for item in iterate_pages(
+            params or SessionNodeListParams(),
+            lambda page_params: self.list_nodes(session_id, page_params),
+        ):
+            yield item
