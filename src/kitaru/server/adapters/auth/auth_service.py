@@ -68,7 +68,7 @@ class AuthenticationServiceUnavailableError(Exception):
 class CloudCredentialResolver(Protocol):
     """Cloud credential resolution used by managed workspaces."""
 
-    async def resolve(self, credential: str, action: str) -> AuthContext:
+    async def resolve(self, credential: str) -> AuthContext:
         """Resolve a Cloud credential into an authentication context."""
         ...
 
@@ -112,7 +112,6 @@ class AuthService:
         credential: str,
         csrf_token: str | None = None,
         from_cookie: bool = False,
-        action: str = "read",
     ) -> AuthContext:
         """Authenticate a bearer credential for API route handling.
 
@@ -120,7 +119,6 @@ class AuthService:
             credential: Bearer token supplied by the caller.
             csrf_token: CSRF token supplied alongside the bearer token.
             from_cookie: Whether the credential arrived in the auth cookie.
-            action: CRUD action requested by the caller.
 
         Raises:
             AuthenticationError: The credential cannot be validated.
@@ -129,7 +127,7 @@ class AuthService:
             Request context accepted by this server.
         """
         if self._cloud_credential_resolver is not None:
-            return await self._cloud_credential_resolver.resolve(credential, action)
+            return await self._cloud_credential_resolver.resolve(credential)
         if self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             context = await self._resolve_control_plane_credential(credential)
         elif credential.startswith(API_KEY_PREFIX):

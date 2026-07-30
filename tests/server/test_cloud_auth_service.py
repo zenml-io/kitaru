@@ -42,13 +42,13 @@ class FakeControlPlaneClient:
         """Initialize the fake client."""
         self.user = user
         self.error = error
-        self.calls: list[tuple[str, uuid.UUID, str]] = []
+        self.calls: list[tuple[str, uuid.UUID]] = []
 
-    async def authorize_server(
-        self, credential: str, server_id: uuid.UUID, action: str
+    async def authorize_user(
+        self, credential: str, server_id: uuid.UUID
     ) -> ControlPlaneUser:
         """Return the configured authorization result."""
-        self.calls.append((credential, server_id, action))
+        self.calls.append((credential, server_id))
         if self.error is not None:
             raise self.error
         assert self.user is not None
@@ -71,9 +71,9 @@ async def test_cloud_auth_creates_workspace_account() -> None:
         account_repository=repository,
     )
 
-    context = await service.resolve("cloud-token", "read")
+    context = await service.resolve("cloud-token")
 
-    assert client.calls == [("cloud-token", server_id, "read")]
+    assert client.calls == [("cloud-token", server_id)]
     assert context.account.id == server_id
     assert context.account.name == f"cloud-workspace-{server_id.hex}"
     assert context.principal_id == user.id
@@ -101,7 +101,7 @@ async def test_cloud_auth_reuses_workspace_account() -> None:
         account_repository=repository,
     )
 
-    context = await service.resolve("service-key", "create")
+    context = await service.resolve("service-key")
 
     assert context.account.id == server_id
     assert context.principal_id == user.id
@@ -125,7 +125,7 @@ async def test_cloud_auth_rejects_invalid_identity(
     )
 
     with pytest.raises(AuthenticationError, match="Invalid Cloud credential"):
-        await service.resolve("invalid", "read")
+        await service.resolve("invalid")
 
 
 async def test_cloud_auth_reports_control_plane_outage() -> None:
@@ -142,4 +142,4 @@ async def test_cloud_auth_reports_control_plane_outage() -> None:
         AuthenticationServiceUnavailableError,
         match="temporarily unavailable",
     ):
-        await service.resolve("valid", "read")
+        await service.resolve("valid")

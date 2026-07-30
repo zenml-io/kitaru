@@ -176,27 +176,6 @@ class ControlPlaneClient:
                 "Control plane API returned no recognizable user."
             ) from exc
 
-    async def authorize_server(
-        self, credential: str, server_id: uuid.UUID, action: str
-    ) -> ControlPlaneUser:
-        """Authorize a caller for one managed workspace request.
-
-        Args:
-            credential: Bearer token supplied by the caller.
-            server_id: Managed workspace represented by this server.
-            action: CRUD action requested by the caller.
-
-        Returns:
-            Control plane user accepted for the request.
-        """
-        payload = await self._request_json(
-            "GET",
-            "/users/authorize_server",
-            token=credential,
-            query={"server_id": str(server_id), "action": action},
-        )
-        return ControlPlaneUser.model_validate(payload)
-
     async def _request_json(
         self,
         method: str,
