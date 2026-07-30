@@ -58,6 +58,7 @@ class APISettings(Settings):
     SERVER_URL: str = ""
 
     CONTROL_PLANE_API_URL: str = ""
+    # Prevent Cloud bearer credentials from being sent to an unexpected host.
     CONTROL_PLANE_ALLOWED_HOSTS: list[str] = Field(default_factory=list)
     CONTROL_PLANE_TIMEOUT_SECONDS: float = 10.0
     CONTROL_PLANE_CONNECTION_POOL_SIZE: int = 20
