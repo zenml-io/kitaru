@@ -105,11 +105,20 @@ Uploads are capped by a server setting (max blob size, default 100 MiB), a large
 | POST | /v1/cohorts | `CohortCreateRequest` | `CohortResponse` 201 | `CohortService.create_cohort` |
 | GET | /v1/cohorts | query name, tag | `Page[CohortResponse]` | `CohortService.list_cohorts` |
 | GET | /v1/cohorts/{id} | - | `CohortResponse` | `CohortService.get_cohort` |
-| GET | /v1/cohorts/{id}/sessions | - | `Page[SessionResponse]` | `CohortService.list_cohort_sessions` |
 | PATCH | /v1/cohorts/{id} | `CohortUpdateRequest` | `CohortResponse` | `CohortService.update_cohort` |
 | DELETE | /v1/cohorts/{id} | - | 204 | `CohortService.delete_cohort` |
+| POST | /v1/cohorts/{id}/versions | `CohortVersionCreateRequest` | `CohortVersionResponse` 201 | `CohortVersionService.create_version` |
+| GET | /v1/cohorts/{id}/versions | - | `Page[CohortVersionResponse]` | `CohortVersionService.list_versions` |
 
-Cohort membership is fixed at creation, a cohort is an immutable snapshot. There are no membership endpoints.
+A cohort is a namespace, membership lives on its versions. A version's member list is immutable: changing membership means creating a new version, whose list is the latest version's list minus `remove_session_ids` plus `add_session_ids` appended. Removing a session not in the base list or adding one already present is a 422, and the first version starts from an empty list. Members are listed through the `cohort_version_id` session filter.
+
+### cohort-versions (`/v1/cohort-versions`)
+
+| Method | Path | Request | Response | Service |
+|---|---|---|---|---|
+| GET | /v1/cohort-versions/{id} | - | `CohortVersionResponse` | `CohortVersionService.get_version` |
+| PATCH | /v1/cohort-versions/{id} | `CohortVersionUpdateRequest` | `CohortVersionResponse` | `CohortVersionService.update_version` |
+| DELETE | /v1/cohort-versions/{id} | - | 204 | `CohortVersionService.delete_version` |
 
 ### evaluations (`/v1/evaluations`)
 
@@ -232,7 +241,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/sessions | `SessionCreateRequest` | `SessionResponse` 201 | `SessionService.create_session` |
-| GET | /v1/sessions | query agent_id, agent_version_id, task_id, origin, status, provider, external_id, name, tag, started_after/before, ended_after/before, has_evaluation, min/max_cost | `Page[SessionResponse]` | `SessionService.list_sessions` |
+| GET | /v1/sessions | query agent_id, agent_version_id, cohort_version_id, task_id, origin, status, provider, external_id, name, tag, started_after/before, ended_after/before, has_evaluation, min/max_cost | `Page[SessionResponse]` | `SessionService.list_sessions` |
 | GET | /v1/sessions/{id} | - | `SessionResponse` | `SessionService.get_session` |
 | PATCH | /v1/sessions/{id} | `SessionUpdateRequest` | `SessionResponse` | `SessionService.update_session` |
 | DELETE | /v1/sessions/{id} | - | 204 | `SessionService.delete_session` |
@@ -288,7 +297,7 @@ Enum member names are uppercase, the table lists the wire values.
 | `TaskKind` | agent, evaluator, importer | task.py |
 | `TaskOnFailure` | abort, continue, ignore | task.py |
 | `TaskStatus` | pending, claimed, running, completed, failed, timed_out, canceled, abandoned | task.py |
-| `HistoryScope` | baseline, cohort, agent | replay_config.py |
+| `HistoryScope` | baseline, cohort_version, agent | replay_config.py |
 | `ReplayStatus` | pending, evaluating, completed, failed, canceled | replay.py |
 | `ToolPolicyOnMiss` | fail, passthrough, error_result | replay_config.py |
 | `StaticMatchMode` | exact, subset | replay_config.py |
@@ -344,17 +353,23 @@ The version number is server-assigned, so the create request carries no version.
 
 ### cohort.py
 
-- `CohortCreateRequest`: name, description?, agent_id, session_ids (ordered)
-- `CohortUpdateRequest`: name?, description?
+- `CohortCreateRequest`: name, description?, agent_id, metadata: dict[str, JsonValue]
+- `CohortUpdateRequest`: name?, description?, metadata?
 - `CohortListParams`: name?, tag?
-- `CohortResponse`: id, owner_id, name, description?, agent_id, session_count, created, updated
+- `CohortResponse`: id, owner_id, name, description?, agent_id, metadata, latest_version, created, updated
+
+### cohort_version.py
+
+- `CohortVersionCreateRequest`: add_session_ids, remove_session_ids, display_version?
+- `CohortVersionUpdateRequest`: display_version?
+- `CohortVersionResponse`: id, owner_id, cohort_id, version: int, display_version?, session_count, created, updated
 
 ### evaluation.py
 
-- `EvaluationResult` (RequestModel): name, score: FiniteFloat | bool?, value: str?, explanation?. The name follows the `Name` rules. At least one of score and value must be set. The data type is derived, never supplied: float or bool from a lone score (bool checked before float), str from a lone value, categorical when both are set. A single positional constructor argument routes by type, bool and float to score, str to value. One result maps to one evaluation row.
+- `EvaluationResult` (RequestModel): name, score: FiniteFloat | bool?, value: str?, explanation?, passed: bool?. The name follows the `Name` rules. At least one of score and value must be set. The data type is derived, never supplied: float or bool from a lone score (bool checked before float), str from a lone value, categorical when both are set. A single positional constructor argument routes by type, bool and float to score, str to value. `passed` is an independent optional verdict, never derived from the score and never constrained by the data type. It is named `passed` rather than `pass` because `pass` is a Python keyword. One result maps to one evaluation row.
 - `EvaluationBatchCreateRequest`: input_session_ids (min 1, unique), evaluators: list[EvaluatorConfig] (min 1). Creation returns `JobResponse`, one job holding one `on_failure=continue` evaluator task per (input session, evaluator) pair.
 - `EvaluationListParams`: session_id?, task_id?, evaluator_version_id?, name?, data_type?
-- `EvaluationResponse`: id, owner_id, evaluator_version_id?, evaluator_name?, evaluator_version?, session_id, task_id?, name, data_type, score?, value?, explanation?, created, updated. evaluator_name and evaluator_version are denormalized from the referenced evaluator version by the mapping, null on manual evaluations along with evaluator_version_id and task_id. score and value mirror the request channels: score carries the stored number, returned as a bool for bool rows, value carries the label or string.
+- `EvaluationResponse`: id, owner_id, evaluator_version_id?, evaluator_name?, evaluator_version?, session_id, task_id?, name, data_type, score?, value?, explanation?, passed?, created, updated. evaluator_name and evaluator_version are denormalized from the referenced evaluator version by the mapping, null on manual evaluations along with evaluator_version_id and task_id. score and value mirror the request channels: score carries the stored number, returned as a bool for bool rows, value carries the label or string.
 
 ### evaluator.py
 
@@ -376,10 +391,10 @@ The version number is server-assigned, so the create request carries no version.
 ### experiment_run.py
 
 - `ExperimentRunProgress` (ResponseModel): pending, evaluating, completed, failed, canceled, total. Counts the run's replay rows by `ReplayStatus`, so the numbers track replays rather than the tasks inside their jobs.
-- `ExperimentRunCreateRequest`: cohort_id, agent_version_id, evaluate_baselines: bool
+- `ExperimentRunCreateRequest`: cohort_version_id, agent_version_id, evaluate_baselines: bool
 - `ExperimentRunListParams`: experiment_id?, status?, tag?
 - `ExperimentRunJobsListParams`: status?
-- `ExperimentRunResponse`: id, owner_id, experiment_id, number, status: ExperimentRunStatus, cohort_id, agent_version_id, evaluate_baselines, started_at?, ended_at?, error?, progress: ExperimentRunProgress, created, updated
+- `ExperimentRunResponse`: id, owner_id, experiment_id, number, status: ExperimentRunStatus, cohort_version_id, agent_version_id, evaluate_baselines, started_at?, ended_at?, error?, progress: ExperimentRunProgress, created, updated
 
 There is no run summary. The run's output is its replays, and per-run statistics are computed by the reader from the replay listing and `GET /v1/evaluations`.
 
@@ -477,7 +492,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 - `SessionCreateRequest`: agent_id, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, task_id?
 - `SessionUpdateRequest`: status?, outputs, error?, ended_at?, name?, expected, metadata?
 - `SessionEvaluationsRequest`: evaluations: list[EvaluationResult] (min 1)
-- `SessionListParams`: agent_id?, agent_version_id?, task_id?, origin?, status?, provider?, external_id?, name?, tag?, started_after?, started_before?, ended_after?, ended_before?, has_evaluation?, min_cost?, max_cost?
+- `SessionListParams`: agent_id?, agent_version_id?, cohort_version_id?, task_id?, origin?, status?, provider?, external_id?, name?, tag?, started_after?, started_before?, ended_after?, ended_before?, has_evaluation?, min_cost?, max_cost?
 - `SessionResponse`: id, owner_id, agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, cost: Decimal?, tokens: TokenUsage?, llm_call_count, tool_call_count, created, updated. The session carries no evaluations inline, they are read via `GET /v1/evaluations?session_id=...`.
 - `provider` is a free-form string naming the source system
 
@@ -524,7 +539,8 @@ replay_config.py is the shared hub for replay configuration: experiment.py and r
 | `AgentVersionService` | Version CRUD with server-assigned version numbers, run spec and capability updates with freeze checks |
 | `ApiKeyService` | Key issue, list, deactivate |
 | `BlobService` | Content-addressed upload, metadata reads, download |
-| `CohortService` | Cohort CRUD, membership validation |
+| `CohortService` | Cohort namespace CRUD |
+| `CohortVersionService` | Version creation with membership deltas and server-assigned version numbers, reads, display version updates, delete |
 | `EvaluationService` | Evaluation reads, manual evaluation upserts |
 | `ExperimentService` | Experiment CRUD, run launch with replay fan-out |
 | `ExperimentRunService` | Run reads, cancel, progress aggregation |
@@ -577,19 +593,19 @@ Registered subscribers, each owning one aggregate: `evaluation_recording.record_
 
 ### Application models (`application/models/`, all FrozenModel)
 
-Filters: `AccountFilter`, `AgentFilter`, `AgentVersionFilter`, `ApiKeyFilter`, `CohortFilter`, `CohortSessionsFilter`, `EvaluationFilter` (session_id, task_id, evaluator_version_id, name, data_type), `ExperimentFilter`, `ExperimentRunFilter`, `ExperimentRunJobsFilter`, `JobFilter` (status), `TaskFilter` (job_id, kind, status, worker_id, stale_before), `PluginFilter` (kind required), `PluginVersionFilter`, `ReplayFilter`, `SecretFilter`, `SessionFilter`, `TagFilter`, `WorkerFilter` (name, seen_after). Filters extend `ListFilter` (`server/base.py`), which carries `cursor`, `size`, `sort`, the `sortable_fields` allowlist, and the filter hash the cursors embed.
+Filters: `AccountFilter`, `AgentFilter`, `AgentVersionFilter`, `ApiKeyFilter`, `CohortFilter`, `CohortVersionFilter`, `EvaluationFilter` (session_id, task_id, evaluator_version_id, name, data_type), `ExperimentFilter`, `ExperimentRunFilter`, `ExperimentRunJobsFilter`, `JobFilter` (status), `TaskFilter` (job_id, kind, status, worker_id, stale_before), `PluginFilter` (kind required), `PluginVersionFilter`, `ReplayFilter`, `SecretFilter`, `SessionFilter`, `TagFilter`, `WorkerFilter` (name, seen_after). Filters extend `ListFilter` (`server/base.py`), which carries `cursor`, `size`, `sort`, the `sortable_fields` allowlist, and the filter hash the cursors embed.
 
 Filters are built from the `XListParams` wire models in the mapping layer. Filter fields without a params counterpart (`SecretFilter.internal`, `ApiKeyFilter.owner_id`, `TaskFilter.stale_before`, `WorkerFilter.seen_after`) are internal, set by services.
 
-Commands: `AccountUpdate`, `AgentUpdate`, `AgentVersionUpdate`, `CohortCreate`, `CohortUpdate`, `ExperimentCreate`, `ExperimentUpdate`, `SessionRunCreate`, `ImportCreate`, `EvaluationBatchCreate`, `TaskUpdate`, `PluginUpdate`, `ReplayCreate`, `SecretUpdate`, `SessionCreate`, `SessionUpdate`, `TagUpdate`, `SessionNodeUpsert` (index-referenced like the wire model, no id or cache_key, both server-derived).
+Commands: `AccountUpdate`, `AgentUpdate`, `AgentVersionUpdate`, `CohortCreate`, `CohortUpdate`, `CohortVersionCreate`, `CohortVersionUpdate`, `ExperimentCreate`, `ExperimentUpdate`, `SessionRunCreate`, `ImportCreate`, `EvaluationBatchCreate`, `TaskUpdate`, `PluginUpdate`, `ReplayCreate`, `SecretUpdate`, `SessionCreate`, `SessionUpdate`, `TagUpdate`, `SessionNodeUpsert` (index-referenced like the wire model, no id or cache_key, both server-derived).
 
 `AuthContext`: account: Account, csrf_token?.
 
 ## Domain models (`server/domain/`)
 
-Bases: `DomainModel` (`extra="forbid"`, `validate_assignment=True`) for mutable entities, `FrozenModel` (frozen) for value objects. `FrozenModel` lives in the top-level `src/kitaru/base.py` so `api_models` value objects (`WorkerScope`) use the same base. Errors derive from `DomainError` with `NotFoundError`, `ConflictError`, `PayloadTooLargeError`, `ValidationError` branches, mapped globally to 404/409/413/422. Ids are `uuid7()` defaults. `Name` is a validated str alias (max 255, charset `[A-Za-z0-9_.-]`, no leading or trailing separator). It constrains resource names and evaluation names alike, so a qualified display form like `accuracy@3:relevance` stays parseable even though nothing server-side depends on one.
+Bases: `DomainModel` (`extra="forbid"`, `validate_assignment=True`) for mutable entities, `FrozenModel` (frozen) for value objects. `FrozenModel` lives in the top-level `src/kitaru/base.py` so `api_models` value objects (`WorkerScope`) use the same base. Errors derive from `DomainError` with `NotFoundError`, `ConflictError`, `PayloadTooLargeError`, `ValidationError` branches, mapped globally to 404/409/413/422. Ids are `uuid7()` defaults. `Name` is a validated str alias (max 255, charset `[A-Za-z0-9_.-]`, no leading or trailing separator). It constrains resource names and evaluation names alike, so a qualified display form like `accuracy@3:relevance` stays parseable even though nothing server-side depends on one. `VersionName` widens the `Name` charset with `+` and `/`, so semver build metadata and branch-style labels pass, and every display_version field uses it.
 
-Every versioned resource numbers its versions the same way: `version` is a server-assigned positive int, counted per parent, and `display_version` is an optional free-form str (max 255) carrying whatever the user calls that version. Nothing resolves a version by `display_version`, so it stays unconstrained and non-unique. It is set at creation and editable afterward on both `AgentVersion` and `PluginVersion`, which is what makes a plugin version a mutable entity rather than a write-once row. The code a version points at stays immutable either way, only the label moves.
+Every versioned resource numbers its versions the same way: `version` is a server-assigned positive int, counted per parent, and `display_version` is an optional `VersionName` carrying whatever the user calls that version. Nothing resolves a version by `display_version`, so it stays non-unique. It is set at creation and editable afterward on `AgentVersion`, `PluginVersion`, and `CohortVersion`, which is what makes a plugin version a mutable entity rather than a write-once row. The code or member list a version points at stays immutable either way, only the label moves.
 
 ### Entities
 
@@ -600,13 +616,14 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 | `AgentVersion` | agent_id, version: int, display_version?, description?, run_spec: RunSpec?, capabilities: AgentCapabilities | update_display_version, update_description, update_run_spec(frozen), update_capabilities(frozen) |
 | `ApiKey` | name, key_hash, active, last_used? | update_active, mark_used |
 | `Blob` | sha256, size, media_type, data, no updated | - |
-| `Cohort` | name, description?, agent_id, session_count | check_members, update_name, update_description |
-| `Evaluation` | evaluator_version_id?, session_id, task_id?, name, data_type, score?, value?, explanation? | - |
+| `Cohort` | name, description?, agent_id, metadata: dict, latest_version | check_members, update_name, update_description, update_metadata |
+| `CohortVersion` | cohort_id, version: int, display_version?, session_count | update_display_version |
+| `Evaluation` | evaluator_version_id?, session_id, task_id?, name, data_type, score?, value?, explanation?, passed? | - |
 | `Experiment` | name, description?, replay_config_id | update_name, update_description, update_replay_config_id(frozen) |
-| `ExperimentRun` | experiment_id, number, status, cohort_id, agent_version_id, evaluate_baselines, started_at?, ended_at?, error? | start, cancel, finalize |
+| `ExperimentRun` | experiment_id, number, status, cohort_version_id, agent_version_id, evaluate_baselines, started_at?, ended_at?, error? | start, cancel, finalize |
 | `Plugin` | kind: PluginKind, name, description?, provider?, metadata: dict, latest_version | update_description, update_metadata, validator: evaluators carry no provider |
 | `PluginVersion` | plugin_id, version: int, display_version?, source: PluginSource | update_display_version |
-| `ReplayConfig` | override?, tool_policy, evaluators | check_standalone (rejects cohort history scope) |
+| `ReplayConfig` | override?, tool_policy, evaluators | check_standalone (rejects cohort_version history scope) |
 | `Replay` | job_id, experiment_run_id?, replay_config_id, baseline_session_id, evaluate_baselines, status: ReplayStatus, error? | settled property, start_evaluating, complete, fail(error), cancel |
 | `Secret` | name, internal, type?, values: dict[str, SecretStr] | update_type, update_values |
 | `Session` | agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, cost?, tokens?, llm_call_count, tool_call_count | update_name, update_expected, update_metadata, check_node_ingest, finish |
@@ -647,7 +664,7 @@ Requirement validation, via `packaging.requirements.Requirement` (a direct serve
 
 ## ORM models (`adapters/db/orm/`)
 
-23 tables. Tables use `UUIDPrimaryKeyMixin` (uuid7 pk `id`) and `TimestampMixin` (`created`, `updated`), except the `agent_version_secret` and `cohort_session` link tables, which use composite primary keys and keep the timestamps. `tag_link` keeps its uuid pk since the id is exposed through `TagLinkResponse`. No SQLAlchemy relationships, joins are explicit in repositories. Enums are stored as short varchar values, JSON is always JSONB. Nullable JSONB columns set `none_as_null`, so Python `None` stores as SQL NULL and `IS NULL` matches, never the JSON null literal. `metadata` columns map from a `metadata_` attribute, the bare name collides with the declarative base.
+24 tables. Tables use `UUIDPrimaryKeyMixin` (uuid7 pk `id`) and `TimestampMixin` (`created`, `updated`), except the `agent_version_secret` and `cohort_version_session` link tables, which use composite primary keys and keep the timestamps. `tag_link` keeps its uuid pk since the id is exposed through `TagLinkResponse`. No SQLAlchemy relationships, joins are explicit in repositories. Enums are stored as short varchar values, JSON is always JSONB. Nullable JSONB columns set `none_as_null`, so Python `None` stores as SQL NULL and `IS NULL` matches, never the JSON null literal. `metadata` columns map from a `metadata_` attribute, the bare name collides with the declarative base.
 
 Repository `get_many` methods load id lists through `_load_by_ids` on the base SQL repository, which returns rows keyed by id with missing ids omitted. Repository-specific conversion (`to_domain`, decryption, hydration) wraps around it at the call site.
 
@@ -659,19 +676,20 @@ Repository `get_many` methods load id lists through `_load_by_ids` on the base S
 | agent_version_secret | `AgentVersionSecretORM` | none (repository-managed) | Composite pk (agent_version_id FK CASCADE, secret_id FK), index with unique (agent_version_id, index) preserving secret order. |
 | api_key | `ApiKeyORM` | `ApiKey` | owner_id, name unique, key_hash, active, last_used? |
 | blob | `BlobORM` | `Blob` | owner_id, sha256 unique, size, media_type, data (bytea) |
-| cohort | `CohortORM` | `Cohort` | owner_id, name unique, description?, agent_id FK, session_count (denormalized) |
-| cohort_session | `CohortSessionORM` | none (repository-managed) | Composite pk (cohort_id FK CASCADE, session_id FK), index with unique (cohort_id, index). |
-| evaluation | `EvaluationORM` | `Evaluation` | owner_id, evaluator_version_id FK plugin_version? (null for manual evaluations), session_id FK CASCADE, task_id FK CASCADE?, name, data_type, numerical_value double precision?, string_value?, explanation?. A CHECK ties data_type to the populated value columns: float and bool in numerical_value (bool as 0/1), str in string_value, categorical in both, the value in string_value and the score in numerical_value (bool scores as 0/1). Unique (task_id, name), partial unique (session_id, name) where task_id is null (the manual upsert key). Indexes session_id and evaluator_version_id. |
+| cohort | `CohortORM` | `Cohort` | owner_id, name unique, description?, agent_id FK, metadata JSONB, latest_version |
+| cohort_version | `CohortVersionORM` | `CohortVersion` | owner_id, cohort_id FK CASCADE, version, display_version?, session_count (denormalized). Unique (cohort_id, version). The version number comes from an `UPDATE ... RETURNING` bump of cohort.latest_version in the same transaction as the insert, matching plugin_version. |
+| cohort_version_session | `CohortVersionSessionORM` | none (repository-managed) | Composite pk (cohort_version_id FK CASCADE, session_id FK), index with unique (cohort_version_id, index). |
+| evaluation | `EvaluationORM` | `Evaluation` | owner_id, evaluator_version_id FK plugin_version? (null for manual evaluations), session_id FK CASCADE, task_id FK CASCADE?, name, data_type, numerical_value double precision?, string_value?, explanation?, passed boolean?. A CHECK ties data_type to the populated value columns: float and bool in numerical_value (bool as 0/1), str in string_value, categorical in both, the value in string_value and the score in numerical_value (bool scores as 0/1). Unique (task_id, name), partial unique (session_id, name) where task_id is null (the manual upsert key). Indexes session_id and evaluator_version_id. |
 | experiment | `ExperimentORM` | `Experiment` | owner_id, name unique, description?, replay_config_id FK |
-| experiment_run | `ExperimentRunORM` | `ExperimentRun` | owner_id, experiment_id FK, number, status, cohort_id FK, agent_version_id FK, evaluate_baselines, started_at?, ended_at?, error?. Unique (experiment_id, number). |
+| experiment_run | `ExperimentRunORM` | `ExperimentRun` | owner_id, experiment_id FK, number, status, cohort_version_id FK, agent_version_id FK, evaluate_baselines, started_at?, ended_at?, error?. Unique (experiment_id, number). |
 | job | `JobORM` | `Job` | owner_id, status, cancel_requested_at?, started_at?, ended_at?, error?. Index (status). |
 | plugin | `PluginORM` | `Plugin` | owner_id, kind, name, description?, provider?, metadata JSONB, latest_version. Unique (kind, name), index (kind, provider). |
 | plugin_version | `PluginVersionORM` | `PluginVersion` | plugin_id FK CASCADE, version, display_version?, type, blob_id FK? (script), requirement? (package), entrypoint. Unique (plugin_id, version). The source union is flattened, exactly one of blob_id and requirement is set, enforced in the domain. The version number comes from an `UPDATE ... RETURNING` bump of plugin.latest_version in the same transaction as the insert, so a rejected insert leaves no gap and the unique constraint is the backstop. |
 | replay | `ReplayORM` | `Replay` | owner_id, job_id FK CASCADE unique, experiment_run_id FK CASCADE?, replay_config_id FK, baseline_session_id FK, status, error?. Unique (experiment_run_id, baseline_session_id), one replay per baseline per run. Indexes on (experiment_run_id, status) and baseline_session_id. |
 | replay_config | `ReplayConfigORM` | `ReplayConfig` | owner_id, override JSONB?, tool_policy JSONB, evaluators JSONB |
 | secret | `SecretORM` | `Secret` | owner_id, name unique, internal, type?, values_encrypted (text, AES-GCM over JSON) |
-| session | `SessionORM` | `Session` | owner_id, agent_id FK, agent_version_id FK?, task_id FK SET NULL indexed, origin, status, name?, inputs/outputs/expected JSONB?, error?, started_at?, ended_at?, external_id?, metadata JSONB, provider?, framework?, adapter_version?, cost numeric?, input/output/cached_input/reasoning_tokens bigint?, llm_call_count, tool_call_count. Unique (provider, external_id). Indexes (agent_id, started_at) and (status). The has_evaluation filter is an EXISTS probe against the evaluation session_id index. One session per agent task is enforced in the service, import tasks link many. |
-| session_node | `SessionNodeORM` | `SessionNode` | session_id FK CASCADE, parent_id self-FK CASCADE?, secondary_parent_ids JSONB, index, external_id?, trace_id?, node_type, name, status, error?, started_at?, ended_at?, inputs/outputs JSONB?, requested_model?, model?, provider?, token columns, cost?, model_params JSONB?, tool_name?, cache_key char(64)?, attributes JSONB, metadata JSONB, subagent_id?. Unique (session_id, index), (session_id, external_id). Partial index on cache_key where cache_key is not null (tool_lookup across cohort and agent history scopes). Row ids are server-minted uuid7, ingest resolves parent_index against stored and in-batch rows. |
+| session | `SessionORM` | `Session` | owner_id, agent_id FK, agent_version_id FK?, task_id FK SET NULL indexed, origin, status, name?, inputs/outputs/expected JSONB?, error?, started_at?, ended_at?, external_id?, metadata JSONB, provider?, framework?, adapter_version?, cost numeric?, input/output/cached_input/reasoning_tokens bigint?, llm_call_count, tool_call_count. Unique (provider, external_id). Indexes (agent_id, started_at) and (status). The has_evaluation filter is an EXISTS probe against the evaluation session_id index, the cohort_version_id filter an EXISTS probe against the cohort_version_session pk. One session per agent task is enforced in the service, import tasks link many. |
+| session_node | `SessionNodeORM` | `SessionNode` | session_id FK CASCADE, parent_id self-FK CASCADE?, secondary_parent_ids JSONB, index, external_id?, trace_id?, node_type, name, status, error?, started_at?, ended_at?, inputs/outputs JSONB?, requested_model?, model?, provider?, token columns, cost?, model_params JSONB?, tool_name?, cache_key char(64)?, attributes JSONB, metadata JSONB, subagent_id?. Unique (session_id, index), (session_id, external_id). Partial index on cache_key where cache_key is not null (tool_lookup across cohort_version and agent history scopes). Row ids are server-minted uuid7, ingest resolves parent_index against stored and in-batch rows. |
 | tag | `TagORM` | `Tag` | owner_id, name unique |
 | tag_link | `TagLinkORM` | `TagLink` | tag_id FK CASCADE, resource_type, resource_id (no FK, polymorphic). Own uuid pk, unique (tag_id, resource_type, resource_id), index (resource_type, resource_id). |
 | task | `TaskORM` | `Task` subclasses | see below |
@@ -721,7 +739,7 @@ Flattened value objects (queryable scalar columns instead of JSON): `TokenUsage`
 
 ### Cascades
 
-CASCADE: agent_version_secret.agent_version_id, cohort_session.cohort_id, evaluation.session_id, evaluation.task_id, task.job_id, plugin_version.plugin_id, replay.job_id, replay.experiment_run_id, session_node.session_id, session_node.parent_id, tag_link.tag_id. SET NULL: task.worker_id, session.task_id. Everything else restricts and surfaces as `*InUse` conflict errors, evaluation.evaluator_version_id included, so an evaluator with stored evaluations does not delete.
+CASCADE: agent_version_secret.agent_version_id, cohort_version.cohort_id, cohort_version_session.cohort_version_id, evaluation.session_id, evaluation.task_id, task.job_id, plugin_version.plugin_id, replay.job_id, replay.experiment_run_id, session_node.session_id, session_node.parent_id, tag_link.tag_id. SET NULL: task.worker_id, session.task_id. Everything else restricts and surfaces as `*InUse` conflict errors, evaluation.evaluator_version_id included, so an evaluator with stored evaluations does not delete.
 
 Jobs have no FK pointing upward, so nothing cascades onto them: deleting a job cascades its tasks and its replay row, and `ExperimentRunService.delete_run` deletes the run's jobs first, collected through `replay.job_id`, before the run row's cascade removes any remaining replay rows.
 
@@ -736,7 +754,8 @@ Jobs have no FK pointing upward, so nothing cascades onto them: deleting a job c
 | `AgentVersionResponse` | mapping/agent_versions.py | `AgentVersion` | `SQLAgentVersionRepository` | agent_version (+ agent_version_secret) |
 | `ApiKeyResponse` | mapping/api_keys.py | `ApiKey` | `SQLApiKeyRepository` | api_key |
 | `BlobResponse` | mapping/blobs.py | `Blob` | `SQLBlobRepository` | blob |
-| `CohortResponse` | mapping/cohorts.py | `Cohort` | `SQLCohortRepository` | cohort (+ cohort_session) |
+| `CohortResponse` | mapping/cohorts.py | `Cohort` | `SQLCohortRepository` | cohort |
+| `CohortVersionResponse` | mapping/cohort_versions.py | `CohortVersion` | `SQLCohortVersionRepository` | cohort_version (+ cohort_version_session) |
 | `EvaluationResponse` | mapping/evaluations.py | `Evaluation` | `SQLEvaluationRepository` | evaluation |
 | `EvaluatorResponse`, `EvaluatorVersionResponse` | mapping/plugins.py (parametrized by response class) | `Plugin`, `PluginVersion` | `SQLPluginRepository` | plugin, plugin_version |
 | `ExperimentResponse` | mapping/experiments.py | `Experiment` + `ReplayConfig` | `SQLExperimentRepository` | experiment (+ replay_config) |
@@ -764,8 +783,9 @@ erDiagram
     agent_version |o--o{ session : "recorded with"
     session ||--o{ session_node : nodes
     agent ||--o{ cohort : cohorts
-    cohort }o--o{ session : "cohort_session (ordered)"
-    cohort ||--o{ experiment_run : runs
+    cohort ||--o{ cohort_version : versions
+    cohort_version }o--o{ session : "cohort_version_session (ordered)"
+    cohort_version ||--o{ experiment_run : runs
     replay_config ||--o{ experiment : config
     experiment ||--o{ experiment_run : runs
     job ||--o{ task : tasks
@@ -791,19 +811,19 @@ erDiagram
 
 ### Job, task, and replay flow connections
 
-- `POST /v1/replays` creates a `ReplayConfig` row, a `Replay` row, a `Job`, and the job's initial tasks in one transaction (`replay_pipeline.create_replay_pipeline`): one agent task carrying the baseline session's inputs, `KITARU_REPLAY_ID` in its env extras, and the `agent_version` label, plus, with `evaluate_baselines`, one baseline evaluator task per evaluator version that has not already scored the baseline session, each with `input_session_id = baseline_session_id` and claimable immediately, baseline scoring does not wait for the agent task. Run fan-out (`ExperimentService.start_run`) does the same per session of the run's cohort, passing the run's `evaluate_baselines` flag into each replay, rejecting an empty cohort with a validation error so every run starts with at least one job.
+- `POST /v1/replays` creates a `ReplayConfig` row, a `Replay` row, a `Job`, and the job's initial tasks in one transaction (`replay_pipeline.create_replay_pipeline`): one agent task carrying the baseline session's inputs, `KITARU_REPLAY_ID` in its env extras, and the `agent_version` label, plus, with `evaluate_baselines`, one baseline evaluator task per evaluator version that has not already scored the baseline session, each with `input_session_id = baseline_session_id` and claimable immediately, baseline scoring does not wait for the agent task. Run fan-out (`ExperimentService.start_run`) does the same per session of the run's cohort version, passing the run's `evaluate_baselines` flag into each replay, rejecting an empty version with a validation error so every run starts with at least one job.
 - The already-scored check for baselines reads the task table for completed evaluator tasks by (input_session_id, plugin_version_id). It is unlocked, so two concurrent runs sharing a session can both score the same baseline, accepted as waste, the duplicate rows stay distinguishable by task_id and job_id.
 - Completing the agent task appends one result evaluator task per evaluator in the config's evaluator list (`replay_pipeline.append_result_evaluations` on `TaskTerminal`, inside the completion request), each with `input_session_id` set to the agent task's `result_session_id`, and moves the replay to `evaluating`. Appended tasks are complete at creation, no deferred references exist, because the result session exists before the append runs. The terminal transition, the append, job advancement, settlement, and run finalization commit in one transaction: a failure in any step rolls back the whole transition and the worker's PATCH fails, nothing is half-applied.
 - Completing an evaluator task writes one evaluation row per `EvaluationResult` in its result list, in the completion transaction: evaluator_version_id from the task's plugin_version_id, session_id from input_session_id, task_id from the task. This holds uniformly for standalone, result, and baseline tasks, `evaluation_recording.record_task_evaluations` is the single writer.
 - Every task of a replay job carries `on_failure=abort`, so the first hard failure, agent task or any evaluator task, baselines included, cancels the rest and the job settles failed when the tasks drain. A baseline failure failing the replay is deliberate: the comparison the replay exists for cannot be produced. Settlement keys off terminal status rather than off completion, so a task that times out or is abandoned by the sweep settles the job the same way an explicit failure does.
 - `JobSettled` maps the outcome onto the `Replay` row (`replay_pipeline.settle_replay`): completed → completed, failed → failed with the job's error, canceled → canceled. `ReplaySettled` then triggers `finalize_run_if_drained`. The replay status tracks the pipeline: `pending` from creation, `evaluating` when the agent task completes, terminal at job settlement.
-- `POST /v1/evaluations` creates one job holding one evaluator task per (input session, evaluator) pair, resolving the evaluator versions at creation. Those tasks carry `on_failure=continue`, so every pair runs regardless of sibling failures and the job outcome reports whether all of them scored. `POST /v1/imports` and `POST /v1/session-runs` create a job with one importer or agent task, session runs put the session name into the task env extras as `KITARU_SESSION_NAME`. Manual evaluations through `POST /v1/sessions/{id}/evaluations` are `INSERT ... ON CONFLICT` upserts on the (session_id, name) partial unique key, so a resent name overwrites its value, data type, and explanation. The rollup updates on node ingest are atomic SQL increments. The increments are delta-based: each upserted node contributes new minus old against the stored row for cost and the token columns, and 0 or 1 for the call counts, summed per batch into one atomic UPDATE on the session row, so a replacement corrects itself and a retried identical batch has delta zero.
+- `POST /v1/evaluations` creates one job holding one evaluator task per (input session, evaluator) pair, resolving the evaluator versions at creation. Those tasks carry `on_failure=continue`, so every pair runs regardless of sibling failures and the job outcome reports whether all of them scored. `POST /v1/imports` and `POST /v1/session-runs` create a job with one importer or agent task, session runs put the session name into the task env extras as `KITARU_SESSION_NAME`. Manual evaluations through `POST /v1/sessions/{id}/evaluations` are `INSERT ... ON CONFLICT` upserts on the (session_id, name) partial unique key, so a resent name overwrites its value, data type, explanation, and pass flag. The rollup updates on node ingest are atomic SQL increments. The increments are delta-based: each upserted node contributes new minus old against the stored row for cost and the token columns, and 0 or 1 for the call counts, summed per batch into one atomic UPDATE on the session row, so a replacement corrects itself and a retried identical batch has delta zero.
 - Sessions link to tasks at create time (`SessionCreateRequest.task_id`, task must be running). Agent tasks link exactly one session and get `result_session_id` written in the same transaction, import tasks link every session they create, listable via the `task_id` session filter.
 - The claim path is `POST /v1/tasks/claim`. The scope is read from the caller's worker row, stored at registration, and interpreted by `_scope_conditions` in the task repository. A claim refreshes worker.last_seen_at, so an idle worker polling an empty queue stays live.
 - `heartbeat_worker` updates worker.last_seen_at, stamps heartbeat_at only on reported tasks whose worker_id matches the caller, and returns the rest in cancel_task_ids (cancel-requested, reassigned, or no longer owned). The staleness sweep runs at claim time, before the claim query, capped to a bounded row count per claim (a server setting, default 100, overflow rolls to the next claim), selecting with `FOR UPDATE SKIP LOCKED` so concurrent claims never block on each other's sweep. It applies to tasks whose coalesce(heartbeat_at, claimed_at) is older than the heartbeat timeout (a server setting, default 60 seconds, kept a comfortable multiple of the worker heartbeat interval so one dropped heartbeat never requeues a live task): a stale task with `cancel_requested_at` set settles to canceled, otherwise it is requeued while attempt is under the retry cap (a server setting, default 3) and abandoned at the cap. A requeue unlinks the stale attempt's result session (`session.task_id` and the task's `result_session_id` to null), freeing the one-session-per-task slot so the next attempt can link its own. The sweep routes its writes through the same `_apply_status` dispatch as `update_task`, so an abandoned or canceled last task settles its job, its replay, and its run without any worker transition arriving. `abandoned` is written only by the sweep, `timed_out` only by the worker's process timeout. With no worker polling, nothing sweeps, stale rows surface through effective-status reads until the next claim.
 - `ExperimentRunService.cancel_run` writes the run's `canceling` status and propagates in the same transaction, canceling each non-settled replay's job the way `cancel_job` does: claimed and running tasks get `cancel_requested_at` stamped in one bulk UPDATE and keep their status, pending tasks move to `canceled` through `_apply_status` one by one, so drained jobs settle, their replay rows cancel, and the run can finalize. Claimed and running tasks then reach a terminal status the usual way, through their worker's next heartbeat or through the sweep, so run cancellation adds no second terminal writer. The run settles to `canceled` when it drains.
 - Run progress counts, run job listing, and run finalization read the run's replay rows and their 1:1 jobs through `replay.job_id`, never the task table.
-- `tool_lookup` resolves the replay by id, looks up the tool's config in the tool policy from the replay config (rejecting tools not under a history config), and searches recorded tool-call nodes by cache_key within the config's history scope (baseline, cohort, or agent). Config and scope resolution is server-side: the adapter sends only the tool name and cache_key, never a scope, so the policy is interpreted in one place. The cache_key is `compute_tool_cache_key(tool_name, inputs)` in the top-level `src/kitaru/cache_keys.py` (pure, stdlib-only, sha256 hex over the tool name and canonical JSON inputs): node ingest derives it for recorded tool-call nodes, the replaying adapter derives it for the lookup, so the format is defined once. The adapter receives the replay id through `KITARU_REPLAY_ID`, set by the replay pipeline in the agent task's env extras, and fetches the override and tool policy from `GET /v1/replays/{id}`.
+- `tool_lookup` resolves the replay by id, looks up the tool's config in the tool policy from the replay config (rejecting tools not under a history config), and searches recorded tool-call nodes by cache_key within the config's history scope (baseline, the run's cohort version, or agent). Config and scope resolution is server-side: the adapter sends only the tool name and cache_key, never a scope, so the policy is interpreted in one place. The cache_key is `compute_tool_cache_key(tool_name, inputs)` in the top-level `src/kitaru/cache_keys.py` (pure, stdlib-only, sha256 hex over the tool name and canonical JSON inputs): node ingest derives it for recorded tool-call nodes, the replaying adapter derives it for the lookup, so the format is defined once. The adapter receives the replay id through `KITARU_REPLAY_ID`, set by the replay pipeline in the agent task's env extras, and fetches the override and tool policy from `GET /v1/replays/{id}`.
 
 ## Task status transitions
 
@@ -849,6 +869,8 @@ Which invariants have a database constraint behind them and which are service-le
 | One blob per sha256 | DB, unique (sha256), the create catches the violation and returns the stored row |
 | One agent version per (agent_id, version) | DB, unique, with the version number from an `UPDATE ... RETURNING` bump in the same transaction |
 | One plugin per (kind, name), one version per (plugin_id, version) | DB, unique, with the version number from an `UPDATE ... RETURNING` bump in the same transaction |
+| One cohort version per (cohort_id, version) | DB, unique, with the version number from an `UPDATE ... RETURNING` bump in the same transaction |
+| Cohort version membership is immutable | Service, member links are written only at version creation and no endpoint updates them |
 | One replay per baseline per run | DB, unique (experiment_run_id, baseline_session_id) on replay |
 | One evaluator task per evaluator version per input session per job | DB, unique (job_id, input_session_id, plugin_version_id) |
 | One evaluation per (task, name) | DB, unique (task_id, name), with a partial unique (session_id, name) where task_id is null as the manual upsert key |
