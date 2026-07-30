@@ -14,30 +14,16 @@
 """Database service and migration bootstrap."""
 
 import logging
-import ssl
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from importlib import import_module
-from typing import Any, Protocol, cast
+from collections.abc import AsyncGenerator
 
-import asyncpg
 import sqlalchemy
 from sqlalchemy.exc import IntegrityError, ProgrammingError
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.sql import text
 
 from kitaru.server.adapters.db.analytics import register_analytics_listeners
 from kitaru.server.adapters.db.pagination import LIST_QUERY_TIMEOUT_INFO_KEY
-from kitaru.server.config import (
-    DatabaseAuthMethod,
-    DatabaseSSLMode,
-    Settings,
-    get_settings,
-)
+from kitaru.server.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,146 +31,21 @@ logger = logging.getLogger(__name__)
 _DEFAULT_DATABASE = "postgres"
 
 
-class _RDSTokenClient(Protocol):
-    """Subset of the boto3 RDS client used for database authentication."""
-
-    def generate_db_auth_token(
-        self,
-        *,
-        DBHostname: str,
-        Port: int,
-        DBUsername: str,
-        Region: str,
-    ) -> str:
-        """Generate an RDS IAM database authentication token."""
-
-
-class _Boto3Module(Protocol):
-    """Subset of boto3 used to construct an RDS client."""
-
-    def client(self, service_name: str, *, region_name: str) -> _RDSTokenClient:
-        """Create a service client."""
-
-
-class DatabaseTokenProvider(Protocol):
-    """Generate short-lived database authentication tokens."""
-
-    def generate_token(
-        self,
-        *,
-        host: str,
-        port: int,
-        username: str,
-        region: str,
-    ) -> str:
-        """Generate a token for one database connection."""
-
-
-class AWSIAMDatabaseTokenProvider:
-    """Generate RDS IAM tokens using the process AWS identity."""
-
-    def generate_token(
-        self,
-        *,
-        host: str,
-        port: int,
-        username: str,
-        region: str,
-    ) -> str:
-        """Generate a token for one database connection."""
-        boto3 = cast(_Boto3Module, import_module("boto3"))
-        client = boto3.client("rds", region_name=region)
-        return client.generate_db_auth_token(
-            DBHostname=host,
-            Port=port,
-            DBUsername=username,
-            Region=region,
-        )
-
-
 class DatabaseService:
     """Manage the Kitaru database engine and schema lifecycle."""
 
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        token_provider: DatabaseTokenProvider | None = None,
-    ) -> None:
+    def __init__(self, settings: Settings | None = None) -> None:
         """Create a database service and initialize its async engine.
 
         Args:
             settings: Optional settings override for database connections.
-            token_provider: Optional IAM token provider override.
         """
         self.settings = settings or get_settings()
-        self.token_provider = token_provider or AWSIAMDatabaseTokenProvider()
         logger.info("Initializing async database engine.")
-        self.engine = self.create_engine(self.settings)
+        self.engine = create_async_engine(
+            self.generate_database_uri(self.settings), echo=False
+        )
         register_analytics_listeners()
-
-    def create_engine(
-        self,
-        settings: Settings,
-        use_default_db: bool = False,
-    ) -> AsyncEngine:
-        """Create an async engine for the configured authentication method.
-
-        Args:
-            settings: Database connection settings.
-            use_default_db: Connect to the maintenance database when true.
-
-        Returns:
-            Configured SQLAlchemy async engine.
-        """
-        engine_options: dict[str, Any] = {}
-        if settings.DB_AUTH_METHOD is DatabaseAuthMethod.AWS_IAM:
-            engine_options["async_creator"] = self._iam_connection_factory(
-                settings,
-                use_default_db=use_default_db,
-            )
-        elif settings.DB_SSL_MODE is DatabaseSSLMode.VERIFY_FULL:
-            engine_options["connect_args"] = {"ssl": ssl.create_default_context()}
-        return create_async_engine(
-            self.generate_database_uri(settings, use_default_db=use_default_db),
-            echo=False,
-            **engine_options,
-        )
-
-    def _iam_connection_factory(
-        self,
-        settings: Settings,
-        *,
-        use_default_db: bool = False,
-    ) -> Callable[[], Awaitable[asyncpg.Connection]]:
-        """Create an asyncpg factory that refreshes IAM tokens per connection."""
-        assert settings.DB_HOST is not None
-        assert settings.DB_AWS_REGION is not None
-        host = settings.DB_HOST
-        region = settings.DB_AWS_REGION
-        database = (
-            _DEFAULT_DATABASE
-            if use_default_db
-            else self.application_database_name(settings)
-        )
-        ssl_context = ssl.create_default_context()
-
-        async def connect() -> asyncpg.Connection:
-            token = self.token_provider.generate_token(
-                host=host,
-                port=settings.DB_PORT,
-                username=settings.DB_USER,
-                region=region,
-            )
-            return await asyncpg.connect(
-                host=host,
-                port=settings.DB_PORT,
-                user=settings.DB_USER,
-                password=token,
-                database=database,
-                ssl=ssl_context,
-            )
-
-        return connect
 
     async def cleanup(self) -> None:
         """Release database engine resources."""
@@ -211,8 +72,7 @@ class DatabaseService:
         """Prepare the application database and schema for process startup."""
         from kitaru.server.database.migrations.alembic import Alembic
 
-        if self.settings.CREATE_DB_IF_MISSING:
-            await self.create_db(self.settings)
+        await self.create_db(self.settings)
         await Alembic(self.engine).migrate_database()
 
     @classmethod
@@ -227,8 +87,10 @@ class DatabaseService:
         """
         resolved = settings or get_settings()
         database_name = cls.application_database_name(resolved)
-        service = cls(resolved)
-        engine = service.create_engine(resolved, use_default_db=True)
+        engine = create_async_engine(
+            cls.generate_database_uri(resolved, use_default_db=True),
+            echo=False,
+        )
         try:
             async with engine.execution_options(
                 isolation_level="AUTOCOMMIT"
@@ -252,7 +114,6 @@ class DatabaseService:
                     )
         finally:
             await engine.dispose()
-            await service.cleanup()
 
     @staticmethod
     def application_database_name(settings: Settings) -> str:
@@ -304,11 +165,7 @@ class DatabaseService:
             return sqlalchemy.engine.url.URL.create(
                 drivername=driver,
                 username=settings.DB_USER,
-                password=(
-                    settings.DB_PWD
-                    if settings.DB_AUTH_METHOD is DatabaseAuthMethod.PASSWORD
-                    else None
-                ),
+                password=settings.DB_PWD,
                 database=db_name,
                 host=settings.DB_HOST,
                 port=settings.DB_PORT,
