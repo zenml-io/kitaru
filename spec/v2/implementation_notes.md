@@ -168,6 +168,20 @@ required solving beyond what the documents describe.
 - `create_evaluations` inserts tasks directly instead of `add_task`, the
   job was created in the same call and cannot have settled.
 
+## Integration
+
+- The nine per-wave migrations were squashed into one revision,
+  `007_add_v2_resources`. Autogenerate dropped the `use_alter` FK from
+  `session.task_id` inside `create_table`, it now lives in a separate
+  `create_foreign_key` after the task table exists, with the matching
+  drop first in the downgrade.
+- `just check` passes fully except the `links` recipe, the lychee binary
+  is not installed in this environment. No hand-written Markdown links
+  changed.
+- One conftest module: worker tests originally shipped their own
+  `tests/worker/conftest.py`, which broke bare `from conftest import`
+  resolution in subset runs. Shared fakes stay in the root conftest only.
+
 ## Replays, pipeline, and experiment runs
 
 - `effective_inputs` is applied once, when the pipeline builds the agent
