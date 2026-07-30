@@ -61,10 +61,6 @@ class SessionService:
             if linked_task.status is not TaskStatus.RUNNING:
                 raise ConflictError(f"Task {linked_task.id} is not running")
             if isinstance(linked_task, AgentTask):
-                if command.agent_version_id != linked_task.agent_version_id:
-                    raise ValidationError(
-                        "Session agent version does not match its task"
-                    )
                 linked_task.link_result_session(session.id)
             elif isinstance(linked_task, ImportTask):
                 if command.agent_id != linked_task.agent_id:

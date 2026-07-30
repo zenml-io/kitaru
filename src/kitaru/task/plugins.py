@@ -14,6 +14,7 @@
 """Foreign plugin code loading."""
 
 import importlib
+import importlib.machinery
 import importlib.util
 import sys
 from pathlib import Path
@@ -43,7 +44,11 @@ def load_plugin_module(name: str, path: Path) -> ModuleType:
         Loaded module.
     """
     try:
-        spec = importlib.util.spec_from_file_location(name, path)
+        # Why: cached blobs are named by digest with no .py suffix, so importlib
+        # cannot pick a loader on its own.
+        spec = importlib.util.spec_from_file_location(
+            name, path, loader=importlib.machinery.SourceFileLoader(name, str(path))
+        )
         if spec is None or spec.loader is None:
             raise ImportError(f"Cannot create an import spec for {path}")
         module = importlib.util.module_from_spec(spec)
