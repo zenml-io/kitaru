@@ -1,25 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck } from "lucide-react";
-
-interface ServerInfo {
-  id?: string | null;
-  version: string;
-  auth_scheme: string;
-}
-
-async function fetchServerInfo(): Promise<ServerInfo> {
-  const response = await fetch("/v1/info");
-  if (!response.ok) {
-    throw new Error(`Server responded ${response.status}`);
-  }
-  return (await response.json()) as ServerInfo;
-}
+import { client, unwrap } from "../api/client";
+import { useOne } from "../api/hooks";
+import { SettingsPanel } from "./SettingsPanel";
 
 export function StatusBar() {
-  const info = useQuery({
-    queryKey: ["server-info"],
-    queryFn: fetchServerInfo,
+  const info = useOne(["server-info"], () => unwrap(client.GET("/v1/info")), {
     refetchInterval: 30_000,
+    retry: 1,
   });
 
   return (
@@ -46,6 +33,7 @@ export function StatusBar() {
             </span>
           </>
         )}
+        <SettingsPanel />
       </div>
     </header>
   );
