@@ -539,7 +539,6 @@ jobs:
           version: ${{ env.VERSION }}
           dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
           aws-role-arn: ${{ vars.KITARU_ECR_ROLE_ARN }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # --- Helm chart ---
       - name: Install Helm
@@ -594,8 +593,7 @@ jobs:
             echo ""
             echo "### Docker image"
             echo "Built and not pushed: zenmldocker/kitaru:$VERSION"
-            echo "Built, scanned, and not pushed: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:$VERSION"
-            echo "SBOM artifact: kitaru-${VERSION}-sbom"
+            echo "Built and not pushed: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:$VERSION"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
