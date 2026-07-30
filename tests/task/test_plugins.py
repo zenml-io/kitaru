@@ -69,6 +69,18 @@ def test_load_plugin_module_registers_in_sys_modules(tmp_path: Path) -> None:
     assert module.value == 42
 
 
+def test_load_plugin_module_without_extension(tmp_path: Path) -> None:
+    """Load a script file named after its content hash, with no .py suffix.
+
+    This mirrors what the worker's content-addressed blob cache materializes
+    a script plugin file as.
+    """
+    path = tmp_path / "ef6b4bdd7398a7f8d981c2a0141ca9f85e66d937c1458a2748ca595ef6ad582a"
+    path.write_text("value = 42\n")
+    module = load_plugin_module("kitaru._test_plugin_module_no_suffix", path)
+    assert module.value == 42
+
+
 def test_get_module_attribute_missing() -> None:
     """Raise PluginLoadError when the attribute does not exist on the module."""
     module = types.ModuleType("empty")

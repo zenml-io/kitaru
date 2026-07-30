@@ -14,6 +14,7 @@
 """Foreign plugin code loading, the only module that imports foreign code."""
 
 import importlib
+import importlib.machinery
 import importlib.util
 import sys
 from pathlib import Path
@@ -42,7 +43,12 @@ def load_plugin_module(name: str, path: Path) -> ModuleType:
     Returns:
         Imported module.
     """
-    spec = importlib.util.spec_from_file_location(name, path)
+    # The materialized path has no .py suffix, since the worker's blob cache
+    # names it after its content hash. Passing an explicit loader avoids
+    # relying on spec_from_file_location's extension-based loader inference,
+    # which returns None for an unrecognized suffix.
+    loader = importlib.machinery.SourceFileLoader(name, str(path))
+    spec = importlib.util.spec_from_file_location(name, path, loader=loader)
     if spec is None or spec.loader is None:
         raise PluginLoadError(f"Could not load a module spec from '{path}'")
     module = importlib.util.module_from_spec(spec)
