@@ -20,7 +20,7 @@ from urllib.parse import urlparse
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.server.config import DatabaseAuthMethod, Settings
+from kitaru.server.config import Settings
 
 # Sentinel meaning the server has not been enrolled with a control plane.
 UNSET_SERVER_ID = uuid.UUID(int=0)
@@ -110,14 +110,6 @@ class APISettings(Settings):
             ):
                 raise ValueError(
                     "KITARU_SERVER_CONTROL_PLANE_API_URL host is not allowed"
-                )
-            if self.DB_AUTH_METHOD is not DatabaseAuthMethod.AWS_IAM:
-                raise ValueError(
-                    "Cloud mode requires KITARU_SERVER_DB_AUTH_METHOD=aws_iam"
-                )
-            if self.CREATE_DB_IF_MISSING:
-                raise ValueError(
-                    "Cloud mode requires KITARU_SERVER_CREATE_DB_IF_MISSING=false"
                 )
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")

@@ -13,26 +13,11 @@
 #  permissions and limitations under the License.
 """Server configuration via environment variables."""
 
-from enum import StrEnum
 from functools import lru_cache
 from typing import Self
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class DatabaseAuthMethod(StrEnum):
-    """Database authentication method."""
-
-    PASSWORD = "password"
-    AWS_IAM = "aws_iam"
-
-
-class DatabaseSSLMode(StrEnum):
-    """Database TLS verification mode."""
-
-    DISABLE = "disable"
-    VERIFY_FULL = "verify-full"
 
 
 class Settings(BaseSettings):
@@ -65,10 +50,6 @@ class Settings(BaseSettings):
     DB_PWD: str = "password"
     DB_NAME: str = "kitaru"
     DATABASE_URL: str | None = None
-    DB_AUTH_METHOD: DatabaseAuthMethod = DatabaseAuthMethod.PASSWORD
-    DB_AWS_REGION: str | None = None
-    DB_SSL_MODE: DatabaseSSLMode = DatabaseSSLMode.DISABLE
-    CREATE_DB_IF_MISSING: bool = True
 
     @model_validator(mode="after")
     def validate_database_settings(self) -> Self:
@@ -83,19 +64,6 @@ class Settings(BaseSettings):
         """
         if not self.DB_HOST and not self.DATABASE_URL:
             raise ValueError("Set KITARU_SERVER_DB_HOST or KITARU_SERVER_DATABASE_URL")
-        if self.DB_AUTH_METHOD is DatabaseAuthMethod.AWS_IAM:
-            if self.DATABASE_URL:
-                raise ValueError(
-                    "KITARU_SERVER_DATABASE_URL is not supported with AWS IAM "
-                    "database authentication"
-                )
-            if not self.DB_AWS_REGION:
-                raise ValueError("Set KITARU_SERVER_DB_AWS_REGION")
-            if self.DB_SSL_MODE is not DatabaseSSLMode.VERIFY_FULL:
-                raise ValueError(
-                    "AWS IAM database authentication requires "
-                    "KITARU_SERVER_DB_SSL_MODE=verify-full"
-                )
         return self
 
 
