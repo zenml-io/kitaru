@@ -121,7 +121,9 @@ known-first-party = ["kitaru"]
 
 [tool.ty.src]
 # TODO: Re-enable once the examples are migrated to the v2 SDK.
-exclude = ["examples/**"]
+# sandbox/ holds the local end-to-end fixture, which loads its agent module by
+# path at runtime and is never imported by the package.
+exclude = ["examples/**", "sandbox/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
