@@ -46,6 +46,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pydantic-ai = [
+    "pydantic-ai-slim[openai]>=2.14.1,<3",
+]
+importers = [
+    "kitaru-importer-langfuse",
+]
 server = [
     "fastapi>=0.139",
     "sqlalchemy[asyncio]>=2.0.51",
@@ -75,8 +81,19 @@ packages = ["src/kitaru"]
 [tool.uv]
 exclude-newer = "3 days"
 
+[tool.uv.sources]
+kitaru = { workspace = true }
+kitaru-importer-langfuse = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "plugins/langfuse",
+]
+
 [dependency-groups]
 dev = [
+    "kitaru-importer-langfuse",
+    "pydantic-ai-slim>=2.14.1,<3",
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
