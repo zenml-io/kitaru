@@ -27,7 +27,7 @@ from kitaru.importers import (
     NodeType,
     SessionStatus,
 )
-from kitaru.importing import ParsedSession
+from kitaru.task.importer import ParsedSession
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:
@@ -42,8 +42,11 @@ def context(source_instance: str | None = None) -> ImportContext:
 
 def test_unified_parse_returns_prefixed_external_id() -> None:
     """Expose normalized sessions through the unified plugin entrypoint."""
-    parsed = parse(
-        jsonl(observation("root", "trace-1", input_="hello", output="world"))
+    parsed = list(
+        parse(
+            jsonl(observation("root", "trace-1", input_="hello", output="world")),
+            {},
+        )
     )
 
     assert len(parsed) == 1

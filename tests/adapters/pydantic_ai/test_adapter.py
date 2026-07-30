@@ -17,6 +17,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import date
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -45,24 +46,27 @@ from kitaru.adapters.pydantic_ai import (
     ToolPolicyError,
     ToolPolicyMissError,
 )
-from kitaru.api_models.v1.jobs import (
-    HistoryPolicy,
-    JobKind,
-    JobSpecResponse,
-    JobSpecRun,
-    LLMPolicy,
-    PassthroughPolicy,
+from kitaru.api_models.v1.replay import (
+    ReplayResponse,
+    ReplayStatus,
+    ToolLookupResponse,
+)
+from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    HistoryScope,
+    LLMConfig,
+    PassthroughConfig,
     ReplayOverride,
     StaticCase,
+    StaticConfig,
     StaticMatchMode,
-    StaticPolicy,
-    ToolLookupResponse,
-    ToolPolicyConfig,
+    ToolPolicy,
     ToolPolicyOnMiss,
 )
-from kitaru.api_models.v1.session_nodes import NodeStatus, NodeType
-from kitaru.api_models.v1.sessions import SessionStatus
-from kitaru.hashing import tool_call_cache_key
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.task import AgentTaskDetails
+from kitaru.cache_keys import compute_tool_cache_key
 
 
 class _FakeSessions:
@@ -70,6 +74,7 @@ class _FakeSessions:
         self._client = client
         self.created: list[Any] = []
         self.updated: list[tuple[uuid.UUID, Any]] = []
+        self.node_batches: list[tuple[uuid.UUID, Any]] = []
 
     async def create(self, request: Any) -> Any:
         self.created.append(request)
@@ -81,48 +86,58 @@ class _FakeSessions:
         self._client.events.append("session:update")
         return None
 
-
-class _FakeSessionNodes:
-    def __init__(self, client: "_FakeClient") -> None:
-        self._client = client
-        self.upserts: list[tuple[uuid.UUID, Any]] = []
-
-    async def upsert(self, session_id: uuid.UUID, request: Any) -> list[Any]:
-        self.upserts.append((session_id, request))
+    async def ingest_nodes(self, session_id: uuid.UUID, request: Any) -> list[Any]:
+        if self._client.ingest_error is not None:
+            raise self._client.ingest_error
+        self.node_batches.append((session_id, request))
         self._client.events.append("nodes:upsert")
         return []
 
 
-class _FakeJobs:
+class _FakeTasks:
+    def __init__(self, client: "_FakeClient") -> None:
+        self._client = client
+
+    async def get_spec(self, task_id: uuid.UUID) -> Any:
+        assert task_id == self._client.task_id
+        return SimpleNamespace(details=AgentTaskDetails(inputs=self._client.inputs))
+
+
+class _FakeReplays:
     def __init__(self, client: "_FakeClient") -> None:
         self._client = client
         self.lookups: list[tuple[uuid.UUID, Any]] = []
 
-    async def get_spec(self, job_id: uuid.UUID) -> JobSpecResponse:
-        assert self._client.spec is not None
-        assert job_id == self._client.spec.job_id
-        return self._client.spec
+    async def get(self, replay_id: uuid.UUID) -> ReplayResponse:
+        assert self._client.replay is not None
+        assert replay_id == self._client.replay.id
+        return self._client.replay
 
-    async def tool_lookup(self, job_id: uuid.UUID, request: Any) -> Any:
-        self.lookups.append((job_id, request))
+    async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
+        self.lookups.append((replay_id, request))
         return self._client.lookup_response
 
 
 class _FakeClient:
     instances: ClassVar[list["_FakeClient"]] = []
-    next_spec: ClassVar[JobSpecResponse | None] = None
+    next_fixture: ClassVar["_ReplayFixture | None"] = None
     next_lookup_response: ClassVar[ToolLookupResponse] = ToolLookupResponse(
         found=False, result=None
     )
+    next_ingest_error: ClassVar[BaseException | None] = None
 
     def __init__(self, **_: Any) -> None:
         self.session_id = uuid.uuid4()
-        self.spec = type(self).next_spec
+        fixture = type(self).next_fixture
+        self.task_id = fixture.task_id if fixture else None
+        self.replay = fixture.replay if fixture else None
+        self.inputs = fixture.inputs if fixture else None
         self.lookup_response = type(self).next_lookup_response
+        self.ingest_error = type(self).next_ingest_error
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
-        self.session_nodes = _FakeSessionNodes(self)
-        self.jobs = _FakeJobs(self)
+        self.tasks = _FakeTasks(self)
+        self.replays = _FakeReplays(self)
         self.closed = False
         type(self).instances.append(self)
 
@@ -136,17 +151,26 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "KITARU_API_KEY",
         "KITARU_API_URL",
-        "KITARU_JOB_ID",
-        "KITARU_JOB_INPUTS",
-        "KITARU_JOB_SESSION_NAME",
-        "KITARU_OVERRIDE",
-        "KITARU_SESSION_ID_FILE",
+        "KITARU_TASK_ID",
+        "KITARU_TASK_INPUTS",
+        "KITARU_SESSION_NAME",
+        "KITARU_REPLAY_ID",
     ):
         monkeypatch.delenv(name, raising=False)
     _FakeClient.instances.clear()
-    _FakeClient.next_spec = None
+    _FakeClient.next_fixture = None
     _FakeClient.next_lookup_response = ToolLookupResponse(found=False, result=None)
+    _FakeClient.next_ingest_error = None
     monkeypatch.setattr(capability_module, "KitaruAPIClient", _FakeClient)
+
+
+@dataclass
+class _ReplayFixture:
+    """Canonical task and replay state used by adapter tests."""
+
+    task_id: uuid.UUID
+    replay: ReplayResponse
+    inputs: Any
 
 
 def _replay_spec(
@@ -155,35 +179,38 @@ def _replay_spec(
     inputs: Any = "replayed prompt",
     override: ReplayOverride | None = None,
     tools: dict[str, Any] | None = None,
-) -> JobSpecResponse:
-    job_id = uuid.uuid4()
-    return JobSpecResponse(
-        job_id=job_id,
-        kind=JobKind.REPLAY,
+) -> _ReplayFixture:
+    now = capability_module.datetime.now(capability_module.UTC)
+    return _ReplayFixture(
+        task_id=uuid.uuid4(),
         inputs=inputs,
-        override=override,
-        tool_policy=ToolPolicyConfig(default=policy, tools=tools or {}),
-        scorer=None,
-        importer=None,
-        run=JobSpecRun(
-            command="python agent.py",
-            working_dir=None,
-            env={},
-            timeout_seconds=30,
+        replay=ReplayResponse(
+            id=uuid.uuid4(),
+            job_id=uuid.uuid4(),
+            experiment_run_id=None,
+            baseline_session_id=uuid.uuid4(),
+            result_session_id=None,
+            override=override,
+            tool_policy=ToolPolicy(default=policy, tools=tools or {}),
+            evaluators=[],
+            evaluate_baselines=False,
+            status=ReplayStatus.PENDING,
+            error=None,
+            created=now,
+            updated=now,
         ),
-        secret_env={},
-        input_session_id=uuid.uuid4(),
-        name=None,
     )
 
 
-def _set_replay(monkeypatch: pytest.MonkeyPatch, spec: JobSpecResponse) -> None:
-    _FakeClient.next_spec = spec
-    monkeypatch.setenv("KITARU_JOB_ID", str(spec.job_id))
+def _set_replay(monkeypatch: pytest.MonkeyPatch, spec: _ReplayFixture) -> None:
+    _FakeClient.next_fixture = spec
+    monkeypatch.setenv("KITARU_TASK_ID", str(spec.task_id))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps(spec.inputs))
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(spec.replay.id))
 
 
 def _nodes(client: _FakeClient) -> list[Any]:
-    return [node for _, batch in client.session_nodes.upserts for node in batch.nodes]
+    return [node for _, batch in client.sessions.node_batches for node in batch.nodes]
 
 
 def _tool_agent(
@@ -234,28 +261,21 @@ def test_constructor_validates_configuration() -> None:
         )
 
 
-def test_run_sync_preserves_result_and_records_lifecycle(tmp_path: Any) -> None:
+def test_run_sync_preserves_result_and_records_lifecycle() -> None:
     original = Agent(TestModel(call_tools=[]))
-    session_file = tmp_path / "session-id"
-    os_environ = pytest.MonkeyPatch()
-    os_environ.setenv("KITARU_SESSION_ID_FILE", str(session_file))
-    try:
-        wrapped = KitaruAgent(
-            original,
-            agent_id=uuid.uuid4(),
-            api_url="http://kitaru.test",
-            session_name="recorded",
-        )
-        result = wrapped.run_sync("hello")
-    finally:
-        os_environ.undo()
+    wrapped = KitaruAgent(
+        original,
+        agent_id=uuid.uuid4(),
+        api_url="http://kitaru.test",
+        session_name="recorded",
+    )
+    result = wrapped.run_sync("hello")
 
     client = _FakeClient.instances[0]
     assert result.output == "success (no tool calls)"
     assert client.sessions.created[0].inputs == "hello"
     assert client.sessions.created[0].name == "recorded"
     assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
-    assert session_file.read_text() == str(client.session_id)
     assert client.closed
     assert client.events == [
         "session:create",
@@ -265,12 +285,12 @@ def test_run_sync_preserves_result_and_records_lifecycle(tmp_path: Any) -> None:
         "client:close",
     ]
     nodes = _nodes(client)
-    assert [(node.node_type, node.status, node.sequence) for node in nodes] == [
+    assert [(node.node_type, node.status, node.index) for node in nodes] == [
         (NodeType.SPAN, NodeStatus.IN_PROGRESS, 0),
         (NodeType.LLM_CALL, NodeStatus.COMPLETED, 1),
         (NodeType.SPAN, NodeStatus.COMPLETED, 0),
     ]
-    assert nodes[0].id == nodes[-1].id
+    assert nodes[0].index == nodes[-1].index
     llm = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
     assert llm.cost is None
 
@@ -278,17 +298,15 @@ def test_run_sync_preserves_result_and_records_lifecycle(tmp_path: Any) -> None:
     assert len(_FakeClient.instances) == 1
 
 
-async def test_setup_error_fails_created_session(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
-) -> None:
-    monkeypatch.setenv("KITARU_SESSION_ID_FILE", str(tmp_path))
+async def test_setup_error_fails_created_session() -> None:
+    _FakeClient.next_ingest_error = RuntimeError("ingest failed")
     agent = KitaruAgent(
         Agent(TestModel(call_tools=[])),
         agent_id=uuid.uuid4(),
         api_url="http://kitaru.test",
     )
 
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(RuntimeError, match="ingest failed"):
         await agent.run("prompt")
 
     client = _FakeClient.instances[0]
@@ -309,7 +327,7 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
         return ModelResponse(parts=[TextPart("ok")])
 
     spec = _replay_spec(
-        PassthroughPolicy(),
+        PassthroughConfig(),
         inputs="spec prompt",
         override=ReplayOverride(
             system_prompt="replacement system",
@@ -317,7 +335,7 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
         ),
     )
     _set_replay(monkeypatch, spec)
-    monkeypatch.setenv("KITARU_JOB_INPUTS", json.dumps("environment prompt"))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps("environment prompt"))
     agent = KitaruAgent(
         Agent(
             FunctionModel(model, model_name="original"),
@@ -351,7 +369,7 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
     assert user_prompts == ["environment prompt"]
     client = _FakeClient.instances[0]
     assert client.sessions.created[0].inputs == "environment prompt"
-    assert client.sessions.created[0].job_id == spec.job_id
+    assert client.sessions.created[0].task_id == spec.task_id
 
 
 async def test_replay_json_input_is_encoded_and_recorded_original(
@@ -370,7 +388,7 @@ async def test_replay_json_input_is_encoded_and_recorded_original(
         )
         return ModelResponse(parts=[TextPart("ok")])
 
-    spec = _replay_spec(PassthroughPolicy(), inputs=replay_input)
+    spec = _replay_spec(PassthroughConfig(), inputs=replay_input)
     _set_replay(monkeypatch, spec)
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
@@ -424,7 +442,7 @@ async def test_imported_conversation_replays_final_turn_with_history(
     }
     _set_replay(
         monkeypatch,
-        _replay_spec(PassthroughPolicy(), inputs=imported_inputs),
+        _replay_spec(PassthroughConfig(), inputs=imported_inputs),
     )
     agent = KitaruAgent(
         Agent(FunctionModel(model), system_prompt="Answer from the conversation."),
@@ -522,8 +540,9 @@ async def test_replay_uses_spec_input_when_environment_input_is_absent(
         )
         return ModelResponse(parts=[TextPart("ok")])
 
-    spec = _replay_spec(PassthroughPolicy(), inputs="large spec input")
+    spec = _replay_spec(PassthroughConfig(), inputs="large spec input")
     _set_replay(monkeypatch, spec)
+    monkeypatch.delenv("KITARU_TASK_INPUTS")
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
@@ -533,33 +552,6 @@ async def test_replay_uses_spec_input_when_environment_input_is_absent(
     await agent.run("caller prompt")
 
     assert seen_prompts == ["large spec input"]
-
-
-async def test_non_replay_environment_override_replaces_model_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    observed_settings: list[Any] = []
-
-    def model(_: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        observed_settings.append(info.model_settings)
-        return ModelResponse(parts=[TextPart("ok")])
-
-    monkeypatch.setenv(
-        "KITARU_OVERRIDE",
-        ReplayOverride(model_params={"temperature": 0.1}).model_dump_json(),
-    )
-    agent = KitaruAgent(
-        Agent(
-            FunctionModel(model),
-            model_settings={"temperature": 0.9, "max_tokens": 100},
-        ),
-        agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
-    )
-
-    await agent.run("prompt")
-
-    assert observed_settings == [{"temperature": 0.1}]
 
 
 async def test_mapping_model_override_replaces_exact_requested_model(
@@ -578,7 +570,7 @@ async def test_mapping_model_override_replaces_exact_requested_model(
     )
     monkeypatch.setattr(capability_module, "infer_model", lambda value: replacement)
     spec = _replay_spec(
-        PassthroughPolicy(),
+        PassthroughConfig(),
         override=ReplayOverride(model={"function:original": "provider:new"}),
     )
     _set_replay(monkeypatch, spec)
@@ -605,27 +597,40 @@ async def test_mapping_model_override_replaces_exact_requested_model(
     ("policy", "expected_result", "real_call_count", "mocked"),
     [
         (
-            PassthroughPolicy(),
+            PassthroughConfig(),
             {"source": "real", "city": "Paris", "units": "metric"},
             1,
             False,
         ),
         (
-            StaticPolicy(
+            StaticConfig(
                 cases=[
-                    StaticCase(match={"city": "London"}, result={"source": "wrong"}),
+                    StaticCase(
+                        match={"city": "London"},
+                        match_mode=StaticMatchMode.EXACT,
+                        result={"source": "wrong"},
+                    ),
                     StaticCase(
                         match={"city": "Paris"},
                         match_mode=StaticMatchMode.SUBSET,
                         result={"source": "static"},
                     ),
-                ]
+                ],
+                on_miss=ToolPolicyOnMiss.FAIL,
             ),
             {"source": "static"},
             0,
             True,
         ),
-        (HistoryPolicy(), {"source": "history"}, 0, True),
+        (
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+            {"source": "history"},
+            0,
+            True,
+        ),
     ],
 )
 async def test_tool_policies(
@@ -639,7 +644,7 @@ async def test_tool_policies(
     returned_results: list[Any] = []
     spec = _replay_spec(policy)
     _set_replay(monkeypatch, spec)
-    if isinstance(policy, HistoryPolicy):
+    if isinstance(policy, HistoryConfig):
         _FakeClient.next_lookup_response = ToolLookupResponse(
             found=True, result=expected_result
         )
@@ -658,11 +663,10 @@ async def test_tool_policies(
     tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
     assert tool.outputs == expected_result
     assert tool.attributes.get("mocked", False) is mocked
-    if isinstance(policy, HistoryPolicy):
-        lookup = client.jobs.lookups[0][1]
+    if isinstance(policy, HistoryConfig):
+        lookup = client.replays.lookups[0][1]
         arguments = {"city": "Paris", "units": "metric"}
-        assert lookup.inputs == arguments
-        assert lookup.cache_key == tool_call_cache_key("lookup", arguments)
+        assert lookup.cache_key == compute_tool_cache_key("lookup", arguments)
 
 
 @pytest.mark.parametrize(
@@ -682,8 +686,14 @@ async def test_static_miss_behavior(
     real_calls: list[dict[str, Any]] = []
     returned_results: list[Any] = []
     spec = _replay_spec(
-        StaticPolicy(
-            cases=[StaticCase(match={"city": "London"}, result="unused")],
+        StaticConfig(
+            cases=[
+                StaticCase(
+                    match={"city": "London"},
+                    match_mode=StaticMatchMode.EXACT,
+                    result="unused",
+                )
+            ],
             on_miss=on_miss,
         )
     )
@@ -714,10 +724,28 @@ async def test_static_miss_behavior(
 @pytest.mark.parametrize(
     ("policy", "fails"),
     [
-        (PassthroughPolicy(), False),
-        (StaticPolicy(cases=[StaticCase(result={"mocked": True})]), False),
-        (HistoryPolicy(), False),
-        (LLMPolicy(model="provider:model"), True),
+        (PassthroughConfig(), False),
+        (
+            StaticConfig(
+                cases=[
+                    StaticCase(
+                        match=None,
+                        match_mode=StaticMatchMode.EXACT,
+                        result={"mocked": True},
+                    )
+                ],
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+            False,
+        ),
+        (
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+            False,
+        ),
+        (LLMConfig(model="provider:model"), True),
     ],
 )
 async def test_provider_native_tools_are_observed_but_not_mocked(
@@ -764,7 +792,7 @@ async def test_provider_native_tools_are_observed_but_not_mocked(
     assert native.outputs == {"answer": "recorded"}
     assert native.attributes == {"provider_native": True}
     assert "mocked" not in native.attributes
-    assert client.jobs.lookups == []
+    assert client.replays.lookups == []
 
 
 async def test_unpaired_provider_native_call_rejects_llm_policy(
@@ -780,7 +808,7 @@ async def test_unpaired_provider_native_call_rejects_llm_policy(
             ]
         )
 
-    spec = _replay_spec(LLMPolicy(model="provider:model"))
+    spec = _replay_spec(LLMConfig(model="provider:model"))
     _set_replay(monkeypatch, spec)
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
@@ -817,7 +845,12 @@ async def test_history_policy_normalizes_validated_tool_arguments(
     def lookup_day(day: date) -> str:
         return day.isoformat()
 
-    spec = _replay_spec(HistoryPolicy())
+    spec = _replay_spec(
+        HistoryConfig(
+            scope=HistoryScope.BASELINE,
+            on_miss=ToolPolicyOnMiss.FAIL,
+        )
+    )
     _set_replay(monkeypatch, spec)
     _FakeClient.next_lookup_response = ToolLookupResponse(
         found=True, result={"source": "history"}
@@ -833,18 +866,17 @@ async def test_history_policy_normalizes_validated_tool_arguments(
     assert result.output == "finished"
     assert returned_results == [{"source": "history"}]
     client = _FakeClient.instances[0]
-    lookup = client.jobs.lookups[0][1]
+    lookup = client.replays.lookups[0][1]
     json_args = {"day": "2026-07-24"}
-    assert lookup.inputs == json_args
-    assert lookup.cache_key == tool_call_cache_key("lookup_day", json_args)
+    assert lookup.cache_key == compute_tool_cache_key("lookup_day", json_args)
     tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
     assert tool.inputs == json_args
 
 
 async def test_fully_consumed_stream_completes_session() -> None:
     async def stream_model(_: list[ModelMessage], __: AgentInfo) -> AsyncIterator[str]:
-        yield "hel"
-        yield "lo"
+        yield "hello "
+        yield "world"
 
     agent = KitaruAgent(
         Agent(FunctionModel(stream_function=stream_model)),
@@ -855,7 +887,7 @@ async def test_fully_consumed_stream_completes_session() -> None:
     async with agent.run_stream("prompt") as stream:
         output = await stream.get_output()
 
-    assert output == "hello"
+    assert output == "hello world"
     client = _FakeClient.instances[0]
     assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
     assert client.closed
@@ -888,8 +920,8 @@ async def test_per_tool_llm_policy_fails_clearly_without_executing_tool(
     real_calls: list[dict[str, Any]] = []
     returned_results: list[Any] = []
     spec = _replay_spec(
-        PassthroughPolicy(),
-        tools={"lookup": LLMPolicy(model="provider:model")},
+        PassthroughConfig(),
+        tools={"lookup": LLMConfig(model="provider:model")},
     )
     _set_replay(monkeypatch, spec)
     agent = KitaruAgent(

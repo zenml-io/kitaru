@@ -16,12 +16,14 @@
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
+from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.importers import (
     ImportContext,
     ImporterDescriptor,
@@ -38,7 +40,7 @@ from kitaru.importers import (
     TokenUsage,
     parsed_items,
 )
-from kitaru.importing import ParsedSession, ParseFailure
+from kitaru.task.importer import ParsedSession
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SESSION_FIELDS = (
@@ -573,9 +575,11 @@ class BraintrustProjectLogImporter:
 
 def parse(
     content: bytes,
-    source_instance: str | None = None,
-    filename: str | None = None,
-) -> list[ParsedSession | ParseFailure]:
+    params: dict[str, Any],
+) -> Iterator[ParsedSession | ImportFailure]:
     """Parse Braintrust JSON through the unified importer contract."""
-    context = ImportContext(source_instance=source_instance, filename=filename)
-    return parsed_items(BraintrustProjectLogImporter().parse(content, context))
+    context = ImportContext(
+        source_instance=params.get("source_instance"),
+        filename=params.get("filename"),
+    )
+    yield from parsed_items(BraintrustProjectLogImporter().parse(content, context))

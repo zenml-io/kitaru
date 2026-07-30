@@ -20,7 +20,7 @@ from typing import Any
 from kitaru_importer_braintrust import BraintrustProjectLogImporter, parse
 
 from kitaru.importers import ImportContext, NodeType, SessionStatus
-from kitaru.importing import ParsedSession
+from kitaru.task.importer import ParsedSession
 
 
 def context(
@@ -137,7 +137,7 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
         start=1_785_000_000.0,
     )
 
-    parsed = parse(json.dumps({"events": [root]}).encode())
+    parsed = list(parse(json.dumps({"events": [root]}).encode(), {}))
 
     assert len(parsed) == 1
     assert isinstance(parsed[0], ParsedSession)
