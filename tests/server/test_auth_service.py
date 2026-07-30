@@ -21,14 +21,23 @@ import pytest
 from conftest import (
     FakeAccountRepository,
     FakeApiKeyRepository,
+    FakeControlPlaneClient,
     FakePasswordHasher,
+    control_plane_settings,
     create_api_key,
     local_settings,
 )
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     LAST_USED_UPDATE_INTERVAL_SECONDS,
     AuthenticationError,
+    AuthenticationServiceUnavailableError,
     AuthService,
+)
+from kitaru.server.adapters.auth.control_plane import (
+    ControlPlaneAuthenticator,
+    ControlPlaneUnavailableError,
+    ControlPlaneUser,
 )
 from kitaru.server.adapters.auth.jwt import JWTToken
 from kitaru.server.domain.account import Account
@@ -85,6 +94,58 @@ async def create_account(
     return await repository.create(
         Account(name=name, password_hash=password_hash, active=active)
     )
+
+
+def create_cloud_service(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+    client: FakeControlPlaneClient,
+) -> AuthService:
+    """Build a Cloud authentication service backed by fakes."""
+    settings = control_plane_settings().model_copy(
+        update={"AUTH_SCHEME": AuthScheme.CLOUD}
+    )
+    return AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+        control_plane=ControlPlaneAuthenticator(
+            client=client,
+            account_repository=account_repository,
+            server_id=settings.SERVER_ID,
+        ),
+    )
+
+
+async def test_cloud_authenticates_raw_bearer_credential(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Authorize every Cloud bearer credential against the control plane."""
+    user = ControlPlaneUser(id=uuid.uuid4(), username="alice")
+    client = FakeControlPlaneClient(user=user)
+    service = create_cloud_service(account_repository, api_key_repository, client)
+
+    context = await service.resolve("raw-cloud-token")
+
+    assert client.received_credentials == ["raw-cloud-token"]
+    assert context.account.external_id == user.id
+
+
+async def test_cloud_reports_control_plane_outage(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Keep an authorization outage distinct from an invalid credential."""
+    client = FakeControlPlaneClient(error=ControlPlaneUnavailableError("timeout"))
+    service = create_cloud_service(account_repository, api_key_repository, client)
+
+    with pytest.raises(
+        AuthenticationServiceUnavailableError,
+        match="temporarily unavailable",
+    ):
+        await service.resolve("raw-cloud-token")
 
 
 async def test_api_key_auth(

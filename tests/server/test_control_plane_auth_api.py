@@ -29,10 +29,12 @@ from conftest import (
     create_api_key,
 )
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneError,
+    ControlPlaneUnavailableError,
     ControlPlaneUser,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -192,6 +194,22 @@ async def test_control_plane_login_rejected_credential(
     assert response.json() == {"detail": "Invalid control plane credential."}
 
 
+async def test_control_plane_login_reports_outage(
+    client: httpx.AsyncClient, control_plane_client: FakeControlPlaneClient
+) -> None:
+    """Observe HTTP 503 when the control plane cannot authorize the request."""
+    control_plane_client.error = ControlPlaneUnavailableError("timeout")
+
+    response = await client.post(
+        "/v1/login", headers={"Authorization": "Bearer cp-credential"}
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Control plane authorization is temporarily unavailable."
+    }
+
+
 async def test_control_plane_login_explicit_grant_type(
     client: httpx.AsyncClient,
     control_plane_client: FakeControlPlaneClient,
@@ -277,6 +295,42 @@ async def test_control_plane_api_key_authenticates_directly(
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 200
+
+
+async def test_cloud_users_only_see_their_own_resources(
+    settings: APISettings,
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+    control_plane_client: FakeControlPlaneClient,
+) -> None:
+    """Keep resource ownership scoped to each authorized Cloud identity."""
+    cloud_settings = settings.model_copy(update={"AUTH_SCHEME": AuthScheme.CLOUD})
+    app = build_app(
+        cloud_settings,
+        account_repository,
+        api_key_repository,
+        control_plane_client,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as cloud_client:
+        control_plane_client.user = ControlPlaneUser(id=uuid.uuid4(), username="alice")
+        created = await cloud_client.post(
+            "/v1/api-keys",
+            json={"name": "alice-key"},
+            headers={"Authorization": "Bearer alice-token"},
+        )
+
+        control_plane_client.user = ControlPlaneUser(id=uuid.uuid4(), username="bob")
+        listed = await cloud_client.get(
+            "/v1/api-keys",
+            headers={"Authorization": "Bearer bob-token"},
+        )
+
+    assert created.status_code == 201
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
 
 
 async def test_create_account_forbidden(

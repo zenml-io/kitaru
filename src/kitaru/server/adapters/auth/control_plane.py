@@ -342,6 +342,10 @@ class ControlPlaneAuthenticator:
             Request context for the mirrored account.
         """
         user = await self._client.authorize_user(credential, self._server_id)
+        if not user.is_active:
+            raise ControlPlaneAuthorizationError(
+                f"Control plane user {user.id} is inactive."
+            )
         account = await self._mirror_account(user)
         return AuthContext(account=account)
 

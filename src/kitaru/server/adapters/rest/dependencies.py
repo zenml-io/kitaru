@@ -27,7 +27,6 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthenticationServiceUnavailableError,
     AuthService,
 )
-from kitaru.server.adapters.auth.cloud_auth_service import CloudAuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneClient,
@@ -689,18 +688,14 @@ def get_auth_service(
     account_repository = SQLAccountRepository(session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
-    cloud_credential_resolver = None
-    if client is not None and settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+    if client is not None and settings.AUTH_SCHEME in (
+        AuthScheme.CONTROL_PLANE,
+        AuthScheme.CLOUD,
+    ):
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
             server_id=settings.SERVER_ID,
-        )
-    elif client is not None and settings.AUTH_SCHEME is AuthScheme.CLOUD:
-        cloud_credential_resolver = CloudAuthService(
-            server_id=settings.SERVER_ID,
-            control_plane=client,
-            account_repository=account_repository,
         )
     return AuthService(
         settings=settings,
@@ -709,7 +704,6 @@ def get_auth_service(
         password_hasher=BcryptPasswordHasher(),
         device_service=device_service,
         control_plane=control_plane,
-        cloud_credential_resolver=cloud_credential_resolver,
     )
 
 

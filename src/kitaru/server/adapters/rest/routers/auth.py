@@ -37,6 +37,7 @@ from kitaru.api_models.v1.auth import (
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
+    AuthenticationServiceUnavailableError,
     AuthService,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
@@ -267,10 +268,11 @@ async def login(
     account has confirmed it.
 
     Clients observe HTTP 200 on success, 400 when the grant type is not
-    accepted by this server or a device authorization is not ready, and 401
-    when the credentials cannot be validated. A 400 for the device grant type
-    carries an OAuth 2.0 ``error`` code, of which ``authorization_pending``
-    means the caller should poll again.
+    accepted by this server or a device authorization is not ready, 401 when
+    the credentials cannot be validated, and 503 when the control plane is
+    unavailable. A 400 for the device grant type carries an OAuth 2.0
+    ``error`` code, of which ``authorization_pending`` means the caller should
+    poll again.
 
     Args:
         request: Incoming request.
@@ -304,6 +306,11 @@ async def login(
             token, expires_at, csrf_token = await service.login_with_password(
                 form.username, form.password
             )
+    except AuthenticationServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
