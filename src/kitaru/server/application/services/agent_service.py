@@ -19,7 +19,6 @@ from kitaru.server.application.interfaces.agent_repository import AgentRepositor
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.base import ValidationError
 
 
 class AgentService:
@@ -105,8 +104,6 @@ class AgentService:
         agent = await self._repository.get(agent_id)
         fields = command.model_fields_set
         if "name" in fields:
-            if command.name is None:
-                raise ValidationError("Agent name cannot be cleared")
             agent.update_name(command.name)
         if "description" in fields:
             agent.update_description(command.description)

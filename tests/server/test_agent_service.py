@@ -17,7 +17,12 @@ import uuid
 
 import pytest
 
-from conftest import FakeAgentRepository, create_agent
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    create_agent,
+    create_agent_version,
+)
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
@@ -215,6 +220,8 @@ async def test_delete_agent_in_use(
 ) -> None:
     """Reject deleting an agent that has versions."""
     created = await create_agent(repository, ACTOR.account.id)
-    repository._increment_latest_version(created.id)
+    await create_agent_version(
+        FakeAgentVersionRepository(repository), created.id, ACTOR.account.id
+    )
     with pytest.raises(AgentInUse, match=f"Agent {created.id} has versions"):
         await service.delete_agent(created.id, actor=ACTOR)

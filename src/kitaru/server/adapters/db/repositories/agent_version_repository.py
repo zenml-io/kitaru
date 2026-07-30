@@ -73,6 +73,26 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
             raise AgentNotFound(agent_id)
         return row[0]
 
+    async def _insert_secret_links(
+        self, agent_version_id: uuid.UUID, run_spec: RunSpec | None
+    ) -> None:
+        """Insert the secret link rows for a run spec's secret ids.
+
+        Args:
+            agent_version_id: Id of the owning agent version.
+            run_spec: Run spec carrying the secret ids, or ``None``.
+        """
+        if run_spec is not None:
+            for index, secret_id in enumerate(run_spec.secret_ids):
+                self._session.add(
+                    AgentVersionSecretORM(
+                        agent_version_id=agent_version_id,
+                        secret_id=secret_id,
+                        index=index,
+                    )
+                )
+        await self._flush()
+
     async def _sync_secret_links(
         self, agent_version_id: uuid.UUID, run_spec: RunSpec | None
     ) -> None:
@@ -87,16 +107,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
                 AgentVersionSecretORM.agent_version_id == agent_version_id
             )
         )
-        if run_spec is not None:
-            for index, secret_id in enumerate(run_spec.secret_ids):
-                self._session.add(
-                    AgentVersionSecretORM(
-                        agent_version_id=agent_version_id,
-                        secret_id=secret_id,
-                        index=index,
-                    )
-                )
-        await self._flush()
+        await self._insert_secret_links(agent_version_id, run_spec)
 
     async def _load_secret_ids(self, agent_version_id: uuid.UUID) -> list[uuid.UUID]:
         """Load the ordered secret ids of one agent version.
@@ -164,7 +175,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         stored = agent_version.model_copy(update={"version": version_number})
         row = AgentVersionORM.from_domain(stored)
         await self._add(row)
-        await self._sync_secret_links(row.id, stored.run_spec)
+        await self._insert_secret_links(row.id, stored.run_spec)
         secret_ids = stored.run_spec.secret_ids if stored.run_spec is not None else []
         return row.to_domain(secret_ids)
 

@@ -1216,14 +1216,14 @@ class FakeAgentRepository:
     def __init__(self) -> None:
         """Initialize the repository."""
         self._agents: dict[uuid.UUID, Agent] = {}
-        self._version_counts: dict[uuid.UUID, int] = {}
+        self._agent_versions: FakeAgentVersionRepository | None = None
 
     def _check_duplicate_name(self, agent: Agent) -> None:
         for other in self._agents.values():
             if other.id != agent.id and other.name == agent.name:
                 raise DuplicateAgentName(agent.name)
 
-    def _increment_latest_version(self, agent_id: uuid.UUID) -> int:
+    def increment_latest_version(self, agent_id: uuid.UUID) -> int:
         """Bump and return the agent's version counter.
 
         Mirrors the SQL repository's ``UPDATE ... RETURNING`` bump.
@@ -1241,16 +1241,7 @@ class FakeAgentRepository:
         if agent is None:
             raise AgentNotFound(agent_id)
         agent.latest_version += 1
-        self._version_counts[agent_id] += 1
         return agent.latest_version
-
-    def _decrement_version_count(self, agent_id: uuid.UUID) -> None:
-        """Record that one fewer agent version references this agent.
-
-        Args:
-            agent_id: Id of the agent.
-        """
-        self._version_counts[agent_id] -= 1
 
     async def create(self, agent: Agent) -> Agent:
         """Persist a new agent.
@@ -1268,7 +1259,6 @@ class FakeAgentRepository:
         now = datetime.now(UTC)
         stored = agent.model_copy(update={"created": now, "updated": now})
         self._agents[stored.id] = stored
-        self._version_counts[stored.id] = 0
         return stored.model_copy()
 
     async def get(self, agent_id: uuid.UUID) -> Agent:
@@ -1337,10 +1327,12 @@ class FakeAgentRepository:
         """
         if agent_id not in self._agents:
             raise AgentNotFound(agent_id)
-        if self._version_counts.get(agent_id, 0) > 0:
+        if self._agent_versions is not None and any(
+            version.agent_id == agent_id
+            for version in self._agent_versions._versions.values()
+        ):
             raise AgentInUse(agent_id)
         del self._agents[agent_id]
-        del self._version_counts[agent_id]
 
 
 async def create_agent(
@@ -1372,9 +1364,12 @@ class FakeAgentVersionRepository:
         """Initialize the repository.
 
         Args:
-            agents: Fake agent repository sharing the version counter.
+            agents: Fake agent repository sharing the version counter. Also
+                wired back onto the agent repository so its delete can check
+                for versions.
         """
         self._agents = agents
+        self._agents._agent_versions = self
         self._versions: dict[uuid.UUID, AgentVersion] = {}
 
     async def create(self, agent_version: AgentVersion) -> AgentVersion:
@@ -1390,7 +1385,7 @@ class FakeAgentVersionRepository:
             Stored agent version with its assigned version number and
             timestamps set.
         """
-        version_number = self._agents._increment_latest_version(agent_version.agent_id)
+        version_number = self._agents.increment_latest_version(agent_version.agent_id)
         now = datetime.now(UTC)
         stored = agent_version.model_copy(
             update={"version": version_number, "created": now, "updated": now}
@@ -1467,11 +1462,9 @@ class FakeAgentVersionRepository:
         Raises:
             AgentVersionNotFound: No agent version has this id.
         """
-        stored = self._versions.get(agent_version_id)
-        if stored is None:
+        if agent_version_id not in self._versions:
             raise AgentVersionNotFound(agent_version_id)
         del self._versions[agent_version_id]
-        self._agents._decrement_version_count(stored.agent_id)
 
 
 async def create_agent_version(
