@@ -34,6 +34,11 @@ async def finalize_run_if_drained(
     fails the run, otherwise the run completes. A no-op when the settled
     replay is standalone or the run still has live replays.
 
+    The run row is locked before the drained count is read, so two replays of
+    the same run settling concurrently serialize on the lock instead of both
+    reading the other's still-uncommitted settlement and skipping
+    finalization, which would stall the run forever.
+
     Args:
         event: ReplaySettled event.
         replay_repository: Replay repository, for the drained count.
@@ -42,11 +47,11 @@ async def finalize_run_if_drained(
     replay = event.replay
     if replay.experiment_run_id is None:
         return
-    counts = await replay_repository.count_by_status(replay.experiment_run_id)
-    if counts.non_settled > 0:
-        return
     run = await experiment_run_repository.get(replay.experiment_run_id, exclusive=True)
     if run.settled:
+        return
+    counts = await replay_repository.count_by_status(replay.experiment_run_id)
+    if counts.non_settled > 0:
         return
     if run.status is ExperimentRunStatus.CANCELING:
         outcome = ExperimentRunStatus.CANCELED
