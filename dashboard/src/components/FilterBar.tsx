@@ -10,24 +10,27 @@ export interface FilterDef {
   key: string;
   label: string;
   type: "text" | "select";
-  options?: FilterOption[];
+  /** Plain strings mean value === label. */
+  options?: (string | FilterOption)[];
   placeholder?: string;
 }
 
 /**
- * Read the current values of the given filter keys from the URL. Pages pass
+ * Read the current values of the given filters from the URL. Pages pass
  * these straight into the list query key, which is what resets cursor
- * pagination whenever a filter changes.
+ * pagination whenever a filter changes. Taking the filter defs (not a
+ * separate key list) means a new filter cannot be silently missing from
+ * the query key.
  */
 export function useFilterValues(
-  keys: readonly string[],
+  filters: readonly FilterDef[],
 ): Record<string, string> {
   const [searchParams] = useSearchParams();
   const values: Record<string, string> = {};
-  for (const key of keys) {
-    const value = searchParams.get(key);
+  for (const def of filters) {
+    const value = searchParams.get(def.key);
     if (value !== null && value !== "") {
-      values[key] = value;
+      values[def.key] = value;
     }
   }
   return values;
@@ -100,11 +103,17 @@ function SelectFilter({ def }: { def: FilterDef }) {
       }`}
     >
       <option value="">{def.label}</option>
-      {def.options?.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
+      {def.options?.map((option) => {
+        const normalized =
+          typeof option === "string"
+            ? { value: option, label: option }
+            : option;
+        return (
+          <option key={normalized.value} value={normalized.value}>
+            {normalized.label}
+          </option>
+        );
+      })}
     </select>
   );
 }

@@ -228,3 +228,7 @@ dashboard-build:
 # Lint and typecheck the dev dashboard
 dashboard-check:
     cd dashboard && pnpm run check
+
+# Seed a running kitaru server with demo data for the dashboard
+dashboard-seed:
+    uv run python dashboard/scripts/seed.py

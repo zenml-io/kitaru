@@ -5,7 +5,7 @@ import { SettingsPanel } from "./SettingsPanel";
 
 export function StatusBar() {
   const info = useOne(["server-info"], () => unwrap(client.GET("/v1/info")), {
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
     retry: 1,
   });
 

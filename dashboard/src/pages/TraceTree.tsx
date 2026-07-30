@@ -12,7 +12,13 @@ import { useList } from "../api/hooks";
 import type { NodeType, SessionNode } from "../api/types";
 import { StatusBadge } from "../components/Badge";
 import { JsonViewer } from "../components/JsonViewer";
-import { EmptyState, ErrorNote, Loading } from "../components/States";
+import {
+  EmptyState,
+  ErrorBanner,
+  ErrorNote,
+  Loading,
+} from "../components/States";
+import { LoadMore } from "../components/Table";
 import { formatCost, formatDuration, formatTokens } from "../lib/format";
 
 const NODE_ICONS: Record<NodeType, ReactNode> = {
@@ -55,7 +61,7 @@ function NodeSummary({ node }: { node: SessionNode }) {
   if (node.node_type === "llm_call") {
     const parts = [
       node.model ?? node.requested_model,
-      formatTokens(node.tokens) !== "—" ? formatTokens(node.tokens) : null,
+      node.tokens ? formatTokens(node.tokens) : null,
       node.cost != null ? formatCost(node.cost) : null,
     ].filter((part): part is string => part != null);
     return <span className="text-xs text-zinc-400">{parts.join(" · ")}</span>;
@@ -73,31 +79,15 @@ function NodeSummary({ node }: { node: SessionNode }) {
 function NodeDetail({ node }: { node: SessionNode }) {
   return (
     <div className="mt-1 mb-2 ml-6 space-y-2">
-      {node.error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700 text-xs">
-          {node.error}
-        </div>
-      )}
-      {node.inputs !== null && node.inputs !== undefined && (
-        <JsonViewer value={node.inputs} label="Inputs" defaultOpenDepth={1} />
-      )}
-      {node.outputs !== null && node.outputs !== undefined && (
-        <JsonViewer value={node.outputs} label="Outputs" defaultOpenDepth={1} />
-      )}
-      {node.attributes != null && Object.keys(node.attributes).length > 0 && (
-        <JsonViewer
-          value={node.attributes}
-          label="Attributes"
-          defaultOpenDepth={1}
-        />
-      )}
-      {node.metadata != null && Object.keys(node.metadata).length > 0 && (
-        <JsonViewer
-          value={node.metadata}
-          label="Metadata"
-          defaultOpenDepth={1}
-        />
-      )}
+      {node.error && <ErrorBanner message={node.error} />}
+      <JsonViewer value={node.inputs} label="Inputs" defaultOpenDepth={1} />
+      <JsonViewer value={node.outputs} label="Outputs" defaultOpenDepth={1} />
+      <JsonViewer
+        value={node.attributes}
+        label="Attributes"
+        defaultOpenDepth={1}
+      />
+      <JsonViewer value={node.metadata} label="Metadata" defaultOpenDepth={1} />
       {node.cache_key && (
         <div className="font-mono text-xs text-zinc-400">
           cache_key: {node.cache_key}
@@ -108,7 +98,7 @@ function NodeDetail({ node }: { node: SessionNode }) {
 }
 
 export function TraceTree({ sessionId }: { sessionId: string }) {
-  const list = useList([`sessions/${sessionId}/nodes`], (cursor) =>
+  const list = useList(["sessions", sessionId, "nodes"], (cursor) =>
     unwrap(
       client.GET("/v1/sessions/{session_id}/nodes", {
         params: {
@@ -122,6 +112,24 @@ export function TraceTree({ sessionId }: { sessionId: string }) {
   const rows = useMemo(() => buildRows(list.items), [list.items]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Skip rows hidden under a collapsed ancestor: once we collapse at depth d,
+  // everything deeper is hidden until a row at depth <= d appears again.
+  const visibleRows = useMemo(() => {
+    const visible: TreeRow[] = [];
+    let skipDeeperThan: number | null = null;
+    for (const row of rows) {
+      if (skipDeeperThan !== null && row.depth > skipDeeperThan) {
+        continue;
+      }
+      skipDeeperThan = null;
+      visible.push(row);
+      if (row.hasChildren && collapsed.has(row.node.id)) {
+        skipDeeperThan = row.depth;
+      }
+    }
+    return visible;
+  }, [rows, collapsed]);
 
   if (list.isLoading) {
     return <Loading />;
@@ -144,21 +152,6 @@ export function TraceTree({ sessionId }: { sessionId: string }) {
       return next;
     });
   };
-
-  // Skip rows hidden under a collapsed ancestor: once we collapse at depth d,
-  // everything deeper is hidden until a row at depth <= d appears again.
-  const visibleRows: TreeRow[] = [];
-  let skipDeeperThan: number | null = null;
-  for (const row of rows) {
-    if (skipDeeperThan !== null && row.depth > skipDeeperThan) {
-      continue;
-    }
-    skipDeeperThan = null;
-    visibleRows.push(row);
-    if (row.hasChildren && collapsed.has(row.node.id)) {
-      skipDeeperThan = row.depth;
-    }
-  }
 
   return (
     <div>
@@ -230,16 +223,9 @@ export function TraceTree({ sessionId }: { sessionId: string }) {
           </div>
         ))}
       </div>
-      {list.hasNextPage && (
-        <button
-          type="button"
-          onClick={() => list.fetchNextPage()}
-          disabled={list.isFetchingNextPage}
-          className="mt-2 rounded-md px-2 py-1 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-50"
-        >
-          Load more nodes
-        </button>
-      )}
+      <div className="mt-2">
+        <LoadMore list={list} label="Load more nodes" />
+      </div>
     </div>
   );
 }

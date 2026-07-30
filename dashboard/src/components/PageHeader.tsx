@@ -1,5 +1,9 @@
 import type { ReactNode } from "react";
 
+export function SectionHeading({ children }: { children: ReactNode }) {
+  return <h2 className="mb-2 font-medium text-sm text-zinc-700">{children}</h2>;
+}
+
 export function PageHeader({
   title,
   subtitle,

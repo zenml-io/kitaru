@@ -1,20 +1,16 @@
 import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
 import { useList, usePolledOne } from "../api/hooks";
-import {
-  type ExperimentRunProgress,
-  isTerminalRun,
-  type Job,
-} from "../api/types";
+import { type ExperimentRunProgress, isSettled } from "../api/types";
 import { StatusBadge } from "../components/Badge";
 import { IdLink, IdText } from "../components/IdLink";
 import { KeyValue } from "../components/KeyValue";
 import { PageHeader } from "../components/PageHeader";
-import { ErrorNote, Loading } from "../components/States";
-import type { Column } from "../components/Table";
+import { ErrorBanner, ErrorNote, Loading } from "../components/States";
 import { DataTable } from "../components/Table";
 import { Tabs } from "../components/Tabs";
 import { formatDate, formatDuration, shortId } from "../lib/format";
+import { JOB_COLUMNS } from "./OpsPage";
 import { REPLAY_COLUMNS } from "./ReplaysPage";
 
 const PROGRESS_SEGMENTS: {
@@ -84,31 +80,8 @@ function RunReplaysTab({ runId }: { runId: string }) {
   );
 }
 
-const JOB_COLUMNS: Column<Job>[] = [
-  {
-    header: "ID",
-    cell: (job) => <IdLink id={job.id} to={`/jobs/${job.id}`} />,
-  },
-  { header: "Status", cell: (job) => <StatusBadge status={job.status} /> },
-  {
-    header: "Started",
-    cell: (job) => formatDate(job.started_at),
-    className: "whitespace-nowrap text-zinc-500",
-  },
-  {
-    header: "Duration",
-    cell: (job) => formatDuration(job.started_at, job.ended_at),
-    className: "whitespace-nowrap",
-  },
-  {
-    header: "Error",
-    cell: (job) => job.error ?? "—",
-    className: "max-w-96 truncate text-zinc-500",
-  },
-];
-
 function RunJobsTab({ runId }: { runId: string }) {
-  const list = useList([`experiment-runs/${runId}/jobs`], (cursor) =>
+  const list = useList(["experiment-runs", runId, "jobs"], (cursor) =>
     unwrap(
       client.GET("/v1/experiment-runs/{experiment_run_id}/jobs", {
         params: {
@@ -134,14 +107,14 @@ export function ExperimentRunPage() {
   const runId = id ?? "";
 
   const run = usePolledOne(
-    [`experiment-runs/${runId}`],
+    ["experiment-runs", runId],
     () =>
       unwrap(
         client.GET("/v1/experiment-runs/{experiment_run_id}", {
           params: { path: { experiment_run_id: runId } },
         }),
       ),
-    isTerminalRun,
+    isSettled,
   );
 
   if (run.isPending) {
@@ -160,7 +133,7 @@ export function ExperimentRunPage() {
           <span className="flex items-center gap-2">
             <StatusBadge status={data.status} />
             <IdText id={data.id} />
-            {!isTerminalRun(data) && (
+            {!isSettled(data) && (
               <span className="text-xs text-zinc-400">(auto-refreshing)</span>
             )}
           </span>
@@ -204,11 +177,7 @@ export function ExperimentRunPage() {
           ]}
         />
       </div>
-      {data.error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
-          {data.error}
-        </div>
-      )}
+      {data.error && <ErrorBanner message={data.error} />}
       <Tabs
         tabs={[
           {

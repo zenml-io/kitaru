@@ -7,7 +7,7 @@ import { IdLink, IdText } from "../components/IdLink";
 import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
 import { PageHeader } from "../components/PageHeader";
-import { ErrorNote, Loading } from "../components/States";
+import { ErrorBanner, ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
 import { DataTable } from "../components/Table";
 import { Tabs } from "../components/Tabs";
@@ -15,6 +15,7 @@ import {
   formatCost,
   formatDate,
   formatDuration,
+  formatScore,
   formatTokens,
   shortId,
 } from "../lib/format";
@@ -33,10 +34,7 @@ const EVALUATION_COLUMNS: Column<Evaluation>[] = [
   { header: "Type", cell: (evaluation) => evaluation.data_type },
   {
     header: "Score",
-    cell: (evaluation) =>
-      evaluation.score === null || evaluation.score === undefined
-        ? "—"
-        : String(evaluation.score),
+    cell: (evaluation) => formatScore(evaluation.score),
   },
   { header: "Value", cell: (evaluation) => evaluation.value ?? "—" },
   {
@@ -47,7 +45,7 @@ const EVALUATION_COLUMNS: Column<Evaluation>[] = [
 ];
 
 function EvaluationsTab({ sessionId }: { sessionId: string }) {
-  const list = useList([`evaluations`, { session_id: sessionId }], (cursor) =>
+  const list = useList(["evaluations", { session_id: sessionId }], (cursor) =>
     unwrap(
       client.GET("/v1/evaluations", {
         params: { query: { cursor, size: 50, session_id: sessionId } },
@@ -91,7 +89,7 @@ export function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const sessionId = id ?? "";
 
-  const session = useOne([`sessions/${sessionId}`], () =>
+  const session = useOne(["sessions", sessionId], () =>
     unwrap(
       client.GET("/v1/sessions/{session_id}", {
         params: { path: { session_id: sessionId } },
@@ -156,36 +154,20 @@ export function SessionDetailPage() {
           ]}
         />
       </div>
-      {data.error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
-          {data.error}
-        </div>
-      )}
+      {data.error && <ErrorBanner message={data.error} />}
       <div className="mb-4 grid gap-3 lg:grid-cols-2">
-        {data.inputs !== null && data.inputs !== undefined && (
-          <JsonViewer value={data.inputs} label="Inputs" defaultOpenDepth={1} />
-        )}
-        {data.outputs !== null && data.outputs !== undefined && (
-          <JsonViewer
-            value={data.outputs}
-            label="Outputs"
-            defaultOpenDepth={1}
-          />
-        )}
-        {data.expected !== null && data.expected !== undefined && (
-          <JsonViewer
-            value={data.expected}
-            label="Expected"
-            defaultOpenDepth={1}
-          />
-        )}
-        {data.metadata != null && Object.keys(data.metadata).length > 0 && (
-          <JsonViewer
-            value={data.metadata}
-            label="Metadata"
-            defaultOpenDepth={1}
-          />
-        )}
+        <JsonViewer value={data.inputs} label="Inputs" defaultOpenDepth={1} />
+        <JsonViewer value={data.outputs} label="Outputs" defaultOpenDepth={1} />
+        <JsonViewer
+          value={data.expected}
+          label="Expected"
+          defaultOpenDepth={1}
+        />
+        <JsonViewer
+          value={data.metadata}
+          label="Metadata"
+          defaultOpenDepth={1}
+        />
       </div>
       <Tabs
         tabs={[

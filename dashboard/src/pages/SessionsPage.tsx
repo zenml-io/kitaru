@@ -23,21 +23,13 @@ const FILTERS: FilterDef[] = [
     key: "origin",
     label: "Origin",
     type: "select",
-    options: [
-      { value: "recorded", label: "recorded" },
-      { value: "imported", label: "imported" },
-      { value: "replay", label: "replay" },
-    ],
+    options: ["recorded", "imported", "replay"],
   },
   {
     key: "status",
     label: "Status",
     type: "select",
-    options: [
-      { value: "in_progress", label: "in_progress" },
-      { value: "completed", label: "completed" },
-      { value: "failed", label: "failed" },
-    ],
+    options: ["in_progress", "completed", "failed"],
   },
   { key: "name", label: "Name", type: "text" },
   { key: "agent_id", label: "Agent ID", type: "text" },
@@ -57,9 +49,7 @@ const FILTERS: FilterDef[] = [
   { key: "max_cost", label: "Max cost", type: "text", placeholder: "Max cost" },
 ];
 
-const FILTER_KEYS = FILTERS.map((filter) => filter.key);
-
-const COLUMNS: Column<Session>[] = [
+export const SESSION_COLUMNS: Column<Session>[] = [
   {
     header: "ID",
     cell: (session) => (
@@ -113,7 +103,7 @@ const COLUMNS: Column<Session>[] = [
 ];
 
 export function SessionsPage() {
-  const filters = useFilterValues(FILTER_KEYS);
+  const filters = useFilterValues(FILTERS);
 
   const list = useList(["sessions", filters], (cursor) =>
     unwrap(
@@ -150,7 +140,7 @@ export function SessionsPage() {
       <FilterBar filters={FILTERS} />
       <DataTable
         list={list}
-        columns={COLUMNS}
+        columns={SESSION_COLUMNS}
         rowKey={(session) => session.id}
         rowLink={(session) => `/sessions/${session.id}`}
         emptyMessage="No sessions match the current filters."

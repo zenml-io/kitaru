@@ -36,3 +36,12 @@ export function EmptyState({
 }) {
   return <div className="py-8 text-sm text-zinc-400">{message}</div>;
 }
+
+/** Red panel for a resource's own error string (as opposed to a fetch failure). */
+export function ErrorBanner({ message }: { message: string }) {
+  return (
+    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
+      {message}
+    </div>
+  );
+}

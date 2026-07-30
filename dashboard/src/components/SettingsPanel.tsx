@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { setApiKey, useApiKey } from "../lib/settings";
 
 export function SettingsPanel() {
@@ -9,7 +9,6 @@ export function SettingsPanel() {
   const [draft, setDraft] = useState("");
   const queryClient = useQueryClient();
   const inputId = useId();
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const applyKey = (value: string | null) => {
     setApiKey(value);
@@ -19,7 +18,7 @@ export function SettingsPanel() {
   };
 
   return (
-    <div className="relative" ref={containerRef}>
+    <div className="relative">
       <button
         type="button"
         onClick={() => {

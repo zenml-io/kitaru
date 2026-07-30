@@ -10,11 +10,11 @@ import {
 import { IdLink, IdText } from "../components/IdLink";
 import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
-import { PageHeader } from "../components/PageHeader";
-import { ErrorNote, Loading } from "../components/States";
+import { PageHeader, SectionHeading } from "../components/PageHeader";
+import { EmptyState, ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
-import { DataTable } from "../components/Table";
-import { formatDate } from "../lib/format";
+import { DataTable, LoadMore } from "../components/Table";
+import { formatDate, formatScore } from "../lib/format";
 
 const FILTERS: FilterDef[] = [{ key: "name", label: "Name", type: "text" }];
 
@@ -43,7 +43,7 @@ const EVALUATOR_COLUMNS: Column<Evaluator>[] = [
 ];
 
 export function EvaluatorsPage() {
-  const filters = useFilterValues(["name"]);
+  const filters = useFilterValues(FILTERS);
   const list = useList(["evaluators", filters], (cursor) =>
     unwrap(
       client.GET("/v1/evaluators", {
@@ -84,10 +84,7 @@ const EVALUATION_COLUMNS: Column<Evaluation>[] = [
   { header: "Type", cell: (evaluation) => evaluation.data_type },
   {
     header: "Score",
-    cell: (evaluation) =>
-      evaluation.score === null || evaluation.score === undefined
-        ? "—"
-        : String(evaluation.score),
+    cell: (evaluation) => formatScore(evaluation.score),
   },
   { header: "Value", cell: (evaluation) => evaluation.value ?? "—" },
   {
@@ -132,15 +129,13 @@ function VersionSection({ version }: { version: EvaluatorVersion }) {
           {formatDate(version.created)}
         </span>
       </div>
-      {version.source != null && (
-        <div className="mb-2">
-          <JsonViewer
-            value={version.source}
-            label="Source"
-            defaultOpenDepth={1}
-          />
-        </div>
-      )}
+      <div className="mb-2">
+        <JsonViewer
+          value={version.source}
+          label="Source"
+          defaultOpenDepth={1}
+        />
+      </div>
       <VersionEvaluations versionId={version.id} />
     </div>
   );
@@ -150,14 +145,14 @@ export function EvaluatorDetailPage() {
   const { id } = useParams<{ id: string }>();
   const evaluatorId = id ?? "";
 
-  const evaluator = useOne([`evaluators/${evaluatorId}`], () =>
+  const evaluator = useOne(["evaluators", evaluatorId], () =>
     unwrap(
       client.GET("/v1/evaluators/{evaluator_id}", {
         params: { path: { evaluator_id: evaluatorId } },
       }),
     ),
   );
-  const versions = useList([`evaluators/${evaluatorId}/versions`], (cursor) =>
+  const versions = useList(["evaluators", evaluatorId, "versions"], (cursor) =>
     unwrap(
       client.GET("/v1/evaluators/{evaluator_id}/versions", {
         params: {
@@ -188,37 +183,27 @@ export function EvaluatorDetailPage() {
           ]}
         />
       </div>
-      {data.metadata != null && Object.keys(data.metadata).length > 0 && (
-        <div className="mb-4">
-          <JsonViewer
-            value={data.metadata}
-            label="Metadata"
-            defaultOpenDepth={1}
-          />
-        </div>
-      )}
-      <h2 className="mb-2 font-medium text-sm text-zinc-700">
-        Versions and their evaluations
-      </h2>
+      <div className="mb-4">
+        <JsonViewer
+          value={data.metadata}
+          label="Metadata"
+          defaultOpenDepth={1}
+        />
+      </div>
+      <SectionHeading>Versions and their evaluations</SectionHeading>
       {versions.isLoading ? (
         <Loading />
       ) : versions.error ? (
         <ErrorNote error={versions.error} />
       ) : (
         <>
+          {versions.items.length === 0 && (
+            <EmptyState message="This evaluator has no versions." />
+          )}
           {versions.items.map((version) => (
             <VersionSection key={version.id} version={version} />
           ))}
-          {versions.hasNextPage && (
-            <button
-              type="button"
-              onClick={() => versions.fetchNextPage()}
-              disabled={versions.isFetchingNextPage}
-              className="rounded-md px-2 py-1 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-50"
-            >
-              Load more versions
-            </button>
-          )}
+          <LoadMore list={versions} label="Load more versions" />
         </>
       )}
     </div>

@@ -10,10 +10,10 @@ import {
 import { IdLink, IdText } from "../components/IdLink";
 import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
-import { PageHeader } from "../components/PageHeader";
+import { PageHeader, SectionHeading } from "../components/PageHeader";
 import { ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
-import { DataTable } from "../components/Table";
+import { DataTable, LoadMore } from "../components/Table";
 import { formatDate } from "../lib/format";
 
 const FILTERS: FilterDef[] = [{ key: "name", label: "Name", type: "text" }];
@@ -38,7 +38,7 @@ const AGENT_COLUMNS: Column<Agent>[] = [
 ];
 
 export function AgentsPage() {
-  const filters = useFilterValues(["name"]);
+  const filters = useFilterValues(FILTERS);
   const list = useList(["agents", filters], (cursor) =>
     unwrap(
       client.GET("/v1/agents", {
@@ -88,13 +88,11 @@ function VersionRow({ version }: { version: AgentVersion }) {
         <div className="mt-1 text-sm text-zinc-500">{version.description}</div>
       )}
       <div className="mt-2 grid gap-3 lg:grid-cols-2">
-        {version.run_spec != null && (
-          <JsonViewer
-            value={version.run_spec}
-            label="Run spec"
-            defaultOpenDepth={1}
-          />
-        )}
+        <JsonViewer
+          value={version.run_spec}
+          label="Run spec"
+          defaultOpenDepth={1}
+        />
         <JsonViewer
           value={version.capabilities}
           label="Capabilities"
@@ -109,14 +107,14 @@ export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const agentId = id ?? "";
 
-  const agent = useOne([`agents/${agentId}`], () =>
+  const agent = useOne(["agents", agentId], () =>
     unwrap(
       client.GET("/v1/agents/{agent_id}", {
         params: { path: { agent_id: agentId } },
       }),
     ),
   );
-  const versions = useList([`agents/${agentId}/versions`], (cursor) =>
+  const versions = useList(["agents", agentId, "versions"], (cursor) =>
     unwrap(
       client.GET("/v1/agents/{agent_id}/versions", {
         params: { path: { agent_id: agentId }, query: { cursor, size: 50 } },
@@ -155,7 +153,7 @@ export function AgentDetailPage() {
           ]}
         />
       </div>
-      <h2 className="mb-2 font-medium text-sm text-zinc-700">Versions</h2>
+      <SectionHeading>Versions</SectionHeading>
       {versions.isLoading ? (
         <Loading />
       ) : versions.error ? (
@@ -169,14 +167,9 @@ export function AgentDetailPage() {
             <VersionRow key={version.id} version={version} />
           ))}
           {versions.hasNextPage && (
-            <button
-              type="button"
-              onClick={() => versions.fetchNextPage()}
-              disabled={versions.isFetchingNextPage}
-              className="px-4 py-2 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-50"
-            >
-              Load more
-            </button>
+            <div className="px-4 py-2">
+              <LoadMore list={versions} />
+            </div>
           )}
         </div>
       )}

@@ -47,11 +47,13 @@ function JsonNode({
   defaultOpenDepth: number;
 }) {
   const isObject = typeof value === "object" && value !== null;
-  const entries: [string, unknown][] = isObject
-    ? Array.isArray(value)
-      ? value.map((item, index) => [String(index), item])
-      : Object.entries(value)
-    : [];
+  const isArray = Array.isArray(value);
+  let entries: [string, unknown][] = [];
+  if (isArray) {
+    entries = value.map((item, index) => [String(index), item]);
+  } else if (isObject) {
+    entries = Object.entries(value);
+  }
   const startOpen = depth < defaultOpenDepth || entries.length <= 3;
   const [open, setOpen] = useState(startOpen);
 
@@ -59,7 +61,6 @@ function JsonNode({
     return <Primitive value={value} />;
   }
 
-  const isArray = Array.isArray(value);
   const brackets = isArray ? "[]" : "{}";
   if (entries.length === 0) {
     return <span className="text-zinc-500">{brackets}</span>;
@@ -115,7 +116,11 @@ export function JsonViewer({
 }) {
   const [copied, setCopied] = useState(false);
 
-  if (value === undefined) {
+  // Owning the "is this worth showing" rule here keeps call sites guard-free.
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value === "object" && Object.keys(value).length === 0) {
     return null;
   }
 

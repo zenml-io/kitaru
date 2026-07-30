@@ -1,7 +1,7 @@
 import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
 import { useList, usePolledOne } from "../api/hooks";
-import { isTerminalReplay, type Replay, type ReplayStatus } from "../api/types";
+import { isSettled, type Replay, type ReplayStatus } from "../api/types";
 import { StatusBadge } from "../components/Badge";
 import {
   FilterBar,
@@ -9,10 +9,10 @@ import {
   useFilterValues,
 } from "../components/FilterBar";
 import { IdLink, IdText } from "../components/IdLink";
-import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
 import { PageHeader } from "../components/PageHeader";
-import { ErrorNote, Loading } from "../components/States";
+import { ReplayConfig } from "../components/ReplayConfig";
+import { ErrorBanner, ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
 import { DataTable } from "../components/Table";
 import { formatDate, shortId } from "../lib/format";
@@ -22,13 +22,7 @@ const FILTERS: FilterDef[] = [
     key: "status",
     label: "Status",
     type: "select",
-    options: [
-      { value: "pending", label: "pending" },
-      { value: "evaluating", label: "evaluating" },
-      { value: "completed", label: "completed" },
-      { value: "failed", label: "failed" },
-      { value: "canceled", label: "canceled" },
-    ],
+    options: ["pending", "evaluating", "completed", "failed", "canceled"],
   },
   { key: "experiment_run_id", label: "Experiment run ID", type: "text" },
   { key: "baseline_session_id", label: "Baseline session ID", type: "text" },
@@ -84,11 +78,7 @@ export const REPLAY_COLUMNS: Column<Replay>[] = [
 ];
 
 export function ReplaysPage() {
-  const filters = useFilterValues([
-    "status",
-    "experiment_run_id",
-    "baseline_session_id",
-  ]);
+  const filters = useFilterValues(FILTERS);
   const list = useList(["replays", filters], (cursor) =>
     unwrap(
       client.GET("/v1/replays", {
@@ -128,14 +118,14 @@ export function ReplayDetailPage() {
   const replayId = id ?? "";
 
   const replay = usePolledOne(
-    [`replays/${replayId}`],
+    ["replays", replayId],
     () =>
       unwrap(
         client.GET("/v1/replays/{replay_id}", {
           params: { path: { replay_id: replayId } },
         }),
       ),
-    isTerminalReplay,
+    isSettled,
   );
 
   if (replay.isPending) {
@@ -201,30 +191,12 @@ export function ReplayDetailPage() {
           ]}
         />
       </div>
-      {data.error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
-          {data.error}
-        </div>
-      )}
-      <div className="grid gap-3 lg:grid-cols-2">
-        <JsonViewer
-          value={data.tool_policy}
-          label="Tool policy"
-          defaultOpenDepth={2}
-        />
-        {data.override != null && (
-          <JsonViewer
-            value={data.override}
-            label="Override"
-            defaultOpenDepth={2}
-          />
-        )}
-        <JsonViewer
-          value={data.evaluators}
-          label="Evaluators"
-          defaultOpenDepth={2}
-        />
-      </div>
+      {data.error && <ErrorBanner message={data.error} />}
+      <ReplayConfig
+        toolPolicy={data.tool_policy}
+        override={data.override}
+        evaluators={data.evaluators}
+      />
     </div>
   );
 }

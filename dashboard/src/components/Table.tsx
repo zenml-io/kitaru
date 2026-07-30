@@ -18,6 +18,32 @@ interface DataTableProps<T> {
   emptyMessage?: string;
 }
 
+/** Cursor-pagination footer shared by tables and hand-rolled lists. */
+export function LoadMore<T>({
+  list,
+  label = "Load more",
+}: {
+  list: ReturnType<typeof useList<T>>;
+  label?: string;
+}) {
+  if (!list.hasNextPage) {
+    return null;
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => list.fetchNextPage()}
+      disabled={list.isFetchingNextPage}
+      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-50"
+    >
+      {list.isFetchingNextPage && (
+        <Loader2 size={14} className="animate-spin" />
+      )}
+      {label}
+    </button>
+  );
+}
+
 /**
  * The one table component every list screen uses: renders loading, error,
  * and empty states from the useList result, and cursor pagination as a
@@ -80,17 +106,7 @@ export function DataTable<T>({
       </table>
       {list.hasNextPage && (
         <div className="border-zinc-100 border-t px-3 py-2">
-          <button
-            type="button"
-            onClick={() => list.fetchNextPage()}
-            disabled={list.isFetchingNextPage}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-indigo-600 text-sm hover:bg-indigo-50 disabled:opacity-50"
-          >
-            {list.isFetchingNextPage && (
-              <Loader2 size={14} className="animate-spin" />
-            )}
-            Load more
-          </button>
+          <LoadMore list={list} />
         </div>
       )}
     </div>

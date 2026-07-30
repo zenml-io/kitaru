@@ -10,11 +10,13 @@ import { ReplayDetailPage, ReplaysPage } from "./pages/ReplaysPage";
 import { SessionDetailPage } from "./pages/SessionDetailPage";
 import { SessionsPage } from "./pages/SessionsPage";
 
-function Placeholder({ title }: { title: string }) {
+function NotFound() {
   return (
     <div>
-      <h1 className="font-semibold text-lg">{title}</h1>
-      <p className="mt-2 text-sm text-zinc-500">Coming soon.</p>
+      <h1 className="font-semibold text-lg">Not found</h1>
+      <p className="mt-2 text-sm text-zinc-500">
+        This page does not exist. Pick a section from the sidebar.
+      </p>
     </div>
   );
 }
@@ -39,7 +41,7 @@ export function App() {
         <Route path="/evaluators/:id" element={<EvaluatorDetailPage />} />
         <Route path="/ops" element={<OpsPage />} />
         <Route path="/jobs/:id" element={<JobDetailPage />} />
-        <Route path="*" element={<Placeholder title="Not found" />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

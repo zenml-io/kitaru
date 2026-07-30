@@ -9,9 +9,9 @@ import {
   useFilterValues,
 } from "../components/FilterBar";
 import { IdLink, IdText } from "../components/IdLink";
-import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
-import { PageHeader } from "../components/PageHeader";
+import { PageHeader, SectionHeading } from "../components/PageHeader";
+import { ReplayConfig } from "../components/ReplayConfig";
 import { ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
 import { DataTable } from "../components/Table";
@@ -47,7 +47,7 @@ const EXPERIMENT_COLUMNS: Column<Experiment>[] = [
 ];
 
 export function ExperimentsPage() {
-  const filters = useFilterValues(["name", "tag"]);
+  const filters = useFilterValues(FILTERS);
   const list = useList(["experiments", filters], (cursor) =>
     unwrap(
       client.GET("/v1/experiments", {
@@ -76,7 +76,7 @@ export function ExperimentsPage() {
   );
 }
 
-export function runProgressSummary(run: ExperimentRun): string {
+function runProgressSummary(run: ExperimentRun): string {
   const progress = run.progress;
   return `${progress.completed}/${progress.total} done · ${progress.failed} failed`;
 }
@@ -119,7 +119,7 @@ export function ExperimentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const experimentId = id ?? "";
 
-  const experiment = useOne([`experiments/${experimentId}`], () =>
+  const experiment = useOne(["experiments", experimentId], () =>
     unwrap(
       client.GET("/v1/experiments/{experiment_id}", {
         params: { path: { experiment_id: experimentId } },
@@ -157,26 +157,14 @@ export function ExperimentDetailPage() {
           ]}
         />
       </div>
-      <div className="mb-4 grid gap-3 lg:grid-cols-2">
-        <JsonViewer
-          value={data.tool_policy}
-          label="Tool policy"
-          defaultOpenDepth={2}
-        />
-        {data.override != null && (
-          <JsonViewer
-            value={data.override}
-            label="Override"
-            defaultOpenDepth={2}
-          />
-        )}
-        <JsonViewer
-          value={data.evaluators}
-          label="Evaluators"
-          defaultOpenDepth={2}
+      <div className="mb-4">
+        <ReplayConfig
+          toolPolicy={data.tool_policy}
+          override={data.override}
+          evaluators={data.evaluators}
         />
       </div>
-      <h2 className="mb-2 font-medium text-sm text-zinc-700">Runs</h2>
+      <SectionHeading>Runs</SectionHeading>
       <DataTable
         list={runs}
         columns={RUN_COLUMNS}

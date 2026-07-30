@@ -1,13 +1,14 @@
 import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
-import { useList, useOne } from "../api/hooks";
-import type {
-  Job,
-  JobStatus,
-  Task,
-  TaskKind,
-  TaskStatus,
-  Worker,
+import { useList, usePolledOne } from "../api/hooks";
+import {
+  isSettled,
+  type Job,
+  type JobStatus,
+  type Task,
+  type TaskKind,
+  type TaskStatus,
+  type Worker,
 } from "../api/types";
 import { StatusBadge } from "../components/Badge";
 import {
@@ -17,8 +18,8 @@ import {
 } from "../components/FilterBar";
 import { IdLink, IdText } from "../components/IdLink";
 import { KeyValue } from "../components/KeyValue";
-import { PageHeader } from "../components/PageHeader";
-import { ErrorNote, Loading } from "../components/States";
+import { PageHeader, SectionHeading } from "../components/PageHeader";
+import { ErrorBanner, ErrorNote, Loading } from "../components/States";
 import type { Column } from "../components/Table";
 import { DataTable } from "../components/Table";
 import { Tabs } from "../components/Tabs";
@@ -77,9 +78,10 @@ function WorkersTab() {
           params: { query: { cursor, size: 50 } },
         }),
       ),
-    // Refetch so the live flag (derived from last_seen_at vs the liveness
-    // timeout) stays current without a manual reload.
-    { refetchInterval: 10_000 },
+    // Refetch so the live flag (derived server-side from last_seen_at vs the
+    // liveness timeout) stays current without a manual reload. Note a refetch
+    // reloads every loaded page, so the interval stays modest.
+    { refetchInterval: 30_000 },
   );
   return (
     <DataTable
@@ -91,7 +93,7 @@ function WorkersTab() {
   );
 }
 
-const JOB_COLUMNS: Column<Job>[] = [
+export const JOB_COLUMNS: Column<Job>[] = [
   {
     header: "ID",
     cell: (job) => <IdLink id={job.id} to={`/jobs/${job.id}`} />,
@@ -100,6 +102,11 @@ const JOB_COLUMNS: Column<Job>[] = [
   {
     header: "Created",
     cell: (job) => formatDate(job.created),
+    className: "whitespace-nowrap text-zinc-500",
+  },
+  {
+    header: "Started",
+    cell: (job) => formatDate(job.started_at),
     className: "whitespace-nowrap text-zinc-500",
   },
   {
@@ -126,7 +133,7 @@ const JOB_FILTERS: FilterDef[] = [
 ];
 
 function JobsTab() {
-  const filters = useFilterValues(["job_status"]);
+  const filters = useFilterValues(JOB_FILTERS);
   const list = useList(["jobs", filters], (cursor) =>
     unwrap(
       client.GET("/v1/jobs", {
@@ -221,12 +228,7 @@ const TASK_FILTERS: FilterDef[] = [
 ];
 
 function TasksTab() {
-  const filters = useFilterValues([
-    "kind",
-    "task_status",
-    "job_id",
-    "worker_id",
-  ]);
+  const filters = useFilterValues(TASK_FILTERS);
   const list = useList(["tasks", filters], (cursor) =>
     unwrap(
       client.GET("/v1/tasks", {
@@ -275,7 +277,7 @@ export function OpsPage() {
 }
 
 function JobTasks({ jobId }: { jobId: string }) {
-  const list = useList([`jobs/${jobId}/tasks`], (cursor) =>
+  const list = useList(["jobs", jobId, "tasks"], (cursor) =>
     unwrap(
       client.GET("/v1/jobs/{job_id}/tasks", {
         params: { path: { job_id: jobId }, query: { cursor, size: 50 } },
@@ -296,12 +298,15 @@ export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const jobId = id ?? "";
 
-  const job = useOne([`jobs/${jobId}`], () =>
-    unwrap(
-      client.GET("/v1/jobs/{job_id}", {
-        params: { path: { job_id: jobId } },
-      }),
-    ),
+  const job = usePolledOne(
+    ["jobs", jobId],
+    () =>
+      unwrap(
+        client.GET("/v1/jobs/{job_id}", {
+          params: { path: { job_id: jobId } },
+        }),
+      ),
+    isSettled,
   );
 
   if (job.isPending) {
@@ -342,12 +347,8 @@ export function JobDetailPage() {
           ]}
         />
       </div>
-      {data.error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700 text-sm">
-          {data.error}
-        </div>
-      )}
-      <h2 className="mb-2 font-medium text-sm text-zinc-700">Tasks</h2>
+      {data.error && <ErrorBanner message={data.error} />}
+      <SectionHeading>Tasks</SectionHeading>
       <JobTasks jobId={jobId} />
     </div>
   );

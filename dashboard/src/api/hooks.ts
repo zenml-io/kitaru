@@ -1,10 +1,20 @@
 import {
+  type InfiniteData,
   type UseQueryOptions,
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
 import type { ApiError } from "./client";
 import type { Page } from "./types";
+
+// Module-level so their identity is stable: React Query only caches the
+// select result while `options.select` compares equal across renders, and a
+// fresh `items` array during loading would defeat downstream memoization.
+function flattenPages<T>(data: InfiniteData<Page<T>, string | undefined>): T[] {
+  return data.pages.flatMap((page) => page.items);
+}
+
+const EMPTY: never[] = [];
 
 /**
  * Cursor-paginated list. The query key must include every filter value: the
@@ -28,12 +38,12 @@ export function useList<T>(
     queryFn: ({ pageParam }) => fetchPage(pageParam),
     initialPageParam: undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
-    select: (data) => data.pages.flatMap((page) => page.items),
+    select: flattenPages,
     refetchInterval: options?.refetchInterval,
   });
 
   return {
-    items: query.data ?? [],
+    items: query.data ?? (EMPTY as T[]),
     isLoading: query.isPending,
     error: query.error,
     hasNextPage: query.hasNextPage,

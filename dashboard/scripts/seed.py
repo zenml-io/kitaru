@@ -28,17 +28,17 @@ class Seeder:
             headers["Authorization"] = f"Bearer {api_key}"
         self.client = httpx.Client(base_url=base_url, headers=headers, timeout=30)
 
-    def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self.client.post(path, json=payload)
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+        response = self.client.request(method, path, json=payload)
         if response.status_code >= 400:
-            raise RuntimeError(f"POST {path} -> {response.status_code}: {response.text}")
+            raise RuntimeError(f"{method} {path} -> {response.status_code}: {response.text}")
         return response.json()
 
+    def post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", path, payload)
+
     def patch(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self.client.patch(path, json=payload)
-        if response.status_code >= 400:
-            raise RuntimeError(f"PATCH {path} -> {response.status_code}: {response.text}")
-        return response.json()
+        return self._request("PATCH", path, payload)
 
     def seed(self) -> None:
         now = datetime.now(UTC)
@@ -82,7 +82,7 @@ class Seeder:
         support_v1 = self.post(f"/v1/agents/{support_bot['id']}/versions", {})
         print(f"agent versions: docs v1 {docs_v1['id']}, docs v2 {docs_v2['id']}, support v1 {support_v1['id']}")
 
-        evaluators = {}
+        evaluator_names: list[str] = []
         for name, description, entrypoint in [
             ("cited-superseded-doc", "Fails when a superseded document is cited.", "kitaru_evals:cited_superseded_doc"),
             ("latency", "Wall-clock seconds from start to end.", "kitaru_evals:latency"),
@@ -99,8 +99,8 @@ class Seeder:
                     }
                 },
             )
-            evaluators[name] = evaluator
-        print(f"evaluators: {', '.join(evaluators)}")
+            evaluator_names.append(name)
+        print(f"evaluators: {', '.join(evaluator_names)}")
 
         session_ids: list[str] = []
         superseded_ids: list[str] = []
@@ -111,7 +111,12 @@ class Seeder:
             version = docs_v1 if index < 10 else docs_v2
             started = now - timedelta(hours=30 - index * 2)
             duration = timedelta(seconds=random.randint(8, 240))
-            status = "in_progress" if in_progress else ("failed" if failed else "completed")
+            if in_progress:
+                status = "in_progress"
+            elif failed:
+                status = "failed"
+            else:
+                status = "completed"
             question = random.choice(
                 [
                     "What is the current travel reimbursement limit?",
@@ -192,7 +197,7 @@ class Seeder:
                     "status": "failed" if failed else "completed",
                     "inputs": {"query": question},
                     "outputs": None if failed else {"hits": [doc_id, "DOC-2044"]},
-                    "error": "ToolTimeout: search_index took longer than 30s" if failed else None,
+                    "error": error,
                     "attributes": {},
                     "started_at": (started + timedelta(seconds=2)).isoformat(),
                     "ended_at": (started + timedelta(seconds=6)).isoformat(),
@@ -349,7 +354,7 @@ class Seeder:
                 },
             },
         )
-        self.client.post(f"/v1/workers/{worker['id']}/heartbeat")
+        self.post(f"/v1/workers/{worker['id']}/heartbeat")
         print(f"worker: {worker['id']} (heartbeat sent)")
 
 

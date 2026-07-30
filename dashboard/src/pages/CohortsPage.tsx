@@ -1,8 +1,7 @@
 import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
 import { useList, useOne } from "../api/hooks";
-import type { Cohort, Session } from "../api/types";
-import { StatusBadge } from "../components/Badge";
+import type { Cohort } from "../api/types";
 import {
   FilterBar,
   type FilterDef,
@@ -10,11 +9,11 @@ import {
 } from "../components/FilterBar";
 import { IdLink, IdText } from "../components/IdLink";
 import { KeyValue } from "../components/KeyValue";
-import { PageHeader } from "../components/PageHeader";
+import { PageHeader, SectionHeading } from "../components/PageHeader";
 import { ErrorNote, Loading } from "../components/States";
-import type { Column } from "../components/Table";
-import { DataTable } from "../components/Table";
-import { formatCost, formatDate, formatDuration } from "../lib/format";
+import { type Column, DataTable } from "../components/Table";
+import { formatDate } from "../lib/format";
+import { SESSION_COLUMNS } from "./SessionsPage";
 
 const FILTERS: FilterDef[] = [
   { key: "name", label: "Name", type: "text" },
@@ -47,7 +46,7 @@ const COHORT_COLUMNS: Column<Cohort>[] = [
 ];
 
 export function CohortsPage() {
-  const filters = useFilterValues(["name", "tag"]);
+  const filters = useFilterValues(FILTERS);
   const list = useList(["cohorts", filters], (cursor) =>
     unwrap(
       client.GET("/v1/cohorts", {
@@ -76,55 +75,33 @@ export function CohortsPage() {
   );
 }
 
-const MEMBER_COLUMNS: Column<Session>[] = [
-  {
-    header: "ID",
-    cell: (session) => (
-      <IdLink id={session.id} to={`/sessions/${session.id}`} />
-    ),
-  },
-  {
-    header: "Name",
-    cell: (session) => session.name ?? "—",
-    className: "max-w-56 truncate",
-  },
-  {
-    header: "Origin",
-    cell: (session) => <StatusBadge status={session.origin} />,
-  },
-  {
-    header: "Status",
-    cell: (session) => <StatusBadge status={session.status} />,
-  },
-  {
-    header: "Started",
-    cell: (session) => formatDate(session.started_at),
-    className: "whitespace-nowrap text-zinc-500",
-  },
-  {
-    header: "Duration",
-    cell: (session) => formatDuration(session.started_at, session.ended_at),
-    className: "whitespace-nowrap",
-  },
-  {
-    header: "Cost",
-    cell: (session) => formatCost(session.cost),
-    className: "whitespace-nowrap",
-  },
-];
+// Cohort members reuse the sessions table's columns, minus the agent-scoped
+// and call-volume ones that add little inside a single-agent cohort.
+const MEMBER_HEADERS = new Set([
+  "ID",
+  "Name",
+  "Origin",
+  "Status",
+  "Started",
+  "Duration",
+  "Cost",
+]);
+const MEMBER_COLUMNS = SESSION_COLUMNS.filter((column) =>
+  MEMBER_HEADERS.has(column.header),
+);
 
 export function CohortDetailPage() {
   const { id } = useParams<{ id: string }>();
   const cohortId = id ?? "";
 
-  const cohort = useOne([`cohorts/${cohortId}`], () =>
+  const cohort = useOne(["cohorts", cohortId], () =>
     unwrap(
       client.GET("/v1/cohorts/{cohort_id}", {
         params: { path: { cohort_id: cohortId } },
       }),
     ),
   );
-  const members = useList([`cohorts/${cohortId}/sessions`], (cursor) =>
+  const members = useList(["cohorts", cohortId, "sessions"], (cursor) =>
     unwrap(
       client.GET("/v1/cohorts/{cohort_id}/sessions", {
         params: { path: { cohort_id: cohortId }, query: { cursor, size: 50 } },
@@ -158,9 +135,7 @@ export function CohortDetailPage() {
           ]}
         />
       </div>
-      <h2 className="mb-2 font-medium text-sm text-zinc-700">
-        Member sessions (cohort order)
-      </h2>
+      <SectionHeading>Member sessions (cohort order)</SectionHeading>
       <DataTable
         list={members}
         columns={MEMBER_COLUMNS}
