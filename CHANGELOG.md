@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Agents and agent versions, managed via `/v1/agents` and `/v1/agent-versions`, where a version carries a run spec and its attached secrets.
+- Sessions and session nodes, managed via `/v1/sessions`, recording an agent run and its nested LLM calls, tool calls, and sub-agent calls.
+- Blobs, managed via `/v1/blobs`, content-addressed storage for plugin payloads and task inputs.
+- Plugins for evaluators and importers, managed via `/v1/evaluators` and `/v1/importers`, each versioned and backed by a script or package source.
+- Cohorts, managed via `/v1/cohorts`, named groups of sessions used as experiment baselines.
+- Tags, managed via `/v1/tags`, linking to sessions, cohorts, experiments, and experiment runs.
+- Experiments and experiment runs, managed via `/v1/experiments` and `/v1/experiment-runs`, comparing agent versions against a cohort.
+- Replays, managed via `/v1/replays`, re-running a session against a replay config with a per-tool lookup, passthrough, or override policy.
+- Evaluations, managed via `/v1/evaluations`, scoring a session or task output.
+- Jobs and tasks, managed via `/v1/jobs` and `/v1/tasks`, running agent runs, evaluations, and imports through workers that claim tasks and send heartbeats. The new `kitaru.worker` and `kitaru.task` packages run the worker process and give task code access to task-scoped accessors.
 - `GET /v1/info` reports the server id, version, auth scheme, server URL, dashboard URL, and control plane API URL, and is readable via `client.info.get()`. The endpoint is unauthenticated, because a client has to read it before it knows which credential to present. The URLs come from `KITARU_SERVER_SERVER_URL` and `KITARU_SERVER_DASHBOARD_URL` and are null when unset.
 - Device authentication for headless clients, following the OAuth 2.0 device authorization grant. `POST /v1/device_authorization` issues a short user code and a device code, a signed-in account confirms the user code at the verification URI, and the client exchanges its device code for a token at `POST /v1/login`. Authorized devices are listed, locked, and revoked via `/v1/devices`, and revoking one immediately invalidates every token issued for it. Configured through `KITARU_SERVER_DASHBOARD_URL`, `KITARU_SERVER_DEVICE_AUTH_TIMEOUT_SECONDS`, `KITARU_SERVER_DEVICE_AUTH_POLLING_INTERVAL_SECONDS`, `KITARU_SERVER_MAX_FAILED_DEVICE_AUTH_ATTEMPTS`, `KITARU_SERVER_DEVICE_EXPIRATION_MINUTES`, and `KITARU_SERVER_TRUSTED_DEVICE_EXPIRATION_MINUTES`.
 - A client credential store at `~/.config/kitaru/credentials.json`, holding API keys, device authorizations, and cached tokens per server URL. The file is written atomically with owner-only permissions, and `KITARU_CREDENTIALS_PATH` moves it while `KITARU_DISABLE_CREDENTIALS_CACHE` keeps it in memory.
