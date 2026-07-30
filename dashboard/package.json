@@ -1,0 +1,34 @@
+{
+  "name": "kitaru-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "biome check && tsc --noEmit",
+    "fix": "biome check --write",
+    "gen:api": "openapi-typescript ../openapi/openapi.json -o src/api/schema.d.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
+    "lucide-react": "^1.27.0",
+    "openapi-fetch": "^0.17.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "^8.3.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "openapi-typescript": "^7.13.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5"
+  }
+}

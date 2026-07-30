@@ -216,3 +216,15 @@ docs-build:
 # Validate the docs static export as it will be served under /docs
 docs-validate:
     cd docs && pnpm run validate:export
+
+# Run the dev dashboard against a local kitaru server (KITARU_SERVER_URL to override)
+dashboard:
+    cd dashboard && pnpm run dev
+
+# Build the dev dashboard
+dashboard-build:
+    cd dashboard && pnpm run build
+
+# Lint and typecheck the dev dashboard
+dashboard-check:
+    cd dashboard && pnpm run check
