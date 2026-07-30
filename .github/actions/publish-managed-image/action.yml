@@ -1,6 +1,6 @@
 ---
 name: Publish managed Kitaru image
-description: Build, scan, attest, publish, and sign the managed Kitaru image.
+description: Build and publish the managed Kitaru image to Amazon ECR.
 inputs:
   version:
     description: Kitaru release version.
@@ -11,10 +11,6 @@ inputs:
     default: 'false'
   aws-role-arn:
     description: AWS role used to publish the image.
-    required: false
-    default: ''
-  github-token:
-    description: GitHub token used to attach image metadata to the release.
     required: false
     default: ''
 runs:
@@ -36,52 +32,15 @@ runs:
       uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2.1.6
       with:
         mask-password: 'true'
-    # Trivy needs a local image so checks finish before any registry mutation.
-    - name: Build local image for pre-publish checks
+    - name: Build and publish image
       uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
       with:
         context: .
         file: docker/release.Dockerfile
         target: runtime
-        load: true
+        load: ${{ inputs.dry-run == 'true' }}
+        push: ${{ inputs.dry-run != 'true' }}
         tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
-        labels: |
-          org.opencontainers.image.title=kitaru
-          org.opencontainers.image.description=Kitaru server
-          org.opencontainers.image.version=${{ inputs.version }}
-          org.opencontainers.image.source=https://github.com/zenml-io/kitaru
-          org.opencontainers.image.licenses=Apache-2.0
-    - name: Scan image
-      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
-      with:
-        image-ref: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
-        severity: CRITICAL,HIGH
-        ignore-unfixed: false
-        exit-code: 1
-    - name: Generate image SBOM
-      uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
-      with:
-        image-ref: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
-        format: cyclonedx
-        output: kitaru-${{ inputs.version }}.cdx.json
-    - name: Upload image SBOM
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-      with:
-        name: kitaru-${{ inputs.version }}-sbom
-        path: kitaru-${{ inputs.version }}.cdx.json
-        if-no-files-found: error
-    - name: Publish image
-      if: inputs.dry-run != 'true'
-      id: publish
-      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
-      with:
-        context: .
-        file: docker/release.Dockerfile
-        target: runtime
-        push: true
-        tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
-        sbom: true
-        provenance: mode=max
         labels: |
           org.opencontainers.image.title=kitaru
           org.opencontainers.image.description=Kitaru server
@@ -89,34 +48,3 @@ runs:
           org.opencontainers.image.source=https://github.com/zenml-io/kitaru
           org.opencontainers.image.revision=${{ github.sha }}
           org.opencontainers.image.licenses=Apache-2.0
-    - name: Install Cosign
-      if: inputs.dry-run != 'true'
-      uses: sigstore/cosign-installer@d7543c93d881b35a8faa02e8e3605f69b7a1ce62  # v3.10.0
-    - name: Sign image digest
-      if: inputs.dry-run != 'true'
-      shell: bash
-      env:
-        IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
-      run: >-
-        cosign sign --yes
-        "715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server@${IMAGE_DIGEST}"
-    - name: Publish image release metadata
-      if: inputs.dry-run != 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.github-token }}
-        IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
-        VERSION: ${{ inputs.version }}
-      run: |-
-        jq -n \
-          --arg version "$VERSION" \
-          --arg repository "715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server" \
-          --arg digest "$IMAGE_DIGEST" \
-          '{version: $version, repository: $repository, digest: $digest}' \
-          > "kitaru-image-${VERSION}.json"
-        gh release upload "v$VERSION" "kitaru-image-${VERSION}.json" --clobber
-        {
-          echo "## Managed Kitaru image"
-          echo "Digest: \`$IMAGE_DIGEST\`"
-          echo "Configure tenant builder KITARU_RELEASE_IMAGE_DIGESTS for version \`$VERSION\`."
-        } >> "$GITHUB_STEP_SUMMARY"
