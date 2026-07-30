@@ -35,8 +35,8 @@ from kitaru.server.domain.account import Account
 class ControlPlaneAuthorizer(Protocol):
     """Control-plane operation required by Cloud authentication."""
 
-    async def authorize_server(
-        self, credential: str, server_id: uuid.UUID, action: str
+    async def authorize_user(
+        self, credential: str, server_id: uuid.UUID
     ) -> ControlPlaneUser:
         """Authorize a credential for one workspace."""
         ...
@@ -62,12 +62,11 @@ class CloudAuthService:
         self._control_plane = control_plane
         self._account_repository = account_repository
 
-    async def resolve(self, credential: str, action: str) -> AuthContext:
+    async def resolve(self, credential: str) -> AuthContext:
         """Resolve a Cloud bearer credential.
 
         Args:
             credential: Cloud bearer token, API key, or service-account key.
-            action: CRUD action requested by the caller.
 
         Raises:
             AuthenticationError: The credential is rejected by Cloud.
@@ -76,9 +75,7 @@ class CloudAuthService:
             Request context backed by the mirrored Cloud account.
         """
         try:
-            user = await self._control_plane.authorize_server(
-                credential, self._server_id, action
-            )
+            user = await self._control_plane.authorize_user(credential, self._server_id)
         except ControlPlaneAuthorizationError as exc:
             raise AuthenticationError("Invalid Cloud credential.") from exc
         except ControlPlaneUnavailableError as exc:

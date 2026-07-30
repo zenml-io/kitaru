@@ -759,7 +759,6 @@ def require_local_account_management(
 
 
 async def authorize(
-    request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         RequestCredential | None, Depends(get_optional_bearer_credential)
@@ -772,7 +771,6 @@ async def authorize(
     default account. Other schemes require a bearer credential.
 
     Args:
-        request: Incoming HTTP request.
         settings: Service settings governing auth behavior.
         credential: Bearer token plus optional CSRF token.
         auth_service: Authentication service for the current request.
@@ -801,7 +799,6 @@ async def authorize(
             credential=credential.token,
             csrf_token=credential.csrf_token,
             from_cookie=credential.from_cookie,
-            action=_request_action(request.method),
         )
     except AuthenticationServiceUnavailableError as exc:
         raise HTTPException(
@@ -813,16 +810,3 @@ async def authorize(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
-
-
-def _request_action(method: str) -> str:
-    """Map an HTTP method to a Cloud RBAC action."""
-    if method in {"GET", "HEAD", "OPTIONS"}:
-        return "read"
-    if method == "POST":
-        return "create"
-    if method in {"PUT", "PATCH"}:
-        return "update"
-    if method == "DELETE":
-        return "delete"
-    return "read"
