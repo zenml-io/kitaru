@@ -17,7 +17,6 @@ import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
-from typing import Protocol
 
 from anyio import to_thread
 
@@ -26,6 +25,7 @@ from kitaru.server.adapters.auth.control_plane import (
     CONTROL_PLANE_API_KEY_PREFIX,
     ControlPlaneAuthenticator,
     ControlPlaneError,
+    ControlPlaneUnavailableError,
 )
 from kitaru.server.adapters.auth.jwt import JWTToken, TokenError
 from kitaru.server.api.config import APISettings
@@ -65,14 +65,6 @@ class AuthenticationServiceUnavailableError(Exception):
     """Raised when an authentication dependency is unavailable."""
 
 
-class CloudCredentialResolver(Protocol):
-    """Cloud credential resolution used by managed workspaces."""
-
-    async def resolve(self, credential: str) -> AuthContext:
-        """Resolve a Cloud credential into an authentication context."""
-        ...
-
-
 class AuthService:
     """Resolve bearer credentials into request contexts."""
 
@@ -84,7 +76,6 @@ class AuthService:
         password_hasher: PasswordHasher,
         device_service: DeviceService | None = None,
         control_plane: ControlPlaneAuthenticator | None = None,
-        cloud_credential_resolver: CloudCredentialResolver | None = None,
     ) -> None:
         """Create an authentication service.
 
@@ -96,8 +87,7 @@ class AuthService:
             device_service: Device service backing the device authorization
                 grant.
             control_plane: Control plane authenticator, set when the server
-                runs the control plane auth scheme.
-            cloud_credential_resolver: Optional managed Cloud authenticator.
+                runs the control plane or Cloud auth scheme.
         """
         self._settings = settings
         self._account_repository = account_repository
@@ -105,7 +95,6 @@ class AuthService:
         self._password_hasher = password_hasher
         self._device_service = device_service
         self._control_plane = control_plane
-        self._cloud_credential_resolver = cloud_credential_resolver
 
     async def resolve(
         self,
@@ -126,9 +115,9 @@ class AuthService:
         Returns:
             Request context accepted by this server.
         """
-        if self._cloud_credential_resolver is not None:
-            return await self._cloud_credential_resolver.resolve(credential)
-        if self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+        if self._settings.AUTH_SCHEME is AuthScheme.CLOUD:
+            context = await self._authenticate_control_plane(credential)
+        elif self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             context = await self._resolve_control_plane_credential(credential)
         elif credential.startswith(API_KEY_PREFIX):
             context = await self._authenticate_api_key(credential)
@@ -297,6 +286,11 @@ class AuthService:
             raise AuthenticationError("Control plane authentication is not configured.")
         try:
             return await self._control_plane.authenticate(credential)
+        except ControlPlaneUnavailableError as exc:
+            logger.warning("Control plane authorization is unavailable: %s", exc)
+            raise AuthenticationServiceUnavailableError(
+                "Control plane authorization is temporarily unavailable."
+            ) from exc
         except ControlPlaneError as exc:
             # The caller only learns the credential was rejected, so the reason
             # is only ever visible here.

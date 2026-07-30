@@ -660,13 +660,6 @@ class FakeAccountRepository:
         self._accounts[stored.id] = stored
         return stored.model_copy()
 
-    async def ensure(self, account: Account) -> Account:
-        """Return an account, creating it when missing."""
-        existing = self._accounts.get(account.id)
-        if existing is not None:
-            return existing.model_copy()
-        return await self.create(account)
-
     async def get(self, account_id: uuid.UUID) -> Account:
         """Load an account by id.
 

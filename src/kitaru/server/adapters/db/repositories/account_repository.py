@@ -16,7 +16,6 @@
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.orm.account import (
     ACCOUNT_NAME_UNIQUE_CONSTRAINT,
@@ -71,28 +70,6 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
             },
         )
         return row.to_domain()
-
-    async def ensure(self, account: Account) -> Account:
-        """Return an account, creating it atomically when missing.
-
-        Args:
-            account: Account with the canonical ID and name.
-
-        Returns:
-            Existing or newly stored account.
-        """
-        row = AccountORM.from_domain(account)
-        statement = insert(AccountORM).values(
-            id=row.id,
-            is_service_account=row.is_service_account,
-            external_id=row.external_id,
-            name=row.name,
-            email=row.email,
-            password_hash=row.password_hash,
-            active=row.active,
-        )
-        await self._session.execute(statement.on_conflict_do_nothing())
-        return await self.get(account.id)
 
     async def get(self, account_id: uuid.UUID) -> Account:
         """Load an account by id.
