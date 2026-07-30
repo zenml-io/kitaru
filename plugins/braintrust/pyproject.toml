@@ -11,9 +11,6 @@ dependencies = [
     "kitaru>=0.21.0,<1",
 ]
 
-[project.entry-points."kitaru.trace_importers"]
-braintrust = "kitaru_importer_braintrust:BraintrustProjectLogImporter"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

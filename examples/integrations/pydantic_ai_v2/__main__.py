@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -62,7 +61,7 @@ def _configure_langfuse() -> Any | None:
         raise RuntimeError(
             "Langfuse tracing requires the 'langfuse' package. Run this example "
             "with: uv run --with langfuse python -m "
-            "v2_examples.pydantic_ai_agent"
+            "examples.integrations.pydantic_ai_v2"
         ) from exc
 
     Agent.instrument_all()
@@ -84,36 +83,24 @@ async def main() -> None:
         api_url=os.environ["KITARU_API_URL"],
     )
 
-    configured_session_file = os.environ.get("KITARU_SESSION_ID_FILE")
-    with tempfile.TemporaryDirectory(prefix="kitaru-example-") as temporary_dir:
-        session_file = configured_session_file or os.path.join(
-            temporary_dir, "session_id"
-        )
-        os.environ["KITARU_SESSION_ID_FILE"] = session_file
-        try:
-            if langfuse is None:
+    try:
+        if langfuse is None:
+            result = await agent.run(PROMPT)
+            trace_id = None
+        else:
+            with langfuse.start_as_current_observation(
+                as_type="span",
+                name="kitaru-pydantic-ai-example",
+                input=PROMPT,
+            ) as observation:
+                trace_id = langfuse.get_current_trace_id()
                 result = await agent.run(PROMPT)
-                trace_id = None
-            else:
-                with langfuse.start_as_current_observation(
-                    as_type="span",
-                    name="kitaru-pydantic-ai-example",
-                    input=PROMPT,
-                ) as observation:
-                    trace_id = langfuse.get_current_trace_id()
-                    result = await agent.run(PROMPT)
-                    observation.update(output=result.output)
-        finally:
-            if configured_session_file is None:
-                os.environ.pop("KITARU_SESSION_ID_FILE", None)
-            if langfuse is not None:
-                langfuse.flush()
-
-        with open(session_file, encoding="utf-8") as file:
-            session_id = file.read().strip()
+                observation.update(output=result.output)
+    finally:
+        if langfuse is not None:
+            langfuse.flush()
 
     print(result.output)
-    print(f"kitaru_session_id={session_id}")
     if trace_id is not None:
         print(f"langfuse_trace_id={trace_id}")
 

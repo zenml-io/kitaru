@@ -19,14 +19,15 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.api_models.v1.session_nodes import NodeStatus, NodeType
-from kitaru.api_models.v1.sessions import (
+from kitaru.api_models.v1.imports import ImportFailure
+from kitaru.api_models.v1.session import (
     SessionStatus,
 )
-from kitaru.api_models.v1.sessions import (
+from kitaru.api_models.v1.session import (
     TokenUsage as APITokenUsage,
 )
-from kitaru.importing import ParsedNode, ParsedSession, ParseFailure
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.task.importer import ParsedNode, ParsedSession
 
 
 class FrozenModel(BaseModel):
@@ -199,9 +200,9 @@ def _parsed_nodes(nodes: list[NormalizedNode]) -> list[ParsedNode]:
 
 def parsed_items(
     normalized: NormalizedImport,
-) -> list[ParsedSession | ParseFailure]:
+) -> list[ParsedSession | ImportFailure]:
     """Convert legacy provider normalization into the unified parser contract."""
-    items: list[ParsedSession | ParseFailure] = []
+    items: list[ParsedSession | ImportFailure] = []
     for session in normalized.sessions:
         metadata = dict(session.source_metadata)
         metadata["normalization_warnings"] = session.warnings
@@ -214,6 +215,7 @@ def parsed_items(
                 status=session.status,
                 inputs=session.inputs,
                 outputs=session.outputs,
+                expected=None,
                 error=session.error,
                 started_at=session.started_at,
                 ended_at=session.ended_at,
@@ -222,7 +224,7 @@ def parsed_items(
             )
         )
     items.extend(
-        ParseFailure(line=position, external_id=error.source_id, error=error.message)
+        ImportFailure(line=position, external_id=error.source_id, error=error.message)
         for position, error in enumerate(normalized.errors, start=1)
     )
     return items

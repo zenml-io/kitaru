@@ -16,8 +16,6 @@
 import asyncio
 import json
 import os
-import secrets
-import time
 import uuid
 from collections.abc import Sequence
 from contextlib import suppress
@@ -27,34 +25,34 @@ from typing import Any, cast
 
 from pydantic import TypeAdapter
 
-from kitaru.api_models.v1.jobs import (
-    HistoryPolicy,
-    JobSpecResponse,
-    LLMPolicy,
-    PassthroughPolicy,
+from kitaru.api_models.v1.replay import ReplayResponse, ToolLookupRequest
+from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    LLMConfig,
+    PassthroughConfig,
     ReplayOverride,
     StaticCase,
+    StaticConfig,
     StaticMatchMode,
-    StaticPolicy,
-    ToolLookupRequest,
-    ToolPolicy,
+    ToolConfig,
     ToolPolicyOnMiss,
 )
-from kitaru.api_models.v1.session_nodes import (
-    NodeStatus,
-    NodeType,
-    SessionNodeBatchRequest,
-    SessionNodeCreateRequest,
-)
-from kitaru.api_models.v1.sessions import (
+from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
     SessionStatus,
     SessionUpdateRequest,
     TokenUsage,
 )
+from kitaru.api_models.v1.session_node import (
+    NodeStatus,
+    NodeType,
+    SessionNodeBatchRequest,
+    SessionNodeCreateRequest,
+)
+from kitaru.api_models.v1.task import AgentTaskDetails
+from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
-from kitaru.hashing import tool_call_cache_key
 from pydantic_ai import UserPromptNode
 from pydantic_ai.capabilities import (
     AbstractCapability,
@@ -112,16 +110,6 @@ class ToolPolicyError(RuntimeError):
 
 class ToolPolicyMissError(ToolPolicyError):
     """Raised when a replay tool lookup misses with fail behavior."""
-
-
-def _uuid7() -> uuid.UUID:
-    """Generate a portable UUIDv7 node identifier."""
-    value = (time.time_ns() // 1_000_000) << 80
-    value |= 0x7 << 76
-    value |= secrets.randbits(12) << 64
-    value |= 0b10 << 62
-    value |= secrets.randbits(62)
-    return uuid.UUID(int=value)
 
 
 def _jsonable(value: Any) -> Any:
@@ -334,17 +322,16 @@ class _RunState:
     """Mutable state isolated to one PydanticAI run."""
 
     client: KitaruAPIClient
-    job_id: uuid.UUID | None
-    spec: JobSpecResponse | None
+    task_id: uuid.UUID | None
+    replay: ReplayResponse | None
     override: ReplayOverride | None
     effective_input: Any
     prompt_input: Any
     message_history: list[ModelMessage]
     session_id: uuid.UUID | None = None
-    root_id: uuid.UUID | None = None
     started_at: datetime | None = None
-    next_sequence: int = 1
-    latest_llm_id: uuid.UUID | None = None
+    next_index: int = 1
+    latest_llm_index: int | None = None
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     finished: bool = False
@@ -376,26 +363,23 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Create isolated client and replay state for one run."""
         client = KitaruAPIClient(base_url=self.api_url, api_key=self.api_key)
         try:
-            job_value = os.environ.get("KITARU_JOB_ID")
-            job_id = uuid.UUID(job_value) if job_value else None
-            spec = await client.jobs.get_spec(job_id) if job_id else None
-            raw_inputs = os.environ.get("KITARU_JOB_INPUTS")
+            task_value = os.environ.get("KITARU_TASK_ID")
+            task_id = uuid.UUID(task_value) if task_value else None
+            replay_value = os.environ.get("KITARU_REPLAY_ID")
+            replay_id = uuid.UUID(replay_value) if replay_value else None
+            replay = await client.replays.get(replay_id) if replay_id else None
+            raw_inputs = os.environ.get("KITARU_TASK_INPUTS")
             if raw_inputs is not None:
                 effective_input = json.loads(raw_inputs)
-            elif spec is not None:
-                effective_input = spec.inputs
+            elif task_id is not None:
+                spec = await client.tasks.get_spec(task_id)
+                if not isinstance(spec.details, AgentTaskDetails):
+                    raise RuntimeError(f"Task {task_id} is not an agent task")
+                effective_input = spec.details.inputs
             else:
                 effective_input = ctx.prompt
             prompt_input, message_history = _project_conversation_input(effective_input)
-            if spec is not None:
-                override = spec.override
-            else:
-                raw_override = os.environ.get("KITARU_OVERRIDE")
-                override = (
-                    ReplayOverride.model_validate_json(raw_override)
-                    if raw_override
-                    else None
-                )
+            override = replay.override if replay is not None else None
         except BaseException:
             await client.close()
             raise
@@ -403,8 +387,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             self,
             _state=_RunState(
                 client=client,
-                job_id=job_id,
-                spec=spec,
+                task_id=task_id,
+                replay=replay,
                 override=override,
                 effective_input=effective_input,
                 prompt_input=prompt_input,
@@ -423,35 +407,37 @@ class _KitaruCapability(AbstractCapability[Any]):
                 SessionCreateRequest(
                     agent_id=self.agent_id,
                     agent_version_id=self.agent_version_id,
-                    origin=SessionOrigin.RECORDED,
+                    origin=(
+                        SessionOrigin.REPLAY
+                        if state.replay is not None
+                        else SessionOrigin.RECORDED
+                    ),
                     name=self.session_name,
                     inputs=_jsonable(state.effective_input),
+                    outputs=None,
+                    expected=None,
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                    job_id=state.job_id,
+                    task_id=state.task_id,
                 )
             )
             state.session_id = session.id
-            state.root_id = _uuid7()
             state.started_at = started_at
-            session_id_path = os.environ.get("KITARU_SESSION_ID_FILE")
-            if session_id_path:
-                with open(session_id_path, "w", encoding="utf-8") as file:
-                    file.write(str(session.id))
-            await state.client.session_nodes.upsert(
+            await state.client.sessions.ingest_nodes(
                 session.id,
                 SessionNodeBatchRequest(
                     nodes=[
                         SessionNodeCreateRequest(
-                            id=state.root_id,
-                            parent_id=None,
-                            sequence=0,
+                            index=0,
+                            parent_index=None,
                             node_type=NodeType.SPAN,
                             name="run",
                             status=NodeStatus.IN_PROGRESS,
                             started_at=started_at,
                             inputs=_jsonable(state.effective_input),
+                            outputs=None,
+                            attributes={},
                         )
                     ]
                 ),
@@ -550,16 +536,15 @@ class _KitaruCapability(AbstractCapability[Any]):
                 model_replaced=replacement is not None,
             )
 
-        node_id, sequence = await self._allocate_node()
+        node_index = await self._allocate_node()
         started_at = datetime.now(UTC)
         try:
             response = await handler(effective)
         except BaseException as error:
             await self._buffer_node(
                 SessionNodeCreateRequest(
-                    id=node_id,
-                    parent_id=state.root_id,
-                    sequence=sequence,
+                    index=node_index,
+                    parent_index=0,
                     node_type=NodeType.LLM_CALL,
                     name="model_request",
                     status=NodeStatus.FAILED,
@@ -567,18 +552,19 @@ class _KitaruCapability(AbstractCapability[Any]):
                     started_at=started_at,
                     ended_at=datetime.now(UTC),
                     inputs=_messages_json(effective.messages),
+                    outputs=None,
                     requested_model=requested_model,
                     model=_model_identifier(effective),
                     model_params=_jsonable(effective.model_settings),
+                    attributes={},
                 )
             )
             raise
 
         unpaired_native_calls = _unpaired_native_calls(response)
         llm_node = SessionNodeCreateRequest(
-            id=node_id,
-            parent_id=state.root_id,
-            sequence=sequence,
+            index=node_index,
+            parent_index=0,
             node_type=NodeType.LLM_CALL,
             name="model_request",
             status=NodeStatus.COMPLETED,
@@ -599,8 +585,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             ),
         )
         await self._buffer_node(llm_node)
-        state.latest_llm_id = node_id
-        unsupported_native = await self._record_native_tools(response, node_id)
+        state.latest_llm_index = node_index
+        unsupported_native = await self._record_native_tools(response, node_index)
         if unsupported_native is not None:
             raise unsupported_native
         return response
@@ -617,16 +603,16 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Apply a replay policy around local function-tool execution."""
         del ctx, tool_def
         state = self._require_state()
-        node_id, sequence = await self._allocate_node()
+        node_index = await self._allocate_node()
         started_at = datetime.now(UTC)
         policy = self._tool_policy(call.tool_name)
         json_args = cast(dict[str, Any], _jsonable(args))
         mocked_policy: str | None = None
         failed_result = False
         try:
-            if policy is None or isinstance(policy, PassthroughPolicy):
+            if policy is None or isinstance(policy, PassthroughConfig):
                 result = await handler(args)
-            elif isinstance(policy, StaticPolicy):
+            elif isinstance(policy, StaticConfig):
                 matching = next(
                     (case for case in policy.cases if _case_matches(case, json_args)),
                     None,
@@ -638,14 +624,13 @@ class _KitaruCapability(AbstractCapability[Any]):
                     result, mocked_policy, failed_result = await self._handle_miss(
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
-            elif isinstance(policy, HistoryPolicy):
-                assert state.job_id is not None
-                response = await state.client.jobs.tool_lookup(
-                    state.job_id,
+            elif isinstance(policy, HistoryConfig):
+                assert state.replay is not None
+                response = await state.client.replays.tool_lookup(
+                    state.replay.id,
                     ToolLookupRequest(
                         tool_name=call.tool_name,
-                        inputs=json_args,
-                        cache_key=tool_call_cache_key(call.tool_name, json_args),
+                        cache_key=compute_tool_cache_key(call.tool_name, json_args),
                     ),
                 )
                 if response.found:
@@ -655,7 +640,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                     result, mocked_policy, failed_result = await self._handle_miss(
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
-            elif isinstance(policy, LLMPolicy):
+            elif isinstance(policy, LLMConfig):
                 raise ToolPolicyError(
                     "Tool policy 'llm' is not supported by the PydanticAI adapter"
                 )
@@ -663,9 +648,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                 raise ToolPolicyError(f"Unsupported tool policy '{policy.type}'")
         except BaseException as error:
             await self._record_tool(
-                node_id=node_id,
-                sequence=sequence,
-                parent_id=state.latest_llm_id or state.root_id,
+                node_index=node_index,
+                parent_index=state.latest_llm_index or 0,
                 tool_name=call.tool_name,
                 arguments=json_args,
                 result=None,
@@ -679,9 +663,8 @@ class _KitaruCapability(AbstractCapability[Any]):
 
         attributes = {"mocked": True, "policy": mocked_policy} if mocked_policy else {}
         await self._record_tool(
-            node_id=node_id,
-            sequence=sequence,
-            parent_id=state.latest_llm_id or state.root_id,
+            node_index=node_index,
+            parent_index=state.latest_llm_index or 0,
             tool_name=call.tool_name,
             arguments=json_args,
             result=result,
@@ -711,18 +694,16 @@ class _KitaruCapability(AbstractCapability[Any]):
             return {"error": message}, policy_type, True
         raise ToolPolicyMissError(message)
 
-    def _tool_policy(self, tool_name: str) -> ToolPolicy | None:
+    def _tool_policy(self, tool_name: str) -> ToolConfig | None:
         """Select a replay policy by exact tool name, then default."""
         state = self._require_state()
-        if state.spec is None:
+        if state.replay is None:
             return None
-        config = state.spec.tool_policy
-        if config is None:
-            return None
+        config = state.replay.tool_policy
         return config.tools.get(tool_name, config.default)
 
     async def _record_native_tools(
-        self, response: ModelResponse, parent_id: uuid.UUID
+        self, response: ModelResponse, parent_index: int
     ) -> ToolPolicyError | None:
         """Record public provider-native call/return parts truthfully."""
         calls = {
@@ -738,21 +719,20 @@ class _KitaruCapability(AbstractCapability[Any]):
         unsupported: str | None = None
         for call_id, call in calls.items():
             policy = self._tool_policy(call.tool_name)
-            if isinstance(policy, LLMPolicy):
+            if isinstance(policy, LLMConfig):
                 unsupported = call.tool_name
             result = returns.get(call_id)
             if result is None:
                 continue
-            node_id, sequence = await self._allocate_node()
+            node_index = await self._allocate_node()
             status = (
                 NodeStatus.COMPLETED
                 if result.outcome == "success"
                 else NodeStatus.FAILED
             )
             await self._record_tool(
-                node_id=node_id,
-                sequence=sequence,
-                parent_id=parent_id,
+                node_index=node_index,
+                parent_index=parent_index,
                 tool_name=call.tool_name,
                 arguments=call.args_as_dict(),
                 result=result.content,
@@ -788,9 +768,8 @@ class _KitaruCapability(AbstractCapability[Any]):
     async def _record_tool(
         self,
         *,
-        node_id: uuid.UUID,
-        sequence: int,
-        parent_id: uuid.UUID | None,
+        node_index: int,
+        parent_index: int | None,
         tool_name: str,
         arguments: Any,
         result: Any,
@@ -803,9 +782,8 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Buffer a terminal tool-call node."""
         await self._buffer_node(
             SessionNodeCreateRequest(
-                id=node_id,
-                parent_id=parent_id,
-                sequence=sequence,
+                index=node_index,
+                parent_index=parent_index,
                 external_id=external_id,
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
@@ -820,13 +798,13 @@ class _KitaruCapability(AbstractCapability[Any]):
             )
         )
 
-    async def _allocate_node(self) -> tuple[uuid.UUID, int]:
-        """Allocate a stable node id and monotonic child sequence."""
+    async def _allocate_node(self) -> int:
+        """Allocate a monotonic node index."""
         state = self._require_state()
         async with state.lock:
-            sequence = state.next_sequence
-            state.next_sequence += 1
-        return _uuid7(), sequence
+            index = state.next_index
+            state.next_index += 1
+        return index
 
     async def _buffer_node(self, node: SessionNodeCreateRequest) -> None:
         """Buffer one node and flush at the configured batch size."""
@@ -842,7 +820,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             return
         count = len(state.buffer)
         batch = SessionNodeBatchRequest(nodes=list(state.buffer))
-        await state.client.session_nodes.upsert(state.session_id, batch)
+        await state.client.sessions.ingest_nodes(state.session_id, batch)
         del state.buffer[:count]
 
     async def _finish(
@@ -855,16 +833,15 @@ class _KitaruCapability(AbstractCapability[Any]):
     ) -> None:
         """Write the terminal root, flush children, and finish the session."""
         state = self._require_state()
-        if state.finished or state.session_id is None or state.root_id is None:
+        if state.finished or state.session_id is None:
             return
         state.finished = True
         ended_at = datetime.now(UTC)
         async with state.lock:
             state.buffer.append(
                 SessionNodeCreateRequest(
-                    id=state.root_id,
-                    parent_id=None,
-                    sequence=0,
+                    index=0,
+                    parent_index=None,
                     node_type=NodeType.SPAN,
                     name="run",
                     status=node_status,
@@ -873,6 +850,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                     ended_at=ended_at,
                     inputs=_jsonable(state.effective_input),
                     outputs=_jsonable(outputs),
+                    attributes={},
                 )
             )
             await self._flush_locked(state)

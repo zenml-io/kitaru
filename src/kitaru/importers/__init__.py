@@ -11,10 +11,10 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Public contract for independently released trace importer plugins."""
+"""Provider trace normalization helpers."""
 
-from kitaru.api_models.v1.session_nodes import NodeStatus, NodeType
-from kitaru.api_models.v1.sessions import SessionStatus
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.importers.models import (
     ImportContext,
     ImporterDescriptor,
@@ -27,9 +27,11 @@ from kitaru.importers.models import (
     TokenUsage,
     parsed_items,
 )
-from kitaru.importing import SessionImportError
 
-InvalidImport = SessionImportError
+
+class InvalidImport(ValueError):
+    """Raised when an importer payload cannot be normalized."""
+
 
 __all__ = [
     "ImportContext",
