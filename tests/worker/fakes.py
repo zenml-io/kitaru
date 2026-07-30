@@ -16,7 +16,7 @@
 import uuid
 from collections import deque
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from kitaru.api_models.v1.job import JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
@@ -42,6 +42,7 @@ from kitaru.api_models.v1.worker import (
     WorkerResponse,
     WorkerRuntime,
 )
+from kitaru.client.api_client import KitaruAPIClient
 
 OWNER_ID = uuid.uuid4()
 
@@ -430,3 +431,8 @@ class FakeKitaruAPIClient:
     async def __aexit__(self, *exc_info: object) -> None:
         """Exit the context manager, marking the client closed."""
         self.closed = True
+
+
+def as_client(fake: FakeKitaruAPIClient) -> KitaruAPIClient:
+    """Type a fake as the real client for constructor signatures."""
+    return cast(KitaruAPIClient, fake)

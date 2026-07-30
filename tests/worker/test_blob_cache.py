@@ -43,6 +43,7 @@ async def test_put_then_get_hits(tmp_path: Path) -> None:
 
     hit = await cache.get(digest)
     assert hit == path
+    assert hit is not None
     assert hit.read_bytes() == content
 
 

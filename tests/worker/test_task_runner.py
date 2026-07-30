@@ -23,6 +23,7 @@ import httpx
 import pytest
 from fakes import (
     FakeKitaruAPIClient,
+    as_client,
     make_agent_spec,
     make_claimed,
     make_evaluator_spec,
@@ -42,7 +43,7 @@ from kitaru.worker.task_runner import MAX_RESULT_BYTES, TaskRunner
 
 def _ctx(tmp_path: Path, client: FakeKitaruAPIClient) -> ExecutionContext:
     return ExecutionContext(
-        client=client,
+        client=as_client(client),
         blob_cache=BlobCache(tmp_path / "blobs"),
         payload_cache=BlobCache(tmp_path / "payloads"),
     )

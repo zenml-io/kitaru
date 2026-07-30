@@ -20,6 +20,7 @@ from pathlib import Path
 
 from fakes import (
     FakeKitaruAPIClient,
+    as_client,
     make_agent_spec,
     make_evaluator_spec,
     make_importer_spec,
@@ -41,7 +42,7 @@ from kitaru.worker.handlers.imports import ImportHandler
 
 def _ctx(tmp_path: Path, client: FakeKitaruAPIClient) -> ExecutionContext:
     return ExecutionContext(
-        client=client,
+        client=as_client(client),
         blob_cache=BlobCache(tmp_path / "blobs"),
         payload_cache=BlobCache(tmp_path / "payloads"),
     )

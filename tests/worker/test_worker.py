@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 from fakes import (
     FakeKitaruAPIClient,
+    as_client,
     make_agent_spec,
     make_claimed,
     make_job_response,
@@ -45,7 +46,7 @@ from kitaru.worker.worker import Worker, detect_runtime
 
 def _ctx(tmp_path: Path, client: FakeKitaruAPIClient) -> ExecutionContext:
     return ExecutionContext(
-        client=client,
+        client=as_client(client),
         blob_cache=BlobCache(tmp_path / "blobs"),
         payload_cache=BlobCache(tmp_path / "payloads"),
     )
@@ -229,7 +230,9 @@ async def test_claim_loop_full_claim_loops_again_without_sleeping(
     stop = asyncio.Event()
     stop.set()
 
-    heartbeat = worker_module.WorkerHeartbeat(client, uuid.uuid4(), interval=1000)
+    heartbeat = worker_module.WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), interval=1000
+    )
     await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
 
     assert len(client.tasks.claim_calls) == 2
@@ -245,7 +248,9 @@ async def test_claim_loop_respects_the_concurrency_bound(tmp_path: Path) -> None
     ctx = _ctx(tmp_path, client)
     stop = asyncio.Event()
     stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(client, uuid.uuid4(), interval=1000)
+    heartbeat = worker_module.WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), interval=1000
+    )
 
     await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
 
@@ -262,7 +267,9 @@ async def test_claim_loop_short_claim_checks_stop_before_sleeping(
     ctx = _ctx(tmp_path, client)
     stop = asyncio.Event()
     stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(client, uuid.uuid4(), interval=1000)
+    heartbeat = worker_module.WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), interval=1000
+    )
 
     # An immediate empty claim is a "short" claim (0 < 5), so with stop
     # already set the loop must end without ever sleeping poll_interval.
@@ -298,7 +305,9 @@ async def test_claim_loop_backoff_doubles_and_resets_on_success(
     # already set, so the loop ends there instead of sleeping again.
     stop = asyncio.Event()
     stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(client, uuid.uuid4(), interval=1000)
+    heartbeat = worker_module.WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), interval=1000
+    )
 
     await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
 
@@ -328,7 +337,9 @@ async def test_claim_loop_backoff_caps_at_the_maximum(
         client.tasks.claim_responses.append(APIError(500, "boom"))
     stop = asyncio.Event()
     stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(client, uuid.uuid4(), interval=1000)
+    heartbeat = worker_module.WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), interval=1000
+    )
 
     await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
 
