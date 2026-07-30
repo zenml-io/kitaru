@@ -24,6 +24,7 @@ from kitaru.api_models.v1.device import (
     DeviceUpdateRequest,
     DeviceVerifyRequest,
 )
+from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
     from kitaru.client.api_client import KitaruAPIClient
@@ -93,14 +94,8 @@ class DevicesResource:
         Returns:
             Async iterator over every device.
         """
-        params = params or DeviceListParams()
-        while True:
-            page = await self.list(params)
-            for item in page.items:
-                yield item
-            if page.next_cursor is None:
-                break
-            params = params.model_copy(update={"cursor": page.next_cursor})
+        async for item in iterate_pages(params or DeviceListParams(), self.list):
+            yield item
 
     async def verify(
         self, device_id: uuid.UUID, request: DeviceVerifyRequest

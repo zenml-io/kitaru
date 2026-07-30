@@ -17,15 +17,12 @@ import hashlib
 import json
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
+from kitaru.base import FrozenModel
 from kitaru.server.domain.base import ValidationError
 
-
-class FrozenModel(BaseModel):
-    """Base type for immutable value objects."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
+__all__ = ["FrozenModel", "ListFilter"]
 
 
 class ListFilter(FrozenModel):

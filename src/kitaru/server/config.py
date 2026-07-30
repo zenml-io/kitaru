@@ -33,6 +33,17 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     SKIP_DB_MIGRATION: bool = False
 
+    WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
+    MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
+
+    TASK_HEARTBEAT_TIMEOUT_SECONDS: int = 60
+    TASK_RETRY_LIMIT: int = 3
+    TASK_SWEEP_BATCH_LIMIT: int = 100
+    EVALUATOR_TASK_TIMEOUT_SECONDS: int = 300
+    IMPORTER_TASK_TIMEOUT_SECONDS: int = 600
+    MAX_TASK_RESULT_BYTES: int = 1024 * 1024
+    EVALUATION_PAIR_LIMIT: int = 100
+
     DB_HOST: str | None = None
     DB_PORT: int = 5432
     DB_USER: str = "postgres"

@@ -57,6 +57,10 @@ server = [
     "python-multipart>=0.0.9",
     "uuid-utils>=0.10",
     "cryptography>=49.0.0",
+    "packaging>=24.0",
+]
+worker = [
+    "pydantic-settings>=2.14",
 ]
 
 [project.urls]

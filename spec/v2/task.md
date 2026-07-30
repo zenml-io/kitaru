@@ -121,7 +121,7 @@ def call_evaluator(name: str, evaluator: Callable[..., EvaluatorReturn],
                    session: SessionView, params: dict[str, Any]) -> list[EvaluationResult]: ...
 ```
 
-`EvaluationResult` (api_models, re-exported here): one named evaluation with a numeric score, a string value, or both, plus an optional explanation. The data type is derived: float or bool from a lone score, str from a lone value, categorical when both are set. Each result becomes one evaluation row.
+`EvaluationResult` (api_models, re-exported here): one named evaluation with a numeric score, a string value, or both, plus an optional explanation and an optional `passed` verdict. The data type is derived: float or bool from a lone score, str from a lone value, categorical when both are set. `passed` is independent of the score and the data type. Each result becomes one evaluation row.
 
 An evaluator is called as `evaluate(session: SessionView, **params)` and returns an `EvaluationResult` or a list of them. `call_evaluator` wraps the invocation and normalizes a single result into a one-element list. Validation: exceptions, empty lists, and duplicate names within the returned list all raise `EvaluationError` naming the evaluator. The `name` argument carries the evaluator name from the spec details, used for the messages.
 

@@ -87,9 +87,14 @@ class BaseSQLRepository(Generic[RowT]):
         return {row.id: row for row in rows}
 
     async def _add(
-        self, row: RowT, constraints: ConstraintErrors | None = None
+        self, row: UUIDPrimaryKeyMixin, constraints: ConstraintErrors | None = None
     ) -> None:
         """Add a row and flush, translating constraint violations.
+
+        Typed against the mixin rather than this repository's bound `RowT`,
+        since a repository managing more than one table (a link table
+        alongside its owning table, for example) adds rows of a second class
+        through the same method.
 
         Args:
             row: Row to add.
@@ -120,18 +125,27 @@ class BaseSQLRepository(Generic[RowT]):
         except IntegrityError as exc:
             self._raise_translated(exc, constraints)
 
-    async def _delete_row(self, entity_id: uuid.UUID) -> None:
-        """Delete a row by id.
+    async def _delete_row(
+        self, entity_id: uuid.UUID, constraints: ConstraintErrors | None = None
+    ) -> None:
+        """Delete a row by id, translating constraint violations.
 
         Args:
             entity_id: Id of the row.
+            constraints: Domain error factories keyed by constraint name, for
+                a referencing row that restricts the delete.
 
         Raises:
             NotFoundError: No row has this id.
+            DomainError: A mapped constraint was violated.
         """
         row = await self._get_row(entity_id)
-        await self._session.delete(row)
-        await self._session.flush()
+        try:
+            async with self._session.begin_nested():
+                await self._session.delete(row)
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(exc, constraints)
 
     def _raise_translated(
         self, exc: IntegrityError, constraints: ConstraintErrors | None

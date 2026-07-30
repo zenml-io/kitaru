@@ -35,11 +35,29 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 )
 from kitaru.server.adapters.rest.routers import (
     accounts,
+    agent_versions,
+    agents,
     api_keys,
     auth,
+    blobs,
+    cohort_versions,
+    cohorts,
     devices,
+    evaluations,
+    evaluators,
+    experiment_runs,
+    experiments,
+    importers,
+    imports,
     info,
+    jobs,
+    replays,
     secrets,
+    session_runs,
+    sessions,
+    tags,
+    tasks,
+    workers,
 )
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
@@ -50,6 +68,7 @@ from kitaru.server.domain.base import (
     ConflictError,
     DomainError,
     NotFoundError,
+    PayloadTooLargeError,
     ValidationError,
 )
 
@@ -58,8 +77,8 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     """Register JSON error responses for domain exceptions raised by routes.
 
     Clients receive HTTP 404 for ``NotFoundError``, 409 for ``ConflictError``,
-    422 for ``ValidationError``, and 500 for other ``DomainError`` subclasses.
-    Each body is ``{"detail": "<message>"}``.
+    413 for ``PayloadTooLargeError``, 422 for ``ValidationError``, and 500 for
+    other ``DomainError`` subclasses. Each body is ``{"detail": "<message>"}``.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -74,6 +93,13 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def conflict(request: Request, exc: ConflictError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(PayloadTooLargeError)
+    async def payload_too_large(
+        request: Request, exc: PayloadTooLargeError
+    ) -> JSONResponse:
+        _ = request
+        return JSONResponse(status_code=413, content={"detail": str(exc)})
 
     @app.exception_handler(ValidationError)
     async def validation(request: Request, exc: ValidationError) -> JSONResponse:
@@ -179,7 +205,39 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(info.router, prefix="/v1/info", tags=["info"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
     app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
+    app.include_router(agents.router, prefix="/v1/agents", tags=["agents"])
+    app.include_router(
+        agent_versions.router, prefix="/v1/agent-versions", tags=["agent-versions"]
+    )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
+    app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
+    app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
+    app.include_router(
+        cohort_versions.router, prefix="/v1/cohort-versions", tags=["cohort-versions"]
+    )
     app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
+    app.include_router(
+        evaluations.router, prefix="/v1/evaluations", tags=["evaluations"]
+    )
+    app.include_router(evaluators.router, prefix="/v1/evaluators", tags=["evaluators"])
+    app.include_router(
+        experiments.router, prefix="/v1/experiments", tags=["experiments"]
+    )
+    app.include_router(
+        experiment_runs.router,
+        prefix="/v1/experiment-runs",
+        tags=["experiment-runs"],
+    )
+    app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
+    app.include_router(imports.router, prefix="/v1/imports", tags=["imports"])
+    app.include_router(jobs.router, prefix="/v1/jobs", tags=["jobs"])
+    app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(
+        session_runs.router, prefix="/v1/session-runs", tags=["session-runs"]
+    )
+    app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
+    app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
+    app.include_router(tasks.router, prefix="/v1/tasks", tags=["tasks"])
+    app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
     return app

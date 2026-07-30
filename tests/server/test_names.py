@@ -19,7 +19,9 @@ from kitaru.server.domain.names import (
     RESERVED_SEPARATORS,
     InvalidName,
     validate_account_name,
+    validate_evaluation_name,
     validate_name,
+    validate_version_name,
 )
 
 
@@ -85,3 +87,37 @@ def test_invalid_account_names_rejected(name: str) -> None:
     """Reject names that are empty, boundary separated, or outside the set."""
     with pytest.raises(InvalidName):
         validate_account_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["accuracy", "accuracy.v2", "accuracy_v2", "accuracy-v2", "a.b-c_d"],
+)
+def test_valid_evaluation_names_pass(name: str) -> None:
+    """Accept the dot separator a qualified evaluator name may use."""
+    assert validate_evaluation_name(name) == name
+
+
+@pytest.mark.parametrize(
+    "name", ["", ".accuracy", "accuracy.", "a b", "a/b", "a:b", "a@b", "ä"]
+)
+def test_invalid_evaluation_names_rejected(name: str) -> None:
+    """Reject names that are empty, boundary separated, or outside the set."""
+    with pytest.raises(InvalidName):
+        validate_evaluation_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["v1", "1.2.3", "1.2.3+build.5", "feature/branch-1", "v1_2-3.4"],
+)
+def test_valid_version_names_pass(name: str) -> None:
+    """Accept the semver and branch-style separators a display version may use."""
+    assert validate_version_name(name) == name
+
+
+@pytest.mark.parametrize("name", ["", "/v1", "v1/", "v1 2", "v1:2", "v1@2", "ä"])
+def test_invalid_version_names_rejected(name: str) -> None:
+    """Reject names that are empty, boundary separated, or outside the set."""
+    with pytest.raises(InvalidName):
+        validate_version_name(name)
