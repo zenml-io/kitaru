@@ -59,7 +59,10 @@ class JobListParams(ListParams):
 class JobTasksListParams(ListParams):
     """Job tasks list params."""
 
-    kind: TaskKind | None = Field(default=None, description="Filter on task kind.")
+    kind: list[TaskKind] | None = Field(
+        default=None,
+        description="Filter on task kind, repeatable to match any of several.",
+    )
     status: TaskStatus | None = Field(
         default=None, description="Filter on task status."
     )

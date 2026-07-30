@@ -157,8 +157,10 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         statement = select(TaskORM)
         if task_filter.job_id is not None:
             statement = statement.where(TaskORM.job_id == task_filter.job_id)
-        if task_filter.kind is not None:
-            statement = statement.where(TaskORM.kind == task_filter.kind.value)
+        if task_filter.kinds is not None:
+            statement = statement.where(
+                TaskORM.kind.in_([kind.value for kind in task_filter.kinds])
+            )
         if task_filter.status is not None:
             statement = statement.where(TaskORM.status == task_filter.status.value)
         if task_filter.worker_id is not None:

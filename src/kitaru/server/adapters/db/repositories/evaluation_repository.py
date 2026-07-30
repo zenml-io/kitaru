@@ -19,8 +19,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
+from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
+from kitaru.server.adapters.db.orm.cohort_version_session import (
+    CohortVersionSessionORM,
+)
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -124,6 +131,44 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
         if evaluation_filter.task_id is not None:
             statement = statement.where(
                 EvaluationORM.task_id == evaluation_filter.task_id
+            )
+        if evaluation_filter.agent_id is not None:
+            statement = statement.where(
+                EvaluationORM.session_id.in_(
+                    select(SessionORM.id).where(
+                        SessionORM.agent_id == evaluation_filter.agent_id
+                    )
+                )
+            )
+        if evaluation_filter.cohort_id is not None:
+            # Sessions hang off a cohort version, so this spans every version
+            # of the cohort rather than only its latest.
+            statement = statement.where(
+                EvaluationORM.session_id.in_(
+                    select(CohortVersionSessionORM.session_id).where(
+                        CohortVersionSessionORM.cohort_version_id.in_(
+                            select(CohortVersionORM.id).where(
+                                CohortVersionORM.cohort_id
+                                == evaluation_filter.cohort_id
+                            )
+                        )
+                    )
+                )
+            )
+        if evaluation_filter.experiment_run_id is not None:
+            # Scoped by producing task rather than by session, so a run's
+            # baseline and result evaluations both land in the same page.
+            statement = statement.where(
+                EvaluationORM.task_id.in_(
+                    select(TaskORM.id).where(
+                        TaskORM.job_id.in_(
+                            select(ReplayORM.job_id).where(
+                                ReplayORM.experiment_run_id
+                                == evaluation_filter.experiment_run_id
+                            )
+                        )
+                    )
+                )
             )
         if evaluation_filter.evaluator_version_id is not None:
             statement = statement.where(

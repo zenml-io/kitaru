@@ -25,6 +25,8 @@ class ExperimentRunFilter(ListFilter):
     """Experiment run list filter."""
 
     experiment_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    agent_version_id: uuid.UUID | None = None
     status: ExperimentRunStatus | None = None
     tag: str | None = None
 

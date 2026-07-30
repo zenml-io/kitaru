@@ -17,6 +17,7 @@ import uuid
 
 from sqlalchemy import select
 
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
 from kitaru.server.adapters.db.orm.agent_version import (
     AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
@@ -93,7 +94,7 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         """
         statement = select(AgentORM)
         if agent_filter.name is not None:
-            statement = statement.where(AgentORM.name == agent_filter.name)
+            statement = statement.where(contains_text(AgentORM.name, agent_filter.name))
         rows, next_cursor = await paginate(
             self._session, statement, agent_filter, id_column=AgentORM.id
         )

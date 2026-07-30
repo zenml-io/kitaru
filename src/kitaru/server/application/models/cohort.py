@@ -25,6 +25,7 @@ from kitaru.server.base import ListFilter
 class CohortFilter(ListFilter):
     """Cohort list filter."""
 
+    agent_id: uuid.UUID | None = None
     name: str | None = None
     tag: str | None = None
 

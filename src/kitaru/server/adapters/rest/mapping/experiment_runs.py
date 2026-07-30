@@ -111,6 +111,8 @@ def experiment_run_list_params_to_filter(
     """
     return ExperimentRunFilter(
         experiment_id=params.experiment_id,
+        agent_id=params.agent_id,
+        agent_version_id=params.agent_version_id,
         status=params.status,
         tag=params.tag,
         cursor=params.cursor,

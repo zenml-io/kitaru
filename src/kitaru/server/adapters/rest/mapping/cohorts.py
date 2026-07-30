@@ -78,6 +78,7 @@ def cohort_list_params_to_filter(params: CohortListParams) -> CohortFilter:
         Cohort filter.
     """
     return CohortFilter(
+        agent_id=params.agent_id,
         name=params.name,
         tag=params.tag,
         cursor=params.cursor,

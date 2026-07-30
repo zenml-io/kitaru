@@ -18,6 +18,7 @@ import uuid
 from sqlalchemy import select
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.cohort import (
     COHORT_NAME_UNIQUE_CONSTRAINT,
     CohortORM,
@@ -92,8 +93,12 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
             Page of matching cohorts and the next cursor.
         """
         statement = select(CohortORM)
+        if cohort_filter.agent_id is not None:
+            statement = statement.where(CohortORM.agent_id == cohort_filter.agent_id)
         if cohort_filter.name is not None:
-            statement = statement.where(CohortORM.name == cohort_filter.name)
+            statement = statement.where(
+                contains_text(CohortORM.name, cohort_filter.name)
+            )
         if cohort_filter.tag is not None:
             tag_exists = (
                 select(TagLinkORM.id)

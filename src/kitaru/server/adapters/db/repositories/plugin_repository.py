@@ -18,6 +18,7 @@ from collections.abc import Callable
 
 from sqlalchemy import Select, select, update
 
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.evaluation import (
     EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
 )
@@ -136,7 +137,9 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
         """
         statement = select(PluginORM).where(PluginORM.kind == plugin_filter.kind.value)
         if plugin_filter.name is not None:
-            statement = statement.where(PluginORM.name == plugin_filter.name)
+            statement = statement.where(
+                contains_text(PluginORM.name, plugin_filter.name)
+            )
         if plugin_filter.provider is not None:
             statement = statement.where(PluginORM.provider == plugin_filter.provider)
         rows, next_cursor = await paginate(

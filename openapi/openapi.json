@@ -8369,7 +8369,26 @@
             }
           },
           {
-            "description": "Filter on cohort name.",
+            "description": "Filter on agent.",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on agent.",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "description": "Filter on cohort name, matched as a substring.",
             "in": "query",
             "name": "name",
             "required": false,
@@ -8382,7 +8401,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter on cohort name.",
+              "description": "Filter on cohort name, matched as a substring.",
               "title": "Name"
             }
           },
@@ -9157,6 +9176,63 @@
             }
           },
           {
+            "description": "Filter on the agent owning the scored sessions.",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the agent owning the scored sessions.",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "description": "Filter on the cohort holding the scored sessions.",
+            "in": "query",
+            "name": "cohort_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the cohort holding the scored sessions.",
+              "title": "Cohort Id"
+            }
+          },
+          {
+            "description": "Filter on the experiment run that produced them.",
+            "in": "query",
+            "name": "experiment_run_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the experiment run that produced them.",
+              "title": "Experiment Run Id"
+            }
+          },
+          {
             "description": "Filter on evaluator version.",
             "in": "query",
             "name": "evaluator_version_id",
@@ -9914,6 +9990,44 @@
               ],
               "description": "Filter on experiment.",
               "title": "Experiment Id"
+            }
+          },
+          {
+            "description": "Filter on the agent owning the replayed version.",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the agent owning the replayed version.",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "description": "Filter on agent version.",
+            "in": "query",
+            "name": "agent_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on agent version.",
+              "title": "Agent Version Id"
             }
           },
           {
@@ -11437,20 +11551,23 @@
             }
           },
           {
-            "description": "Filter on task kind.",
+            "description": "Filter on task kind, repeatable to match any of several.",
             "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/TaskKind"
+                  "items": {
+                    "$ref": "#/components/schemas/TaskKind"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on task kind.",
+              "description": "Filter on task kind, repeatable to match any of several.",
               "title": "Kind"
             }
           },
@@ -13347,20 +13464,23 @@
             }
           },
           {
-            "description": "Filter on task kind.",
+            "description": "Filter on task kind, repeatable to match any of several.",
             "in": "query",
             "name": "kind",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/TaskKind"
+                  "items": {
+                    "$ref": "#/components/schemas/TaskKind"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on task kind.",
+              "description": "Filter on task kind, repeatable to match any of several.",
               "title": "Kind"
             }
           },

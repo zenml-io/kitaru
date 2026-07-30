@@ -35,7 +35,9 @@ class TaskFilter(ListFilter):
     """Task list filter."""
 
     job_id: uuid.UUID | None = None
-    kind: TaskKind | None = None
+    # A tuple rather than a list, since ListFilter is frozen and therefore
+    # hashable.
+    kinds: tuple[TaskKind, ...] | None = None
     status: TaskStatus | None = None
     worker_id: uuid.UUID | None = None
     stale_before: AwareDatetime | None = None

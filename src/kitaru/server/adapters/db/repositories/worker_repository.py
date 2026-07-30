@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.worker import (
     WORKER_NAME_UNIQUE_CONSTRAINT,
     WorkerORM,
@@ -136,7 +137,9 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         """
         statement = select(WorkerORM)
         if worker_filter.name is not None:
-            statement = statement.where(WorkerORM.name == worker_filter.name)
+            statement = statement.where(
+                contains_text(WorkerORM.name, worker_filter.name)
+            )
         if worker_filter.seen_after is not None:
             statement = statement.where(
                 WorkerORM.last_seen_at >= worker_filter.seen_after

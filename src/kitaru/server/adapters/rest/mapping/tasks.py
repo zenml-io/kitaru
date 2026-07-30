@@ -236,7 +236,7 @@ def task_list_params_to_filter(params: TaskListParams) -> TaskFilter:
     """
     return TaskFilter(
         job_id=params.job_id,
-        kind=params.kind,
+        kinds=tuple(params.kind) if params.kind is not None else None,
         status=params.status,
         worker_id=params.worker_id,
         cursor=params.cursor,

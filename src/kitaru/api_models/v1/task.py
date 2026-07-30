@@ -128,7 +128,10 @@ class TaskListParams(ListParams):
     """Task list params."""
 
     job_id: uuid.UUID | None = Field(default=None, description="Filter on owning job.")
-    kind: TaskKind | None = Field(default=None, description="Filter on task kind.")
+    kind: list[TaskKind] | None = Field(
+        default=None,
+        description="Filter on task kind, repeatable to match any of several.",
+    )
     status: TaskStatus | None = Field(
         default=None, description="Filter on task status."
     )

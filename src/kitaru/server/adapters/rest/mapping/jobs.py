@@ -70,7 +70,7 @@ def job_tasks_list_params_to_filter(params: JobTasksListParams) -> TaskFilter:
         Task filter without the owning job, which the service pins.
     """
     return TaskFilter(
-        kind=params.kind,
+        kinds=tuple(params.kind) if params.kind is not None else None,
         status=params.status,
         cursor=params.cursor,
         size=params.size,

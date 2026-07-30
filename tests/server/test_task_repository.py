@@ -258,9 +258,14 @@ async def test_query_filters(setup: Setup) -> None:
     assert [t.id for t in tasks] == [task.id]
 
     tasks, _ = await setup.tasks.query(
-        TaskFilter(job_id=setup.job_id, kind=TaskKind.IMPORTER)
+        TaskFilter(job_id=setup.job_id, kinds=(TaskKind.IMPORTER,))
     )
     assert tasks == []
+
+    tasks, _ = await setup.tasks.query(
+        TaskFilter(job_id=setup.job_id, kinds=(TaskKind.IMPORTER, TaskKind.AGENT))
+    )
+    assert [t.id for t in tasks] == [task.id]
 
     tasks, _ = await setup.tasks.query(
         TaskFilter(job_id=setup.job_id, status=TaskStatus.PENDING)

@@ -44,6 +44,9 @@ def evaluation_list_params_to_filter(params: EvaluationListParams) -> Evaluation
     return EvaluationFilter(
         session_id=params.session_id,
         task_id=params.task_id,
+        agent_id=params.agent_id,
+        cohort_id=params.cohort_id,
+        experiment_run_id=params.experiment_run_id,
         evaluator_version_id=params.evaluator_version_id,
         name=params.name,
         data_type=params.data_type,

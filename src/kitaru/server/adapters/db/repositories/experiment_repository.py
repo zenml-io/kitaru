@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.experiment import (
     EXPERIMENT_NAME_UNIQUE_CONSTRAINT,
     ExperimentORM,
@@ -123,7 +124,9 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         """
         statement = select(ExperimentORM)
         if experiment_filter.name is not None:
-            statement = statement.where(ExperimentORM.name == experiment_filter.name)
+            statement = statement.where(
+                contains_text(ExperimentORM.name, experiment_filter.name)
+            )
         if experiment_filter.tag is not None:
             statement = statement.where(
                 select(TagLinkORM.id)

@@ -25,6 +25,9 @@ class EvaluationFilter(ListFilter):
 
     session_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
+    agent_id: uuid.UUID | None = None
+    cohort_id: uuid.UUID | None = None
+    experiment_run_id: uuid.UUID | None = None
     evaluator_version_id: uuid.UUID | None = None
     name: str | None = None
     data_type: EvaluationDataType | None = None

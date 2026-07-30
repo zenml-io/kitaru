@@ -4359,8 +4359,8 @@ class FakeTaskRepository:
         tasks = list(self._tasks.values())
         if task_filter.job_id is not None:
             tasks = [task for task in tasks if task.job_id == task_filter.job_id]
-        if task_filter.kind is not None:
-            tasks = [task for task in tasks if task.kind == task_filter.kind]
+        if task_filter.kinds is not None:
+            tasks = [task for task in tasks if task.kind in task_filter.kinds]
         if task_filter.status is not None:
             tasks = [task for task in tasks if task.status == task_filter.status]
         if task_filter.worker_id is not None:

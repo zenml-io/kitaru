@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import CursorResult, func, select, update
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filters import contains_text
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY,
     CohortVersionSessionORM,
@@ -169,7 +170,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 SessionORM.external_id == session_filter.external_id
             )
         if session_filter.name is not None:
-            statement = statement.where(SessionORM.name == session_filter.name)
+            statement = statement.where(
+                contains_text(SessionORM.name, session_filter.name)
+            )
         if session_filter.tag is not None:
             tag_exists = (
                 select(TagLinkORM.id)

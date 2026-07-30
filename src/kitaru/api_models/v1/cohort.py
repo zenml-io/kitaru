@@ -49,7 +49,10 @@ class CohortUpdateRequest(RequestModel):
 class CohortListParams(ListParams):
     """Cohort list params."""
 
-    name: str | None = Field(default=None, description="Filter on cohort name.")
+    agent_id: uuid.UUID | None = Field(default=None, description="Filter on agent.")
+    name: str | None = Field(
+        default=None, description="Filter on cohort name, matched as a substring."
+    )
     tag: str | None = Field(default=None, description="Filter on tag name.")
 
 

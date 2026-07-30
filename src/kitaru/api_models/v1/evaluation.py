@@ -158,6 +158,15 @@ class EvaluationListParams(ListParams):
     task_id: uuid.UUID | None = Field(
         default=None, description="Filter on evaluator task."
     )
+    agent_id: uuid.UUID | None = Field(
+        default=None, description="Filter on the agent owning the scored sessions."
+    )
+    cohort_id: uuid.UUID | None = Field(
+        default=None, description="Filter on the cohort holding the scored sessions."
+    )
+    experiment_run_id: uuid.UUID | None = Field(
+        default=None, description="Filter on the experiment run that produced them."
+    )
     evaluator_version_id: uuid.UUID | None = Field(
         default=None, description="Filter on evaluator version."
     )
