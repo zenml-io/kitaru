@@ -30,6 +30,7 @@ from kitaru.api_models.v1.account import (
     AccountResponse,
     AccountUpdateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
@@ -98,7 +99,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["carol", "bob", "alice"]
 
-    page = await api_client.accounts.list(AccountListParams(name="bob"))
+    page = await api_client.accounts.list(
+        AccountListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="bob")
+        )
+    )
     assert page.next_cursor is None
     assert page.items[0].name == "bob"
 

@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakePluginRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -26,7 +27,11 @@ from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
-from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
+from kitaru.server.application.models.plugin import (
+    ImporterFilter,
+    PluginFilter,
+    PluginVersionFilter,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
@@ -36,6 +41,7 @@ from kitaru.server.domain.plugin import (
     PluginNotFound,
     PluginVersionNotFound,
 )
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[PluginRepository, uuid.UUID]
 
@@ -167,7 +173,12 @@ async def test_query_provider_filter(setup: Setup) -> None:
         )
     )
     plugins, next_cursor = await repository.query(
-        PluginFilter(kind=PluginKind.IMPORTER, provider="langfuse")
+        ImporterFilter(
+            kind=PluginKind.IMPORTER,
+            expression=FilterCondition(
+                field="provider", op=FilterOp.EQ, value="langfuse"
+            ),
+        )
     )
     assert next_cursor is None
     assert [plugin.name for plugin in plugins] == ["langfuse"]

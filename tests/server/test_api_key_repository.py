@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 import pytest
 
 from conftest import FakeApiKeyRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -37,6 +38,7 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[ApiKeyRepository, uuid.UUID, uuid.UUID]
 
@@ -126,7 +128,11 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert [api_key.name for api_key in api_keys] == ["local", "deploy", "ci"]
 
-    api_keys, next_cursor = await repository.query(ApiKeyFilter(name="ci"))
+    api_keys, next_cursor = await repository.query(
+        ApiKeyFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="ci")
+        )
+    )
     assert next_cursor is None
     assert api_keys[0] == ci
 
@@ -136,7 +142,11 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert api_keys[0] == local
 
-    api_keys, next_cursor = await repository.query(ApiKeyFilter(name="missing"))
+    api_keys, next_cursor = await repository.query(
+        ApiKeyFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert api_keys == []
 

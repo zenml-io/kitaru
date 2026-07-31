@@ -14,16 +14,22 @@
 """Device filter, fingerprint, and policy models."""
 
 import uuid
+from collections.abc import Mapping
+from typing import ClassVar
 
 from kitaru.server.base import FrozenModel, ListFilter
 from kitaru.server.domain.device import DeviceStatus
+from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
 
 class DeviceFilter(ListFilter):
     """Device list filter."""
 
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "status": FilterField(value_type=DeviceStatus, ops=EQUALITY_OPS),
+    }
+
     account_id: uuid.UUID | None = None
-    status: DeviceStatus | None = None
 
 
 class DeviceFingerprint(FrozenModel):

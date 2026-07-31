@@ -18,7 +18,7 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import (
 
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
@@ -191,6 +192,13 @@ from kitaru.server.domain.task import (
     TaskNotFound,
 )
 from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.filtering import (
+    AndExpression,
+    FilterCondition,
+    FilterExpression,
+    NotExpression,
+    OrExpression,
+)
 from kitaru.transport import RetryTransport
 
 # Why: test modules import shared fakes with a bare `from conftest import ...`.
@@ -626,6 +634,66 @@ def _paginate_fake(
     return page, next_cursor
 
 
+def _evaluate_filter_expression(
+    item: Any,
+    expression: FilterExpression,
+    resolvers: Mapping[str, Callable[[Any, FilterCondition], bool]] | None = None,
+) -> bool:
+    """Evaluate a filter expression against a domain object.
+
+    Args:
+        item: Domain object to evaluate the expression against.
+        expression: Filter expression.
+        resolvers: Condition evaluators keyed by field name, for fields that
+            are not attributes of the object.
+
+    Returns:
+        Whether the object matches the expression.
+    """
+    if isinstance(expression, AndExpression):
+        return all(
+            _evaluate_filter_expression(item, operand, resolvers)
+            for operand in expression.operands
+        )
+    if isinstance(expression, OrExpression):
+        return any(
+            _evaluate_filter_expression(item, operand, resolvers)
+            for operand in expression.operands
+        )
+    if isinstance(expression, NotExpression):
+        return not _evaluate_filter_expression(item, expression.operand, resolvers)
+    assert isinstance(expression, FilterCondition)
+    if resolvers is not None and expression.field in resolvers:
+        return resolvers[expression.field](item, expression)
+    value = getattr(item, expression.field)
+    if expression.op is FilterOp.IS_NULL:
+        return value is None
+    if value is None:
+        # Comparisons with a null column value never match, mirroring SQL.
+        return False
+    match expression.op:
+        case FilterOp.EQ:
+            return value == expression.value
+        case FilterOp.NE:
+            return value != expression.value
+        case FilterOp.LT:
+            return value < expression.value
+        case FilterOp.LE:
+            return value <= expression.value
+        case FilterOp.GT:
+            return value > expression.value
+        case FilterOp.GE:
+            return value >= expression.value
+        case FilterOp.IN:
+            return value in expression.value
+        case FilterOp.STARTSWITH:
+            return value.startswith(expression.value)
+        case FilterOp.ENDSWITH:
+            return value.endswith(expression.value)
+        case FilterOp.CONTAINS:
+            return expression.value in value
+
+
 class FakeAccountRepository:
     """In-memory account repository."""
 
@@ -733,15 +801,11 @@ class FakeAccountRepository:
             Page of matching accounts and the next cursor.
         """
         accounts = list(self._accounts.values())
-        if account_filter.name is not None:
-            accounts = [
-                account for account in accounts if account.name == account_filter.name
-            ]
-        if account_filter.active is not None:
+        if account_filter.expression is not None:
             accounts = [
                 account
                 for account in accounts
-                if account.active == account_filter.active
+                if _evaluate_filter_expression(account, account_filter.expression)
             ]
         page, next_cursor = _paginate_fake(accounts, account_filter)
         return [account.model_copy() for account in page], next_cursor
@@ -828,15 +892,17 @@ class FakeApiKeyRepository:
             Page of matching API keys and the next cursor.
         """
         api_keys = list(self._api_keys.values())
-        if api_key_filter.name is not None:
-            api_keys = [
-                api_key for api_key in api_keys if api_key.name == api_key_filter.name
-            ]
         if api_key_filter.owner_id is not None:
             api_keys = [
                 api_key
                 for api_key in api_keys
                 if api_key.owner_id == api_key_filter.owner_id
+            ]
+        if api_key_filter.expression is not None:
+            api_keys = [
+                api_key
+                for api_key in api_keys
+                if _evaluate_filter_expression(api_key, api_key_filter.expression)
             ]
         page, next_cursor = _paginate_fake(api_keys, api_key_filter)
         return [api_key.model_copy() for api_key in page], next_cursor
@@ -959,9 +1025,11 @@ class FakeDeviceRepository:
                 for device in devices
                 if device.account_id == device_filter.account_id
             ]
-        if device_filter.status is not None:
+        if device_filter.expression is not None:
             devices = [
-                device for device in devices if device.status == device_filter.status
+                device
+                for device in devices
+                if _evaluate_filter_expression(device, device_filter.expression)
             ]
         page, next_cursor = _paginate_fake(devices, device_filter)
         return [device.model_copy() for device in page], next_cursor
@@ -1135,10 +1203,6 @@ class FakeSecretRepository:
             Page of matching secrets and the next cursor.
         """
         secrets = list(self._secrets.values())
-        if secret_filter.name is not None:
-            secrets = [
-                secret for secret in secrets if secret.name == secret_filter.name
-            ]
         if secret_filter.owner_id is not None:
             secrets = [
                 secret
@@ -1150,6 +1214,12 @@ class FakeSecretRepository:
                 secret
                 for secret in secrets
                 if secret.internal == secret_filter.internal
+            ]
+        if secret_filter.expression is not None:
+            secrets = [
+                secret
+                for secret in secrets
+                if _evaluate_filter_expression(secret, secret_filter.expression)
             ]
         page, next_cursor = _paginate_fake(secrets, secret_filter)
         return [secret.model_copy() for secret in page], next_cursor
@@ -1294,8 +1364,12 @@ class FakeAgentRepository:
             Page of matching agents and the next cursor.
         """
         agents = list(self._agents.values())
-        if agent_filter.name is not None:
-            agents = [agent for agent in agents if agent.name == agent_filter.name]
+        if agent_filter.expression is not None:
+            agents = [
+                agent
+                for agent in agents
+                if _evaluate_filter_expression(agent, agent_filter.expression)
+            ]
         page, next_cursor = _paginate_fake(agents, agent_filter)
         return [agent.model_copy() for agent in page], next_cursor
 
@@ -1597,8 +1671,12 @@ class FakeTagRepository:
             Page of matching tags and the next cursor.
         """
         tags = list(self._tags.values())
-        if tag_filter.name is not None:
-            tags = [tag for tag in tags if tag.name == tag_filter.name]
+        if tag_filter.expression is not None:
+            tags = [
+                tag
+                for tag in tags
+                if _evaluate_filter_expression(tag, tag_filter.expression)
+            ]
         page, next_cursor = _paginate_fake(tags, tag_filter)
         return [tag.model_copy() for tag in page], next_cursor
 
@@ -1875,83 +1953,69 @@ class FakeSessionRepository:
             Page of matching sessions and the next cursor.
         """
         sessions = list(self._sessions.values())
-        if session_filter.agent_id is not None:
-            sessions = [s for s in sessions if s.agent_id == session_filter.agent_id]
-        if session_filter.agent_version_id is not None:
+        if session_filter.expression is not None:
+            resolvers = {
+                "tag": self._evaluate_tag_condition,
+                "cohort_version_id": self._evaluate_cohort_version_condition,
+                "has_evaluation": self._evaluate_has_evaluation_condition,
+            }
             sessions = [
                 s
                 for s in sessions
-                if s.agent_version_id == session_filter.agent_version_id
-            ]
-        if session_filter.cohort_version_id is not None:
-            member_ids = self._session_ids_in_cohort_version(
-                session_filter.cohort_version_id
-            )
-            sessions = [s for s in sessions if s.id in member_ids]
-        if session_filter.task_id is not None:
-            sessions = [s for s in sessions if s.task_id == session_filter.task_id]
-        if session_filter.origin is not None:
-            sessions = [s for s in sessions if s.origin == session_filter.origin]
-        if session_filter.status is not None:
-            sessions = [s for s in sessions if s.status == session_filter.status]
-        if session_filter.provider is not None:
-            sessions = [s for s in sessions if s.provider == session_filter.provider]
-        if session_filter.external_id is not None:
-            sessions = [
-                s for s in sessions if s.external_id == session_filter.external_id
-            ]
-        if session_filter.name is not None:
-            sessions = [s for s in sessions if s.name == session_filter.name]
-        if session_filter.tag is not None:
-            tagged_ids = self._session_ids_tagged(session_filter.tag)
-            sessions = [s for s in sessions if s.id in tagged_ids]
-        if session_filter.has_evaluation is not None:
-            sessions = [
-                s
-                for s in sessions
-                if self._evaluations.has_evaluation(s.id)
-                == session_filter.has_evaluation
-            ]
-        if session_filter.started_after is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.started_at is not None
-                and s.started_at >= session_filter.started_after
-            ]
-        if session_filter.started_before is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.started_at is not None
-                and s.started_at <= session_filter.started_before
-            ]
-        if session_filter.ended_after is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.ended_at is not None and s.ended_at >= session_filter.ended_after
-            ]
-        if session_filter.ended_before is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.ended_at is not None and s.ended_at <= session_filter.ended_before
-            ]
-        if session_filter.min_cost is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.cost is not None and s.cost >= session_filter.min_cost
-            ]
-        if session_filter.max_cost is not None:
-            sessions = [
-                s
-                for s in sessions
-                if s.cost is not None and s.cost <= session_filter.max_cost
+                if _evaluate_filter_expression(s, session_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(sessions, session_filter)
         return [s.model_copy() for s in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, session: Session, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against a session.
+
+        Args:
+            session: Session to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the session has a matching tag.
+        """
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(session.id in self._session_ids_tagged(name) for name in names)
+
+    def _evaluate_cohort_version_condition(
+        self, session: Session, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a cohort version condition against a session.
+
+        Args:
+            session: Session to evaluate.
+            condition: Validated cohort version condition.
+
+        Returns:
+            Whether the session belongs to a matching cohort version.
+        """
+        ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(
+            session.id in self._session_ids_in_cohort_version(version_id)
+            for version_id in ids
+        )
+
+    def _evaluate_has_evaluation_condition(
+        self, session: Session, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a has-evaluation condition against a session.
+
+        Args:
+            session: Session to evaluate.
+            condition: Validated has-evaluation condition.
+
+        Returns:
+            Whether the session's evaluation state matches the condition.
+        """
+        expected = (
+            condition.value if condition.op is FilterOp.EQ else not condition.value
+        )
+        return self._evaluations.has_evaluation(session.id) == expected
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID]
@@ -2406,13 +2470,30 @@ class FakeCohortRepository:
             Page of matching cohorts and the next cursor.
         """
         cohorts = list(self._cohorts.values())
-        if cohort_filter.name is not None:
-            cohorts = [c for c in cohorts if c.name == cohort_filter.name]
-        if cohort_filter.tag is not None:
-            tagged_ids = self._cohort_ids_tagged(cohort_filter.tag)
-            cohorts = [c for c in cohorts if c.id in tagged_ids]
+        if cohort_filter.expression is not None:
+            resolvers = {"tag": self._evaluate_tag_condition}
+            cohorts = [
+                c
+                for c in cohorts
+                if _evaluate_filter_expression(c, cohort_filter.expression, resolvers)
+            ]
         page, next_cursor = _paginate_fake(cohorts, cohort_filter)
         return [c.model_copy() for c in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, cohort: Cohort, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against a cohort.
+
+        Args:
+            cohort: Cohort to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the cohort has a matching tag.
+        """
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(cohort.id in self._cohort_ids_tagged(name) for name in names)
 
     async def update(self, cohort: Cohort) -> Cohort:
         """Persist changes to an existing cohort.
@@ -2754,15 +2835,17 @@ class FakeWorkerRepository:
             Page of matching workers and the next cursor.
         """
         workers = list(self._workers.values())
-        if worker_filter.name is not None:
-            workers = [
-                worker for worker in workers if worker.name == worker_filter.name
-            ]
         if worker_filter.seen_after is not None:
             workers = [
                 worker
                 for worker in workers
                 if worker.last_seen_at >= worker_filter.seen_after
+            ]
+        if worker_filter.expression is not None:
+            workers = [
+                worker
+                for worker in workers
+                if _evaluate_filter_expression(worker, worker_filter.expression)
             ]
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
@@ -3037,15 +3120,11 @@ class FakePluginRepository:
             for plugin in self._plugins.values()
             if plugin.kind == plugin_filter.kind
         ]
-        if plugin_filter.name is not None:
-            plugins = [
-                plugin for plugin in plugins if plugin.name == plugin_filter.name
-            ]
-        if plugin_filter.provider is not None:
+        if plugin_filter.expression is not None:
             plugins = [
                 plugin
                 for plugin in plugins
-                if plugin.provider == plugin_filter.provider
+                if _evaluate_filter_expression(plugin, plugin_filter.expression)
             ]
         page, next_cursor = _paginate_fake(plugins, plugin_filter)
         return [plugin.model_copy() for plugin in page], next_cursor
@@ -3339,23 +3418,38 @@ class FakeExperimentRepository:
             Page of matching experiments and the next cursor.
         """
         experiments = list(self._experiments.values())
-        if experiment_filter.name is not None:
+        if experiment_filter.expression is not None:
+            resolvers = {"tag": self._evaluate_tag_condition}
             experiments = [
                 experiment
                 for experiment in experiments
-                if experiment.name == experiment_filter.name
-            ]
-        if experiment_filter.tag is not None:
-            assert self._tag_repository is not None
-            experiments = [
-                experiment
-                for experiment in experiments
-                if self._tag_repository.has_link(
-                    TagResourceType.EXPERIMENT, experiment.id, experiment_filter.tag
+                if _evaluate_filter_expression(
+                    experiment, experiment_filter.expression, resolvers
                 )
             ]
         page, next_cursor = _paginate_fake(experiments, experiment_filter)
         return [experiment.model_copy() for experiment in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, experiment: Experiment, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against an experiment.
+
+        Args:
+            experiment: Experiment to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the experiment has a matching tag.
+        """
+        assert self._tag_repository is not None
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(
+            self._tag_repository.has_link(
+                TagResourceType.EXPERIMENT, experiment.id, name
+            )
+            for name in names
+        )
 
     async def update(self, experiment: Experiment) -> Experiment:
         """Persist changes to an existing experiment.
@@ -3586,20 +3680,12 @@ class FakeReplayRepository:
             Page of matching replays and the next cursor.
         """
         replays = list(self._replays.values())
-        if replay_filter.experiment_run_id is not None:
+        if replay_filter.expression is not None:
             replays = [
                 r
                 for r in replays
-                if r.experiment_run_id == replay_filter.experiment_run_id
+                if _evaluate_filter_expression(r, replay_filter.expression)
             ]
-        if replay_filter.baseline_session_id is not None:
-            replays = [
-                r
-                for r in replays
-                if r.baseline_session_id == replay_filter.baseline_session_id
-            ]
-        if replay_filter.status is not None:
-            replays = [r for r in replays if r.status == replay_filter.status]
         page, next_cursor = _paginate_fake(replays, replay_filter)
         return [r.model_copy() for r in page], next_cursor
 
@@ -3808,21 +3894,34 @@ class FakeExperimentRunRepository:
             Page of matching runs and the next cursor.
         """
         runs = list(self._runs.values())
-        if run_filter.experiment_id is not None:
-            runs = [r for r in runs if r.experiment_id == run_filter.experiment_id]
-        if run_filter.status is not None:
-            runs = [r for r in runs if r.status == run_filter.status]
-        if run_filter.tag is not None:
-            assert self._tag_repository is not None
+        if run_filter.expression is not None:
+            resolvers = {"tag": self._evaluate_tag_condition}
             runs = [
                 r
                 for r in runs
-                if self._tag_repository.has_link(
-                    TagResourceType.EXPERIMENT_RUN, r.id, run_filter.tag
-                )
+                if _evaluate_filter_expression(r, run_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(runs, run_filter)
         return [r.model_copy() for r in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, run: ExperimentRun, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against an experiment run.
+
+        Args:
+            run: Experiment run to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the run has a matching tag.
+        """
+        assert self._tag_repository is not None
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(
+            self._tag_repository.has_link(TagResourceType.EXPERIMENT_RUN, run.id, name)
+            for name in names
+        )
 
     async def update(self, run: ExperimentRun) -> ExperimentRun:
         """Persist changes to an existing experiment run.
@@ -3988,25 +4087,11 @@ class FakeEvaluationRepository:
             Page of matching evaluations and the next cursor.
         """
         evaluations = list(self._evaluations.values())
-        if evaluation_filter.session_id is not None:
-            evaluations = [
-                e for e in evaluations if e.session_id == evaluation_filter.session_id
-            ]
-        if evaluation_filter.task_id is not None:
-            evaluations = [
-                e for e in evaluations if e.task_id == evaluation_filter.task_id
-            ]
-        if evaluation_filter.evaluator_version_id is not None:
+        if evaluation_filter.expression is not None:
             evaluations = [
                 e
                 for e in evaluations
-                if e.evaluator_version_id == evaluation_filter.evaluator_version_id
-            ]
-        if evaluation_filter.name is not None:
-            evaluations = [e for e in evaluations if e.name == evaluation_filter.name]
-        if evaluation_filter.data_type is not None:
-            evaluations = [
-                e for e in evaluations if e.data_type == evaluation_filter.data_type
+                if _evaluate_filter_expression(e, evaluation_filter.expression)
             ]
         page, next_cursor = _paginate_fake(evaluations, evaluation_filter)
         items = [
@@ -4207,8 +4292,12 @@ class FakeJobRepository:
             Page of matching jobs and the next cursor.
         """
         jobs = list(self._jobs.values())
-        if job_filter.status is not None:
-            jobs = [job for job in jobs if job.status == job_filter.status]
+        if job_filter.expression is not None:
+            jobs = [
+                job
+                for job in jobs
+                if _evaluate_filter_expression(job, job_filter.expression)
+            ]
         page, next_cursor = _paginate_fake(jobs, job_filter)
         return [job.model_copy() for job in page], next_cursor
 
@@ -4376,15 +4465,15 @@ class FakeTaskRepository:
         tasks = list(self._tasks.values())
         if task_filter.job_id is not None:
             tasks = [task for task in tasks if task.job_id == task_filter.job_id]
-        if task_filter.kind is not None:
-            tasks = [task for task in tasks if task.kind == task_filter.kind]
-        if task_filter.status is not None:
-            tasks = [task for task in tasks if task.status == task_filter.status]
-        if task_filter.worker_id is not None:
-            tasks = [task for task in tasks if task.worker_id == task_filter.worker_id]
         if task_filter.stale_before is not None:
             bound = task_filter.stale_before
             tasks = [task for task in tasks if _is_stale_before(task, bound)]
+        if task_filter.expression is not None:
+            tasks = [
+                task
+                for task in tasks
+                if _evaluate_filter_expression(task, task_filter.expression)
+            ]
         page, next_cursor = _paginate_fake(tasks, task_filter)
         return [task.model_copy() for task in page], next_cursor
 

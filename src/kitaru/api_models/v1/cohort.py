@@ -19,10 +19,10 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    ListParams,
     OwnedResponseModel,
     RequestModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class CohortCreateRequest(RequestModel):
@@ -46,11 +46,8 @@ class CohortUpdateRequest(RequestModel):
     )
 
 
-class CohortListParams(ListParams):
+class CohortListParams(FilterableListParams):
     """Cohort list params."""
-
-    name: str | None = Field(default=None, description="Filter on cohort name.")
-    tag: str | None = Field(default=None, description="Filter on tag name.")
 
 
 class CohortResponse(OwnedResponseModel):

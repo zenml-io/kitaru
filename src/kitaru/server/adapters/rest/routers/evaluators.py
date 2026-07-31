@@ -84,7 +84,7 @@ async def list_evaluators(
         Page of evaluators.
     """
     return await plugins.list_plugins(
-        service, params, EvaluatorResponse, actor=actor, name=params.name
+        service, params, EvaluatorResponse, actor=actor, filter_=params.filter
     )
 
 

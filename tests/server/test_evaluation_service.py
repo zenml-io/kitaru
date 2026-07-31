@@ -19,6 +19,7 @@ import pytest
 
 from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
@@ -28,6 +29,7 @@ from kitaru.server.application.services.evaluation_service import EvaluationServ
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch
 from kitaru.server.domain.session import SessionNotFound
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -84,7 +86,12 @@ async def test_list_evaluations(
         actor=ACTOR,
     )
     items, next_cursor = await service.list_evaluations(
-        EvaluationFilter(session_id=session.id), actor=ACTOR
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="session_id", op=FilterOp.EQ, value=session.id
+            )
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert len(items) == 1

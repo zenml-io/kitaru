@@ -14,17 +14,23 @@
 """SQL device repository."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.device import Device, DeviceNotFound
+
+DEVICE_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "status": DeviceORM.status,
+}
 
 
 class SQLDeviceRepository(BaseSQLRepository[DeviceORM]):
@@ -98,8 +104,12 @@ class SQLDeviceRepository(BaseSQLRepository[DeviceORM]):
             statement = statement.where(
                 DeviceORM.account_id == device_filter.account_id
             )
-        if device_filter.status is not None:
-            statement = statement.where(DeviceORM.status == device_filter.status.value)
+        if device_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    device_filter.expression, DEVICE_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session,
             statement,

@@ -20,6 +20,7 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationResult,
 )
 from kitaru.api_models.v1.session import SessionEvaluationsRequest
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.adapters.rest.mapping.replay_config import evaluator_config_input
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
@@ -42,11 +43,9 @@ def evaluation_list_params_to_filter(params: EvaluationListParams) -> Evaluation
         Evaluation filter.
     """
     return EvaluationFilter(
-        session_id=params.session_id,
-        task_id=params.task_id,
-        evaluator_version_id=params.evaluator_version_id,
-        name=params.name,
-        data_type=params.data_type,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

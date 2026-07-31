@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the job routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -90,7 +91,10 @@ async def test_list_jobs_filters_by_status(
     assert response.status_code == 200
     assert len(response.json()["items"]) == 2
 
-    response = await client.get("/v1/jobs", params={"status": "completed"})
+    filter_expression = {"field": "status", "op": "eq", "value": "completed"}
+    response = await client.get(
+        "/v1/jobs", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1

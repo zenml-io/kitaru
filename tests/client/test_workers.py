@@ -33,6 +33,7 @@ from conftest import (
     create_agent_task,
     create_job,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
@@ -180,7 +181,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["worker-3", "worker-2", "worker-1"]
 
-    page = await api_client.workers.list(WorkerListParams(name="worker-2"))
+    page = await api_client.workers.list(
+        WorkerListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="worker-2")
+        )
+    )
     assert page.items[0].name == "worker-2"
 
 

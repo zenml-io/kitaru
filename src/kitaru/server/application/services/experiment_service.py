@@ -17,6 +17,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
@@ -62,6 +63,7 @@ from kitaru.server.domain.replay_config import (
     default_tool_policy,
 )
 from kitaru.server.domain.session import Session
+from kitaru.server.filtering import FilterCondition
 from kitaru.server.utils import paginate_all
 
 
@@ -331,9 +333,12 @@ class ExperimentService:
         Returns:
             Member sessions.
         """
+        membership = FilterCondition(
+            field="cohort_version_id", op=FilterOp.EQ, value=cohort_version_id
+        )
         return await paginate_all(
             lambda cursor: self._sessions.query(
-                SessionFilter(cohort_version_id=cohort_version_id, cursor=cursor)
+                SessionFilter(expression=membership, cursor=cursor)
             )
         )
 

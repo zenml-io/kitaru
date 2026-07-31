@@ -14,20 +14,30 @@
 """SQL cohort repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_tag_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.cohort import (
     COHORT_NAME_UNIQUE_CONSTRAINT,
     CohortORM,
 )
-from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.cohort import CohortFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
+
+COHORT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": CohortORM.name,
+    "tag": build_tag_condition_binding(TagResourceType.COHORT, CohortORM.id),
+}
 
 
 class SQLCohortRepository(BaseSQLRepository[CohortORM]):
@@ -92,20 +102,12 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
             Page of matching cohorts and the next cursor.
         """
         statement = select(CohortORM)
-        if cohort_filter.name is not None:
-            statement = statement.where(CohortORM.name == cohort_filter.name)
-        if cohort_filter.tag is not None:
-            tag_exists = (
-                select(TagLinkORM.id)
-                .join(TagORM, TagORM.id == TagLinkORM.tag_id)
-                .where(
-                    TagLinkORM.resource_type == TagResourceType.COHORT.value,
-                    TagLinkORM.resource_id == CohortORM.id,
-                    TagORM.name == cohort_filter.tag,
+        if cohort_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    cohort_filter.expression, COHORT_FILTER_BINDINGS
                 )
-                .correlate(CohortORM)
             )
-            statement = statement.where(tag_exists.exists())
         rows, next_cursor = await paginate(
             self._session, statement, cohort_filter, id_column=CohortORM.id
         )

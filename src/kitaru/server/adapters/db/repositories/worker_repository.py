@@ -14,11 +14,13 @@
 """SQL worker repository."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.worker import (
     WORKER_NAME_UNIQUE_CONSTRAINT,
     WorkerORM,
@@ -28,6 +30,10 @@ from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.worker import Worker, WorkerNotFound
+
+WORKER_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": WorkerORM.name,
+}
 
 
 class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
@@ -135,11 +141,15 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
             Page of matching workers and the next cursor.
         """
         statement = select(WorkerORM)
-        if worker_filter.name is not None:
-            statement = statement.where(WorkerORM.name == worker_filter.name)
         if worker_filter.seen_after is not None:
             statement = statement.where(
                 WorkerORM.last_seen_at >= worker_filter.seen_after
+            )
+        if worker_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    worker_filter.expression, WORKER_FILTER_BINDINGS
+                )
             )
         rows, next_cursor = await paginate(
             self._session, statement, worker_filter, id_column=WorkerORM.id

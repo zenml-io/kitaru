@@ -26,6 +26,7 @@ from conftest import (
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin
@@ -59,6 +60,7 @@ from kitaru.server.domain.replay_config import (
     ToolPolicy,
 )
 from kitaru.server.domain.session import Session
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[
     ReplayRepository,
@@ -294,7 +296,11 @@ async def test_query_filters_by_status(setup: Setup) -> None:
     await repository.update(evaluating)
 
     replays, next_cursor = await repository.query(
-        ReplayFilter(status=ReplayStatus.EVALUATING)
+        ReplayFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=ReplayStatus.EVALUATING
+            )
+        )
     )
     assert next_cursor is None
     assert [replay.id for replay in replays] == [evaluating.id]

@@ -21,9 +21,9 @@ from kitaru.api_models.v1.device import (
     DeviceResponse,
     DeviceStatus,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.device import DeviceFilter, DevicePolicy
 from kitaru.server.domain.device import Device
-from kitaru.server.domain.device import DeviceStatus as DomainDeviceStatus
 
 
 def device_to_response(device: Device) -> DeviceResponse:
@@ -96,8 +96,8 @@ def device_list_params_to_filter(params: DeviceListParams) -> DeviceFilter:
         Device filter.
     """
     return DeviceFilter(
-        status=DomainDeviceStatus(params.status.value)
-        if params.status is not None
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
         else None,
         cursor=params.cursor,
         size=params.size,

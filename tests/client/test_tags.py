@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeTagRepository, asgi_api_client
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.tag import (
     TagCreateRequest,
     TagLinkCreateRequest,
@@ -79,7 +80,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["canary", "staging", "prod"]
 
-    page = await api_client.tags.list(TagListParams(name="staging"))
+    page = await api_client.tags.list(
+        TagListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="staging")
+        )
+    )
     assert page.items[0].name == "staging"
 
 

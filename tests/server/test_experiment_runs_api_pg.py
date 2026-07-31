@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end experiment run tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -115,7 +116,14 @@ async def test_start_run_fans_out_one_replay_per_session(
     assert run["progress"]["pending"] == 2
 
     replays = (
-        await client.get("/v1/replays", params={"experiment_run_id": run["id"]})
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
+                )
+            },
+        )
     ).json()["items"]
     assert len(replays) == 2
 
@@ -165,7 +173,14 @@ async def test_delete_run_cascades_its_jobs_and_replays(
     ).json()
     jobs = (await client.get(f"/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
     replays = (
-        await client.get("/v1/replays", params={"experiment_run_id": run["id"]})
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
+                )
+            },
+        )
     ).json()["items"]
 
     response = await client.delete(f"/v1/experiment-runs/{run['id']}")

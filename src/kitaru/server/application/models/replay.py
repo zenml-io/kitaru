@@ -14,7 +14,8 @@
 """Replay filter, command, and progress count models."""
 
 import uuid
-from typing import Any, NamedTuple
+from collections.abc import Mapping
+from typing import Any, ClassVar, NamedTuple
 
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.base import FrozenModel
@@ -22,14 +23,19 @@ from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, ReplayOverride, ToolPolicy
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
 
 
 class ReplayFilter(ListFilter):
     """Replay list filter."""
 
-    experiment_run_id: uuid.UUID | None = None
-    baseline_session_id: uuid.UUID | None = None
-    status: ReplayStatus | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "experiment_run_id": FilterField(
+            value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
+        ),
+        "baseline_session_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "status": FilterField(value_type=ReplayStatus, ops=EQUALITY_OPS),
+    }
 
 
 class ReplayCreate(FrozenModel):

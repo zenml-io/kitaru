@@ -31,6 +31,7 @@ from kitaru.api_models.v1.experiment import (
     ExperimentResponse,
     ExperimentUpdateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.replay_config import EvaluatorConfig, ReplayOverride
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
@@ -145,7 +146,9 @@ async def test_list(
     assert [item.name for item in page.items] == ["reviewer-eval", "assistant-eval"]
 
     page = await api_client.experiments.list(
-        ExperimentListParams(name="assistant-eval")
+        ExperimentListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="assistant-eval")
+        )
     )
     assert page.next_cursor is None
     assert page.items[0].name == "assistant-eval"

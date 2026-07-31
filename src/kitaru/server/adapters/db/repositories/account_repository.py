@@ -14,9 +14,11 @@
 """SQL account repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.account import (
     ACCOUNT_NAME_UNIQUE_CONSTRAINT,
     AccountORM,
@@ -30,6 +32,11 @@ from kitaru.server.domain.account import (
     DuplicateAccountName,
 )
 from kitaru.server.domain.base import NotFoundError
+
+ACCOUNT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": AccountORM.name,
+    "active": AccountORM.active,
+}
 
 
 class SQLAccountRepository(BaseSQLRepository[AccountORM]):
@@ -144,10 +151,12 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
             Page of matching accounts and the next cursor.
         """
         statement = select(AccountORM)
-        if account_filter.name is not None:
-            statement = statement.where(AccountORM.name == account_filter.name)
-        if account_filter.active is not None:
-            statement = statement.where(AccountORM.active == account_filter.active)
+        if account_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    account_filter.expression, ACCOUNT_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session,
             statement,

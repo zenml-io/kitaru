@@ -17,7 +17,8 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import ListParams, RequestModel, TimestampedResponseModel
+from kitaru.api_models.v1.base import RequestModel, TimestampedResponseModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class AccountCreateRequest(RequestModel):
@@ -35,11 +36,8 @@ class AccountUpdateRequest(RequestModel):
     password: str | None = Field(default=None, description="New login password.")
 
 
-class AccountListParams(ListParams):
+class AccountListParams(FilterableListParams):
     """Account list params."""
-
-    name: str | None = Field(default=None, description="Filter on account name.")
-    active: bool | None = Field(default=None, description="Filter on active state.")
 
 
 class AccountResponse(TimestampedResponseModel):

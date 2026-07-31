@@ -14,7 +14,8 @@
 """Task filter and command models."""
 
 import uuid
-from typing import Any, NamedTuple
+from collections.abc import Mapping
+from typing import Any, ClassVar, NamedTuple
 
 from pydantic import AwareDatetime
 
@@ -22,6 +23,7 @@ from kitaru.api_models.v1.task import TaskKind, TaskStatus
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.task import Task, TaskSpec
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
 
 
 class ClaimedTask(NamedTuple):
@@ -34,11 +36,24 @@ class ClaimedTask(NamedTuple):
 class TaskFilter(ListFilter):
     """Task list filter."""
 
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "job_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "kind": FilterField(value_type=TaskKind, ops=EQUALITY_OPS),
+        "status": FilterField(value_type=TaskStatus, ops=EQUALITY_OPS),
+        "worker_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
+    }
+
     job_id: uuid.UUID | None = None
-    kind: TaskKind | None = None
-    status: TaskStatus | None = None
-    worker_id: uuid.UUID | None = None
     stale_before: AwareDatetime | None = None
+
+
+class JobTasksFilter(TaskFilter):
+    """Job tasks list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "kind": TaskFilter.filterable_fields["kind"],
+        "status": TaskFilter.filterable_fields["status"],
+    }
 
 
 class TaskUpdate(FrozenModel):

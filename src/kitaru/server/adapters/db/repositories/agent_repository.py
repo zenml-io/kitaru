@@ -14,9 +14,11 @@
 """SQL agent repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
 from kitaru.server.adapters.db.orm.agent_version import (
     AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
@@ -31,6 +33,10 @@ from kitaru.server.domain.agent import (
     DuplicateAgentName,
 )
 from kitaru.server.domain.base import NotFoundError
+
+AGENT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": AgentORM.name,
+}
 
 
 class SQLAgentRepository(BaseSQLRepository[AgentORM]):
@@ -92,8 +98,12 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
             Page of matching agents and the next cursor.
         """
         statement = select(AgentORM)
-        if agent_filter.name is not None:
-            statement = statement.where(AgentORM.name == agent_filter.name)
+        if agent_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    agent_filter.expression, AGENT_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session, statement, agent_filter, id_column=AgentORM.id
         )

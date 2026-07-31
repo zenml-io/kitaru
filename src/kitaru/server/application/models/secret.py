@@ -14,13 +14,19 @@
 """Secret filter model."""
 
 import uuid
+from collections.abc import Mapping
+from typing import ClassVar
 
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import STRING_OPS, FilterField
 
 
 class SecretFilter(ListFilter):
     """Secret list filter."""
 
-    name: str | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+    }
+
     owner_id: uuid.UUID | None = None
     internal: bool | None = None

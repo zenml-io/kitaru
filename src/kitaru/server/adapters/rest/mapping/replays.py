@@ -21,6 +21,7 @@ from kitaru.api_models.v1.replay import (
     ReplayResponse,
     ToolLookupResponse,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.adapters.rest.mapping.replay_config import (
     evaluator_config_input,
     evaluator_config_to_wire,
@@ -114,9 +115,9 @@ def replay_list_params_to_filter(params: ReplayListParams) -> ReplayFilter:
         Replay filter.
     """
     return ReplayFilter(
-        experiment_run_id=params.experiment_run_id,
-        baseline_session_id=params.baseline_session_id,
-        status=params.status,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

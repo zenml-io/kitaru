@@ -14,11 +14,12 @@
 """SQL replay repository."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, select
 
 from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_JOB_ID_UNIQUE_CONSTRAINT,
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
@@ -34,6 +35,12 @@ from kitaru.server.domain.replay import (
     ReplayAlreadyExistsForJob,
     ReplayNotFound,
 )
+
+REPLAY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "experiment_run_id": ReplayORM.experiment_run_id,
+    "baseline_session_id": ReplayORM.baseline_session_id,
+    "status": ReplayORM.status,
+}
 
 
 class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
@@ -122,16 +129,12 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             Page of matching replays and the next cursor.
         """
         statement = select(ReplayORM)
-        if replay_filter.experiment_run_id is not None:
+        if replay_filter.expression is not None:
             statement = statement.where(
-                ReplayORM.experiment_run_id == replay_filter.experiment_run_id
+                compile_filter_expression(
+                    replay_filter.expression, REPLAY_FILTER_BINDINGS
+                )
             )
-        if replay_filter.baseline_session_id is not None:
-            statement = statement.where(
-                ReplayORM.baseline_session_id == replay_filter.baseline_session_id
-            )
-        if replay_filter.status is not None:
-            statement = statement.where(ReplayORM.status == replay_filter.status.value)
         rows, next_cursor = await paginate(
             self._session, statement, replay_filter, id_column=ReplayORM.id
         )

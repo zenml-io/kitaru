@@ -35,6 +35,7 @@ from conftest import (
     create_import_task,
     create_job,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportFailure, ImportStats
 from kitaru.api_models.v1.session import SessionListParams, SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import (
@@ -429,7 +430,11 @@ async def test_importer_flow_batches_nodes_and_dedups(
     ]
 
     sessions_page = await task_app.client.sessions.list(
-        SessionListParams(external_id="session-1")
+        SessionListParams(
+            filter=FilterCondition(
+                field="external_id", op=FilterOp.EQ, value="session-1"
+            )
+        )
     )
     nodes_page = await task_app.client.sessions.list_nodes(
         sessions_page.items[0].id, SessionNodeListParams(size=1000)

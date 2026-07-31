@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the API key routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -104,7 +105,10 @@ async def test_list_api_keys(client: httpx.AsyncClient) -> None:
     assert [item["name"] for item in body["items"]] == ["local", "deploy", "ci"]
     assert all("key" not in item for item in body["items"])
 
-    response = await client.get("/v1/api-keys", params={"name": "deploy"})
+    filter_expression = {"field": "name", "op": "eq", "value": "deploy"}
+    response = await client.get(
+        "/v1/api-keys", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None

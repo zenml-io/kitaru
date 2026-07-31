@@ -40,3 +40,7 @@ class PayloadTooLargeError(DomainError):
 
 class ValidationError(DomainError):
     """Raised when input fails domain shape or invariant checks."""
+
+
+class QueryTimeoutError(DomainError):
+    """Raised when a query exceeds its statement timeout."""
