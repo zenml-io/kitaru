@@ -1,19 +1,20 @@
+{{- $server := include "kitaru.serverValues" . | fromYaml -}}
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "kitaru.fullname" . }}
   labels:
     {{- include "kitaru.labels" . | nindent 4 }}
-  {{- with .Values.service.annotations }}
+  {{- with $server.service.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ $server.service.type }}
   ports:
-    - port: 80
-      targetPort: 8000
+    - port: {{ $server.service.port }}
+      targetPort: 8080
       protocol: TCP
       name: http
   selector:
-    {{- include "kitaru.selectorLabels" . | nindent 4 }}
+    {{- include "kitaru.serverSelectorLabels" . | nindent 4 }}

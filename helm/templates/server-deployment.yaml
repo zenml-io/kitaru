@@ -1,0 +1,216 @@
+{{- $server := include "kitaru.serverValues" . | fromYaml -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kitaru.fullname" . }}
+  labels:
+    {{- include "kitaru.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if $server.database.url }}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ $server.replicaCount }}
+  {{- end }}
+  {{- else }}
+  replicas: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      # TODO: this should also include the server component label, but
+      # adding it now would fail for existing installations.
+      {{- include "kitaru.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/server-secret.yaml") . | sha256sum }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kitaru.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: server
+    spec:
+      {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+      initContainers:
+        - name: update-ca-certificates
+          image: "{{ $server.image.repository }}:{{ $server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ $server.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Copy the system CA bundle
+              cp /etc/ssl/certs/ca-certificates.crt /updated-certs/ca-certificates.crt
+              # Append all custom certificates
+              for cert in /custom-certs/*.crt; do
+                if [ -f "$cert" ]; then
+                  cat "$cert" >> /updated-certs/ca-certificates.crt
+                fi
+              done
+          volumeMounts:
+            - name: custom-certs
+              mountPath: /custom-certs
+              readOnly: true
+            - name: ca-certificates
+              mountPath: /updated-certs
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kitaru.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: kitaru-config
+          emptyDir: {}
+      {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+        - name: custom-certs
+          projected:
+            sources:
+            {{- range $server.certificates.customCAs }}
+            - secret:
+                name: {{ include "kitaru.fullname" $ }}-custom-ca-{{ .name }}
+                items:
+                  - key: certificate
+                    path: {{ .name }}.crt
+            {{- end }}
+            {{- range $server.certificates.secretRefs }}
+            - secret:
+                name: {{ .name }}
+                items:
+                  - key: {{ .key }}
+                    path: {{ .name }}.crt
+            {{- end }}
+        - name: ca-certificates
+          emptyDir: {}
+      {{- end }}
+      {{- if or (and $server.database.sslCa $server.database.sslCa.secretRef) (and $server.database.sslCert $server.database.sslCert.secretRef) (and $server.database.sslKey $server.database.sslKey.secretRef) }}
+        - name: db-certs
+          projected:
+            sources:
+              {{- if and $server.database.sslCa $server.database.sslCa.secretRef }}
+              - secret:
+                  name: {{ $server.database.sslCa.secretRef.name }}
+                  items:
+                    - key: {{ $server.database.sslCa.secretRef.key }}
+                      path: {{ $server.database.sslCa.secretRef.key }}
+              {{- end }}
+              {{- if and $server.database.sslCert $server.database.sslCert.secretRef }}
+              - secret:
+                  name: {{ $server.database.sslCert.secretRef.name }}
+                  items:
+                    - key: {{ $server.database.sslCert.secretRef.key }}
+                      path: {{ $server.database.sslCert.secretRef.key }}
+              {{- end }}
+              {{- if and $server.database.sslKey $server.database.sslKey.secretRef }}
+              - secret:
+                  name: {{ $server.database.sslKey.secretRef.name }}
+                  items:
+                    - key: {{ $server.database.sslKey.secretRef.key }}
+                      path: {{ $server.database.sslKey.secretRef.key }}
+              {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ $server.image.repository }}:{{ $server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ $server.image.pullPolicy }}
+          args:
+            - uvicorn
+            - kitaru.zen_server.zen_server_api:app
+            - --no-server-header
+            {{ if $server.proxyHeaders.enabled }}
+            - --proxy-headers
+            - --forwarded-allow-ips
+            - {{ $server.proxyHeaders.forwardedAllowIPs | quote }}
+            {{ else }}
+            - --no-proxy-headers
+            {{ end }}
+            - --port
+            - "8080"
+            - --host
+            - "0.0.0.0"
+          volumeMounts:
+          {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+            - name: ca-certificates
+              mountPath: /updated-certs
+              readOnly: true
+          {{- end }}
+          {{- if or (and $server.database.sslCa $server.database.sslCa.secretRef) (and $server.database.sslCert $server.database.sslCert.secretRef) (and $server.database.sslKey $server.database.sslKey.secretRef) }}
+            - name: db-certs
+              mountPath: /dbcerts
+              readOnly: true
+          {{- end }}
+          env:
+            {{- if $server.database.url }}
+            - name: DISABLE_DATABASE_MIGRATION
+              value: "True"
+            {{- end }}
+            {{- range $k, $v := include "kitaru.envVariables" . | fromYaml }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if and $server.database.url $server.database.passwordSecretRef }}
+            - name: ZENML_STORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $server.database.passwordSecretRef.name }}
+                  key: {{ $server.database.passwordSecretRef.key }}
+            {{- end }}
+            {{- range $server.environmentSecretKeyRefs }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+          envFrom:
+          - secretRef:
+              name: {{ include "kitaru.fullname" . }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5
+          lifecycle:
+            preStop:
+              exec:
+                # Give the process 15 more seconds before the SIGTERM signal is
+                # sent. This allows the endpoint removal to reach the ingress
+                # controller in time and for traffic to be routed away from the
+                # pod before it is shut down. This eliminates the number of 502
+                # errors returned to the user.
+                #
+                # See https://learnk8s.io/graceful-shutdown for more information.
+                #
+                command: ["sleep", "15"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

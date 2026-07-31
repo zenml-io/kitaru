@@ -1,6 +1,81 @@
-Kitaru is available through service {{ include "kitaru.fullname" . }} on port 80.
+{{- $server := include "kitaru.serverValues" . | fromYaml -}}
+{{- if $server.pro.enabled }}
 
-To connect locally:
+The ZenML Pro workspace API is now active and ready to use at the following URL:
 
-  kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "kitaru.fullname" . }} 8000:80
-  kitaru login http://localhost:8000
+  {{ $server.serverURL }}
+
+{{- if $server.pro.enrollmentKey }}
+
+The following enrollment key has been used to enroll your server in the ZenML Pro control plane:
+
+  {{ $server.pro.enrollmentKey }}
+
+{{- else }}
+
+An enrollment key has been auto-generated for your server. Please use the following command to fetch the enrollment key:
+
+  kubectl get secret {{ include "kitaru.fullname" . }} -o jsonpath="{.data.ZENML_SERVER_PRO_OAUTH2_CLIENT_SECRET}" | base64 --decode
+
+{{- end }}
+
+{{- else }}
+{{- if $server.gateway.enabled }}
+{{- if $server.gateway.host }}
+{{- $gatewayScheme := "http" }}
+{{- if eq $server.gateway.sectionName "https" }}
+{{- $gatewayScheme = "https" }}
+{{- end }}
+
+Please access the Kitaru server at the following URL {{- if .Release.IsInstall }} to activate the server and create an initial admin user account {{- end }}:
+
+  {{ $gatewayScheme }}://{{ $server.gateway.host }}{{ $server.gateway.path }}
+
+{{- else }}
+{{- end }}
+{{- else if $server.ingress.enabled }}
+{{- if $server.ingress.host }}
+
+Please access the Kitaru server at the following URL {{- if .Release.IsInstall }} to activate the server and create an initial admin user account {{- end }}:
+
+  http{{ if $server.ingress.tls.enabled }}s{{ end }}://{{ $server.ingress.host }}{{ $server.ingress.path }}
+
+{{- else }}
+{{- end }}
+{{- else }}
+
+You can get the Kitaru server URL by running these commands:
+
+{{- if contains "NodePort" $server.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "kitaru.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" $server.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "kitaru.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "kitaru.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ $server.service.port }}
+{{- else if contains "ClusterIP" $server.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "kitaru.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+{{- end }}
+{{- end }}
+
+{{- if .Values.kitaru }}
+{{- if ne (len .Values.kitaru) 0 }}
+
+==> DEPRECATION WARNING:
+    The top-level 'kitaru' values key is deprecated and will be removed in a
+    future release. Please migrate your values to use 'server' instead.
+    For example, change 'kitaru.database.url' to 'server.database.url'.
+    Values under 'kitaru' are currently merged with 'server' for backwards
+    compatibility. If both 'kitaru:' and 'server:' are provided, 'kitaru:'
+    values take precedence for overlapping keys. We recommend using only one
+    key to avoid confusion.
+
+{{- end }}
+{{- end }}

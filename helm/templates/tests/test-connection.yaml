@@ -1,0 +1,16 @@
+{{- $server := include "kitaru.serverValues" . | fromYaml -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kitaru.fullname" . }}-test-connection"
+  labels:
+    {{- include "kitaru.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "kitaru.fullname" . }}:{{ $server.service.port }}']
+  restartPolicy: Never
