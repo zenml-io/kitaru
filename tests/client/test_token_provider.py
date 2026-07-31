@@ -18,13 +18,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import (
+    API_KEY_PREFIX,
+    CONTROL_PLANE_API_KEY_PREFIX,
+    TokenResponse,
+)
 from kitaru.client.auth import TokenProvider
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.credentials import ApiToken, CredentialType
+from kitaru.client.credentials import ApiToken, ApiType
 
 SERVER_URL = "https://kitaru.example.com"
 CONTROL_PLANE_URL = "https://control-plane.example.com"
+SERVER_API_KEY = f"{API_KEY_PREFIX}secret"
+CONTROL_PLANE_API_KEY = f"{CONTROL_PLANE_API_KEY_PREFIX}secret"
 
 
 class FakeTokenExchange:
@@ -113,18 +119,51 @@ async def test_cached_valid_token_is_used_without_exchange(tmp_path: Path) -> No
     assert exchange.device_code_calls == 0
 
 
-async def test_api_key_is_sent_directly(tmp_path: Path) -> None:
-    """Send a stored API key as the bearer token without exchanging it."""
+async def test_server_api_key_is_sent_directly(tmp_path: Path) -> None:
+    """Send a stored server API key as the bearer token without exchanging it."""
     store = _store(tmp_path)
-    store.set_api_key(SERVER_URL, "kitaru-key")
+    store.set_api_key(SERVER_URL, SERVER_API_KEY)
     exchange = FakeTokenExchange()
     provider = TokenProvider(SERVER_URL, store, exchange)
 
     token = await provider.get_token()
 
-    assert token == "kitaru-key"
+    assert token == SERVER_API_KEY
     assert exchange.device_code_calls == 0
     assert store.get_token(SERVER_URL) is None
+
+
+async def test_control_plane_api_key_is_exchanged_for_a_session(
+    tmp_path: Path,
+) -> None:
+    """Exchange a stored control plane API key instead of sending it directly."""
+    store = _store(tmp_path)
+    store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
+    exchange = FakeTokenExchange()
+    provider = TokenProvider(SERVER_URL, store, exchange)
+
+    token = await provider.get_token()
+    await provider.close()
+
+    assert exchange.control_plane_credentials == [CONTROL_PLANE_API_KEY]
+    assert token == f"token-for-{CONTROL_PLANE_API_KEY}"
+    cached = store.get_token(SERVER_URL)
+    assert cached is not None
+    assert cached.access_token == token
+
+
+async def test_control_plane_api_key_is_exchanged_once(tmp_path: Path) -> None:
+    """Reuse the exchanged token rather than exchanging the key on every call."""
+    store = _store(tmp_path)
+    store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
+    exchange = FakeTokenExchange()
+    provider = TokenProvider(SERVER_URL, store, exchange)
+
+    tokens = [await provider.get_token() for _ in range(3)]
+    await provider.close()
+
+    assert len(exchange.control_plane_credentials) == 1
+    assert len(set(tokens)) == 1
 
 
 async def test_expired_token_triggers_device_code_exchange(tmp_path: Path) -> None:
@@ -195,7 +234,7 @@ async def test_control_plane_credential_is_exchanged_for_a_session(
     store.set_token(
         CONTROL_PLANE_URL,
         ApiToken(access_token="cp-token", leeway_seconds=0),
-        type=CredentialType.CONTROL_PLANE,
+        type=ApiType.CONTROL_PLANE,
     )
     exchange = FakeTokenExchange()
     provider = TokenProvider(SERVER_URL, store, exchange)
@@ -220,7 +259,7 @@ async def test_device_authorization_wins_over_the_control_plane(
     store.set_token(
         CONTROL_PLANE_URL,
         ApiToken(access_token="cp-token", leeway_seconds=0),
-        type=CredentialType.CONTROL_PLANE,
+        type=ApiType.CONTROL_PLANE,
     )
     exchange = FakeTokenExchange()
     provider = TokenProvider(SERVER_URL, store, exchange)

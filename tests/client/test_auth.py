@@ -22,9 +22,14 @@ from conftest import (
     FakeApiKeyRepository,
     FakePasswordHasher,
     asgi_api_client,
+    create_api_key,
     local_settings,
 )
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import (
+    API_KEY_PREFIX,
+    CONTROL_PLANE_API_KEY_PREFIX,
+    TokenResponse,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import AuthenticationError
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -89,3 +94,47 @@ async def test_login_invalid_credentials(api_client: KitaruAPIClient) -> None:
         await api_client.auth.login(username="alice", password="wrong")
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "Invalid username or password."
+
+
+async def test_exchange_api_key(
+    api_client: KitaruAPIClient,
+    account: Account,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Exchange an API key for a session token through the SDK."""
+    _, key = await create_api_key(api_key_repository, account.id)
+    token = await api_client.auth.exchange_api_key(key)
+    assert isinstance(token, TokenResponse)
+    assert token.token_type == "bearer"
+    assert token.expires_in > 0
+
+
+async def test_exchange_invalid_api_key(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 401 for a key the server does not accept."""
+    with pytest.raises(AuthenticationError) as exc_info:
+        await api_client.auth.exchange_api_key(f"{API_KEY_PREFIX}bogus")
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid API key."
+
+
+async def test_control_plane_api_key_is_not_pinned_as_a_header() -> None:
+    """Exchange a control plane API key rather than sending it on every request."""
+    client = KitaruAPIClient(
+        base_url="http://test", api_key=f"{CONTROL_PLANE_API_KEY_PREFIX}secret"
+    )
+    try:
+        assert "Authorization" not in client._http.headers
+        assert client._auth is not None
+    finally:
+        await client.close()
+
+
+async def test_server_api_key_is_pinned_as_a_header() -> None:
+    """Send a server API key as a bearer token without a token provider."""
+    key = f"{API_KEY_PREFIX}secret"
+    client = KitaruAPIClient(base_url="http://test", api_key=key)
+    try:
+        assert client._http.headers["Authorization"] == f"Bearer {key}"
+        assert client._auth is None
+    finally:
+        await client.close()

@@ -28,9 +28,9 @@ from conftest import (
     control_plane_settings,
     create_api_key,
 )
+from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
-    CONTROL_PLANE_API_KEY_PREFIX,
     ControlPlaneAuthenticator,
     ControlPlaneError,
     ControlPlaneUser,

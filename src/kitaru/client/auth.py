@@ -91,10 +91,10 @@ class TokenProvider:
             Bearer token, or None when nothing stored can produce one.
         """
         credentials = self._store.get(self._url)
-        # An API key authenticates requests directly and never expires, so
-        # there is nothing to cache or renew.
-        if credentials is not None and credentials.api_key is not None:
-            return credentials.api_key
+        if credentials is not None and credentials.server_api_key is not None:
+            # A server API key is used directly as a bearer credential and we
+            # don't need to exchange it for a server token.
+            return credentials.server_api_key
         token = self._store.get_token(self._url)
         if token is not None:
             return token.access_token
@@ -139,7 +139,12 @@ class TokenProvider:
                 credentials.device_id, credentials.device_code
             )
             return ApiToken.from_response(response)
-        credential = await self._get_control_plane_credential(credentials)
+        # The server allows exchanging a control plane API key, so a stored one
+        # is used directly. Otherwise, we log into the control plane first and
+        # exchange the resulting token for a server token.
+        credential = credentials.control_plane_api_key
+        if credential is None:
+            credential = await self._get_control_plane_credential(credentials)
         if credential is not None:
             response = await self._exchange.exchange_control_plane_credential(
                 credential

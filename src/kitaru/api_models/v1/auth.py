@@ -20,11 +20,15 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import ResponseModel
 
+API_KEY_PREFIX = "KITKEY_"
+CONTROL_PLANE_API_KEY_PREFIX = "ZENPROKEY_"
+
 
 class GrantType(StrEnum):
     """Login grant type."""
 
     PASSWORD = "password"
+    API_KEY = "api-key"
     CONTROL_PLANE = "control-plane"
     DEVICE_CODE = "urn:ietf:params:oauth:grant-type:device_code"
 

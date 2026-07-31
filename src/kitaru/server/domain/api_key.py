@@ -20,6 +20,7 @@ from datetime import datetime
 
 from pydantic import Field
 
+from kitaru.api_models.v1.auth import API_KEY_PREFIX
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -28,8 +29,6 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
-
-API_KEY_PREFIX = "KITKEY_"
 
 
 class ApiKeyNotFound(NotFoundError):

@@ -25,7 +25,7 @@ from kitaru.client.control_plane import (
     ControlPlaneSession,
 )
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.credentials import ApiToken, CredentialType
+from kitaru.client.credentials import ApiToken, ApiType
 from kitaru.client.device_grant import DeviceLoginError
 from kitaru.transport import RetryTransport
 
@@ -149,7 +149,7 @@ async def test_api_key_login_caches_the_key_and_the_token(
 
     credentials = credential_store.get_control_plane(CONTROL_PLANE_URL)
     assert credentials is not None
-    assert credentials.type is CredentialType.CONTROL_PLANE
+    assert credentials.type is ApiType.CONTROL_PLANE
     assert credentials.api_key == "ZENPROKEY_abc"
     cached = credential_store.get_token(CONTROL_PLANE_URL)
     assert cached is not None
@@ -163,7 +163,7 @@ async def test_get_token_returns_the_cached_token_without_a_login(
     credential_store.set_token(
         CONTROL_PLANE_URL,
         ApiToken(access_token="cached", leeway_seconds=0),
-        type=CredentialType.CONTROL_PLANE,
+        type=ApiType.CONTROL_PLANE,
     )
     control_plane = FakeControlPlane()
     session = _session(credential_store, control_plane)
@@ -179,7 +179,7 @@ async def test_get_token_renews_an_expired_token_from_the_stored_key(
 ) -> None:
     """Log in again with the stored API key once the cached token expires."""
     credential_store.set_api_key(
-        CONTROL_PLANE_URL, "ZENPROKEY_abc", type=CredentialType.CONTROL_PLANE
+        CONTROL_PLANE_URL, "ZENPROKEY_abc", type=ApiType.CONTROL_PLANE
     )
     control_plane = FakeControlPlane()
     session = _session(credential_store, control_plane)
