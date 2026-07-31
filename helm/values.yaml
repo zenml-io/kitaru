@@ -4,10 +4,8 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-
 # Kitaru server related options.
 server:
-
   replicaCount: 1
 
   image:
@@ -45,10 +43,6 @@ server:
     # The name of the ZenML Pro organization to use.
     organizationName:
 
-    # The enrollment key to use for the ZenML Pro workspace. If not specified,
-    # an enrollment key will be auto-generated.
-    enrollmentKey:
-
   # The URL where the Kitaru server API is reachable. If not specified, the
   # clients will use the same URL used to connect them to the Kitaru server.
   #
@@ -67,29 +61,21 @@ server:
   # This value is overridden if the `kitaru.pro.enabled` value is set.
   dashboardURL:
 
-
   # Flag to enable/disable the tracking process of the analytics
   analyticsOptIn: true
-
-  # Kitaru server deployment type. This field is used for telemetry purposes.
-  # Example values are "local", "kubernetes", "aws", "gcp", "azure".
-  #
-  # This value is overridden if the `kitaru.pro.enabled` value is set.
-  deploymentType:
 
   # Authentication settings that control how the Kitaru server authenticates
   # its users.
   auth:
-
     # The Kitaru authentication scheme. Use one of:
-    # 
-    # NO_AUTH - No authentication
-    # HTTP_BASIC - HTTP Basic authentication
-    # OAUTH2_PASSWORD_BEARER - OAuth2 password bearer
-    # EXTERNAL - External authentication (e.g. via a remote authenticator)
+    #
+    # NONE - No authentication
+    # LOCAL - Local authentication
+    # CONTROL_PLANE - Control plane authentication
+    # CLOUD - Cloud authentication
     #
     # This value is overridden if the `kitaru.pro.enabled` value is set.
-    authType: OAUTH2_PASSWORD_BEARER
+    authType: LOCAL
 
     # The secret key used to sign JWT tokens. This should be set to
     # a random string with a recommended length of at least 32 characters, e.g.:
@@ -98,7 +84,7 @@ server:
     #   from secrets import token_hex
     #   token_hex(32)
     #   ```
-    #   
+    #
     # or:
     #
     #   ```shell
@@ -107,36 +93,27 @@ server:
     #
     # If not explicitly set, a random key will be generated when the helm
     # chart is installed and reused for all subsequent upgrades.
-    jwtSecretKey:
-
-    # The JWT token algorithm to use. Use one of:
-    # 
-    # HS256 - HMAC using SHA-256 hash algorithm
-    # HS384 - HMAC using SHA-384 hash algorithm
-    # HS512 - HMAC using SHA-512 hash algorithm
-    jwtTokenAlgorithm: HS256
+    jwtSigningKey:
 
     # The issuer of the JWT tokens. If not specified, the issuer is set to the
     # Kitaru Server ID.
-    jwtTokenIssuer:
+    #
+    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    jwtIssuer:
 
     # The audience of the JWT tokens. If not specified, the audience is set to
     # the Kitaru Server ID.
-    jwtTokenAudience:
-    
-    # The leeway in seconds allowed when verifying the expiration time of JWT
-    # tokens.
-    jwtTokenLeewaySeconds: 10
-
-    # The expiration time of JWT tokens in minutes. If not specified, generated
-    # JWT tokens will not be set to expire.
     #
-    # This value is automatically set if the `kitaru.pro.enabled` value is set.
-    jwtTokenExpireMinutes: 
+    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    jwtAudience:
+
+    # The lifetime of JWT tokens in seconds.
+    jwtLifetimeSeconds: 3600
 
     # The name of the http-only cookie used to store the JWT tokens used to
-    # authenticate web clients. If not specified, the cookie name is set to a
-    # value computed from the Kitaru server ID.
+    # authenticate web clients.
+    #
+    # This value is overridden if the `kitaru.pro.enabled` value is set.
     authCookieName:
 
     # The domain of the http-only cookie used to store the JWT tokens used to
@@ -152,26 +129,49 @@ server:
     corsAllowOrigins:
       - "*"
 
-    # The login URL of an external authenticator service to use with the
-    # `EXTERNAL` authentication scheme. Only relevant if `kitaru.auth.authType`
-    # is set to `EXTERNAL`.
+    # The maximum number of failed authentication attempts allowed for an OAuth
+    # 2.0 device before the device is locked.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
-    externalLoginURL:
+    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
+    # `NO_AUTH`.
+    maxFailedDeviceAuthAttempts: 3
 
-    # The user info URL of an external authenticator service to use with the
-    # `EXTERNAL` authentication scheme. Only relevant if `kitaru.auth.authType`
-    # is set to `EXTERNAL`.
+    # The timeout in seconds after which a pending OAuth 2.0 device
+    # authorization request expires.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
-    externalUserInfoURL:
+    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
+    # `NO_AUTH`.
+    deviceAuthTimeoutSeconds: 300
 
-    # The UUID of the Kitaru server to use with the `EXTERNAL` authentication
-    # scheme. If not specified, the regular Kitaru server ID (deployment ID) is
-    # used.
+    # The polling interval in seconds used by clients to poll the OAuth 2.0
+    # device authorization endpoint for the status of a pending device
+    # authorization request.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
-    externalServerID:
+    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
+    # `NO_AUTH`.
+    deviceAuthPollingIntervalSeconds: 5
+
+    # The time in minutes that an OAuth 2.0 device is allowed to be used to
+    # authenticate with the ZenML server. If not set or if
+    # `zenml.auth.jwtTokenExpireMinutes` is not set, the devices are allowed to
+    # be used indefinitely. This controls the expiration time of the JWT tokens
+    # issued to clients after they have authenticated with the Kitaru server
+    # using an OAuth 2.0 device.
+    #
+    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
+    # `NO_AUTH`.
+    deviceExpirationMinutes:
+
+    # The time in minutes that a trusted OAuth 2.0 device is allowed to be used
+    # to authenticate with the ZenML server. If not set or if
+    # `zenml.auth.jwtTokenExpireMinutes` is not set, the devices are allowed to
+    # be used indefinitely. This controls the expiration time of the JWT tokens
+    # issued to clients after they have authenticated with the Kitaru server
+    # using an OAuth 2.0 device that was previously trusted by the user.
+    #
+    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
+    # `NO_AUTH`.
+    trustedDeviceExpirationMinutes:
 
   # The root URL path to use when behind a proxy. This is useful when the
   # `rewrite-target` annotation is used in the ingress controller, e.g.:
@@ -193,7 +193,6 @@ server:
   # NOTE: the certificate files need to be copied in the helm chart folder and
   # the paths configured here need to be relative to the root of the helm chart.
   database:
-
     # The host of the external database service.
     host: zenml-db
 
@@ -287,7 +286,7 @@ server:
   # default value.
   # - `disabled`, `off`, `false`, `none` or `no` - disables the secure header
   # entirely, so that it is not set in the Kitaru server's HTTP responses.
-  # - any other value - sets the secure header to the specified value.  
+  # - any other value - sets the secure header to the specified value.
   secure_headers:
     # The `Server` HTTP header value used to identify the server. The default
     # value is the Kitaru server ID.
@@ -316,20 +315,11 @@ server:
     # `accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()`.
     permissions: enabled
 
-
   # Logging settings for the Kitaru server container.
   logging:
     # Set the logging verbosity.
     # Supported values are: debug, info, warning, error, critical
     verbosity: info
-
-    # Log output format. Use "console", "json", or a custom Python logging
-    # format string in %-style format like "%(levelname)s:%(name)s:%(message)s".
-    format: console
-
-    # Disable ANSI colors in console logs.
-    colorsDisabled: false
-
 
   # Extra environment variables to set in the Kitaru server container.
   environment: {}
@@ -441,7 +431,6 @@ server:
 
   # Configuration for custom CA certificates.
   certificates:
-
     # Direct injection of CA certificates in PEM format
     customCAs: []
       # - name: "my-custom-ca"
@@ -450,7 +439,7 @@ server:
       #     MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiIMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
       #     ...
       #     -----END CERTIFICATE-----
-    
+
     # Reference existing secrets containing CA certificates
     secretRefs: []
       # - name: "my-secret"

@@ -56,43 +56,28 @@ db_max_overflow: {{ .Kitaru.database.maxOverflow | quote }}
 {{- end }}
 
 {{- if .Kitaru.pro.enabled }}
-deployment_type: cloud
-pro_api_url: "{{ .Kitaru.pro.apiURL }}"
-pro_dashboard_url: "{{ .Kitaru.pro.dashboardURL }}"
-pro_oauth2_audience: "{{ .Kitaru.pro.apiURL }}"
-pro_organization_id: "{{ .Kitaru.pro.organizationID }}"
-pro_workspace_id: "{{ .Kitaru.pro.workspaceID }}"
-{{- if .Kitaru.pro.workspaceName }}
-pro_workspace_name: "{{ .Kitaru.pro.workspaceName }}"
-{{- end }}
-{{- if .Kitaru.pro.organizationName }}
-pro_organization_name: "{{ .Kitaru.pro.organizationName }}"
-{{- end }}
-{{- if .Kitaru.pro.extraCorsOrigins }}
-cors_allow_origins: "{{ join "," .Kitaru.pro.extraCorsOrigins }}"
-{{- end }}
-{{- if .Kitaru.auth.jwtTokenExpireMinutes }}
-jwt_token_expire_minutes: {{ .Kitaru.auth.jwtTokenExpireMinutes | quote }}
-{{- end }}
+auth_scheme: cloud
+control_plane_api_url: "{{ .Kitaru.pro.apiURL }}"
+jwt_audience: "{{ .Kitaru.pro.apiURL }}"
+jwt_issuer: "{{ .Kitaru.pro.apiURL }}"
+auth_cookie_name: kitaru-server-{{ .Kitaru.pro.workspaceID }}
+server_id: {{ .Kitaru.pro.workspaceID | quote }}
+dashboard_url: {{ .Kitaru.pro.dashboardURL }}/workspaces/{{ .Kitaru.pro.workspaceID }}
 
 {{- else }}
 
 auth_scheme: {{ .Kitaru.authType | default .Kitaru.auth.authType | quote }}
-deployment_type: {{ .Kitaru.deploymentType | default "kubernetes" }}
+{{- if .Kitaru.auth.authCookieName }}
+auth_cookie_name: {{ .Kitaru.auth.authCookieName | quote }}
+{{- end }}
 {{- if .Kitaru.auth.corsAllowOrigins }}
 cors_allow_origins: {{ join "," .Kitaru.auth.corsAllowOrigins | quote }}
 {{- end }}
-{{- if .Kitaru.auth.externalLoginURL }}
-external_login_url: {{ .Kitaru.auth.externalLoginURL | quote }}
+{{- if .Kitaru.auth.jwtIssuer }}
+jwt_issuer: {{ .Kitaru.auth.jwtIssuer | quote }}
 {{- end }}
-{{- if .Kitaru.auth.externalUserInfoURL }}
-external_user_info_url: {{ .Kitaru.auth.externalUserInfoURL | quote }}
-{{- end }}
-{{- if .Kitaru.auth.externalServerID }}
-external_server_id: {{ .Kitaru.auth.externalServerID | quote }}
-{{- end }}
-{{- if .Kitaru.auth.jwtTokenExpireMinutes }}
-jwt_token_expire_minutes: {{ .Kitaru.auth.jwtTokenExpireMinutes | quote }}
+{{- if .Kitaru.auth.jwtAudience }}
+jwt_audience: {{ .Kitaru.auth.jwtAudience | quote }}
 {{- end }}
 {{- if .Kitaru.dashboardURL }}
 dashboard_url: {{ .Kitaru.dashboardURL | quote }}
@@ -100,23 +85,26 @@ dashboard_url: {{ .Kitaru.dashboardURL | quote }}
 
 {{- end }}
 
-{{- if .Kitaru.auth.jwtTokenAlgorithm }}
-jwt_token_algorithm: {{ .Kitaru.auth.jwtTokenAlgorithm | quote }}
-{{- end }}
-{{- if .Kitaru.auth.jwtTokenIssuer }}
-jwt_token_issuer: {{ .Kitaru.auth.jwtTokenIssuer | quote }}
-{{- end }}
-{{- if .Kitaru.auth.jwtTokenAudience }}
-jwt_token_audience: {{ .Kitaru.auth.jwtTokenAudience | quote }}
-{{- end }}
-{{- if .Kitaru.auth.jwtTokenLeewaySeconds }}
-jwt_token_leeway_seconds: {{ .Kitaru.auth.jwtTokenLeewaySeconds | quote }}
-{{- end }}
-{{- if .Kitaru.auth.authCookieName }}
-auth_cookie_name: {{ .Kitaru.auth.authCookieName | quote }}
+{{- if .Kitaru.auth.jwtLifetimeSeconds }}
+jwt_lifetime_seconds: {{ .Kitaru.auth.jwtLifetimeSeconds | quote }}
 {{- end }}
 {{- if .Kitaru.auth.authCookieDomain }}
 auth_cookie_domain: {{ .Kitaru.auth.authCookieDomain | quote }}
+{{- end }}
+{{- if .Kitaru.auth.maxFailedDeviceAuthAttempts }}
+max_failed_device_auth_attempts: {{ .Kitaru.auth.maxFailedDeviceAuthAttempts | quote }}
+{{- end }}
+{{- if .Kitaru.auth.deviceAuthTimeoutSeconds }}
+device_auth_timeout_seconds: {{ .Kitaru.auth.deviceAuthTimeoutSeconds | quote }}
+{{- end }}
+{{- if .Kitaru.auth.deviceAuthPollingIntervalSeconds }}
+device_auth_polling_interval_seconds: {{ .Kitaru.auth.deviceAuthPollingIntervalSeconds | quote }}
+{{- end }}
+{{- if .Kitaru.auth.deviceExpirationMinutes }}
+device_expiration_minutes: {{ .Kitaru.auth.deviceExpirationMinutes | quote }}
+{{- end }}
+{{- if .Kitaru.auth.trustedDeviceExpirationMinutes }}
+trusted_device_expiration_minutes: {{ .Kitaru.auth.trustedDeviceExpirationMinutes | quote }}
 {{- end }}
 {{- if .Kitaru.rootUrlPath }}
 root_url_path: {{ .Kitaru.rootUrlPath | quote }}
@@ -124,7 +112,12 @@ root_url_path: {{ .Kitaru.rootUrlPath | quote }}
 {{- if .Kitaru.serverURL }}
 server_url: {{ .Kitaru.serverURL | quote }}
 {{- end }}
-
+{{- if .Kitaru.analyticsOptIn }}
+analytics_opt_in: "True"
+{{- else }}
+analytics_opt_in: "False"
+{{- end }}
+log_level: {{ default "info" .Kitaru.logging.verbosity | upper | quote }}
 {{- range $key, $value := .Kitaru.secure_headers }}
 secure_headers_{{ $key }}: {{ $value | quote }}
 {{- end }}
@@ -216,7 +209,6 @@ Returns a dictionary with common configuration env vars.
 {{- define "kitaru.baseEnvVariables" -}}
 {{- $server := include "kitaru.serverValues" . | fromYaml -}}
 {{- $logging := $server.logging | default dict -}}
-ZENML_SERVER: "True"
 NODE_OPTIONS: "--use-openssl-ca"
 {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
 REQUESTS_CA_BUNDLE: "/updated-certs/ca-certificates.crt"
@@ -230,11 +222,6 @@ ZENML_CONSOLE_LOGGING_FORMAT: {{ .format | quote }}
 {{- if hasKey . "colorsDisabled" }}
 ZENML_LOGGING_COLORS_DISABLED: {{ .colorsDisabled | quote }}
 {{- end }}
-{{- end }}
-{{- if $server.analyticsOptIn }}
-ZENML_ANALYTICS_OPT_IN: "True"
-{{- else }}
-ZENML_ANALYTICS_OPT_IN: "False"
 {{- end }}
 
 {{- if $server.proxy.enabled }}

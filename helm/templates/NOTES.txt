@@ -5,20 +5,6 @@ The ZenML Pro workspace API is now active and ready to use at the following URL:
 
   {{ $server.serverURL }}
 
-{{- if $server.pro.enrollmentKey }}
-
-The following enrollment key has been used to enroll your server in the ZenML Pro control plane:
-
-  {{ $server.pro.enrollmentKey }}
-
-{{- else }}
-
-An enrollment key has been auto-generated for your server. Please use the following command to fetch the enrollment key:
-
-  kubectl get secret {{ include "kitaru.fullname" . }} -o jsonpath="{.data.ZENML_SERVER_PRO_OAUTH2_CLIENT_SECRET}" | base64 --decode
-
-{{- end }}
-
 {{- else }}
 {{- if $server.gateway.enabled }}
 {{- if $server.gateway.host }}
