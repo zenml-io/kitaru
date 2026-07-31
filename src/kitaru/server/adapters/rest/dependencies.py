@@ -220,10 +220,7 @@ def get_agent_version_service(
     Returns:
         Agent version service bound to the SQL repositories.
     """
-    return AgentVersionService(
-        repository=SQLAgentVersionRepository(session),
-        task_repository=SQLTaskRepository(session),
-    )
+    return AgentVersionService(repository=SQLAgentVersionRepository(session))
 
 
 def get_api_key_service(
@@ -329,6 +326,7 @@ def get_session_service(
     return SessionService(
         repository=SQLSessionRepository(session),
         task_repository=SQLTaskRepository(session),
+        agent_version_repository=SQLAgentVersionRepository(session),
     )
 
 

@@ -183,17 +183,6 @@ class TaskRepository(Protocol):
         """
         ...
 
-    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
-        """Report whether any task references an agent version.
-
-        Args:
-            agent_version_id: Id of the agent version.
-
-        Returns:
-            Whether a task references the agent version.
-        """
-        ...
-
     async def get_agent_tasks_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Task]:

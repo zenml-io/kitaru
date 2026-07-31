@@ -86,6 +86,55 @@ class SessionInUseByTask(ConflictError):
         super().__init__(f"Session {session_id} is in use by a task")
 
 
+class SessionAgentVersionMismatch(ValidationError):
+    """Raised when a session names a different agent version than its task runs."""
+
+    def __init__(
+        self,
+        task_id: uuid.UUID,
+        agent_version_id: uuid.UUID | None,
+        task_agent_version_id: uuid.UUID | None,
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            task_id: Id of the producing task.
+            agent_version_id: Agent version the session names.
+            task_agent_version_id: Agent version the task runs.
+        """
+        super().__init__(
+            f"Session names agent version {agent_version_id}, task {task_id} "
+            f"runs agent version {task_agent_version_id}"
+        )
+
+
+class SessionAgentMismatch(ValidationError):
+    """Raised when a session names a different agent than its task creates under."""
+
+    def __init__(
+        self, task_id: uuid.UUID, agent_id: uuid.UUID | None, task_agent_id: uuid.UUID
+    ) -> None:
+        """Initialize the error.
+
+        Args:
+            task_id: Id of the producing task.
+            agent_id: Agent the session names.
+            task_agent_id: Agent the task creates sessions under.
+        """
+        super().__init__(
+            f"Session names agent {agent_id}, task {task_id} creates sessions "
+            f"under agent {task_agent_id}"
+        )
+
+
+class SessionAgentRequired(ValidationError):
+    """Raised when a session create carries no agent and none can be inferred."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("Session names no agent and no task to infer one from")
+
+
 class SessionStatusCannotBeCleared(ValidationError):
     """Raised when a session update tries to clear the status."""
 

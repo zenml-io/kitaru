@@ -19,9 +19,13 @@ from datetime import UTC, datetime
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    create_agent,
     create_agent_task,
+    create_agent_version,
     create_import_task,
     create_session,
 )
@@ -34,8 +38,16 @@ from kitaru.server.application.models.session import (
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent_version import (
+    AgentVersion,
+    AgentVersionAgentMismatch,
+    AgentVersionNotFound,
+)
 from kitaru.server.domain.session import (
     IllegalSessionStatusTransition,
+    SessionAgentMismatch,
+    SessionAgentRequired,
+    SessionAgentVersionMismatch,
     SessionNotFound,
     SessionStatusCannotBeCleared,
 )
@@ -62,19 +74,60 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
+def agent_repository() -> FakeAgentRepository:
+    """Provide a fake agent repository."""
+    return FakeAgentRepository()
+
+
+@pytest.fixture
+def agent_version_repository(
+    agent_repository: FakeAgentRepository,
+) -> FakeAgentVersionRepository:
+    """Provide a fake agent version repository sharing the agent repository."""
+    return FakeAgentVersionRepository(agent_repository)
+
+
+@pytest.fixture
 def service(
-    repository: FakeSessionRepository, task_repository: FakeTaskRepository
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> SessionService:
     """Provide a session service backed by the fake repositories."""
-    return SessionService(repository=repository, task_repository=task_repository)
+    return SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+    )
 
 
-async def _running_agent_task(task_repository: FakeTaskRepository) -> Task:
-    """Store an agent task claimed by a worker and running."""
-    task = await create_agent_task(task_repository, uuid.uuid4())
+async def _stored_agent_version(
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    name: str = "assistant",
+) -> AgentVersion:
+    """Store an agent and one version of it."""
+    agent = await create_agent(agent_repository, ACTOR.account.id, name=name)
+    return await create_agent_version(
+        agent_version_repository, agent.id, ACTOR.account.id
+    )
+
+
+async def _start(task_repository: FakeTaskRepository, task: Task) -> Task:
+    """Claim and start a stored task."""
     task.claim(uuid.uuid4(), datetime.now(UTC))
     task.start(datetime.now(UTC))
     return await task_repository.update(task)
+
+
+async def _running_agent_task(
+    task_repository: FakeTaskRepository, agent_version_id: uuid.UUID | None = None
+) -> Task:
+    """Store an agent task claimed by a worker and running."""
+    task = await create_agent_task(
+        task_repository, uuid.uuid4(), agent_version_id=agent_version_id
+    )
+    return await _start(task_repository, task)
 
 
 async def test_create_session_defaults_status_in_progress(
@@ -360,14 +413,16 @@ async def test_create_session_requires_the_named_task_to_be_running(
 
 
 async def test_create_session_links_an_agent_tasks_result_session(
-    service: SessionService, task_repository: FakeTaskRepository
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
     """Creating a session for a running agent task links it as the result session."""
-    task = await _running_agent_task(task_repository)
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
     session = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
-        ),
+        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
         actor=ACTOR,
     )
     stored_task = await task_repository.get(task.id)
@@ -375,21 +430,21 @@ async def test_create_session_links_an_agent_tasks_result_session(
 
 
 async def test_create_session_rejects_a_second_link_to_an_agent_task(
-    service: SessionService, task_repository: FakeTaskRepository
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
     """A second session cannot link to an agent task that already has one."""
-    task = await _running_agent_task(task_repository)
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
     await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
-        ),
+        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
         actor=ACTOR,
     )
     with pytest.raises(TaskResultSessionAlreadyLinked):
         await service.create_session(
-            SessionCreate(
-                agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
-            ),
+            SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
             actor=ACTOR,
         )
 
@@ -398,24 +453,213 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     service: SessionService, task_repository: FakeTaskRepository
 ) -> None:
     """An import task links every session it creates, not just one."""
-    task = await create_import_task(task_repository, uuid.uuid4())
-    task.claim(uuid.uuid4(), datetime.now(UTC))
-    task.start(datetime.now(UTC))
-    await task_repository.update(task)
-
+    task = await _start(
+        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
     first = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(), origin=SessionOrigin.IMPORTED, task_id=task.id
-        ),
+        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
         actor=ACTOR,
     )
     second = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(), origin=SessionOrigin.IMPORTED, task_id=task.id
-        ),
+        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
         actor=ACTOR,
     )
     assert first.task_id == task.id
     assert second.task_id == task.id
     stored_task = await task_repository.get(task.id)
     assert stored_task.result_session_id is None
+
+
+async def test_create_session_infers_agent_and_version_from_an_agent_task(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """An agent task's version and its owning agent land on the session."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
+        actor=ACTOR,
+    )
+    assert session.agent_version_id == version.id
+    assert session.agent_id == version.agent_id
+
+
+async def test_create_session_accepts_the_agent_task_version_it_was_given(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A command repeating the task's own agent version is stored unchanged."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    session = await service.create_session(
+        SessionCreate(
+            agent_id=version.agent_id,
+            agent_version_id=version.id,
+            origin=SessionOrigin.RECORDED,
+            task_id=task.id,
+        ),
+        actor=ACTOR,
+    )
+    assert session.agent_version_id == version.id
+
+
+async def test_create_session_rejects_a_version_the_agent_task_does_not_run(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A command naming another agent version than its task runs is rejected."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    with pytest.raises(SessionAgentVersionMismatch):
+        await service.create_session(
+            SessionCreate(
+                agent_version_id=uuid.uuid4(),
+                origin=SessionOrigin.RECORDED,
+                task_id=task.id,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_rejects_an_agent_the_version_does_not_belong_to(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A command naming another agent than its task's version belongs to is rejected."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    with pytest.raises(AgentVersionAgentMismatch):
+        await service.create_session(
+            SessionCreate(
+                agent_id=uuid.uuid4(),
+                origin=SessionOrigin.RECORDED,
+                task_id=task.id,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_infers_the_agent_from_a_version_without_a_task(
+    service: SessionService,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A task-less session naming only a version takes the version's agent."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    session = await service.create_session(
+        SessionCreate(agent_version_id=version.id, origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    assert session.agent_id == version.agent_id
+    assert session.agent_version_id == version.id
+
+
+async def test_create_session_rejects_a_task_less_version_of_another_agent(
+    service: SessionService,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A task-less session pairing an agent with another agent's version fails."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    other = await _stored_agent_version(
+        agent_repository, agent_version_repository, name="other"
+    )
+    with pytest.raises(AgentVersionAgentMismatch):
+        await service.create_session(
+            SessionCreate(
+                agent_id=other.agent_id,
+                agent_version_id=version.id,
+                origin=SessionOrigin.RECORDED,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_rejects_an_unknown_agent_version(
+    service: SessionService,
+) -> None:
+    """A task-less session naming a version that does not exist is rejected."""
+    with pytest.raises(AgentVersionNotFound):
+        await service.create_session(
+            SessionCreate(agent_version_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+            actor=ACTOR,
+        )
+
+
+async def test_create_session_requires_an_agent_without_a_task_or_version(
+    service: SessionService,
+) -> None:
+    """A session naming neither a task nor a version must carry an agent."""
+    with pytest.raises(SessionAgentRequired):
+        await service.create_session(
+            SessionCreate(origin=SessionOrigin.RECORDED), actor=ACTOR
+        )
+
+
+async def test_create_session_takes_an_import_tasks_agent_and_version(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """An import task stamps its agent and version on every session it creates."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _start(
+        task_repository,
+        await create_import_task(
+            task_repository,
+            uuid.uuid4(),
+            agent_id=version.agent_id,
+            agent_version_id=version.id,
+        ),
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
+        actor=ACTOR,
+    )
+    assert session.agent_id == version.agent_id
+    assert session.agent_version_id == version.id
+
+
+async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """An import task carrying no version creates sessions carrying none."""
+    agent_id = uuid.uuid4()
+    task = await _start(
+        task_repository,
+        await create_import_task(task_repository, uuid.uuid4(), agent_id=agent_id),
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
+        actor=ACTOR,
+    )
+    assert session.agent_id == agent_id
+    assert session.agent_version_id is None
+
+
+async def test_create_session_rejects_an_agent_the_import_task_does_not_use(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """A command naming another agent than its import task creates under fails."""
+    task = await _start(
+        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
+    with pytest.raises(SessionAgentMismatch):
+        await service.create_session(
+            SessionCreate(
+                agent_id=uuid.uuid4(),
+                origin=SessionOrigin.IMPORTED,
+                task_id=task.id,
+            ),
+            actor=ACTOR,
+        )

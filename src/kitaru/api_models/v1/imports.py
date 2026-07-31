@@ -29,6 +29,10 @@ class ImportCreateRequest(RequestModel):
     agent_id: uuid.UUID = Field(
         description="Agent imported sessions are created under."
     )
+    agent_version_id: uuid.UUID | None = Field(
+        default=None,
+        description="Agent version recorded on the imported sessions.",
+    )
     version: int | None = Field(
         default=None,
         description="Importer version, an omitted value resolves to latest.",

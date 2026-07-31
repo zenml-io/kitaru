@@ -39,7 +39,7 @@ from kitaru.server.application.models.task import (
     TaskUpdate,
 )
 from kitaru.server.application.services.agent_version_resolution import (
-    resolve_agent_version,
+    resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
@@ -406,7 +406,7 @@ class TaskService:
         Returns:
             Execution spec.
         """
-        agent_version = await resolve_agent_version(
+        agent_version = await resolve_runnable_agent_version(
             task.agent_version_id, self._agent_versions
         )
         run_spec = agent_version.run_spec

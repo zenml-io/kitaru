@@ -84,7 +84,7 @@ async def test_replay_pipeline_completes_through_the_api(
     client: httpx.AsyncClient,
 ) -> None:
     """A replay runs through claim, agent completion, and evaluator completion."""
-    agent_id, _, baseline_id = await _setup_replayable_session(client)
+    agent_id, version_id, baseline_id = await _setup_replayable_session(client)
     await _register_evaluator(client)
 
     replay = (
@@ -119,7 +119,6 @@ async def test_replay_pipeline_completes_through_the_api(
         await client.post(
             "/v1/sessions",
             json={
-                "agent_id": agent_id,
                 "origin": "replay",
                 "inputs": None,
                 "outputs": None,
@@ -128,6 +127,8 @@ async def test_replay_pipeline_completes_through_the_api(
             },
         )
     ).json()
+    assert result_session["agent_id"] == agent_id
+    assert result_session["agent_version_id"] == version_id
     await client.patch(
         f"/v1/sessions/{result_session['id']}",
         json={"status": "completed", "outputs": {}},

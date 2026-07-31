@@ -18,7 +18,6 @@ import uuid
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
-from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
     AgentVersionUpdate,
@@ -34,18 +33,13 @@ from kitaru.server.domain.agent_version import (
 class AgentVersionService:
     """Agent version use cases."""
 
-    def __init__(
-        self, repository: AgentVersionRepository, task_repository: TaskRepository
-    ) -> None:
+    def __init__(self, repository: AgentVersionRepository) -> None:
         """Initialize the service.
 
         Args:
             repository: Agent version repository.
-            task_repository: Task repository, for the run spec and
-                capabilities freeze check.
         """
         self._repository = repository
-        self._tasks = task_repository
 
     async def create_version(
         self,
@@ -135,8 +129,6 @@ class AgentVersionService:
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
-            AgentVersionFrozen: The version has tasks and the command
-                touches its run spec or capabilities.
 
         Returns:
             Updated agent version.
@@ -148,17 +140,14 @@ class AgentVersionService:
             agent_version.update_display_version(command.display_version)
         if "description" in fields:
             agent_version.update_description(command.description)
-        if "run_spec" in fields or "capabilities" in fields:
-            has_tasks = await self._tasks.exists_for_agent_version(agent_version_id)
-            if "run_spec" in fields:
-                agent_version.update_run_spec(command.run_spec, has_tasks)
-            if "capabilities" in fields:
-                capabilities = (
-                    command.capabilities
-                    if command.capabilities is not None
-                    else AgentCapabilities()
-                )
-                agent_version.update_capabilities(capabilities, has_tasks)
+        if "run_spec" in fields:
+            agent_version.update_run_spec(command.run_spec)
+        if "capabilities" in fields:
+            agent_version.update_capabilities(
+                command.capabilities
+                if command.capabilities is not None
+                else AgentCapabilities()
+            )
         return await self._repository.update(agent_version)
 
     async def delete_version(

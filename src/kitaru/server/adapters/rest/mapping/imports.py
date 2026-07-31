@@ -29,6 +29,7 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
     return ImportCreate(
         importer=body.importer,
         agent_id=body.agent_id,
+        agent_version_id=body.agent_version_id,
         version=body.version,
         payload_blob_id=body.payload_blob_id,
         params=body.params,

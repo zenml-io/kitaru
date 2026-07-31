@@ -50,7 +50,7 @@ class SessionFilter(ListFilter):
 class SessionCreate(FrozenModel):
     """Session create command."""
 
-    agent_id: uuid.UUID
+    agent_id: uuid.UUID | None = None
     agent_version_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     origin: SessionOrigin

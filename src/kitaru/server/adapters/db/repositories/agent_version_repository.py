@@ -195,6 +195,27 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         secret_ids = await self._load_secret_ids(agent_version_id)
         return row.to_domain(secret_ids)
 
+    async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version belongs to.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        statement = select(AgentVersionORM.agent_id).where(
+            AgentVersionORM.id == agent_version_id
+        )
+        result = await self._session.execute(statement)
+        row = result.first()
+        if row is None:
+            raise AgentVersionNotFound(agent_version_id)
+        return row[0]
+
     async def query(
         self, agent_version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], str | None]:
