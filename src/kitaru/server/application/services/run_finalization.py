@@ -15,18 +15,22 @@
 
 from datetime import UTC, datetime
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.server.application.events import ReplaySettled
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
+from kitaru.server.application.services import analytics_events
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 
 
 async def finalize_run_if_drained(
     event: ReplaySettled,
     replay_repository: ReplayRepository,
     experiment_run_repository: ExperimentRunRepository,
+    analytics: ServerAnalytics | None = None,
 ) -> None:
     """Finalize a run once every one of its replays has settled.
 
@@ -43,6 +47,7 @@ async def finalize_run_if_drained(
         event: ReplaySettled event.
         replay_repository: Replay repository, for the drained count.
         experiment_run_repository: Experiment run repository.
+        analytics: Analytics tracker, None skips tracking.
     """
     replay = event.replay
     if replay.experiment_run_id is None:
@@ -60,4 +65,12 @@ async def finalize_run_if_drained(
     else:
         outcome = ExperimentRunStatus.COMPLETED
     run.finalize(outcome, None, datetime.now(UTC))
-    await experiment_run_repository.update(run)
+    run = await experiment_run_repository.update(run)
+    if analytics is not None:
+        analytics.track(
+            run.owner_id,
+            AnalyticsEvent.EXPERIMENT_RUN_COMPLETED,
+            analytics_events.build_experiment_run_completed_properties(
+                run, counts.total
+            ),
+        )

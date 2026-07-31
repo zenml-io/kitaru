@@ -27,6 +27,7 @@ from kitaru.server.application.models.experiment_run import (
 )
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.application.models.replay import ReplayStatusCounts
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.job import Job
@@ -41,6 +42,7 @@ class ExperimentRunService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         transitions: TaskTransitions,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -50,11 +52,13 @@ class ExperimentRunService:
                 listing.
             job_repository: Job repository.
             transitions: Task transition dispatch, for job cancellation.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._replays = replay_repository
         self._jobs = job_repository
         self._transitions = transitions
+        self._analytics = analytics
 
     async def get_run(
         self, experiment_run_id: uuid.UUID, actor: AuthContext

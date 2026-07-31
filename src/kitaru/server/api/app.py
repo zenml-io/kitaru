@@ -167,7 +167,9 @@ def create_app(settings: APISettings) -> FastAPI:
     Returns:
         Application instance.
     """
-    analytics = AnalyticsClient(enabled=settings.ANALYTICS_OPT_IN)
+    analytics = AnalyticsClient(
+        enabled=settings.ANALYTICS_OPT_IN, debug=settings.ANALYTICS_DEBUG
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:

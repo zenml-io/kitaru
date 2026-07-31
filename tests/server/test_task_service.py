@@ -15,12 +15,15 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from typing import Any
 
 import pytest
 from pydantic import SecretStr
 
 from conftest import (
+    FakeJobRepository,
+    FakeTaskRepository,
     JobAndTaskServices,
     build_job_and_task_services,
     create_agent,
@@ -35,10 +38,14 @@ from conftest import (
     create_session,
     create_worker,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, TaskStatus, WorkerScope
+from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
+from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
@@ -46,6 +53,7 @@ from kitaru.server.domain.task import (
     AgentTask,
     ImportTask,
     ImportTaskDetails,
+    Task,
     TaskAttemptMismatch,
     TaskResultSessionMissing,
     TaskResultSessionNotCompleted,
@@ -612,3 +620,168 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
     assert spec.details.provider == "acme"
     assert spec.details.payload.blob_id == payload.id
     assert spec.details.payload.sha256 == payload.sha256
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the recorder."""
+        self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
+
+
+def _build_transitions(
+    analytics: ServerAnalytics | None,
+) -> tuple[TaskTransitions, FakeTaskRepository, FakeJobRepository]:
+    """Wire a transitions dispatch directly over fresh fake repositories."""
+    tasks = FakeTaskRepository()
+    jobs = FakeJobRepository(tasks=tasks)
+    transitions = TaskTransitions(
+        task_repository=tasks,
+        job_repository=jobs,
+        dispatcher=EventDispatcher(),
+        analytics=analytics,
+    )
+    return transitions, tasks, jobs
+
+
+async def _complete_task(transitions: TaskTransitions, task: Task, result: Any) -> Task:
+    """Drive a pending task through claim, start, and complete via apply_status."""
+    now = datetime.now(UTC)
+    claimed = await transitions.apply_status(
+        task, partial(Task.claim, worker_id=uuid.uuid4(), now=now)
+    )
+    started = await transitions.apply_status(claimed, partial(Task.start, now=now))
+    return await transitions.apply_status(
+        started, partial(Task.complete, result=result, now=now)
+    )
+
+
+async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
+    """Track an import_completed event when an importer task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_import_task(tasks, job.id)
+    await create_agent_task(tasks, job.id)
+
+    completed = await _complete_task(transitions, task, result={"created": 3})
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.IMPORT_COMPLETED
+    assert tracked_properties["status"] == "completed"
+    assert tracked_properties["plugin_version_id"] == task.plugin_version_id
+    assert tracked_properties["session_count"] == 3
+    assert tracked_properties["duration_seconds"] >= 0.0
+
+
+async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> None:
+    """Track an evaluation_completed event when an evaluator task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_evaluation_task(tasks, job.id)
+    await create_agent_task(tasks, job.id)
+
+    result = [{"name": "quality", "score": 1.0}]
+    completed = await _complete_task(transitions, task, result=result)
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.EVALUATION_COMPLETED
+    assert tracked_properties["status"] == "completed"
+    assert tracked_properties["plugin_version_id"] == task.plugin_version_id
+    assert "session_count" not in tracked_properties
+
+
+async def test_apply_status_agent_terminal_tracks_nothing() -> None:
+    """Skip tracking when an agent task turns terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_agent_task(tasks, job.id)
+    await create_agent_task(tasks, job.id)
+    now = datetime.now(UTC)
+    claimed = await transitions.apply_status(
+        task, partial(Task.claim, worker_id=uuid.uuid4(), now=now)
+    )
+    started = await transitions.apply_status(claimed, partial(Task.start, now=now))
+    started.link_result_session(uuid.uuid4())
+
+    completed = await transitions.apply_status(
+        started, partial(Task.complete, result=None, now=now)
+    )
+
+    assert completed.status is TaskStatus.COMPLETED
+    assert analytics.tracked == []
+
+
+async def test_advance_job_settlement_tracks_job_completed() -> None:
+    """Track a job_completed event carrying task_count once every task drains."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    import_task = await create_import_task(tasks, job.id)
+    evaluation_task = await create_evaluation_task(tasks, job.id)
+
+    await _complete_task(transitions, import_task, result={"created": 1})
+    await _complete_task(
+        transitions, evaluation_task, result=[{"name": "quality", "score": 1.0}]
+    )
+
+    job_events = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.JOB_COMPLETED
+    ]
+    assert len(job_events) == 1
+    tracked_user_id, _, tracked_properties = job_events[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_properties["status"] == "completed"
+    assert tracked_properties["task_count"] == 2
+    assert tracked_properties["task_kinds"] == ["evaluator", "importer"]
+
+
+async def test_apply_status_non_terminal_writes_track_nothing() -> None:
+    """Skip tracking when a transition leaves the task non-terminal."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_import_task(tasks, job.id)
+    now = datetime.now(UTC)
+
+    claimed = await transitions.apply_status(
+        task, partial(Task.claim, worker_id=uuid.uuid4(), now=now)
+    )
+    await transitions.apply_status(claimed, partial(Task.start, now=now))
+
+    assert analytics.tracked == []
+
+
+async def test_apply_status_with_analytics_none_is_safe() -> None:
+    """Drive a task to terminal without an analytics tracker configured."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_import_task(tasks, job.id)
+
+    completed = await _complete_task(transitions, task, result={"created": 1})
+
+    assert completed.status is TaskStatus.COMPLETED
