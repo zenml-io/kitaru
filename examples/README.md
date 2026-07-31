@@ -1,23 +1,21 @@
-# Support agent improvement loop
+# Document processing improvement loop
 
-This repository has one canonical example. It follows a change from production
-evidence to an evaluated agent version:
+The canonical example extracts structured records from three public NIST PDFs.
+It connects the tools used across the lifecycle:
 
-1. Register a single-file importer.
-2. Import support traces from another observability system.
-3. Turn the imported sessions into a versioned cohort.
-4. Register an evaluator and a revised agent.
-5. Replay the cohort and compare the baseline and candidate scores.
-
-The agent uses PydanticAI's `FunctionModel`, so the example needs no model API
-key and produces the same result on every run.
+1. Download the AI RMF 1.0, Generative AI Profile, and Cybersecurity Framework
+   2.0 PDFs from NIST.
+2. Run a typed PydanticAI extractor and capture its baseline traces in Langfuse.
+3. Export those traces and import them with Kitaru's Langfuse importer service.
+4. Freeze the imported sessions as a cohort and register field-level labels.
+5. Replay the PDFs through a revised extractor and compare field accuracy.
 
 ## Run it
 
-Install the server, worker, and PydanticAI dependencies:
+Install the server, worker, PydanticAI, and example dependencies:
 
 ```bash
-uv sync --extra server --extra worker --extra pydantic-ai
+uv sync --extra server --extra worker --extra pydantic-ai --extra examples
 ```
 
 Start Kitaru and PostgreSQL:
@@ -26,10 +24,14 @@ Start Kitaru and PostgreSQL:
 docker compose up -d db server
 ```
 
-Run the example from the repository root:
+Configure OpenAI and Langfuse, then run the example from the repository root:
 
 ```bash
-uv run python -m examples.support_agent
+export OPENAI_API_KEY=...
+export LANGFUSE_PUBLIC_KEY=...
+export LANGFUSE_SECRET_KEY=...
+export LANGFUSE_BASE_URL=https://cloud.langfuse.com
+uv run python -m examples.document_processing
 ```
 
 The local Docker setup uses `default` / `password`. Override these values when
@@ -38,22 +40,23 @@ pointing the example at another server:
 ```bash
 export KITARU_API_URL=https://kitaru.example.com
 export KITARU_API_KEY=...
-uv run python -m examples.support_agent
+uv run python -m examples.document_processing
 ```
 
-The final table shows whether each imported production response met its
-expected outcome and whether the replayed candidate response did.
+The command prints baseline and candidate field accuracy for every PDF. Set
+`BASELINE_MODEL` or `CANDIDATE_MODEL` to compare another model pair.
 
 ## Read the example
 
-Start with [`support_agent/__main__.py`](support_agent/__main__.py). It is the
-control plane for the walkthrough. The other files are artifacts it registers:
+Start with
+[`document_processing/__main__.py`](document_processing/__main__.py). The other
+files separate the moving parts:
 
-- [`trace_importer.py`](support_agent/trace_importer.py) is a PEP 723 script
-  plugin that converts JSONL records into Kitaru sessions and nodes.
-- [`evaluator.py`](support_agent/evaluator.py) compares a session output with
-  its expected output.
-- [`agent.py`](support_agent/agent.py) is the candidate agent executed by a
-  Kitaru worker during replay.
-- [`production_traces.jsonl`](support_agent/production_traces.jsonl) represents
-  an export from a production tracing system.
+- [`corpus.py`](document_processing/corpus.py) pins the PDF URLs, checksums, and
+  reviewed labels.
+- [`langfuse_capture.py`](document_processing/langfuse_capture.py) instruments
+  PydanticAI and exports the resulting Langfuse traces.
+- [`agent.py`](document_processing/agent.py) runs the candidate extractor during
+  Kitaru replay.
+- [`evaluator.py`](document_processing/evaluator.py) scores each structured
+  field against the reviewed record.

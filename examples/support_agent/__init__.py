@@ -1,1 +1,0 @@
-"""Canonical support agent example."""

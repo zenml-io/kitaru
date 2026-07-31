@@ -51,6 +51,9 @@ cli = [
     "pyyaml>=6.0",
     "rich>=13.0",
 ]
+examples = [
+    "langfuse>=4.14,<5",
+]
 pydantic-ai = [
     "pydantic-ai-slim[openai]>=2.14.1,<3",
 ]
