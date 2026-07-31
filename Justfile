@@ -165,9 +165,9 @@ ui-smoke:
 release-smoke *ARGS:
     ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
 
-# Audit the public example coverage manifest without running examples or providers.
-example-coverage-audit:
-    uv run --with pyyaml python scripts/audit-example-coverage.py
+# Validate the canonical example without a server or provider credentials.
+canonical-example-test:
+    uv run pytest -q tests/test_support_agent_example.py
 
 # Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.

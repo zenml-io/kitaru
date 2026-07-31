@@ -80,7 +80,7 @@ jobs:
         run: |
           awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
-  example-coverage-audit:
+  canonical-example:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
@@ -88,8 +88,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - name: Audit public example coverage manifest
-        run: uv run --with pyyaml python scripts/audit-example-coverage.py
+      - name: Test canonical example contracts
+        run: uv run pytest -q tests/test_support_agent_example.py
   links:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

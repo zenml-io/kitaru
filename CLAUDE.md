@@ -69,7 +69,7 @@ The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do n
 
 Detailed authoring conventions, link rules, and accuracy requirements for all
 three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under
-`docs/`). Rules for example READMEs live in **`examples/CLAUDE.md`**.
+`docs/`). Keep the canonical example runnable without provider credentials.
 
 Do not commit temporary agent planning/review files such as `docs/plans/*`,
 `docs/reviews/*`, or prompt exports unless the user explicitly asks for a
@@ -137,7 +137,8 @@ The server follows a layered architecture (API, application, domain, infrastruct
 - **PR reproduction:** Include a concrete "Reproduction" subsection inside Reviewer Notes or immediately after it. Prefer a runnable example, API flow, or UI path that proves the behavior end to end. Tell the reviewer exactly what to run and what to look for afterward.
 - **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
-- **Update the example coverage manifest** (`examples/example-coverage.yaml`) when adding, removing, renaming, or publicly documenting examples under `examples/`. Then run `just example-coverage-audit`; it validates paths, coverage metadata, and explicit waivers for missing/planned/manual-only coverage only, without running examples or provider calls. A passing audit does not mean every example executed.
+- **Update the canonical example contract test** when changing files under
+  `examples/`. Run `just canonical-example-test` before opening a PR.
 - Never include a "[Codex] " or "feat: " prefix to PR titles.
 
 ## Conventions

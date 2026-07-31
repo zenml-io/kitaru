@@ -1,2 +1,0 @@
-# Generated per-host by ensure_certs(); never commit private keys.
-*.pem
