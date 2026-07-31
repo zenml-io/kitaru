@@ -85,11 +85,13 @@ exclude-newer = "3 days"
 kitaru = { workspace = true }
 kitaru-importer-braintrust = { workspace = true }
 kitaru-importer-langfuse = { workspace = true }
+kitaru-importer-otlp = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "plugins/braintrust",
     "plugins/langfuse",
+    "plugins/otlp",
 ]
 
 [dependency-groups]

@@ -11,6 +11,7 @@ members = [
     "kitaru",
     "kitaru-importer-braintrust",
     "kitaru-importer-langfuse",
+    "kitaru-importer-otlp",
 ]
 
 [[package]]
@@ -920,6 +921,17 @@ requires-dist = [{ name = "kitaru", editable = "." }]
 name = "kitaru-importer-langfuse"
 version = "0.1.0"
 source = { editable = "plugins/langfuse" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-otlp"
+version = "0.1.0"
+source = { editable = "plugins/otlp" }
 dependencies = [
     { name = "kitaru" },
 ]
