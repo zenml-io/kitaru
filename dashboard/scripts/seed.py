@@ -7,7 +7,8 @@ experiment with a run (whose replays stay pending without a worker), a
 standalone replay, and a live worker.
 
 Usage:
-    uv run python dashboard/scripts/seed.py [--url http://localhost:8000] [--api-key KITKEY_...]
+    uv run python dashboard/scripts/seed.py [--url http://localhost:8000]
+        [--api-key KITKEY_...]
 """
 
 import argparse
@@ -28,10 +29,14 @@ class Seeder:
             headers["Authorization"] = f"Bearer {api_key}"
         self.client = httpx.Client(base_url=base_url, headers=headers, timeout=30)
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, payload: dict[str, Any] | None
+    ) -> dict[str, Any]:
         response = self.client.request(method, path, json=payload)
         if response.status_code >= 400:
-            raise RuntimeError(f"{method} {path} -> {response.status_code}: {response.text}")
+            raise RuntimeError(
+                f"{method} {path} -> {response.status_code}: {response.text}"
+            )
         return response.json()
 
     def post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -45,13 +50,19 @@ class Seeder:
 
         docs_agent = self.post(
             "/v1/agents",
-            {"name": "docs-agent", "description": "Answers policy questions from the docs corpus."},
+            {
+                "name": "docs-agent",
+                "description": "Answers policy questions from the docs corpus.",
+            },
         )
         support_bot = self.post(
             "/v1/agents",
             {"name": "support-bot", "description": "Front-line support triage bot."},
         )
-        print(f"agents: {docs_agent['id']} (docs-agent), {support_bot['id']} (support-bot)")
+        print(
+            f"agents: {docs_agent['id']} (docs-agent), "
+            f"{support_bot['id']} (support-bot)"
+        )
 
         docs_v1 = self.post(
             f"/v1/agents/{docs_agent['id']}/versions",
@@ -80,15 +91,32 @@ class Seeder:
             },
         )
         support_v1 = self.post(f"/v1/agents/{support_bot['id']}/versions", {})
-        print(f"agent versions: docs v1 {docs_v1['id']}, docs v2 {docs_v2['id']}, support v1 {support_v1['id']}")
+        print(
+            f"agent versions: docs v1 {docs_v1['id']}, "
+            f"docs v2 {docs_v2['id']}, support v1 {support_v1['id']}"
+        )
 
         evaluator_names: list[str] = []
         for name, description, entrypoint in [
-            ("cited-superseded-doc", "Fails when a superseded document is cited.", "kitaru_evals:cited_superseded_doc"),
-            ("latency", "Wall-clock seconds from start to end.", "kitaru_evals:latency"),
-            ("policy-freshness", "Age bucket of the cited policy document.", "kitaru_evals:policy_freshness"),
+            (
+                "cited-superseded-doc",
+                "Fails when a superseded document is cited.",
+                "kitaru_evals:cited_superseded_doc",
+            ),
+            (
+                "latency",
+                "Wall-clock seconds from start to end.",
+                "kitaru_evals:latency",
+            ),
+            (
+                "policy-freshness",
+                "Age bucket of the cited policy document.",
+                "kitaru_evals:policy_freshness",
+            ),
         ]:
-            evaluator = self.post("/v1/evaluators", {"name": name, "description": description})
+            evaluator = self.post(
+                "/v1/evaluators", {"name": name, "description": description}
+            )
             self.post(
                 f"/v1/evaluators/{evaluator['id']}/versions",
                 {
@@ -129,7 +157,11 @@ class Seeder:
             outputs = (
                 None
                 if in_progress
-                else {"answer": "Cited policy DOC-3311." if cites_superseded else "Cited policy DOC-4180."}
+                else {
+                    "answer": "Cited policy DOC-3311."
+                    if cites_superseded
+                    else "Cited policy DOC-4180."
+                }
             )
             error = "ToolTimeout: search_index took longer than 30s" if failed else None
             ended_at = None if in_progress else (started + duration).isoformat()
@@ -152,7 +184,9 @@ class Seeder:
                     "ended_at": ended_at if imported else None,
                     "provider": "openai" if index % 2 == 0 else "anthropic",
                     "framework": "pydantic-ai",
-                    "metadata": {"import_batch": "langfuse-2026-07"} if imported else {},
+                    "metadata": {"import_batch": "langfuse-2026-07"}
+                    if imported
+                    else {},
                 },
             )
             session_ids.append(session["id"])
@@ -216,8 +250,12 @@ class Seeder:
                             "inputs": {"doc_id": doc_id},
                             "outputs": {
                                 "doc_id": doc_id,
-                                "status": "superseded" if cites_superseded else "current",
-                                "superseded_by": "DOC-4180" if cites_superseded else None,
+                                "status": "superseded"
+                                if cites_superseded
+                                else "current",
+                                "superseded_by": "DOC-4180"
+                                if cites_superseded
+                                else None,
                             },
                             "attributes": {},
                             "started_at": (started + timedelta(seconds=6)).isoformat(),
@@ -230,14 +268,22 @@ class Seeder:
                             "name": "answer",
                             "status": "in_progress" if in_progress else "completed",
                             "inputs": {"context": [doc_id]},
-                            "outputs": None if in_progress else {"answer": f"Cited policy {doc_id}."},
+                            "outputs": None
+                            if in_progress
+                            else {"answer": f"Cited policy {doc_id}."},
                             "attributes": {},
                             "model": "claude-sonnet-5",
                             "provider": "anthropic",
-                            "tokens": {"input_tokens": 2140, "output_tokens": 188, "reasoning_tokens": 96},
+                            "tokens": {
+                                "input_tokens": 2140,
+                                "output_tokens": 188,
+                                "reasoning_tokens": 96,
+                            },
                             "cost": "0.0121",
                             "started_at": (started + timedelta(seconds=7)).isoformat(),
-                            "ended_at": None if in_progress else (started + duration).isoformat(),
+                            "ended_at": None
+                            if in_progress
+                            else (started + duration).isoformat(),
                         },
                     ]
                 )
@@ -262,11 +308,16 @@ class Seeder:
                             {
                                 "name": "cited-superseded-doc",
                                 "score": cites_superseded,
+                                "passed": not cites_superseded,
                                 "explanation": f"cited {doc_id}, superseded by DOC-4180"
                                 if cites_superseded
                                 else None,
                             },
-                            {"name": "latency", "score": duration.total_seconds()},
+                            {
+                                "name": "latency",
+                                "score": duration.total_seconds(),
+                                "passed": duration.total_seconds() < 120,
+                            },
                             {
                                 "name": "policy-freshness",
                                 "score": 0.0 if cites_superseded else 1.0,
@@ -275,7 +326,10 @@ class Seeder:
                         ]
                     },
                 )
-        print(f"sessions: {len(session_ids)} for docs-agent ({len(superseded_ids)} cite superseded docs)")
+        print(
+            f"sessions: {len(session_ids)} for docs-agent "
+            f"({len(superseded_ids)} cite superseded docs)"
+        )
 
         support_session = self.post(
             "/v1/sessions",
@@ -289,7 +343,9 @@ class Seeder:
                 "outputs": {"resolution": "escalated"},
                 "expected": None,
                 "started_at": (now - timedelta(hours=2)).isoformat(),
-                "ended_at": (now - timedelta(hours=2) + timedelta(seconds=41)).isoformat(),
+                "ended_at": (
+                    now - timedelta(hours=2) + timedelta(seconds=41)
+                ).isoformat(),
                 "provider": "anthropic",
             },
         )
@@ -299,30 +355,57 @@ class Seeder:
             "/v1/cohorts",
             {
                 "name": "cites-superseded-policy",
-                "description": "Sessions where the agent cited a document that has been superseded.",
+                "description": "Sessions where the agent cited a document "
+                "that has been superseded.",
                 "agent_id": docs_agent["id"],
-                "session_ids": superseded_ids,
+                "metadata": {"owner_team": "docs-quality"},
             },
         )
-        print(f"cohort: {cohort['id']} ({cohort['session_count']} sessions)")
+        cohort_v1 = self.post(
+            f"/v1/cohorts/{cohort['id']}/versions",
+            {"add_session_ids": superseded_ids},
+        )
+        # A second version narrows the cohort after triage drops one session
+        # that turned out not to reproduce the citation bug.
+        cohort_v2 = self.post(
+            f"/v1/cohorts/{cohort['id']}/versions",
+            {
+                "display_version": "outlier-removed",
+                "remove_session_ids": [superseded_ids[0]],
+            },
+        )
+        print(
+            f"cohort: {cohort['id']}, "
+            f"v{cohort_v1['version']} ({cohort_v1['session_count']} sessions), "
+            f"v{cohort_v2['version']} ({cohort_v2['session_count']} sessions)"
+        )
 
         experiment = self.post(
             "/v1/experiments",
             {
                 "name": "fix-validation",
-                "description": "Does the superseded-document rejection in pr-311 hold on the failing cohort?",
+                "description": "Does the superseded-document rejection in "
+                "pr-311 hold on the failing cohort?",
                 "evaluators": [
                     {"evaluator": "cited-superseded-doc"},
                     {"evaluator": "latency"},
                 ],
                 "tool_policy": {
-                    "default": {"type": "history", "scope": "baseline", "on_miss": "error_result"},
+                    "default": {
+                        "type": "history",
+                        "scope": "baseline",
+                        "on_miss": "error_result",
+                    },
                 },
             },
         )
         run = self.post(
             f"/v1/experiments/{experiment['id']}/runs",
-            {"cohort_id": cohort["id"], "agent_version_id": docs_v2["id"], "evaluate_baselines": True},
+            {
+                "cohort_version_id": cohort_v2["id"],
+                "agent_version_id": docs_v2["id"],
+                "evaluate_baselines": True,
+            },
         )
         print(f"experiment: {experiment['id']}, run #{run['number']}: {run['id']}")
 
@@ -333,7 +416,11 @@ class Seeder:
                 "agent_version_id": docs_v2["id"],
                 "evaluators": [{"evaluator": "cited-superseded-doc"}],
                 "tool_policy": {
-                    "default": {"type": "history", "scope": "baseline", "on_miss": "passthrough"},
+                    "default": {
+                        "type": "history",
+                        "scope": "baseline",
+                        "on_miss": "passthrough",
+                    },
                 },
             },
         )
