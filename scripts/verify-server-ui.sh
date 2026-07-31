@@ -16,12 +16,3 @@ path = Path(kitaru.__file__).parent / "_ui" / "dist" / "index.html"
 assert path.is_file(), f"missing: {path}"
 print("OK package UI:", path)
 '
-
-docker exec "$container" python -c '
-from pathlib import Path
-import zenml
-
-path = Path(zenml.__path__[0]) / "zen_server" / "dashboard" / "index.html"
-assert path.is_file(), f"missing: {path}"
-print("OK ZenML dashboard:", path)
-'

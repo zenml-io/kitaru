@@ -506,6 +506,10 @@ jobs:
           done
 
       # --- Docker image ---
+      - name: Export locked server dependencies
+        run: >-
+          uv export --locked --no-dev --extra server --no-emit-project
+          --output-file dist/kitaru-server-requirements.txt
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
       - name: Log in to Docker Hub
@@ -518,18 +522,15 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
-          file: docker/Dockerfile
-          target: server
+          file: docker/release.Dockerfile
+          target: runtime
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-          build-args: |
-            ZENML_SERVER_TAG=0.96.1
-            ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
             zenmldocker/kitaru:latest
           labels: |
             org.opencontainers.image.title=kitaru
-            org.opencontainers.image.description=Durable execution for AI agents, built on ZenML
+            org.opencontainers.image.description=Kitaru server
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/zenml-io/kitaru
             org.opencontainers.image.licenses=Apache-2.0
@@ -548,11 +549,8 @@ jobs:
       - name: Set Chart.yaml version
         run: |
           sed -i "s/^version: .*/version: \"$VERSION\"/" helm/Chart.yaml
-          grep '^version' helm/Chart.yaml
-      # charts/ and Chart.lock are not in git; resolve from Chart.yaml and pull
-      # the ZenML subchart from OCI before lint/package.
-      - name: Helm dependency update
-        run: helm dependency update ./helm
+          sed -i "s/^appVersion: .*/appVersion: \"$VERSION\"/" helm/Chart.yaml
+          grep -E '^(version|appVersion):' helm/Chart.yaml
       - name: Helm lint
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)

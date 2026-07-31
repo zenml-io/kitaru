@@ -115,24 +115,49 @@ jobs:
     # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    env:
-      ZENML_SERVER_TAG: 0.96.1
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
       - name: Download stable Kitaru UI
         run: bash scripts/download-ui.sh
         env:
           KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+      - name: Build server distribution
+        run: |
+          uv build --wheel
+          uv export --locked --no-dev --extra server --no-emit-project \
+            --output-file dist/kitaru-server-requirements.txt
       - name: Build server image
         run: >-
-          docker build -f docker/Dockerfile --target server
-          --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
+          docker build -f docker/release.Dockerfile --target runtime
           -t kitaru-ci-server .
+      - name: Start PostgreSQL
+        run: |
+          docker network create kitaru-ci
+          docker run -d --rm --name kitaru-ci-postgres --network kitaru-ci \
+            -e POSTGRES_PASSWORD=password postgres:16-alpine
+          for _ in $(seq 1 30); do
+            if docker exec kitaru-ci-postgres pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs kitaru-ci-postgres
+          exit 1
       - name: Start server container
-        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 -e KITARU_ANALYTICS_OPT_IN=false
-          -e ZENML_ANALYTICS_OPT_IN=false kitaru-ci-server
+        run: >-
+          docker run -d --rm --name kitaru-ci-server --network kitaru-ci
+          -p 18080:8000
+          -e KITARU_SERVER_AUTH_SCHEME=none
+          -e KITARU_SERVER_DB_HOST=kitaru-ci-postgres
+          -e KITARU_SERVER_DB_PWD=password
+          -e KITARU_SERVER_SECRET_ENCRYPTION_KEY=ci-only-encryption-key-ci-only-encryption-key
+          -e KITARU_SERVER_ANALYTICS_OPT_IN=false
+          kitaru-ci-server
       - name: Wait for health endpoint
         run: |
           set -euo pipefail
@@ -146,7 +171,7 @@ jobs:
           echo "Server did not become healthy in time." >&2
           docker logs kitaru-ci-server || true
           exit 1
-      - name: Verify bundled and copied dashboard assets
+      - name: Verify bundled dashboard assets
         run: bash scripts/verify-server-ui.sh kitaru-ci-server
       - name: Smoke test root route serves dashboard HTML
         run: |
