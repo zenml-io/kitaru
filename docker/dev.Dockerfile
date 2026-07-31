@@ -39,7 +39,7 @@ ARG USER_GID
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock README.md LICENSE ./
 COPY --chown=$USERNAME:$USER_GID src ./src
 
-RUN uv sync --locked --no-dev --extra server --no-editable
+RUN uv sync --locked --no-dev --extra server --extra otel --no-editable
 
 FROM base AS runtime
 

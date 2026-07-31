@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `api-key` grant type at `POST /v1/login` exchanges a local API key in the `Authorization` header for a session token, readable via `client.auth.exchange_api_key(...)`. The key is checked once, at the exchange, so deactivating it leaves the tokens already issued from it valid until they expire.
 - Local stacks can now use S3, GCS, or Azure Blob/ADLS artifact storage while keeping flow execution local, with existing-connector reuse and ambient provider credentials when explicit credentials are not supplied. (#593)
 - Flow and execution deletion is now available through the SDK, `kitaru flow delete` and `kitaru executions delete` CLI commands, and MCP tools.
+- OpenTelemetry instrumentation for the API server, enabled by setting `KITARU_SERVER_OTEL_EXPORTER_OTLP_ENDPOINT` (or the standard `OTEL_*` environment variables) with the `otel` extra installed.
 
 ### Changed
 - A control plane API key configured on the client is now exchanged for a session token instead of being sent on every request. The server had to authorize each of those requests against the control plane, which is a rate-limited round trip per call. Local API keys are unaffected and still authenticate directly.
