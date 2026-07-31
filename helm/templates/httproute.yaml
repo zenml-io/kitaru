@@ -23,5 +23,5 @@ spec:
             value: /
       backendRefs:
         - name: {{ include "kitaru.fullname" . }}
-          port: {{ .Values.service.port }}
+          port: 80
 {{- end }}

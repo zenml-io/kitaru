@@ -28,7 +28,6 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: true
   runAsNonRoot: true
   runAsUser: 1000
   capabilities:
@@ -36,22 +35,8 @@ securityContext:
       - ALL
 
 server:
-  port: 8000
   environment: {}
   secretEnvironment: {}
-  readinessProbe:
-    httpGet:
-      path: /health
-      port: http
-    initialDelaySeconds: 5
-    periodSeconds: 10
-    failureThreshold: 6
-  livenessProbe:
-    httpGet:
-      path: /health/live
-      port: http
-    initialDelaySeconds: 15
-    periodSeconds: 20
   resources:
     requests:
       cpu: 100m
@@ -59,23 +44,8 @@ server:
     limits:
       memory: 600Mi
 
-migration:
-  enabled: true
-  command:
-    - python
-    - -m
-    - kitaru.server.database.main
-  backoffLimit: 3
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      memory: 512Mi
-
 service:
   type: ClusterIP
-  port: 80
   annotations: {}
 
 httpRoute:
@@ -87,12 +57,3 @@ httpRoute:
 nodeSelector: {}
 tolerations: []
 affinity: {}
-
-volumes:
-  - name: tmp
-    emptyDir:
-      sizeLimit: 256Mi
-
-volumeMounts:
-  - name: tmp
-    mountPath: /tmp

@@ -31,9 +31,10 @@ helm install kitaru oci://public.ecr.aws/zenml/kitaru \
   --values values.yaml
 ```
 
-The chart runs `python -m kitaru.server.database.main` as a pre-install and
-pre-upgrade migration hook. The server container then starts from the image's
-default command on port 8000.
+The chart owns the fixed deployment lifecycle: it runs
+`python -m kitaru.server.database.main` as a pre-install and pre-upgrade hook,
+starts the server from the image's default command, and checks the server's
+standard health endpoints. These implementation details are not chart values.
 
 ## Managed Cloud authentication
 

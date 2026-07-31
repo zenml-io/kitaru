@@ -37,24 +37,23 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: {{ include "kitaru.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: {{ .Values.server.port }}
-              protocol: TCP
-          {{- if or .Values.migration.enabled .Values.server.environment .Values.server.secretEnvironment }}
           env:
             {{- include "kitaru.environment" . | nindent 12 }}
-          {{- end }}
           livenessProbe:
-            {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+            httpGet:
+              path: /health/live
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
           readinessProbe:
-            {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
-          volumeMounts:
-            {{- toYaml .Values.volumeMounts | nindent 12 }}
-      volumes:
-        {{- toYaml .Values.volumes | nindent 8 }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

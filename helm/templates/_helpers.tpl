@@ -47,9 +47,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "kitaru.environment" -}}
 {{- $environment := deepCopy (.Values.server.environment | default dict) }}
-{{- if .Values.migration.enabled }}
 {{- $_ := set $environment "KITARU_SERVER_SKIP_DB_MIGRATION" "true" }}
-{{- end }}
 {{- range $name, $value := $environment }}
 - name: {{ $name }}
   value: {{ $value | toString | quote }}

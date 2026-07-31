@@ -1,6 +1,6 @@
-Kitaru is available through service {{ include "kitaru.fullname" . }} on port {{ .Values.service.port }}.
+Kitaru is available through service {{ include "kitaru.fullname" . }} on port 80.
 
 To connect locally:
 
-  kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "kitaru.fullname" . }} 8000:{{ .Values.service.port }}
+  kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "kitaru.fullname" . }} 8000:80
   kitaru login http://localhost:8000
