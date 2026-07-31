@@ -23,27 +23,36 @@ Returns:
   A dictionary with the non-secret values configured for the Kitaru server.
 */}}
 {{- define "kitaru.serverConfigurationAttrs" -}}
-{{- if .Kitaru.database.url }}
-type: sql
+{{- if .Kitaru.database.host }}
+db_host: {{ .Kitaru.database.host | quote }}
+{{- end }}
+{{- if .Kitaru.database.port }}
+db_port: {{ .Kitaru.database.port | quote }}
+{{- end }}
+{{- if .Kitaru.database.user }}
+db_user: {{ .Kitaru.database.user | quote }}
+{{- end }}
+{{- if .Kitaru.database.database }}
+db_name: {{ .Kitaru.database.database | quote }}
+{{- end }}
 {{- if .Kitaru.database.ssl }}
-ssl: {{ .Kitaru.database.ssl | quote }}
+db_ssl: {{ .Kitaru.database.ssl | quote }}
 {{- end }}
 {{- if and .Kitaru.database.sslCa .Kitaru.database.sslCa.secretRef }}
-ssl_ca: /dbcerts/{{ .Kitaru.database.sslCa.secretRef.key }}
+db_ssl_ca: /dbcerts/{{ .Kitaru.database.sslCa.secretRef.key }}
 {{- end }}
 {{- if and .Kitaru.database.sslCert .Kitaru.database.sslCert.secretRef }}
-ssl_cert: /dbcerts/{{ .Kitaru.database.sslCert.secretRef.key }}
+db_ssl_cert: /dbcerts/{{ .Kitaru.database.sslCert.secretRef.key }}
 {{- end }}
 {{- if and .Kitaru.database.sslKey .Kitaru.database.sslKey.secretRef }}
-ssl_key: /dbcerts/{{ .Kitaru.database.sslKey.secretRef.key }}
+db_ssl_key: /dbcerts/{{ .Kitaru.database.sslKey.secretRef.key }}
 {{- end }}
-ssl_verify_server_cert: {{ .Kitaru.database.sslVerifyServerCert | quote }}
+db_ssl_verify_server_cert: {{ .Kitaru.database.sslVerifyServerCert | quote }}
 {{- if .Kitaru.database.poolSize }}
-pool_size: {{ .Kitaru.database.poolSize | quote }}
+db_pool_size: {{ .Kitaru.database.poolSize | quote }}
 {{- end }}
 {{- if .Kitaru.database.maxOverflow }}
-max_overflow: {{ .Kitaru.database.maxOverflow | quote }}
-{{- end }}
+db_max_overflow: {{ .Kitaru.database.maxOverflow | quote }}
 {{- end }}
 
 {{- if .Kitaru.pro.enabled }}
@@ -142,8 +151,9 @@ Returns:
   A dictionary with the secret values configured for the Kitaru server.
 */}}
 {{- define "kitaru.serverSecretConfigurationAttrs" -}}
-{{- if .Kitaru.database.url }}
-url: {{ .Kitaru.database.url | quote }}
+{{- if .Kitaru.database.password }}
+db_pwd: {{ .Kitaru.database.password | quote }}
+{{- end }}
 {{- if and .Kitaru.database.sslCa .Kitaru.database.sslCa.value }}
 ssl_ca: {{ .Kitaru.database.sslCa.value | quote }}
 {{- end }}
@@ -152,7 +162,6 @@ ssl_cert: {{ .Kitaru.database.sslCert.value | quote }}
 {{- end }}
 {{- if and .Kitaru.database.sslKey .Kitaru.database.sslKey.value }}
 ssl_key: {{ .Kitaru.database.sslKey.value | quote }}
-{{- end }}
 {{- end }}
 {{- end }}
 

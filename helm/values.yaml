@@ -194,19 +194,31 @@ server:
   # the paths configured here need to be relative to the root of the helm chart.
   database:
 
-    # The database URL. If not set, a local sqlite database will be used, which
-    # will not be persisted across pod restarts. The URL can contain the
-    # password or it can be provided in a secret using the `passwordSecretRef`
-    # option.
-    #
-    # E.g.: "mysql://admin:password@kitaru-mysql:3306/database"
-    url:
+    # The host of the external database service.
+    host: zenml-db
 
-    # The Kubernetes secret containing the MySQL password. If not set, the
-    # password provided in the `url` option will be used.
+    # The port where the external database service is accepting connections.
+    port:
+
+    # The username to use to connect to the external database service.
+    username: postgres
+
+    # The password to use to connect to the external database service.
+    password:
+
+    # Reference to an existing Kubernetes secret containing the database
+    # password. If set, the password field above is ignored and the password
+    # is sourced from the referenced secret instead.
     passwordSecretRef:
       # name:
       # key:
+
+    # The name of the database to use. Will be created on first run if it
+    # doesn't exist.
+    #
+    # NOTE: if the user doesn't have permissions to create this database, the
+    # database should be created manually before installing the helm chart.
+    database: kitaru
 
     # Set to true to enable SSL for the MySQL database. Defaults to false.
     # NOTE: setting any of the SSL certificate options (sslCa, sslCert, sslKey)
@@ -261,13 +273,7 @@ server:
     # server certificate. Defaults to false.
     sslVerifyServerCert: false
 
-    # Connection pool settings (only relevant for MySQL databases).
-    #
-    # NOTE: these values should be coordinated with the `kitaru.threadPoolSize`
-    # to ensure that the Kitaru server workers do not block on database
-    # connections (i.e. the sum of the pool size and max overflow should be
-    # greater than or equal to the main thread pool size plus the auth thread
-    # pool size).
+    # Connection pool settings.
     #
     # poolSize: 20
     # maxOverflow: 20

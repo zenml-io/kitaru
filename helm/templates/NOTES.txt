@@ -64,18 +64,3 @@ You can get the Kitaru server URL by running these commands:
 
 {{- end }}
 {{- end }}
-
-{{- if .Values.kitaru }}
-{{- if ne (len .Values.kitaru) 0 }}
-
-==> DEPRECATION WARNING:
-    The top-level 'kitaru' values key is deprecated and will be removed in a
-    future release. Please migrate your values to use 'server' instead.
-    For example, change 'kitaru.database.url' to 'server.database.url'.
-    Values under 'kitaru' are currently merged with 'server' for backwards
-    compatibility. If both 'kitaru:' and 'server:' are provided, 'kitaru:'
-    values take precedence for overlapping keys. We recommend using only one
-    key to avoid confusion.
-
-{{- end }}
-{{- end }}

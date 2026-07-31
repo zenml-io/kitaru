@@ -7,12 +7,8 @@ metadata:
     {{- include "kitaru.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  {{- if $server.database.url }}
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ $server.replicaCount }}
-  {{- end }}
-  {{- else }}
-  replicas: 1
   {{- end }}
   selector:
     matchLabels:
@@ -143,16 +139,14 @@ spec:
               readOnly: true
           {{- end }}
           env:
-            {{- if $server.database.url }}
-            - name: DISABLE_DATABASE_MIGRATION
+            - name: KITARU_SERVER_SKIP_DB_MIGRATION
               value: "True"
-            {{- end }}
             {{- range $k, $v := include "kitaru.envVariables" . | fromYaml }}
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-            {{- if and $server.database.url $server.database.passwordSecretRef }}
-            - name: ZENML_STORE_PASSWORD
+            {{- if $server.database.passwordSecretRef }}
+            - name: KITARU_SERVER_DB_PWD
               valueFrom:
                 secretKeyRef:
                   name: {{ $server.database.passwordSecretRef.name }}

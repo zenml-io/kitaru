@@ -1,5 +1,4 @@
 {{- $server := include "kitaru.serverValues" . | fromYaml -}}
-{{- if $server.database.url }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -132,8 +131,8 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-            {{- if and $server.database.url $server.database.passwordSecretRef }}
-            - name: ZENML_STORE_PASSWORD
+            {{- if $server.database.passwordSecretRef }}
+            - name: KITARU_SERVER_DB_PWD
               valueFrom:
                 secretKeyRef:
                   name: {{ $server.database.passwordSecretRef.name }}
@@ -163,4 +162,3 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-{{- end }}
