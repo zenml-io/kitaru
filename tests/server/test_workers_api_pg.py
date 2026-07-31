@@ -42,7 +42,7 @@ async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> Non
         },
     )
     assert response.status_code == 200
-    created = response.json()
+    created = response.json()["worker"]
 
     response = await client.get(f"/v1/workers/{created['id']}")
     assert response.status_code == 200
@@ -67,7 +67,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
                 "metadata": {"region": "eu"},
             },
         )
-    ).json()
+    ).json()["worker"]
 
     second = (
         await client.post(
@@ -79,7 +79,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
                 "metadata": {"region": "us"},
             },
         )
-    ).json()
+    ).json()["worker"]
 
     assert second["id"] == first["id"]
     assert second["created"] == first["created"]
@@ -100,7 +100,7 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
-    ).json()
+    ).json()["worker"]
     response = await client.delete(f"/v1/workers/{created['id']}")
     assert response.status_code == 204
 

@@ -33,7 +33,7 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
@@ -49,6 +49,7 @@ from kitaru.server.domain.agent_version import (
 )
 from kitaru.server.domain.session import (
     IllegalSessionStatusTransition,
+    SessionAccessDenied,
     SessionAgentMismatch,
     SessionAgentRequired,
     SessionAgentVersionMismatch,
@@ -865,4 +866,128 @@ async def test_create_session_rejects_an_agent_the_import_task_does_not_use(
                 task_id=task.id,
             ),
             actor=ACTOR,
+        )
+
+
+async def test_create_session_with_a_task_principal_binds_the_principals_task_id(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A task principal's session links its own task, ignoring a mismatched request.
+
+    The account on a task principal's context is the owner of the task's
+    job, resolved by the auth layer from the task token, not the account
+    that registered the worker running it.
+    """
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    job_owner = Account(id=uuid.uuid4(), name="job-owner")
+    actor = AuthContext(
+        account=job_owner,
+        principal=TaskPrincipal(
+            task_id=task.id, attempt=task.attempt, worker_id=uuid.uuid4()
+        ),
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED, task_id=uuid.uuid4()),
+        actor=actor,
+    )
+    assert session.task_id == task.id
+    assert session.owner_id == job_owner.id
+
+
+def _task_principal(
+    task_id: uuid.UUID, input_session_id: uuid.UUID | None = None
+) -> AuthContext:
+    """Build an auth context for a task principal owning the given task."""
+    return AuthContext(
+        account=Account(id=uuid.uuid4(), name="job-owner"),
+        principal=TaskPrincipal(
+            task_id=task_id,
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            input_session_id=input_session_id,
+        ),
+    )
+
+
+async def test_get_session_denies_a_task_principal_for_another_tasks_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Reject a task principal reading a session it does not own."""
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4())
+    with pytest.raises(SessionAccessDenied):
+        await service.get_session(session.id, actor=actor)
+
+
+async def test_get_session_allows_a_task_principal_for_its_own_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Allow a task principal to read the session linked to its own task."""
+    task_id = uuid.uuid4()
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=task_id
+    )
+    actor = _task_principal(task_id)
+    loaded = await service.get_session(session.id, actor=actor)
+    assert loaded.id == session.id
+
+
+async def test_get_session_allows_a_task_principal_for_its_input_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Allow a task principal to read the session named as its input session."""
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    loaded = await service.get_session(session.id, actor=actor)
+    assert loaded.id == session.id
+
+
+async def test_update_session_denies_a_task_principal_for_another_tasks_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Reject a task principal updating a session it does not own."""
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4())
+    with pytest.raises(SessionAccessDenied):
+        await service.update_session(
+            session.id, SessionUpdate(name="renamed"), actor=actor
+        )
+
+
+async def test_update_session_allows_a_task_principal_for_its_own_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Allow a task principal to update the session linked to its own task."""
+    task_id = uuid.uuid4()
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=task_id
+    )
+    actor = _task_principal(task_id)
+    updated = await service.update_session(
+        session.id, SessionUpdate(name="renamed"), actor=actor
+    )
+    assert updated.name == "renamed"
+
+
+async def test_update_session_denies_a_task_principal_for_its_input_session(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Reject a task principal writing to its input session, a read-only relation."""
+    session = await create_session(
+        repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    with pytest.raises(SessionAccessDenied):
+        await service.update_session(
+            session.id, SessionUpdate(name="renamed"), actor=actor
         )

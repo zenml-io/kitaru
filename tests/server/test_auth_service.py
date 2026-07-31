@@ -22,15 +22,18 @@ from conftest import (
     FakeAccountRepository,
     FakeApiKeyRepository,
     FakePasswordHasher,
+    control_plane_settings,
     create_api_key,
     local_settings,
 )
+from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     LAST_USED_UPDATE_INTERVAL_SECONDS,
     AuthenticationError,
     AuthService,
 )
-from kitaru.server.adapters.auth.jwt import JWTToken
+from kitaru.server.adapters.auth.jwt import JWTToken, TaskSubject
+from kitaru.server.application.models.auth import TaskPrincipal, WorkerPrincipal
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import encode_api_key
 from kitaru.server.domain.keys import generate_secret
@@ -193,7 +196,7 @@ async def test_login_with_password(
     token, expires_at, csrf_token = await service.login_with_password("alice", "secret")
     assert csrf_token is None
     decoded = JWTToken.decode(token, local_settings())
-    assert decoded.account_id == account.id
+    assert decoded.subject.account_id == account.id
     assert decoded.expires_at == expires_at.replace(microsecond=0)
 
     context = await service.resolve(token)
@@ -278,3 +281,265 @@ async def test_csrf_token_not_required_for_header_credentials(
 
     context = await service.resolve(token)
     assert context.account.name == "alice"
+
+
+async def test_worker_token_resolves_to_a_worker_principal(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Resolve a worker token into a worker principal scoped to its account."""
+    account = await create_account(account_repository)
+    worker_id = uuid.uuid4()
+    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+
+    context = await service.resolve(token)
+
+    assert context.account.id == account.id
+    assert isinstance(context.principal, WorkerPrincipal)
+    assert context.principal.worker_id == worker_id
+
+
+async def test_task_token_resolves_to_a_task_principal(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Resolve a task token into a task principal scoped to its account."""
+    account = await create_account(account_repository)
+    task_id = uuid.uuid4()
+    worker_id = uuid.uuid4()
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=task_id,
+            attempt=2,
+            worker_id=worker_id,
+            account_id=account.id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    context = await service.resolve(token)
+
+    assert context.account.id == account.id
+    assert isinstance(context.principal, TaskPrincipal)
+    assert context.principal.task_id == task_id
+    assert context.principal.attempt == 2
+    assert context.principal.worker_id == worker_id
+
+
+async def test_task_token_carries_input_session_id(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Resolve a task token's input_session_id claim onto its task principal."""
+    account = await create_account(account_repository)
+    input_session_id = uuid.uuid4()
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=uuid.uuid4(),
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+            input_session_id=input_session_id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    context = await service.resolve(token)
+
+    assert isinstance(context.principal, TaskPrincipal)
+    assert context.principal.input_session_id == input_session_id
+
+
+async def test_task_token_input_session_id_defaults_to_none(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Leave input_session_id unset on a task token that names none."""
+    account = await create_account(account_repository)
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=uuid.uuid4(),
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    context = await service.resolve(token)
+
+    assert isinstance(context.principal, TaskPrincipal)
+    assert context.principal.input_session_id is None
+
+
+async def test_worker_token_rejects_a_deactivated_account(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Reject a worker token whose account was deactivated after issuance."""
+    account = await create_account(account_repository, active=False)
+    token, _ = service.issue_worker_token(worker_id=uuid.uuid4(), account_id=account.id)
+
+    with pytest.raises(AuthenticationError, match="Invalid worker token"):
+        await service.resolve(token)
+
+
+async def test_task_token_rejects_a_deactivated_account(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Reject a task token whose account was deactivated after issuance."""
+    account = await create_account(account_repository, active=False)
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=uuid.uuid4(),
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    with pytest.raises(AuthenticationError, match="Invalid task token"):
+        await service.resolve(token)
+
+
+async def test_try_resolve_worker_or_task_resolves_a_worker_token(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Resolve a worker token under the none auth scheme."""
+    settings = local_settings(AUTH_SCHEME=AuthScheme.NONE)
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    account = await create_account(account_repository)
+    worker_id = uuid.uuid4()
+    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+
+    context = await service.try_resolve_worker_or_task(token)
+
+    assert context is not None
+    assert isinstance(context.principal, WorkerPrincipal)
+    assert context.principal.worker_id == worker_id
+
+
+async def test_try_resolve_worker_or_task_resolves_a_task_token(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Resolve a task token under the none auth scheme."""
+    settings = local_settings(AUTH_SCHEME=AuthScheme.NONE)
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    account = await create_account(account_repository)
+    task_id = uuid.uuid4()
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=task_id,
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    context = await service.try_resolve_worker_or_task(token)
+
+    assert context is not None
+    assert isinstance(context.principal, TaskPrincipal)
+    assert context.principal.task_id == task_id
+
+
+async def test_try_resolve_worker_or_task_returns_none_for_an_account_token(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Return None for an account session token, deferring to the default account."""
+    settings = local_settings(AUTH_SCHEME=AuthScheme.NONE)
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    await create_account(account_repository)
+    token, _, _ = await service.login_with_password("alice", "secret")
+
+    assert await service.try_resolve_worker_or_task(token) is None
+
+
+async def test_try_resolve_worker_or_task_returns_none_for_garbage(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Return None for a credential that does not decode as a token at all."""
+    settings = local_settings(AUTH_SCHEME=AuthScheme.NONE)
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    assert await service.try_resolve_worker_or_task("not-a-token") is None
+
+
+async def test_control_plane_scheme_resolves_a_worker_token_without_an_external_account(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """A worker token resolves under the control plane scheme without an external id."""
+    settings = control_plane_settings()
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    account = await create_account(account_repository)
+    assert account.external_id is None
+    worker_id = uuid.uuid4()
+    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+
+    context = await service.resolve(token)
+
+    assert isinstance(context.principal, WorkerPrincipal)
+    assert context.account.id == account.id
+
+
+async def test_control_plane_scheme_resolves_a_task_token_without_an_external_account(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """A task token resolves under the control plane scheme without an external id."""
+    settings = control_plane_settings()
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    account = await create_account(account_repository)
+    assert account.external_id is None
+    task_id = uuid.uuid4()
+    token = service.issue_task_token(
+        TaskSubject(
+            task_id=task_id,
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+        ),
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+
+    context = await service.resolve(token)
+
+    assert isinstance(context.principal, TaskPrincipal)
+    assert context.account.id == account.id

@@ -20,7 +20,6 @@ import os
 import platform
 import re
 import socket
-import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -28,7 +27,10 @@ from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskClaimRequest, TaskWithSpec
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.auth import RenewingTokenAuth
+from kitaru.client.env import get_required_env
 from kitaru.client.exceptions import APIError
+from kitaru.worker.auth import WorkerTokenSource
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig
 from kitaru.worker.context import ExecutionContext
@@ -145,7 +147,25 @@ class Worker:
             self._config.payload_cache_root or DEFAULT_PAYLOAD_CACHE_ROOT
         )
 
-        async with KitaruAPIClient.from_env() as client:
+        base_url = get_required_env("KITARU_API_URL")
+        api_key = get_required_env("KITARU_API_KEY")
+
+        registration = WorkerCreateRequest(
+            name=name,
+            scope=self._config.scope,
+            runtime=detect_runtime(),
+            metadata=self._config.metadata,
+        )
+        async with KitaruAPIClient(
+            base_url=base_url, api_key=api_key
+        ) as registration_client:
+            response = await registration_client.workers.create(registration)
+            worker = response.worker
+            logger.info("Registered worker %s (%s).", name, worker.id)
+            source = WorkerTokenSource(
+                registration_client, registration, response.token.get_secret_value()
+            )
+            client = registration_client.with_auth(RenewingTokenAuth(source))
             ctx = ExecutionContext(
                 client=client,
                 blob_cache=BlobCache(blob_cache_root),
@@ -153,15 +173,6 @@ class Worker:
                     payload_cache_root, max_bytes=PAYLOAD_CACHE_MAX_BYTES
                 ),
             )
-            worker = await client.workers.create(
-                WorkerCreateRequest(
-                    name=name,
-                    scope=self._config.scope,
-                    runtime=detect_runtime(),
-                    metadata=self._config.metadata,
-                )
-            )
-            logger.info("Registered worker %s (%s).", name, worker.id)
             heartbeat = WorkerHeartbeat(
                 client=client,
                 worker_id=worker.id,
@@ -169,7 +180,7 @@ class Worker:
             )
             heartbeat_task = asyncio.create_task(heartbeat.run())
             try:
-                await self._claim_loop(ctx, worker.id, heartbeat, stop)
+                await self._claim_loop(ctx, heartbeat, stop)
             finally:
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -179,7 +190,6 @@ class Worker:
     async def _claim_loop(
         self,
         ctx: ExecutionContext,
-        worker_id: uuid.UUID,
         heartbeat: WorkerHeartbeat,
         stop: asyncio.Event,
     ) -> None:
@@ -187,7 +197,6 @@ class Worker:
 
         Args:
             ctx: Execution context.
-            worker_id: Id of the registered worker.
             heartbeat: Heartbeat tracking in-flight tasks.
             stop: Event that ends the loop when set.
         """
@@ -214,7 +223,7 @@ class Worker:
             )
             try:
                 claimed = await ctx.client.tasks.claim(
-                    TaskClaimRequest(worker_id=worker_id, max_tasks=max_tasks)
+                    TaskClaimRequest(max_tasks=max_tasks)
                 )
             except APIError as exc:
                 logger.warning("Failed to claim tasks: %s", exc)

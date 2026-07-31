@@ -233,7 +233,11 @@ async def test_login_unavailable_under_none_scheme(
     """Observe HTTP 400 for password login under the none auth scheme."""
     _ = account
     app = build_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        ),
         account_repository,
         api_key_repository,
     )
@@ -252,7 +256,11 @@ async def test_none_scheme_requires_bootstrap(
 ) -> None:
     """Fail under none scheme when the default account was not initialized."""
     app = build_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        ),
         account_repository,
         api_key_repository,
     )
@@ -274,7 +282,11 @@ async def test_none_scheme_resolves_default_account(
     account = await account_repository.create(Account(name="default"))
     await create_api_key(api_key_repository, account.id)
     app = build_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"),
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        ),
         account_repository,
         api_key_repository,
     )

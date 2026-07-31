@@ -281,7 +281,9 @@ async def test_device_grant_rejected_under_none_scheme(
 ) -> None:
     """Observe HTTP 400 for the device grant type under the none auth scheme."""
     settings = APISettings(
-        DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key"
+        DB_HOST="localhost",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
     )
     app = build_app(settings, account_repository, api_key_repository, device_repository)
     transport = httpx.ASGITransport(app=app)

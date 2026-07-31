@@ -23,7 +23,7 @@ from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
 from kitaru.server.application.interfaces.task_repository import TaskRepository
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
@@ -32,6 +32,10 @@ from kitaru.server.application.models.session import (
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.session_access import (
+    check_task_session_read,
+    check_task_session_write,
+)
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,
@@ -81,6 +85,8 @@ class SessionService:
         task links exactly one session and gets its result session written in
         the same transaction, an import task links every session it creates.
         The task is the source of truth for the agent and the agent version.
+        A task principal's session is always linked to its own task,
+        regardless of what the request names.
 
         Args:
             command: Fields for the new session.
@@ -106,9 +112,12 @@ class SessionService:
         Returns:
             Created session.
         """
+        task_id = command.task_id
+        if isinstance(actor.principal, TaskPrincipal):
+            task_id = actor.principal.task_id
         task = None
-        if command.task_id is not None:
-            task = await self._tasks.get(command.task_id, exclusive=True)
+        if task_id is not None:
+            task = await self._tasks.get(task_id, exclusive=True)
             task.check_running()
             if isinstance(task, AgentTask) and task.result_session_id is not None:
                 raise TaskResultSessionAlreadyLinked(task.id)
@@ -117,7 +126,7 @@ class SessionService:
             owner_id=actor.account.id,
             agent_id=agent_id,
             agent_version_id=agent_version_id,
-            task_id=command.task_id,
+            task_id=task_id,
             origin=command.origin,
             status=command.status
             if command.status is not None
@@ -201,18 +210,24 @@ class SessionService:
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.
 
+        A task principal reads a session it owns or holds as its task's
+        input session.
+
         Args:
             session_id: Id of the session.
             actor: Caller context.
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
 
         Returns:
             Stored session.
         """
-        _ = actor
-        return await self._repository.get(session_id)
+        session = await self._repository.get(session_id)
+        check_task_session_read(session_id, session.task_id, actor)
+        return session
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext
@@ -238,7 +253,8 @@ class SessionService:
         with a status transition, applied through ``Session.finish``. When
         the command sets none of ``status``, ``outputs``, ``error``, or
         ``ended_at``, the session's current status carries through as a
-        no-op transition, which leaves those fields untouched.
+        no-op transition, which leaves those fields untouched. A task
+        principal writes only a session it owns.
 
         Args:
             session_id: Id of the session.
@@ -247,6 +263,7 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionAccessDenied: A task principal does not own the session.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
             IllegalSessionStatusTransition: The session is terminal and the
@@ -255,8 +272,8 @@ class SessionService:
         Returns:
             Updated session.
         """
-        _ = actor
         session = await self._repository.get(session_id, exclusive=True)
+        check_task_session_write(session_id, session.task_id, actor)
         fields = command.model_fields_set
         if {"status", "outputs", "error", "ended_at"} & fields:
             previous_status = session.status

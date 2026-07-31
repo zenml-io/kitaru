@@ -27,7 +27,11 @@ class AgentHandler:
     """Builds the agent's own command as the task process."""
 
     async def prepare(
-        self, ctx: ExecutionContext, task_id: uuid.UUID, spec: TaskSpecResponse
+        self,
+        ctx: ExecutionContext,
+        task_id: uuid.UUID,
+        spec: TaskSpecResponse,
+        token: str,
     ) -> TaskProcess:
         """Build the process running the agent's command from its run spec.
 
@@ -35,13 +39,14 @@ class AgentHandler:
             ctx: Execution context.
             task_id: Id of the task being prepared.
             spec: Execution spec of the task, carrying agent task details.
+            token: Bearer token scoped to this task and attempt.
 
         Returns:
             Process running the agent's command.
         """
         assert spec.run is not None, "agent task spec is missing a run spec"
         assert isinstance(spec.details, AgentTaskDetails)
-        env = build_process_env(task_id, spec.run.env, spec.env, spec.secret_env)
+        env = build_process_env(task_id, spec.run.env, spec.env, spec.secret_env, token)
         inputs_json = json.dumps(spec.details.inputs)
         if len(inputs_json.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES:
             env["KITARU_TASK_INPUTS"] = inputs_json

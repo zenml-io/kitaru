@@ -14,6 +14,7 @@
 """Task routes."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -27,8 +28,18 @@ from kitaru.api_models.v1.task import (
     TaskSpecResponse,
     TaskUpdateRequest,
 )
+from kitaru.server.adapters.auth.auth_service import AuthService
+from kitaru.server.adapters.auth.jwt import TaskSubject
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_task_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_task_only,
+    authorize_with_task,
+    authorize_worker_only,
+    get_app_settings,
+    get_auth_service,
+    get_task_service,
+)
 from kitaru.server.adapters.rest.mapping.tasks import (
     claimed_tasks_to_response,
     spec_to_response,
@@ -36,8 +47,14 @@ from kitaru.server.adapters.rest.mapping.tasks import (
     task_to_response,
     task_update_to_command,
 )
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.api.config import APISettings
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    TaskAuthContext,
+    WorkerAuthContext,
+)
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.domain.task import EvaluationTask
 
 router = APIRouter(route_class=CommitRoute)
 
@@ -72,34 +89,60 @@ async def list_tasks(
 async def claim_tasks(
     body: TaskClaimRequest,
     service: Annotated[TaskService, Depends(get_task_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    actor: Annotated[WorkerAuthContext, Depends(authorize_worker_only)],
 ) -> TaskClaimResponse:
     """Claim pending tasks matching the worker's stored scope.
 
-    Clients observe HTTP 200 on success, 404 when no worker has this id, and
-    422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when the caller holds no worker
+    token, 404 when no worker has the claiming principal's id, and 422 on
+    invalid input.
 
     Args:
         body: Task claim request.
         service: Task service.
+        auth_service: Authentication service for the current request.
+        settings: API settings for this process.
         actor: Caller context.
 
     Returns:
-        Claimed tasks with their execution specs.
+        Claimed tasks with their execution specs and a task token each.
     """
-    claimed = await service.claim_tasks(body.worker_id, body.max_tasks, actor=actor)
-    return claimed_tasks_to_response(claimed)
+    claimed = await service.claim_tasks(body.max_tasks, actor=actor)
+    worker_id = actor.principal.worker_id
+    tokens = {
+        item.task.id: auth_service.issue_task_token(
+            TaskSubject(
+                task_id=item.task.id,
+                attempt=item.task.attempt,
+                worker_id=worker_id,
+                account_id=item.job_owner_id,
+                input_session_id=item.task.input_session_id
+                if isinstance(item.task, EvaluationTask)
+                else None,
+            ),
+            expires_at=datetime.now(UTC)
+            + timedelta(
+                seconds=item.spec.timeout_seconds
+                + settings.TASK_TOKEN_EXPIRY_SLACK_SECONDS
+            ),
+        )
+        for item in claimed
+    }
+    return claimed_tasks_to_response(claimed, tokens)
 
 
 @router.get("/{task_id}")
 async def get_task(
     task_id: uuid.UUID,
     service: Annotated[TaskService, Depends(get_task_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> TaskResponse:
     """Get a task by id.
 
-    Clients observe HTTP 200 on success and 404 when no task has this id.
+    Clients observe HTTP 200 on success, 403 when a task token names a
+    different task, and 404 when no task has this id.
 
     Args:
         task_id: Id of the task.
@@ -117,12 +160,13 @@ async def get_task(
 async def get_task_spec(
     task_id: uuid.UUID,
     service: Annotated[TaskService, Depends(get_task_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> TaskSpecResponse:
     """Get the execution spec of a task.
 
-    Clients observe HTTP 200 on success and 404 when no task has this id or
-    the spec references a missing resource.
+    Clients observe HTTP 200 on success, 403 when a task token names a
+    different task, and 404 when no task has this id or the spec references
+    a missing resource.
 
     Args:
         task_id: Id of the task.
@@ -141,14 +185,14 @@ async def update_task(
     task_id: uuid.UUID,
     body: TaskUpdateRequest,
     service: Annotated[TaskService, Depends(get_task_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[TaskAuthContext, Depends(authorize_task_only)],
 ) -> TaskResponse:
     """Apply an executor transition to a task.
 
-    Clients observe HTTP 200 on success, 404 when no task has this id, 409
-    when the attempt does not match or the transition is illegal, 413 when
-    the result exceeds the size cap, and 422 when the body carries no
-    status.
+    Clients observe HTTP 200 on success, 403 when the caller holds no task
+    token for this task, 404 when no task has this id, 409 when the attempt
+    does not match or the transition is illegal, 413 when the result exceeds
+    the size cap, and 422 when the body carries no status.
 
     Args:
         task_id: Id of the task.

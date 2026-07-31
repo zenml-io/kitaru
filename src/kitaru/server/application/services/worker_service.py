@@ -19,9 +19,9 @@ from datetime import UTC, datetime
 from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
-from kitaru.server.domain.worker import Worker
+from kitaru.server.domain.worker import Worker, WorkerAccessDenied
 
 
 class WorkerService:
@@ -68,17 +68,25 @@ class WorkerService:
     async def get_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> Worker:
         """Get a worker by id.
 
+        An account principal reads any worker. A worker principal reads only
+        itself.
+
         Args:
             worker_id: Id of the worker.
             actor: Caller context.
 
         Raises:
+            WorkerAccessDenied: The caller's worker token names a different
+                worker.
             WorkerNotFound: No worker has this id.
 
         Returns:
             Stored worker.
         """
-        _ = actor
+        if isinstance(actor.principal, WorkerPrincipal) and (
+            actor.principal.worker_id != worker_id
+        ):
+            raise WorkerAccessDenied(worker_id)
         return await self._repository.get(worker_id)
 
     async def list_workers(

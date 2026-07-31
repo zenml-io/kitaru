@@ -34,7 +34,11 @@ class EvaluationHandler:
     """Builds the kitaru.task evaluate process for an evaluator task."""
 
     async def prepare(
-        self, ctx: ExecutionContext, task_id: uuid.UUID, spec: TaskSpecResponse
+        self,
+        ctx: ExecutionContext,
+        task_id: uuid.UUID,
+        spec: TaskSpecResponse,
+        token: str,
     ) -> TaskProcess:
         """Build the evaluator process, materializing a script plugin.
 
@@ -42,13 +46,14 @@ class EvaluationHandler:
             ctx: Execution context.
             task_id: Id of the task being prepared.
             spec: Execution spec of the task, carrying evaluator task details.
+            token: Bearer token scoped to this task and attempt.
 
         Returns:
             Process running the evaluator plugin.
         """
         assert isinstance(spec.details, EvaluationTaskDetails)
         plugin = spec.details.plugin
-        env = build_process_env(task_id, {}, spec.env, spec.secret_env)
+        env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
         if isinstance(plugin, ScriptPluginSpec):
             path = await materialize_blob(
                 ctx, ctx.blob_cache, plugin.blob_id, plugin.sha256

@@ -23,10 +23,14 @@ from kitaru.server.application.interfaces.session_node_repository import (
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
 from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
+)
+from kitaru.server.application.services.session_access import (
+    check_task_session_read,
+    check_task_session_write,
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.session import combine_rollups, rollup_delta
@@ -67,7 +71,7 @@ class SessionNodeService:
         ``secondary_parent_indexes`` resolve against both stored rows and
         earlier rows in the same batch. The session's cost, tokens, and call
         counts roll up by one atomic delta-based update covering the whole
-        batch.
+        batch. A task principal ingests only into a session it owns.
 
         Args:
             session_id: Id of the session to ingest into.
@@ -76,6 +80,7 @@ class SessionNodeService:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionAccessDenied: A task principal does not own the session.
             SessionNotIngestable: The session is not in progress and its
                 origin is not imported.
             SessionNodeParentNotFound: A parent_index or secondary parent
@@ -84,8 +89,8 @@ class SessionNodeService:
         Returns:
             Stored nodes in batch order.
         """
-        _ = actor
         session = await self._sessions.get(session_id)
+        check_task_session_write(session_id, session.task_id, actor)
         session.check_node_ingest()
         if not batch:
             return []
@@ -172,14 +177,25 @@ class SessionNodeService:
     ) -> tuple[list[SessionNode], str | None]:
         """List the nodes of a session, ordered by index ascending.
 
+        A task principal reads only a session it owns or holds as its
+        task's input session.
+
         Args:
             session_node_filter: Filter and pagination parameters.
             actor: Caller context.
 
+        Raises:
+            SessionNotFound: A task principal names a session that does not
+                exist.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
+
         Returns:
             Page of matching nodes and the next cursor.
         """
-        _ = actor
+        if isinstance(actor.principal, TaskPrincipal):
+            session = await self._sessions.get(session_node_filter.session_id)
+            check_task_session_read(session.id, session.task_id, actor)
         return await self._repository.query(session_node_filter)
 
     async def get_index_by_id(
@@ -187,12 +203,23 @@ class SessionNodeService:
     ) -> dict[uuid.UUID, int]:
         """Look up the index of every node in a session, keyed by node id.
 
+        A task principal reads only a session it owns or holds as its
+        task's input session.
+
         Args:
             session_id: Id of the session whose nodes to look up.
             actor: Caller context.
 
+        Raises:
+            SessionNotFound: A task principal names a session that does not
+                exist.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
+
         Returns:
             Every node id in the session mapped to its index.
         """
-        _ = actor
+        if isinstance(actor.principal, TaskPrincipal):
+            session = await self._sessions.get(session_id)
+            check_task_session_read(session_id, session.task_id, actor)
         return await self._repository.get_index_by_id(session_id)

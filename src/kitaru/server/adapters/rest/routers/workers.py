@@ -25,12 +25,17 @@ from kitaru.api_models.v1.worker import (
     WorkerHeartbeatRequest,
     WorkerHeartbeatResponse,
     WorkerListParams,
+    WorkerRegistrationResponse,
     WorkerResponse,
 )
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_worker,
+    authorize_worker_only,
     get_app_settings,
+    get_auth_service,
     get_task_service,
     get_worker_service,
 )
@@ -39,7 +44,7 @@ from kitaru.server.adapters.rest.mapping.workers import (
     worker_to_response,
 )
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, WorkerAuthContext
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.worker_service import WorkerService
 
@@ -50,24 +55,27 @@ router = APIRouter(route_class=CommitRoute)
 async def register_worker(
     body: WorkerCreateRequest,
     service: Annotated[WorkerService, Depends(get_worker_service)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
-) -> WorkerResponse:
+) -> WorkerRegistrationResponse:
     """Register a worker, upserting by name.
 
-    Re-registration refreshes the scope, runtime, and metadata and stamps
-    last_seen_at, keeping the id and created time. Clients observe HTTP 200
-    on both the first registration and every re-registration, and 422 on
-    invalid input.
+    Re-registration refreshes the scope, runtime, and metadata, stamps
+    last_seen_at, and mints a fresh token, keeping the id and created time.
+    Re-registering with a fresh token is how a worker renews before its
+    current token expires. Clients observe HTTP 200 on both the first
+    registration and every re-registration, and 422 on invalid input.
 
     Args:
         body: Worker create request.
         service: Worker service.
+        auth_service: Authentication service for the current request.
         actor: Caller context.
         settings: API settings for this process.
 
     Returns:
-        Stored worker.
+        Stored worker with a bearer token scoped to it.
     """
     worker = await service.register_worker(
         name=body.name,
@@ -76,8 +84,15 @@ async def register_worker(
         metadata=body.metadata,
         actor=actor,
     )
-    return worker_to_response(
-        worker, datetime.now(UTC), settings.WORKER_LIVENESS_TIMEOUT_SECONDS
+    token, token_expires_at = auth_service.issue_worker_token(
+        worker_id=worker.id, account_id=actor.account.id
+    )
+    return WorkerRegistrationResponse(
+        worker=worker_to_response(
+            worker, datetime.now(UTC), settings.WORKER_LIVENESS_TIMEOUT_SECONDS
+        ),
+        token=token,
+        token_expires_at=token_expires_at,
     )
 
 
@@ -118,12 +133,13 @@ async def list_workers(
 async def get_worker(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_worker)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> WorkerResponse:
     """Get a worker by id.
 
-    Clients observe HTTP 200 on success and 404 when no worker has this id.
+    Clients observe HTTP 200 on success, 403 when a worker token names a
+    different worker, and 404 when no worker has this id.
 
     Args:
         worker_id: Id of the worker.
@@ -145,11 +161,12 @@ async def heartbeat_worker(
     worker_id: uuid.UUID,
     body: WorkerHeartbeatRequest,
     service: Annotated[TaskService, Depends(get_task_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[WorkerAuthContext, Depends(authorize_worker_only)],
 ) -> WorkerHeartbeatResponse:
     """Report the tasks a worker currently holds.
 
-    Clients observe HTTP 200 on success and 404 when no worker has this id.
+    Clients observe HTTP 200 on success, 403 when the caller holds no worker
+    token for this worker, and 404 when no worker has this id.
 
     Args:
         worker_id: Id of the worker.

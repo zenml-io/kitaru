@@ -32,6 +32,7 @@ from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     PayloadTooLargeError,
     ValidationError,
@@ -54,6 +55,7 @@ __all__ = [
     "PluginSpec",
     "ScriptPluginSpec",
     "Task",
+    "TaskAccessDenied",
     "TaskAttemptMismatch",
     "TaskDetails",
     "TaskNotFound",
@@ -93,6 +95,18 @@ class TaskNotFound(NotFoundError):
             task_id: Id of the missing task.
         """
         super().__init__(f"Task {task_id} was not found")
+
+
+class TaskAccessDenied(ForbiddenError):
+    """Raised when the caller's credential does not authorize this task."""
+
+    def __init__(self, task_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            task_id: Id of the task.
+        """
+        super().__init__(f"Task {task_id} is not accessible to this caller")
 
 
 class IllegalTaskStatusTransition(ConflictError):

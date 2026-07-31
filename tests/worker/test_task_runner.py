@@ -317,6 +317,41 @@ async def test_exit_before_kill_wins_over_a_requested_cancel(
     assert request.status == TaskStatus.COMPLETED
 
 
+async def test_execute_scopes_client_calls_and_process_env_to_the_claimed_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runner threads the claimed task's token to the client and the process."""
+    captured_envs: list[dict[str, str]] = []
+
+    async def _fake(process: TaskProcess, canceled: asyncio.Event) -> ProcessResult:
+        captured_envs.append(process.env)
+        return ProcessResult(returncode=0, tail="")
+
+    _patch_run_task_process(monkeypatch, _fake)
+    client = FakeKitaruAPIClient()
+    seen_tokens: list[str] = []
+    real_with_token = client.with_token
+
+    def _spy_with_token(token: str) -> FakeKitaruAPIClient:
+        seen_tokens.append(token)
+        return real_with_token(token)
+
+    monkeypatch.setattr(client, "with_token", _spy_with_token)
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    completed_task = running_task.model_copy(update={"status": TaskStatus.COMPLETED})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(completed_task)
+
+    await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec, token="claim-token-xyz"), asyncio.Event()
+    )
+
+    assert seen_tokens == ["claim-token-xyz"]
+    assert captured_envs[0]["KITARU_TASK_TOKEN"] == "claim-token-xyz"
+
+
 async def test_prepare_failure_fails_the_task_with_the_label_and_exception(
     tmp_path: Path,
 ) -> None:
@@ -381,6 +416,35 @@ async def test_running_transition_hard_failure_abandons_the_attempt(
     )
 
     assert result == task
+    assert len(client.tasks.update_calls) == 1
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_running_transition_token_rejection_abandons_without_running_the_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    """A rejected token on the running transition abandons the attempt immediately."""
+    called = False
+
+    async def _unexpected_run(
+        process: TaskProcess, canceled: asyncio.Event
+    ) -> ProcessResult:
+        nonlocal called
+        called = True
+        return ProcessResult(returncode=0, tail="")
+
+    _patch_run_task_process(monkeypatch, _unexpected_run)
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    client.tasks.update_responses.append(APIError(status_code, "token rejected"))
+
+    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    assert result == task
+    assert called is False
     assert len(client.tasks.update_calls) == 1
 
 
@@ -513,6 +577,28 @@ async def test_completion_conflict_transport_failure_on_the_refetch_abandons(
     assert len(client.tasks.update_calls) == 2
 
 
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_completion_conflict_token_rejection_on_the_refetch_abandons(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    """A rejected token fetching the task after a completion conflict abandons."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(APIError(409, "conflict"))
+    client.tasks.get_responses.append(APIError(status_code, "token rejected"))
+
+    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    assert result == running_task
+    assert len(client.tasks.update_calls) == 2
+
+
 async def test_completion_hard_failure_returns_the_running_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -524,6 +610,27 @@ async def test_completion_hard_failure_returns_the_running_task(
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(APIError(500, "boom"))
+
+    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    assert result == running_task
+    assert len(client.tasks.update_calls) == 2
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_completion_token_rejection_returns_the_running_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+) -> None:
+    """A rejected token on completion abandons, keeping the running task."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(APIError(status_code, "token rejected"))
 
     result = await TaskRunner(_ctx(tmp_path, client)).execute(
         make_claimed(task, spec), asyncio.Event()

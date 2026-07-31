@@ -26,12 +26,19 @@ from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.secret_repository import SecretRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    TaskAuthContext,
+    TaskPrincipal,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
 from kitaru.server.application.models.task import (
     ClaimedTask,
     TaskFilter,
@@ -56,6 +63,7 @@ from kitaru.server.domain.task import (
     PluginSpec,
     ScriptPluginSpec,
     Task,
+    TaskAccessDenied,
     TaskResultSessionMissing,
     TaskResultSessionNotCompleted,
     TaskResultTooLarge,
@@ -63,6 +71,7 @@ from kitaru.server.domain.task import (
     TaskSpec,
     TaskUpdateRequiresStatus,
 )
+from kitaru.server.domain.worker import WorkerAccessDenied, WorkerCredentialRequired
 
 
 class TaskService:
@@ -77,6 +86,7 @@ class TaskService:
         plugin_repository: PluginRepository,
         blob_repository: BlobRepository,
         secret_repository: SecretRepository,
+        job_repository: JobRepository,
         transitions: TaskTransitions,
         policy: TaskPolicy,
     ) -> None:
@@ -90,6 +100,7 @@ class TaskService:
             plugin_repository: Plugin repository.
             blob_repository: Blob repository.
             secret_repository: Secret repository.
+            job_repository: Job repository, for the owning job's owner id.
             transitions: Task transition dispatch.
             policy: Task execution policy.
         """
@@ -100,11 +111,12 @@ class TaskService:
         self._plugins = plugin_repository
         self._blobs = blob_repository
         self._secrets = secret_repository
+        self._jobs = job_repository
         self._transitions = transitions
         self._policy = policy
 
     async def claim_tasks(
-        self, worker_id: uuid.UUID, max_tasks: int, actor: AuthContext
+        self, max_tasks: int, actor: WorkerAuthContext
     ) -> list[ClaimedTask]:
         """Sweep stale tasks, then claim pending tasks matching the worker's scope.
 
@@ -112,17 +124,19 @@ class TaskService:
         before this claim reads it.
 
         Args:
-            worker_id: Id of the claiming worker.
             max_tasks: Maximum number of tasks to claim.
             actor: Caller context.
 
         Raises:
-            WorkerNotFound: No worker has this id.
+            WorkerCredentialRequired: The caller holds no worker token.
+            WorkerNotFound: No worker has the claiming principal's id.
 
         Returns:
-            Claimed tasks paired with their execution specs.
+            Claimed tasks paired with their execution specs and job owners.
         """
-        _ = actor
+        if not isinstance(actor.principal, WorkerPrincipal):
+            raise WorkerCredentialRequired()
+        worker_id = actor.principal.worker_id
         worker = await self._workers.get(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
@@ -130,17 +144,27 @@ class TaskService:
         claimed = await self._repository.claim_pending(
             worker.scope, worker_id, max_tasks, now
         )
+        owners = await self._jobs.get_many(list({task.job_id for task in claimed}))
         started_jobs: set[uuid.UUID] = set()
         results: list[ClaimedTask] = []
         for task in claimed:
             if task.job_id not in started_jobs:
                 await self._transitions.start_job(task.job_id)
                 started_jobs.add(task.job_id)
-            results.append(ClaimedTask(task=task, spec=await self._build_spec(task)))
+            results.append(
+                ClaimedTask(
+                    task=task,
+                    spec=await self._build_spec(task),
+                    job_owner_id=owners[task.job_id].owner_id,
+                )
+            )
         return results
 
     async def heartbeat_worker(
-        self, worker_id: uuid.UUID, task_ids: Sequence[uuid.UUID], actor: AuthContext
+        self,
+        worker_id: uuid.UUID,
+        task_ids: Sequence[uuid.UUID],
+        actor: WorkerAuthContext,
     ) -> list[uuid.UUID]:
         """Stamp the heartbeat on the tasks the caller still owns.
 
@@ -154,12 +178,18 @@ class TaskService:
             actor: Caller context.
 
         Raises:
+            WorkerAccessDenied: The caller's worker token does not name this
+                worker.
             WorkerNotFound: No worker has this id.
 
         Returns:
             Ids of the reported tasks the worker should stop running.
         """
-        _ = actor
+        if (
+            not isinstance(actor.principal, WorkerPrincipal)
+            or actor.principal.worker_id != worker_id
+        ):
+            raise WorkerAccessDenied(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
         stamped = await self._repository.stamp_heartbeats(task_ids, worker_id, now)
@@ -172,17 +202,24 @@ class TaskService:
     async def get_task(self, task_id: uuid.UUID, actor: AuthContext) -> Task:
         """Get a task by id, carrying its effective status.
 
+        An account principal reads any task. A task principal reads only its
+        own task.
+
         Args:
             task_id: Id of the task.
             actor: Caller context.
 
         Raises:
+            TaskAccessDenied: The caller's task token names a different task.
             TaskNotFound: No task has this id.
 
         Returns:
             Stored task.
         """
-        _ = actor
+        if isinstance(actor.principal, TaskPrincipal) and (
+            actor.principal.task_id != task_id
+        ):
+            raise TaskAccessDenied(task_id)
         task = await self._repository.get(task_id)
         return self._with_staleness(task, datetime.now(UTC))
 
@@ -206,24 +243,31 @@ class TaskService:
     async def get_spec(self, task_id: uuid.UUID, actor: AuthContext) -> TaskSpec:
         """Get the execution spec of a task.
 
+        An account principal reads any spec. A task principal reads only its
+        own task's spec.
+
         Args:
             task_id: Id of the task.
             actor: Caller context.
 
         Raises:
+            TaskAccessDenied: The caller's task token names a different task.
             TaskNotFound: No task has this id.
 
         Returns:
             Execution spec.
         """
-        _ = actor
+        if isinstance(actor.principal, TaskPrincipal) and (
+            actor.principal.task_id != task_id
+        ):
+            raise TaskAccessDenied(task_id)
         task = await self._repository.get(task_id)
         return await self._build_spec(task)
 
     async def update_task(
-        self, task_id: uuid.UUID, command: TaskUpdate, actor: AuthContext
+        self, task_id: uuid.UUID, command: TaskUpdate, actor: TaskAuthContext
     ) -> Task:
-        """Apply an executor transition, fenced by the claim's attempt.
+        """Apply an executor transition, fenced by the caller's claimed attempt.
 
         Args:
             task_id: Id of the task.
@@ -231,9 +275,11 @@ class TaskService:
             actor: Caller context.
 
         Raises:
+            TaskAccessDenied: The caller holds no task token, or its task
+                token names a different task.
             TaskNotFound: No task has this id.
             TaskUpdateRequiresStatus: The command carries no status.
-            TaskAttemptMismatch: The command is fenced by an attempt the task
+            TaskAttemptMismatch: The token is fenced by an attempt the task
                 has moved past.
             TaskResultTooLarge: The completion result exceeds the size cap.
             IllegalTaskStatusTransition: The status is not one an executor
@@ -243,11 +289,14 @@ class TaskService:
         Returns:
             Task carrying its new status.
         """
-        _ = actor
+        if not isinstance(actor.principal, TaskPrincipal) or (
+            actor.principal.task_id != task_id
+        ):
+            raise TaskAccessDenied(task_id)
         task = await self._repository.get(task_id, exclusive=True)
         if command.status is None:
             raise TaskUpdateRequiresStatus(task_id)
-        task.check_attempt(command.attempt)
+        task.check_attempt(actor.principal.attempt)
         now = datetime.now(UTC)
         transition: Callable[[Task], None]
         if command.status is TaskStatus.RUNNING:

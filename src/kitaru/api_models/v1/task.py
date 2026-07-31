@@ -22,6 +22,7 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import (
     JsonValue,
+    PlainSerializedSecretStr,
     RequestModel,
     ResponseModel,
     TimestampedResponseModel,
@@ -117,9 +118,6 @@ class TaskUpdateRequest(RequestModel):
     """Task update request."""
 
     status: TaskStatus | None = Field(default=None, description="New task status.")
-    attempt: int | None = Field(
-        default=None, description="Attempt this transition is fenced by."
-    )
     error: str | None = Field(default=None, description="New error.")
     result: JsonValue | None = Field(default=None, description="New task result.")
 
@@ -177,7 +175,6 @@ class WorkerScope(FrozenModel):
 class TaskClaimRequest(RequestModel):
     """Task claim request."""
 
-    worker_id: uuid.UUID = Field(description="Claiming worker.")
     max_tasks: int = Field(
         ge=1, le=100, description="Maximum number of tasks to claim."
     )
@@ -284,6 +281,9 @@ class TaskWithSpec(ResponseModel):
 
     task: TaskResponse = Field(description="Task.")
     spec: TaskSpecResponse = Field(description="Task spec.")
+    token: PlainSerializedSecretStr = Field(
+        description="Bearer token scoped to this task and attempt."
+    )
 
 
 class TaskClaimResponse(ResponseModel):

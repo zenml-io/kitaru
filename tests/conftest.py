@@ -50,6 +50,7 @@ from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client_id import ENV_CLIENT_ID
 from kitaru.client.credential_store import CredentialStore
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneClient,
     ControlPlaneError,
@@ -67,6 +68,12 @@ from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
+from kitaru.server.application.models.auth import (
+    TaskAuthContext,
+    TaskPrincipal,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
 from kitaru.server.application.models.cohort import CohortFilter, CohortVersionFilter
 from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
@@ -229,16 +236,21 @@ def db_settings(**overrides: Any) -> APISettings:
     Returns:
         Settings for the test database.
     """
-    return APISettings(
-        DB_HOST=os.environ.get("KITARU_TEST_DB_HOST", "localhost"),
-        DB_PORT=int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
+    values: dict[str, Any] = {
+        "DB_HOST": os.environ.get("KITARU_TEST_DB_HOST", "localhost"),
+        "DB_PORT": int(os.environ.get("KITARU_TEST_DB_PORT", "5433")),
         # A database per caller. Tests drop their database on teardown, and a
         # shared name would let one test drop the database another is using.
         # The timestamp lets the stale-database reaper age-gate its drops.
-        DB_NAME=f"{TEST_DB_PREFIX}_{int(datetime.now(UTC).timestamp())}_{uuid.uuid4().hex[:12]}",
-        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        "DB_NAME": (
+            f"{TEST_DB_PREFIX}_{int(datetime.now(UTC).timestamp())}_"
+            f"{uuid.uuid4().hex[:12]}"
+        ),
+        "SECRET_ENCRYPTION_KEY": "test-encryption-key",
+        "JWT_SIGNING_KEY": "test-signing-key-0123456789abcdef",
         **overrides,
-    )
+    }
+    return APISettings(**values)
 
 
 def local_settings(use_db: bool = False, **overrides: Any) -> APISettings:
@@ -470,7 +482,9 @@ def isolated_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
 
 def asgi_api_client(
-    app: FastAPI, credential_store: CredentialStore | None = None
+    app: FastAPI,
+    credential_store: CredentialStore | None = None,
+    api_key: str | None = None,
 ) -> KitaruAPIClient:
     """Build an SDK client routed to the app instead of the network.
 
@@ -478,11 +492,16 @@ def asgi_api_client(
         app: Application to route requests to.
         credential_store: Store holding the credentials the client
             authenticates with.
+        api_key: Bearer token sent with every request.
 
     Returns:
         Client wired to an ASGI transport.
     """
-    client = KitaruAPIClient(base_url="http://test", credential_store=credential_store)
+    client = KitaruAPIClient(
+        base_url="http://test",
+        credential_store=credential_store,
+        api_key=api_key,
+    )
     client._http = httpx.AsyncClient(
         transport=RetryTransport(httpx.ASGITransport(app=app)),
         base_url="http://test",
@@ -967,6 +986,48 @@ async def create_api_key(
         )
     )
     return api_key, encode_api_key(api_key.id, secret)
+
+
+@pytest.fixture
+def account_repository() -> FakeAccountRepository:
+    """Provide a fake account repository."""
+    return FakeAccountRepository()
+
+
+@pytest.fixture
+async def account(account_repository: FakeAccountRepository) -> Account:
+    """Provide a stored account test resources are owned by."""
+    return await account_repository.create(Account(name="ann"))
+
+
+@pytest.fixture
+def auth_service(account_repository: FakeAccountRepository) -> AuthService:
+    """Provide an authentication service backed by the fake account repository."""
+    return AuthService(
+        settings=local_settings(),
+        account_repository=account_repository,
+        api_key_repository=FakeApiKeyRepository(),
+        password_hasher=FakePasswordHasher(),
+    )
+
+
+def mint_worker_token(
+    auth_service: AuthService, worker_id: uuid.UUID, account: Account
+) -> str:
+    """Mint a worker token for a worker registered under the given account.
+
+    Args:
+        auth_service: Authentication service backing the app.
+        worker_id: Id of the worker the token is scoped to.
+        account: Account the worker registered under.
+
+    Returns:
+        Encoded worker bearer token.
+    """
+    token, _ = auth_service.issue_worker_token(
+        worker_id=worker_id, account_id=account.id
+    )
+    return token
 
 
 class FakeDeviceRepository:
@@ -4304,6 +4365,21 @@ class FakeJobRepository:
             raise JobNotFound(job_id)
         return job.model_copy()
 
+    async def get_many(self, job_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Job]:
+        """Bulk-load jobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Stored jobs keyed by id.
+        """
+        return {
+            job_id: self._jobs[job_id].model_copy()
+            for job_id in job_ids
+            if job_id in self._jobs
+        }
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -4965,6 +5041,7 @@ def build_job_and_task_services(
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
+        job_repository=substrate.jobs,
         transitions=transitions,
         policy=task_policy,
     )
@@ -5086,6 +5163,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         plugin_repository=plugins,
         blob_repository=blobs,
         secret_repository=secrets,
+        job_repository=jobs,
         transitions=transitions,
         policy=task_policy,
     )
@@ -5151,4 +5229,49 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         workers=workers,
         evaluations=evaluations,
         tags=tags,
+    )
+
+
+def build_worker_actor(account: Account, worker_id: uuid.UUID) -> WorkerAuthContext:
+    """Build a worker-principal context for a worker owned by the account.
+
+    Args:
+        account: Account the context acts as.
+        worker_id: Id of the worker the principal claims to be.
+
+    Returns:
+        Context carrying a worker principal.
+    """
+    return WorkerAuthContext(
+        account=account, principal=WorkerPrincipal(worker_id=worker_id)
+    )
+
+
+def build_task_actor(
+    account: Account,
+    task_id: uuid.UUID,
+    attempt: int,
+    worker_id: uuid.UUID,
+    input_session_id: uuid.UUID | None = None,
+) -> TaskAuthContext:
+    """Build a task-principal context fenced by attempt.
+
+    Args:
+        account: Account the context acts as.
+        task_id: Id of the task the principal claims to run.
+        attempt: Attempt the principal is fenced by.
+        worker_id: Id of the worker holding the attempt.
+        input_session_id: Id of the session the task reads without owning.
+
+    Returns:
+        Context carrying a task principal.
+    """
+    return TaskAuthContext(
+        account=account,
+        principal=TaskPrincipal(
+            task_id=task_id,
+            attempt=attempt,
+            worker_id=worker_id,
+            input_session_id=input_session_id,
+        ),
     )

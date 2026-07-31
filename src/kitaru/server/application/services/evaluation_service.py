@@ -27,6 +27,7 @@ from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
     EvaluationMerge,
 )
+from kitaru.server.application.services.session_access import check_task_session_read
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch, Evaluation
 
 
@@ -91,7 +92,8 @@ class EvaluationService:
 
         A resent name overwrites its data type, score, value, explanation,
         and pass flag. The stored rows carry no evaluator_version_id or
-        task_id. The session accepts a merge in any status.
+        task_id. The session accepts a merge in any status. A task principal
+        merges into a session it owns or holds as its task's input session.
 
         Args:
             session_id: Id of the session to merge evaluations into.
@@ -100,13 +102,16 @@ class EvaluationService:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
             DuplicateEvaluationNameInBatch: The request names the same
                 evaluation twice.
 
         Returns:
             Stored evaluations in request order.
         """
-        await self._sessions.get(session_id)
+        session = await self._sessions.get(session_id)
+        check_task_session_read(session_id, session.task_id, actor)
         seen: set[str] = set()
         for command in commands:
             if command.name in seen:

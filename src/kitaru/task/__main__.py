@@ -55,9 +55,11 @@ def main() -> None:
     kind = _parse_kind(sys.argv[1:])
     try:
         task_id = get_required_env("KITARU_TASK_ID")
+        base_url = get_required_env("KITARU_API_URL")
+        token = get_required_env("KITARU_TASK_TOKEN")
 
         async def _main() -> None:
-            async with KitaruAPIClient.from_env() as client:
+            async with KitaruAPIClient(base_url=base_url, api_key=token) as client:
                 await _run_flow(kind, client, task_id)
 
         asyncio.run(_main())

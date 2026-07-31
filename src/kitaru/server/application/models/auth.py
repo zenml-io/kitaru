@@ -13,12 +13,53 @@
 #  permissions and limitations under the License.
 """Authentication and caller context for use cases."""
 
+import uuid
+
+from pydantic import Field
+
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.account import Account
+
+
+class AccountPrincipal(FrozenModel):
+    """Account principal."""
+
+
+class WorkerPrincipal(FrozenModel):
+    """Worker principal."""
+
+    worker_id: uuid.UUID
+
+
+class TaskPrincipal(FrozenModel):
+    """Task principal."""
+
+    task_id: uuid.UUID
+    attempt: int
+    worker_id: uuid.UUID
+    input_session_id: uuid.UUID | None = None
+
+
+Principal = AccountPrincipal | WorkerPrincipal | TaskPrincipal
 
 
 class AuthContext(FrozenModel):
     """Resolved caller for application use cases."""
 
+    # The registering account for a worker principal, the owner of the
+    # task's job for a task principal, and the caller itself otherwise.
     account: Account
+    principal: Principal = Field(default_factory=AccountPrincipal)
     csrf_token: str | None = None
+
+
+class WorkerAuthContext(AuthContext):
+    """Resolved worker caller for application use cases."""
+
+    principal: WorkerPrincipal
+
+
+class TaskAuthContext(AuthContext):
+    """Resolved task caller for application use cases."""
+
+    principal: TaskPrincipal
