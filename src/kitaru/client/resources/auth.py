@@ -129,6 +129,22 @@ class AuthResource:
         )
         return TokenResponse.model_validate(response.json())
 
+    async def exchange_api_key(self, api_key: str) -> TokenResponse:
+        """Exchange an API key for a session token.
+
+        Args:
+            api_key: API key.
+
+        Raises:
+            APIError: The request failed, including 400 when this server does
+                not run the local auth scheme and 401 when the key is not
+                valid.
+
+        Returns:
+            Issued token.
+        """
+        return await self._exchange_credential(GrantType.API_KEY, api_key)
+
     async def exchange_control_plane_credential(self, credential: str) -> TokenResponse:
         """Exchange a control plane credential for a session token.
 
@@ -143,10 +159,27 @@ class AuthResource:
         Returns:
             Issued token.
         """
+        return await self._exchange_credential(GrantType.CONTROL_PLANE, credential)
+
+    async def _exchange_credential(
+        self, grant_type: GrantType, credential: str
+    ) -> TokenResponse:
+        """Run a grant that presents its credential in the authorization header.
+
+        Args:
+            grant_type: Grant type to run.
+            credential: Credential to present.
+
+        Raises:
+            APIError: The request failed.
+
+        Returns:
+            Issued token.
+        """
         response = await self._client.request(
             "POST",
             "/v1/login",
-            data={"grant_type": GrantType.CONTROL_PLANE.value},
+            data={"grant_type": grant_type.value},
             headers={"Authorization": f"Bearer {credential}"},
             authenticate=False,
         )

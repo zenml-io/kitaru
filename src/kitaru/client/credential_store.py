@@ -25,7 +25,7 @@ from pydantic import ValidationError
 
 from kitaru.client.credentials import (
     ApiToken,
-    CredentialType,
+    ApiType,
     ServerCredentials,
 )
 
@@ -140,7 +140,7 @@ class CredentialStore:
         self,
         url: str,
         token: ApiToken,
-        type: CredentialType | None = None,
+        type: ApiType | None = None,
         control_plane_api_url: str | None = None,
     ) -> None:
         """Cache a token for a server.
@@ -152,7 +152,7 @@ class CredentialStore:
         Args:
             url: Server base URL.
             token: Token to cache.
-            type: Credential type, left as stored when omitted.
+            type: API type, left as stored when omitted.
             control_plane_api_url: Control plane that issued the credential
                 behind this token, left as stored when omitted.
         """
@@ -169,14 +169,14 @@ class CredentialStore:
         self,
         url: str,
         api_key: str,
-        type: CredentialType = CredentialType.SERVER,
+        type: ApiType = ApiType.SERVER,
     ) -> None:
         """Store an API key for a server and drop the token it replaces.
 
         Args:
             url: Server base URL.
             api_key: API key to store.
-            type: Credential type.
+            type: API type.
         """
         self._mutate(url, {"api_key": api_key, "type": type, "api_token": None})
 
@@ -201,7 +201,7 @@ class CredentialStore:
             control plane entry.
         """
         credentials = self.get(control_plane_api_url)
-        if credentials is None or credentials.type is not CredentialType.CONTROL_PLANE:
+        if credentials is None or credentials.type is not ApiType.CONTROL_PLANE:
             return None
         return credentials
 

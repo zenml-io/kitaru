@@ -140,6 +140,9 @@ class LoginRequestForm:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid request: username is required.",
                 )
+        elif self.grant_type is GrantType.API_KEY:
+            if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
+                raise self._unsupported_grant_type(self.grant_type)
         elif self.grant_type is GrantType.CONTROL_PLANE:
             if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
                 raise self._unsupported_grant_type(self.grant_type)
@@ -255,10 +258,11 @@ async def login(
     """Log in and receive a bearer token.
 
     The ``password`` grant type takes the form username and password and is
-    accepted under the ``local`` auth scheme. The ``control-plane`` grant type
-    reads a control plane credential from the authorization header and mirrors
-    the control plane user into a local account. The device grant type takes
-    the ``device_id`` and
+    accepted under the ``local`` auth scheme. The ``api-key`` grant type reads
+    an API key from the authorization header and is accepted under the same
+    scheme. The ``control-plane`` grant type reads a control plane credential
+    from the authorization header and mirrors the control plane user into a
+    local account. The device grant type takes the ``device_id`` and
     ``device_code`` of a device authorization and returns a token once an
     account has confirmed it.
 
@@ -288,6 +292,10 @@ async def login(
             token, expires_at = await _login_with_device(
                 service, form.device_id, form.device_code
             )
+        elif form.grant_type is GrantType.API_KEY:
+            token, expires_at = await service.login_with_api_key(
+                _require_bearer_credential(request, "API key")
+            )
         elif form.grant_type is GrantType.CONTROL_PLANE:
             token, expires_at, csrf_token = await service.login_with_control_plane(
                 _require_bearer_credential(request, "control plane credential")
@@ -302,8 +310,12 @@ async def login(
             detail=str(exc),
         ) from exc
     expires_in = int((expires_at - datetime.now(UTC)).total_seconds())
-    # A device token belongs to a headless client, so it never rides a cookie.
-    if settings.AUTH_COOKIE_NAME and form.grant_type is not GrantType.DEVICE_CODE:
+    # A device or API key token belongs to a headless client, so it never rides
+    # a cookie.
+    if settings.AUTH_COOKIE_NAME and form.grant_type not in (
+        GrantType.DEVICE_CODE,
+        GrantType.API_KEY,
+    ):
         response.set_cookie(
             key=settings.AUTH_COOKIE_NAME,
             value=token,

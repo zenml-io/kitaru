@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict
 
 from kitaru.client.client_id import get_client_id
 from kitaru.client.credential_store import CredentialStore, normalize_server_url
-from kitaru.client.credentials import ApiToken, CredentialType
+from kitaru.client.credentials import ApiToken, ApiType
 from kitaru.client.device_grant import describe_this_device, poll_for_token
 from kitaru.client.exceptions import raise_for_response
 from kitaru.transport import build_async_client
@@ -129,9 +129,7 @@ class ControlPlaneSession:
         # Stored only once the control plane has accepted it, so a rejected key
         # never displaces a working one.
         if credentials is None or credentials.api_key != api_key:
-            self._store.set_api_key(
-                self._url, api_key, type=CredentialType.CONTROL_PLANE
-            )
+            self._store.set_api_key(self._url, api_key, type=ApiType.CONTROL_PLANE)
         return self._store_token(response)
 
     async def device_login(
@@ -206,7 +204,7 @@ class ControlPlaneSession:
         """
         issued = ControlPlaneToken.model_validate(response.json())
         token = ApiToken.issued(issued.access_token, issued.expires_in)
-        self._store.set_token(self._url, token, type=CredentialType.CONTROL_PLANE)
+        self._store.set_token(self._url, token, type=ApiType.CONTROL_PLANE)
         return token
 
     async def _post(

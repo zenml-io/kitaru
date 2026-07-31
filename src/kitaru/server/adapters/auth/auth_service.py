@@ -20,9 +20,9 @@ from datetime import UTC, datetime
 
 from anyio import to_thread
 
+from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import (
-    CONTROL_PLANE_API_KEY_PREFIX,
     ControlPlaneAuthenticator,
     ControlPlaneError,
 )
@@ -172,6 +172,24 @@ class AuthService:
         if not valid or not account.active:
             raise AuthenticationError("Invalid username or password.")
         return self._issue_session(AuthContext(account=account))
+
+    async def login_with_api_key(self, credential: str) -> tuple[str, datetime]:
+        """Exchange an API key for a session token.
+
+        Args:
+            credential: API key.
+
+        Raises:
+            AuthenticationError: The credential cannot be validated.
+
+        Returns:
+            Encoded bearer token and its expiry time.
+        """
+        context = await self._authenticate_api_key(credential)
+        # The key is only checked here. A session token carries no reference to
+        # the key it came from, so deactivating or deleting the key leaves the
+        # tokens already issued from it valid until they expire.
+        return self.issue_token(context)
 
     async def login_with_control_plane(
         self, credential: str

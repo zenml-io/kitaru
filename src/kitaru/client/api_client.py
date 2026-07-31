@@ -25,6 +25,7 @@ from kitaru.analytics.source import (
     AnalyticsSource,
     format_client_header,
 )
+from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.client.auth import TokenProvider
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
@@ -71,8 +72,10 @@ class KitaruAPIClient:
 
         Args:
             base_url: Server base URL.
-            api_key: API key sent as a bearer token. Ignored when a credential
-                store is supplied.
+            api_key: API key authenticating this client. A server key is sent
+                as a bearer token, a control plane key is exchanged for a
+                session token held in memory. Ignored when a credential store
+                is supplied.
             credential_store: Store holding the credentials this client
                 authenticates with, renewing its token as it expires.
             timeout: Request timeout in seconds.
@@ -82,7 +85,13 @@ class KitaruAPIClient:
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         if api_key and credential_store is None:
-            headers["Authorization"] = f"Bearer {api_key}"
+            if api_key.startswith(CONTROL_PLANE_API_KEY_PREFIX):
+                # Control plane API keys are exchanged for a session token, so
+                # we need an in-memory credential store to hold it.
+                credential_store = CredentialStore(persist=False)
+                credential_store.set_api_key(base_url, api_key)
+            else:
+                headers["Authorization"] = f"Bearer {api_key}"
         self._http = build_async_client(
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )

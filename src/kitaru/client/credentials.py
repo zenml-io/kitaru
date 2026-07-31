@@ -20,7 +20,11 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
-from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.api_models.v1.auth import (
+    API_KEY_PREFIX,
+    CONTROL_PLANE_API_KEY_PREFIX,
+    TokenResponse,
+)
 
 # A token is treated as expired this long before its stated expiry, so a
 # request started just under the wire does not arrive just over it.
@@ -29,8 +33,8 @@ MIN_TOKEN_LEEWAY_SECONDS = 30
 TOKEN_LEEWAY_DIVISOR = 20
 
 
-class CredentialType(StrEnum):
-    """Credential type."""
+class ApiType(StrEnum):
+    """API type."""
 
     SERVER = "server"
     CONTROL_PLANE = "control_plane"
@@ -94,12 +98,36 @@ class ServerCredentials(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     url: str
-    type: CredentialType = CredentialType.SERVER
+    type: ApiType = ApiType.SERVER
     api_key: str | None = None
     api_token: ApiToken | None = None
     device_id: uuid.UUID | None = None
     device_code: str | None = None
     control_plane_api_url: str | None = None
+
+    @property
+    def control_plane_api_key(self) -> str | None:
+        """Return the stored API key when it is a control plane key.
+
+        Returns:
+            Stored control plane API key or None.
+        """
+        if self.api_key is None or not self.api_key.startswith(
+            CONTROL_PLANE_API_KEY_PREFIX
+        ):
+            return None
+        return self.api_key
+
+    @property
+    def server_api_key(self) -> str | None:
+        """Return the stored API key when it is a server key.
+
+        Returns:
+            Stored server API key or None.
+        """
+        if self.api_key is None or not self.api_key.startswith(API_KEY_PREFIX):
+            return None
+        return self.api_key
 
     @property
     def can_refresh(self) -> bool:

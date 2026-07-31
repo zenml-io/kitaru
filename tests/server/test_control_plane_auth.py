@@ -128,6 +128,45 @@ async def test_authenticate_refreshes_existing_mirrored_account(
     assert context.account.email == "new@example.com"
 
 
+class CountingAccountRepository(FakeAccountRepository):
+    """Account repository counting the updates it received."""
+
+    def __init__(self) -> None:
+        """Initialize the repository with no recorded updates."""
+        super().__init__()
+        self.updates = 0
+
+    async def update(self, account: Account) -> Account:
+        """Record the update and persist the account.
+
+        Args:
+            account: Account with modified fields.
+
+        Returns:
+            Stored account with the updated timestamp renewed.
+        """
+        self.updates += 1
+        return await super().update(account)
+
+
+async def test_authenticate_skips_the_write_when_nothing_changed() -> None:
+    """Leave a mirrored account untouched when the control plane reports no change."""
+    external_id = uuid.uuid4()
+    account_repository = CountingAccountRepository()
+    await account_repository.create(
+        Account(external_id=external_id, name="alice", email="alice@example.com")
+    )
+    user = control_plane_user(
+        username="alice", email="alice@example.com", user_id=external_id
+    )
+    authenticator, _ = build_authenticator(account_repository, user)
+
+    await authenticator.authenticate("credential")
+    await authenticator.authenticate("credential")
+
+    assert account_repository.updates == 0
+
+
 async def test_authenticate_reactivates_deactivated_account(
     account_repository: FakeAccountRepository,
 ) -> None:
