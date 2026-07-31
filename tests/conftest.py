@@ -2488,6 +2488,8 @@ class FakeCohortVersionRepository:
         self._sessions = sessions
         self._sessions._cohort_versions = self
         self._experiment_runs = experiment_runs
+        if experiment_runs is not None:
+            experiment_runs._cohort_versions = self
         self._versions: dict[uuid.UUID, CohortVersion] = {}
         self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
 
@@ -3754,6 +3756,9 @@ class FakeExperimentRunRepository:
         """
         self._runs: dict[uuid.UUID, ExperimentRun] = {}
         self._tag_repository = tag_repository
+        # Wired back by FakeCohortVersionRepository, to resolve the cohort
+        # filter the way the SQL repository resolves it through a subquery.
+        self._cohort_versions: FakeCohortVersionRepository | None = None
 
     async def create(self, run: ExperimentRun) -> ExperimentRun:
         """Persist a new experiment run.
@@ -3815,6 +3820,26 @@ class FakeExperimentRunRepository:
         runs = list(self._runs.values())
         if run_filter.experiment_id is not None:
             runs = [r for r in runs if r.experiment_id == run_filter.experiment_id]
+        if run_filter.agent_id is not None:
+            # Resolving this needs an agent version lookup the fake has no
+            # handle on. Refuse rather than silently return unfiltered runs.
+            raise NotImplementedError("The fake cannot resolve the agent_id filter")
+        if run_filter.agent_version_id is not None:
+            runs = [
+                r for r in runs if r.agent_version_id == run_filter.agent_version_id
+            ]
+        if run_filter.cohort_version_id is not None:
+            runs = [
+                r for r in runs if r.cohort_version_id == run_filter.cohort_version_id
+            ]
+        if run_filter.cohort_id is not None:
+            assert self._cohort_versions is not None
+            version_ids = {
+                v.id
+                for v in self._cohort_versions._versions.values()
+                if v.cohort_id == run_filter.cohort_id
+            }
+            runs = [r for r in runs if r.cohort_version_id in version_ids]
         if run_filter.status is not None:
             runs = [r for r in runs if r.status == run_filter.status]
         if run_filter.tag is not None:

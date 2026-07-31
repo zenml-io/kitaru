@@ -10031,6 +10031,44 @@
             }
           },
           {
+            "description": "Filter on the cohort owning the replayed version, spanning every version of it.",
+            "in": "query",
+            "name": "cohort_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on the cohort owning the replayed version, spanning every version of it.",
+              "title": "Cohort Id"
+            }
+          },
+          {
+            "description": "Filter on cohort version.",
+            "in": "query",
+            "name": "cohort_version_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on cohort version.",
+              "title": "Cohort Version Id"
+            }
+          },
+          {
             "description": "Filter on run status.",
             "in": "query",
             "name": "status",

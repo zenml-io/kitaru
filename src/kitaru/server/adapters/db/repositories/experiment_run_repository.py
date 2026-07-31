@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
+from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
@@ -126,6 +127,20 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
         if run_filter.agent_version_id is not None:
             statement = statement.where(
                 ExperimentRunORM.agent_version_id == run_filter.agent_version_id
+            )
+        if run_filter.cohort_id is not None:
+            # A run pins one cohort version, so a cohort-wide history spans
+            # every version of that cohort.
+            statement = statement.where(
+                ExperimentRunORM.cohort_version_id.in_(
+                    select(CohortVersionORM.id).where(
+                        CohortVersionORM.cohort_id == run_filter.cohort_id
+                    )
+                )
+            )
+        if run_filter.cohort_version_id is not None:
+            statement = statement.where(
+                ExperimentRunORM.cohort_version_id == run_filter.cohort_version_id
             )
         if run_filter.status is not None:
             statement = statement.where(

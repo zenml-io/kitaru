@@ -73,6 +73,14 @@ class ExperimentRunListParams(ListParams):
     agent_version_id: uuid.UUID | None = Field(
         default=None, description="Filter on agent version."
     )
+    cohort_id: uuid.UUID | None = Field(
+        default=None,
+        description="Filter on the cohort owning the replayed version, "
+        "spanning every version of it.",
+    )
+    cohort_version_id: uuid.UUID | None = Field(
+        default=None, description="Filter on cohort version."
+    )
     status: ExperimentRunStatus | None = Field(
         default=None, description="Filter on run status."
     )

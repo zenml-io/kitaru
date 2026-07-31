@@ -27,6 +27,8 @@ class ExperimentRunFilter(ListFilter):
     experiment_id: uuid.UUID | None = None
     agent_id: uuid.UUID | None = None
     agent_version_id: uuid.UUID | None = None
+    cohort_id: uuid.UUID | None = None
+    cohort_version_id: uuid.UUID | None = None
     status: ExperimentRunStatus | None = None
     tag: str | None = None
 

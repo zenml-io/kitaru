@@ -338,6 +338,45 @@ async def test_query_filters_by_experiment_and_status(setup: Setup) -> None:
     assert {run.id for run in runs} >= {matching.id, other_experiment.id}
 
 
+async def test_query_filters_by_cohort_version(setup: Setup) -> None:
+    """Filter runs by the cohort version they replay."""
+    (
+        repository,
+        owner_id,
+        make_experiment_id,
+        make_cohort_version_id,
+        make_agent_version_id,
+    ) = setup
+    cohort_version_id = await make_cohort_version_id()
+    matching = await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            cohort_version_id,
+            await make_agent_version_id(),
+        )
+    )
+    await repository.create(
+        _run(
+            owner_id,
+            await make_experiment_id(),
+            await make_cohort_version_id(),
+            await make_agent_version_id(),
+        )
+    )
+
+    runs, next_cursor = await repository.query(
+        ExperimentRunFilter(cohort_version_id=cohort_version_id)
+    )
+    assert next_cursor is None
+    assert [run.id for run in runs] == [matching.id]
+
+    runs, _ = await repository.query(
+        ExperimentRunFilter(cohort_version_id=uuid.uuid4())
+    )
+    assert runs == []
+
+
 async def test_get_max_number(setup: Setup) -> None:
     """Read the highest run number, 0 when the experiment has no runs."""
     (
@@ -391,3 +430,74 @@ async def test_exists_for_experiment(setup: Setup) -> None:
         )
     )
     assert await repository.exists_for_experiment(experiment_id) is True
+
+
+async def test_query_filters_by_cohort_spanning_versions() -> None:
+    """Filter runs by cohort, matching runs against any of its versions.
+
+    Postgres-only: a run stores a cohort version, so resolving the cohort
+    behind it is a subquery the fake has no handle on.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="agent")
+        )
+        agent_version = await SQLAgentVersionRepository(session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        experiments = SQLExperimentRepository(session)
+        config = await experiments.create_replay_config(
+            ReplayConfig(
+                owner_id=owner.id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        experiment = await experiments.create(
+            Experiment(owner_id=owner.id, name="experiment", replay_config_id=config.id)
+        )
+        cohorts = SQLCohortRepository(session)
+        cohort_versions = SQLCohortVersionRepository(session)
+        cohort = await cohorts.create(
+            Cohort(owner_id=owner.id, name="cohort", agent_id=agent.id)
+        )
+        first = await cohort_versions.create(
+            CohortVersion(owner_id=owner.id, cohort_id=cohort.id, session_count=0),
+            [],
+        )
+        second = await cohort_versions.create(
+            CohortVersion(owner_id=owner.id, cohort_id=cohort.id, session_count=0),
+            [],
+        )
+        other_cohort = await cohorts.create(
+            Cohort(owner_id=owner.id, name="other-cohort", agent_id=agent.id)
+        )
+        other_version = await cohort_versions.create(
+            CohortVersion(
+                owner_id=owner.id, cohort_id=other_cohort.id, session_count=0
+            ),
+            [],
+        )
+
+        repository = SQLExperimentRunRepository(session)
+        on_first = await repository.create(
+            _run(owner.id, experiment.id, first.id, agent_version.id, number=1)
+        )
+        on_second = await repository.create(
+            _run(owner.id, experiment.id, second.id, agent_version.id, number=2)
+        )
+        elsewhere = await repository.create(
+            _run(owner.id, experiment.id, other_version.id, agent_version.id, number=3)
+        )
+
+        runs, _ = await repository.query(ExperimentRunFilter(cohort_id=cohort.id))
+        assert {run.id for run in runs} == {on_first.id, on_second.id}
+        assert elsewhere.id not in {run.id for run in runs}
+
+        runs, _ = await repository.query(
+            ExperimentRunFilter(cohort_version_id=second.id)
+        )
+        assert [run.id for run in runs] == [on_second.id]
