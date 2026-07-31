@@ -573,6 +573,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/cohort-versions/{cohort_version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Cohort Version
+         * @description Get a cohort version by id.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no cohort version has
+         *     this id.
+         *
+         *     Args:
+         *         cohort_version_id: Id of the cohort version.
+         *         service: Cohort version service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored cohort version.
+         */
+        get: operations["get_cohort_version_v1_cohort_versions__cohort_version_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Cohort Version
+         * @description Delete a cohort version.
+         *
+         *     Clients observe HTTP 204 on success and 404 when no cohort version has
+         *     this id.
+         *
+         *     Args:
+         *         cohort_version_id: Id of the cohort version.
+         *         service: Cohort version service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_cohort_version_v1_cohort_versions__cohort_version_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Cohort Version
+         * @description Update a cohort version.
+         *
+         *     Clients observe HTTP 200 on success, 404 when no cohort version has this
+         *     id, and 422 on invalid input.
+         *
+         *     Args:
+         *         cohort_version_id: Id of the cohort version.
+         *         body: Cohort version update request.
+         *         service: Cohort version service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated cohort version.
+         */
+        patch: operations["update_cohort_version_v1_cohort_versions__cohort_version_id__patch"];
+        trace?: never;
+    };
     "/v1/cohorts": {
         parameters: {
             query?: never;
@@ -599,12 +658,11 @@ export interface paths {
         put?: never;
         /**
          * Create Cohort
-         * @description Create a cohort as a fixed snapshot of its member sessions.
+         * @description Create a cohort namespace.
          *
          *     Clients observe HTTP 201 on success, 404 when the agent does not exist,
-         *     409 when the cohort name is already registered, and 422 when the member
-         *     list is empty, has duplicates, or references a session that is missing
-         *     or belongs to a different agent.
+         *     409 when the cohort name is already registered, and 422 on invalid
+         *     input.
          *
          *     Args:
          *         body: Cohort create request.
@@ -649,7 +707,7 @@ export interface paths {
          * Delete Cohort
          * @description Delete a cohort.
          *
-         *     Deleting a cohort cascades its member links. Clients observe HTTP 204 on
+         *     Deleting a cohort cascades its versions. Clients observe HTTP 204 on
          *     success and 404 when no cohort has this id.
          *
          *     Args:
@@ -662,7 +720,7 @@ export interface paths {
         head?: never;
         /**
          * Update Cohort
-         * @description Update a cohort's name and description.
+         * @description Update a cohort's name, description, and metadata.
          *
          *     Clients observe HTTP 200 on success, 404 when no cohort has this id,
          *     409 when the new name is already registered, and 422 when the update
@@ -680,7 +738,7 @@ export interface paths {
         patch: operations["update_cohort_v1_cohorts__cohort_id__patch"];
         trace?: never;
     };
-    "/v1/cohorts/{cohort_id}/sessions": {
+    "/v1/cohorts/{cohort_id}/versions": {
         parameters: {
             query?: never;
             header?: never;
@@ -688,24 +746,42 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Cohort Sessions
-         * @description List a cohort's member sessions in cohort order.
+         * List Cohort Versions
+         * @description List the versions of a cohort.
          *
          *     Clients observe HTTP 200 on success and 422 on invalid pagination
          *     parameters.
          *
          *     Args:
          *         cohort_id: Id of the cohort.
-         *         service: Cohort service.
+         *         service: Cohort version service.
          *         actor: Caller context.
-         *         params: Cohort sessions list params.
+         *         params: List params.
          *
          *     Returns:
-         *         Page of member sessions, in cohort order.
+         *         Page of cohort versions.
          */
-        get: operations["list_cohort_sessions_v1_cohorts__cohort_id__sessions_get"];
+        get: operations["list_cohort_versions_v1_cohorts__cohort_id__versions_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Cohort Version
+         * @description Create a new version of a cohort from a membership delta.
+         *
+         *     Clients observe HTTP 201 on success, 404 when no cohort has this id, and
+         *     422 when the delta removes a session absent from the base version, adds
+         *     a session already present, repeats a session id, or an added session is
+         *     missing or belongs to a different agent.
+         *
+         *     Args:
+         *         cohort_id: Id of the cohort.
+         *         body: Cohort version create request.
+         *         service: Cohort version service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created cohort version.
+         */
+        post: operations["create_cohort_version_v1_cohorts__cohort_id__versions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1413,11 +1489,12 @@ export interface paths {
         put?: never;
         /**
          * Start Run
-         * @description Start an experiment run, fanning out one replay per cohort session.
+         * @description Start an experiment run, fanning out one replay per cohort version session.
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
-         *     cohort, or the resolved agent version does not exist, and 422 when the
-         *     cohort has no sessions or the resolved agent version has no run spec.
+         *     cohort version, or the resolved agent version does not exist, and 422
+         *     when the cohort version has no sessions or the resolved agent version
+         *     has no run spec.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -1936,7 +2013,7 @@ export interface paths {
          *     the resolved agent version or an evaluator config does not exist, and
          *     422 when the baseline session carries no agent version and none was
          *     given, the resolved agent version has no run spec, the tool policy uses
-         *     cohort-scoped history, or an evaluator version repeats.
+         *     cohort-version-scoped history, or an evaluator version repeats.
          *
          *     Args:
          *         body: Replay create request.
@@ -3255,15 +3332,17 @@ export interface components {
              */
             description?: string | null;
             /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
              * Name
              * @description Cohort name.
              */
             name: string;
-            /**
-             * Session Ids
-             * @description Ordered sessions in the cohort.
-             */
-            session_ids: string[];
         };
         /**
          * CohortResponse
@@ -3294,6 +3373,18 @@ export interface components {
              */
             id: string;
             /**
+             * Latest Version
+             * @description Highest version number created for this cohort.
+             */
+            latest_version: number;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
              * Name
              * @description Cohort name.
              */
@@ -3304,11 +3395,6 @@ export interface components {
              * @description Id of the owning account.
              */
             owner_id: string;
-            /**
-             * Session Count
-             * @description Number of sessions in the cohort.
-             */
-            session_count: number;
             /**
              * Updated
              * Format: date-time
@@ -3327,10 +3413,100 @@ export interface components {
              */
             description?: string | null;
             /**
+             * Metadata
+             * @description New metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Name
              * @description New cohort name.
              */
             name?: string | null;
+        };
+        /**
+         * CohortVersionCreateRequest
+         * @description Cohort version create request.
+         */
+        CohortVersionCreateRequest: {
+            /**
+             * Add Session Ids
+             * @description Sessions to add to the new version.
+             */
+            add_session_ids?: string[];
+            /**
+             * Display Version
+             * @description Human-readable designator.
+             */
+            display_version?: string | null;
+            /**
+             * Remove Session Ids
+             * @description Sessions to remove from the new version.
+             */
+            remove_session_ids?: string[];
+        };
+        /**
+         * CohortVersionResponse
+         * @description Cohort version response.
+         */
+        CohortVersionResponse: {
+            /**
+             * Cohort Id
+             * Format: uuid
+             * @description Cohort this version belongs to.
+             */
+            cohort_id: string;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Display Version
+             * @description Human-readable designator.
+             */
+            display_version: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Cohort version id.
+             */
+            id: string;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Session Count
+             * @description Number of sessions in the version.
+             */
+            session_count: number;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+            /**
+             * Version
+             * @description Server-assigned version number.
+             */
+            version: number;
+        };
+        /**
+         * CohortVersionUpdateRequest
+         * @description Cohort version update request.
+         */
+        CohortVersionUpdateRequest: {
+            /**
+             * Display Version
+             * @description New human-readable designator.
+             */
+            display_version?: string | null;
         };
         /**
          * DeviceAuthorizationResponse
@@ -3557,6 +3733,11 @@ export interface components {
              */
             owner_id: string;
             /**
+             * Passed
+             * @description Pass or fail verdict.
+             */
+            passed?: boolean | null;
+            /**
              * Score
              * @description Numeric or boolean score.
              */
@@ -3599,6 +3780,11 @@ export interface components {
              * @description Evaluation name.
              */
             name: string;
+            /**
+             * Passed
+             * @description Pass or fail verdict.
+             */
+            passed?: boolean | null;
             /**
              * Score
              * @description Numeric or boolean score.
@@ -3918,11 +4104,11 @@ export interface components {
              */
             agent_version_id: string;
             /**
-             * Cohort Id
+             * Cohort Version Id
              * Format: uuid
-             * @description Cohort whose sessions are replayed.
+             * @description Cohort version whose sessions are replayed.
              */
-            cohort_id: string;
+            cohort_version_id: string;
             /**
              * Evaluate Baselines
              * @description Whether to also score each baseline session.
@@ -3978,11 +4164,11 @@ export interface components {
              */
             agent_version_id: string;
             /**
-             * Cohort Id
+             * Cohort Version Id
              * Format: uuid
-             * @description Cohort whose sessions are replayed.
+             * @description Cohort version whose sessions are replayed.
              */
-            cohort_id: string;
+            cohort_version_id: string;
             /**
              * Created
              * Format: date-time
@@ -4099,7 +4285,7 @@ export interface components {
          * @description Scope a history tool config draws recorded calls from.
          * @enum {string}
          */
-        HistoryScope: "baseline" | "cohort" | "agent";
+        HistoryScope: "baseline" | "cohort_version" | "agent";
         /**
          * ImportCreateRequest
          * @description Import create request.
@@ -4559,6 +4745,19 @@ export interface components {
              * @description Items on this page.
              */
             items: components["schemas"]["CohortResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[CohortVersionResponse] */
+        Page_CohortVersionResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["CohortVersionResponse"][];
             /**
              * Next Cursor
              * @description Cursor for the next page, null on the last page.
@@ -5493,6 +5692,11 @@ export interface components {
              */
             parent_id?: string | null;
             /**
+             * Parent Index
+             * @description Parent node index.
+             */
+            parent_index: number | null;
+            /**
              * Provider
              * @description Model provider.
              */
@@ -5507,6 +5711,11 @@ export interface components {
              * @description Additional parent nodes.
              */
             secondary_parent_ids: string[];
+            /**
+             * Secondary Parent Indexes
+             * @description Secondary parent indexes.
+             */
+            secondary_parent_indexes: number[];
             /**
              * Session Id
              * Format: uuid
@@ -7280,6 +7489,101 @@ export interface operations {
             };
         };
     };
+    get_cohort_version_v1_cohort_versions__cohort_version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cohort_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CohortVersionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_cohort_version_v1_cohort_versions__cohort_version_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cohort_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_cohort_version_v1_cohort_versions__cohort_version_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cohort_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CohortVersionUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CohortVersionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_cohorts_v1_cohorts_get: {
         parameters: {
             query?: {
@@ -7448,13 +7752,15 @@ export interface operations {
             };
         };
     };
-    list_cohort_sessions_v1_cohorts__cohort_id__sessions_get: {
+    list_cohort_versions_v1_cohorts__cohort_id__versions_get: {
         parameters: {
             query?: {
                 /** @description Cursor from the previous page. */
                 cursor?: string | null;
                 /** @description Items per page. */
                 size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
             };
             header?: never;
             path: {
@@ -7470,7 +7776,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_SessionResponse_"];
+                    "application/json": components["schemas"]["Page_CohortVersionResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_cohort_version_v1_cohorts__cohort_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cohort_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CohortVersionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CohortVersionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -9426,6 +9767,8 @@ export interface operations {
                 agent_id?: string | null;
                 /** @description Filter on agent version. */
                 agent_version_id?: string | null;
+                /** @description Filter on cohort version membership. */
+                cohort_version_id?: string | null;
                 /** @description Filter on producing task. */
                 task_id?: string | null;
                 /** @description Filter on session origin. */
