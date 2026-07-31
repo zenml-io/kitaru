@@ -66,9 +66,9 @@ def services() -> ReplayServices:
 
 
 async def _agent_version(
-    services: ReplayServices, with_run_spec: bool = True
+    services: ReplayServices, with_run_spec: bool = True, name: str = "assistant"
 ) -> AgentVersion:
-    agent = await create_agent(services.agents, ACTOR.account.id)
+    agent = await create_agent(services.agents, ACTOR.account.id, name=name)
     return await create_agent_version(
         services.agent_versions,
         agent_id=agent.id,
@@ -100,6 +100,31 @@ async def _session(
     }
     values.update(overrides)
     return await create_session(services.sessions, ACTOR.account.id, **values)
+
+
+async def test_create_replay_runs_the_named_agent_version(
+    services: ReplayServices,
+) -> None:
+    """The named agent version runs, not the one the baseline recorded."""
+    recorded = await _agent_version(services)
+    replayed = await _agent_version(services, name="successor")
+    await _evaluator(services)
+    baseline = await _session(services, recorded)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            agent_version_id=replayed.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    agent_task = tasks[0]
+    assert isinstance(agent_task, AgentTask)
+    assert agent_task.agent_version_id == replayed.id
 
 
 async def test_create_replay_resolves_baseline_agent_version(
@@ -147,6 +172,23 @@ async def test_create_replay_requires_agent_version_when_baseline_has_none(
         )
 
 
+async def test_create_replay_rejects_an_unrunnable_baseline_agent_version(
+    services: ReplayServices,
+) -> None:
+    """A baseline whose recorded version has no run spec is rejected."""
+    agent_version = await _agent_version(services, with_run_spec=False)
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+    with pytest.raises(AgentVersionWithoutRunSpec):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            ),
+            actor=ACTOR,
+        )
+
+
 async def test_create_replay_rejects_agent_version_without_run_spec(
     services: ReplayServices,
 ) -> None:
@@ -158,6 +200,7 @@ async def test_create_replay_rejects_agent_version_without_run_spec(
         await services.replay_service.create_replay(
             ReplayCreate(
                 baseline_session_id=baseline.id,
+                agent_version_id=agent_version.id,
                 evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
             ),
             actor=ACTOR,
@@ -182,6 +225,7 @@ async def test_create_replay_rejects_cohort_version_scoped_history(
         await services.replay_service.create_replay(
             ReplayCreate(
                 baseline_session_id=baseline.id,
+                agent_version_id=agent_version.id,
                 evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
                 tool_policy=tool_policy,
             ),
@@ -399,6 +443,7 @@ async def test_get_replay_result_session_id_appears_after_agent_task_links_it(
     bundle = await services.replay_service.create_replay(
         ReplayCreate(
             baseline_session_id=baseline.id,
+            agent_version_id=agent_version.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
         ),
         actor=ACTOR,

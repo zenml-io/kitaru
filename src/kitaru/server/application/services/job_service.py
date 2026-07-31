@@ -34,7 +34,8 @@ from kitaru.server.application.models.job import (
 )
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
-    resolve_agent_version,
+    resolve_agent_id,
+    resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.task_transitions import TaskTransitions
@@ -253,7 +254,7 @@ class JobService:
         Returns:
             Created job.
         """
-        agent_version = await resolve_agent_version(
+        agent_version = await resolve_runnable_agent_version(
             command.agent_version_id, self._agent_versions
         )
         job = await self.create_job(actor)
@@ -272,7 +273,9 @@ class JobService:
     async def create_import(self, command: ImportCreate, actor: AuthContext) -> Job:
         """Create a job running one importer task on a payload blob.
 
-        An omitted importer version resolves to the importer's latest.
+        An omitted importer version resolves to the importer's latest. An
+        agent version is stamped on every session the import creates, and
+        the sessions carry none when the command names none.
 
         Args:
             command: Fields for the import.
@@ -284,6 +287,9 @@ class JobService:
                 number.
             BlobNotFound: No blob has the payload id.
             AgentNotFound: No agent has this id.
+            AgentVersionNotFound: No agent version has this id.
+            AgentVersionAgentMismatch: The agent version belongs to another
+                agent.
 
         Returns:
             Created job.
@@ -295,6 +301,10 @@ class JobService:
         plugin_version = await self._plugins.get_version(plugin.id, version)
         payload = await self._blobs.get_metadata(command.payload_blob_id)
         agent = await self._agents.get(command.agent_id)
+        if command.agent_version_id is not None:
+            await resolve_agent_id(
+                command.agent_version_id, agent.id, self._agent_versions
+            )
         job = await self.create_job(actor)
         await self.add_task(
             ImportTask(
@@ -302,6 +312,7 @@ class JobService:
                 plugin_version_id=plugin_version.id,
                 payload_blob_id=payload.id,
                 agent_id=agent.id,
+                agent_version_id=command.agent_version_id,
                 params=command.params,
             )
         )

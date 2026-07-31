@@ -2497,6 +2497,19 @@
             "title": "Agent Id",
             "type": "string"
           },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version recorded on the imported sessions.",
+            "title": "Agent Version Id"
+          },
           "importer": {
             "description": "Importer name.",
             "title": "Importer",
@@ -3856,7 +3869,7 @@
                 "type": "null"
               }
             ],
-            "description": "Agent version to replay with.",
+            "description": "Agent version to replay with, the baseline session's recorded version when unset.",
             "title": "Agent Version Id"
           },
           "baseline_session_id": {
@@ -4503,10 +4516,17 @@
             "title": "Adapter Version"
           },
           "agent_id": {
-            "description": "Agent the session belongs to.",
-            "format": "uuid",
-            "title": "Agent Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent the session belongs to, inferred from the task or the agent version when unset.",
+            "title": "Agent Id"
           },
           "agent_version_id": {
             "anyOf": [
@@ -4518,7 +4538,7 @@
                 "type": "null"
               }
             ],
-            "description": "Agent version recorded for the session.",
+            "description": "Agent version recorded for the session, inferred from the task when unset.",
             "title": "Agent Version Id"
           },
           "ended_at": {
@@ -4655,7 +4675,6 @@
           }
         },
         "required": [
-          "agent_id",
           "origin",
           "inputs",
           "outputs",

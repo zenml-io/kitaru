@@ -20,11 +20,12 @@ from kitaru.server.application.interfaces.agent_version_repository import (
 )
 from kitaru.server.domain.agent_version import (
     AgentVersion,
+    AgentVersionAgentMismatch,
     AgentVersionWithoutRunSpec,
 )
 
 
-async def resolve_agent_version(
+async def resolve_runnable_agent_version(
     agent_version_id: uuid.UUID, repository: AgentVersionRepository
 ) -> AgentVersion:
     """Load an agent version and require it to carry a run spec.
@@ -45,3 +46,28 @@ async def resolve_agent_version(
     if agent_version.run_spec is None:
         raise AgentVersionWithoutRunSpec(agent_version_id)
     return agent_version
+
+
+async def resolve_agent_id(
+    agent_version_id: uuid.UUID,
+    agent_id: uuid.UUID | None,
+    repository: AgentVersionRepository,
+) -> uuid.UUID:
+    """Load the agent a version belongs to, rejecting a disagreeing agent id.
+
+    Args:
+        agent_version_id: Id of the agent version.
+        agent_id: Agent named alongside the version, None to infer it.
+        repository: Agent version repository.
+
+    Raises:
+        AgentVersionNotFound: No agent version has this id.
+        AgentVersionAgentMismatch: The version belongs to another agent.
+
+    Returns:
+        Id of the owning agent.
+    """
+    version_agent_id = await repository.get_agent_id(agent_version_id)
+    if agent_id is not None and agent_id != version_agent_id:
+        raise AgentVersionAgentMismatch(agent_version_id, agent_id)
+    return version_agent_id

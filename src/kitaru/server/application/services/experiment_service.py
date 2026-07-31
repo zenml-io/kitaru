@@ -44,7 +44,7 @@ from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.services.agent_version_resolution import (
-    resolve_agent_version,
+    resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
@@ -369,7 +369,7 @@ class ExperimentService:
         cohort_version = await self._cohort_versions.get(command.cohort_version_id)
         if cohort_version.session_count == 0:
             raise ValidationError(f"Cohort version {cohort_version.id} has no sessions")
-        agent_version = await resolve_agent_version(
+        agent_version = await resolve_runnable_agent_version(
             command.agent_version_id, self._agent_versions
         )
         config = await self._repository.get_replay_config(experiment.replay_config_id)

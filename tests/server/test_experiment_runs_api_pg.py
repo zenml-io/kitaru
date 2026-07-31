@@ -197,10 +197,10 @@ async def test_experiment_config_update_conflicts_once_it_has_runs(
     assert response.status_code == 409
 
 
-async def test_agent_version_update_conflicts_once_tasks_reference_it(
+async def test_agent_version_update_allowed_once_tasks_reference_it(
     client: httpx.AsyncClient,
 ) -> None:
-    """Updating an agent version's run spec conflicts once a task references it."""
+    """Updating an agent version's run spec stays legal once a task references it."""
     setup = await _setup_run(client)
     await client.post(
         f"/v1/experiments/{setup['experiment_id']}/runs",
@@ -213,4 +213,5 @@ async def test_agent_version_update_conflicts_once_tasks_reference_it(
         f"/v1/agent-versions/{setup['agent_version_id']}",
         json={"run_spec": {"command": "new.sh"}},
     )
-    assert response.status_code == 409
+    assert response.status_code == 200
+    assert response.json()["run_spec"]["command"] == "new.sh"

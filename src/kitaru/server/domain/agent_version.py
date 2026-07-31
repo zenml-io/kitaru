@@ -21,7 +21,6 @@ from pydantic import AfterValidator, Field
 
 from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
-    ConflictError,
     DomainModel,
     NotFoundError,
     ValidationError,
@@ -54,18 +53,18 @@ class AgentVersionWithoutRunSpec(ValidationError):
         super().__init__(f"Agent version {agent_version_id} has no run spec")
 
 
-class AgentVersionFrozen(ConflictError):
-    """Raised when a run spec or capabilities update is rejected because tasks exist."""
+class AgentVersionAgentMismatch(ValidationError):
+    """Raised when an agent version does not belong to the named agent."""
 
-    def __init__(self, agent_version_id: uuid.UUID) -> None:
+    def __init__(self, agent_version_id: uuid.UUID, agent_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
             agent_version_id: Id of the agent version.
+            agent_id: Id of the agent named alongside it.
         """
         super().__init__(
-            f"Agent version {agent_version_id} has tasks and its run spec "
-            "and capabilities cannot be changed"
+            f"Agent version {agent_version_id} does not belong to agent {agent_id}"
         )
 
 
@@ -141,32 +140,18 @@ class AgentVersion(DomainModel):
         """
         self.description = description
 
-    def update_run_spec(self, run_spec: RunSpec | None, has_tasks: bool) -> None:
+    def update_run_spec(self, run_spec: RunSpec | None) -> None:
         """Set a new run spec.
 
         Args:
             run_spec: New run spec.
-            has_tasks: Whether a task already references this version.
-
-        Raises:
-            AgentVersionFrozen: ``has_tasks`` is set.
         """
-        if has_tasks:
-            raise AgentVersionFrozen(self.id)
         self.run_spec = run_spec
 
-    def update_capabilities(
-        self, capabilities: AgentCapabilities, has_tasks: bool
-    ) -> None:
+    def update_capabilities(self, capabilities: AgentCapabilities) -> None:
         """Set new agent capabilities.
 
         Args:
             capabilities: New capabilities.
-            has_tasks: Whether a task already references this version.
-
-        Raises:
-            AgentVersionFrozen: ``has_tasks`` is set.
         """
-        if has_tasks:
-            raise AgentVersionFrozen(self.id)
         self.capabilities = capabilities

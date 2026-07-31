@@ -198,6 +198,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.plugin_version_id = task.plugin_version_id
             row.payload_blob_id = task.payload_blob_id
             row.agent_id = task.agent_id
+            row.agent_version_id = task.agent_version_id
             row.inputs = task.params
         return row
 
@@ -271,6 +272,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 plugin_version_id=self.plugin_version_id,
                 payload_blob_id=self.payload_blob_id,
                 agent_id=self.agent_id,
+                agent_version_id=self.agent_version_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,
             )

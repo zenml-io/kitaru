@@ -41,7 +41,7 @@ from kitaru.server.application.models.replay import (
     ToolLookupResult,
 )
 from kitaru.server.application.services.agent_version_resolution import (
-    resolve_agent_version,
+    resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
@@ -160,7 +160,7 @@ class ReplayService:
                     "agent_version_id must be given"
                 )
             agent_version_id = baseline.agent_version_id
-        agent_version = await resolve_agent_version(
+        agent_version = await resolve_runnable_agent_version(
             agent_version_id, self._agent_versions
         )
         evaluators = await validate_evaluators(command.evaluators, self._plugins, actor)

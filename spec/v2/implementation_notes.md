@@ -38,9 +38,11 @@ required solving beyond what the documents describe.
 
 ## Agents and agent versions
 
-- The spec lists `update_run_spec(frozen)` and `update_capabilities(frozen)`
-  without defining what freezes a version. No freeze check is implemented
-  while nothing references versions. Revisit when tasks and replays land.
+- Nothing freezes an agent version. The run spec and capabilities stay
+  editable for the version's whole life, tasks referencing it included,
+  since the server records no identity for the code a run spec executes and
+  a freeze keyed on task existence would protect an identity that is not
+  actually pinned. See future_improvements.md.
 - An explicit `capabilities: null` on a version PATCH resets to empty
   `AgentCapabilities` since the domain field is not nullable.
 - An explicit `name: null` on an agent PATCH is a 422, names cannot clear.
@@ -98,6 +100,20 @@ required solving beyond what the documents describe.
   `SessionNodeListParams` model (cursor, size, include_payloads) added to
   `api_models`, and a `paginate_by_index` helper next to `paginate`.
 - Date-bound filters are inclusive on both ends.
+- Agent attribution resolves in one private `SessionService._resolve_agent`
+  covering both the task and the task-less path, so the invariant has one
+  home. The task branch matches `AgentTask | ImportTask`, an evaluator task
+  named as `task_id` attributes nothing and the command's own ids stand.
+- An import task whose `agent_version_id` is null rejects a command that
+  names one, the task's value wins whether or not it is set.
+- The version-belongs-to-agent probe is a narrow
+  `AgentVersionRepository.get_agent_id` rather than `get`, which would cost
+  a second query for the secret links and build a domain object that is
+  thrown away.
+- `SessionCreateRequest.agent_id` had to become optional for the inference,
+  so its required-ness moved from pydantic to `SessionAgentRequired` in the
+  service. The response model keeps it required, a stored session always
+  has one.
 
 ## Experiments and replay config
 
@@ -193,10 +209,9 @@ required solving beyond what the documents describe.
 - Run numbers come from `max(number) + 1` under an exclusive lock of the
   experiment row, the spec defines no counter column on experiment. The
   unique (experiment_id, number) constraint is the backstop.
-- The freeze checks the spec's `(frozen)` annotations imply are booleans
-  passed into the domain mutators: experiments reject config changes once
-  runs exist, agent versions reject run_spec and capability changes once
-  tasks reference them. The services run the existence probes.
+- Experiments reject config changes once runs exist, a boolean passed into
+  the domain mutator with the service running the existence probe. Agent
+  versions carry no equivalent freeze, see the agent versions section.
 - `ExperimentInUse` and `ReplayConfigInUse` were added, deleting an
   experiment with runs and deleting a referenced config now map to 409
   instead of raw integrity errors. Config rows deleted on experiment

@@ -21,6 +21,8 @@ import httpx
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -64,7 +66,9 @@ async def client(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
     session_service = SessionService(
-        repository=session_repository, task_repository=FakeTaskRepository()
+        repository=session_repository,
+        task_repository=FakeTaskRepository(),
+        agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
     )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository

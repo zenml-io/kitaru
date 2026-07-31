@@ -36,7 +36,6 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
-    AgentVersionFrozen,
     AgentVersionNotFound,
     RunSpec,
 )
@@ -63,11 +62,9 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
-def service(
-    repository: FakeAgentVersionRepository, task_repository: FakeTaskRepository
-) -> AgentVersionService:
-    """Provide an agent version service backed by the fake repositories."""
-    return AgentVersionService(repository=repository, task_repository=task_repository)
+def service(repository: FakeAgentVersionRepository) -> AgentVersionService:
+    """Provide an agent version service backed by the fake repository."""
+    return AgentVersionService(repository=repository)
 
 
 @pytest.fixture
@@ -383,12 +380,12 @@ async def test_update_version_not_found(service: AgentVersionService) -> None:
         )
 
 
-async def test_update_version_run_spec_frozen_once_a_task_references_it(
+async def test_update_version_run_spec_editable_once_a_task_references_it(
     service: AgentVersionService,
     agent_id: uuid.UUID,
     task_repository: FakeTaskRepository,
 ) -> None:
-    """Reject a run spec update once a task references the version."""
+    """A run spec update stays legal once a task references the version."""
     created = await service.create_version(
         agent_id=agent_id,
         display_version=None,
@@ -398,35 +395,17 @@ async def test_update_version_run_spec_frozen_once_a_task_references_it(
         actor=ACTOR,
     )
     await create_agent_task(task_repository, uuid.uuid4(), agent_version_id=created.id)
-    with pytest.raises(AgentVersionFrozen):
-        await service.update_version(
-            created.id,
-            AgentVersionUpdate(run_spec=RunSpec(command="new.sh")),
-            actor=ACTOR,
-        )
-
-
-async def test_update_version_capabilities_frozen_once_a_task_references_it(
-    service: AgentVersionService,
-    agent_id: uuid.UUID,
-    task_repository: FakeTaskRepository,
-) -> None:
-    """Reject a capabilities update once a task references the version."""
-    created = await service.create_version(
-        agent_id=agent_id,
-        display_version=None,
-        description=None,
-        run_spec=RunSpec(command="run.sh"),
-        capabilities=None,
+    updated = await service.update_version(
+        created.id,
+        AgentVersionUpdate(
+            run_spec=RunSpec(command="new.sh"),
+            capabilities=AgentCapabilities(tools=["search"]),
+        ),
         actor=ACTOR,
     )
-    await create_agent_task(task_repository, uuid.uuid4(), agent_version_id=created.id)
-    with pytest.raises(AgentVersionFrozen):
-        await service.update_version(
-            created.id,
-            AgentVersionUpdate(capabilities=AgentCapabilities(tools=["search"])),
-            actor=ACTOR,
-        )
+    assert updated.run_spec is not None
+    assert updated.run_spec.command == "new.sh"
+    assert updated.capabilities.tools == ["search"]
 
 
 async def test_update_version_display_version_unaffected_by_tasks(

@@ -1416,6 +1416,23 @@ class FakeAgentVersionRepository:
             raise AgentVersionNotFound(agent_version_id)
         return agent_version.model_copy()
 
+    async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version belongs to.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        agent_version = self._versions.get(agent_version_id)
+        if agent_version is None:
+            raise AgentVersionNotFound(agent_version_id)
+        return agent_version.agent_id
+
     async def query(
         self, agent_version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], str | None]:
@@ -4541,20 +4558,6 @@ class FakeTaskRepository:
             and task.status is TaskStatus.COMPLETED
         }
 
-    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
-        """Report whether any task references an agent version.
-
-        Args:
-            agent_version_id: Id of the agent version.
-
-        Returns:
-            Whether a task references the agent version.
-        """
-        return any(
-            isinstance(task, AgentTask) and task.agent_version_id == agent_version_id
-            for task in self._tasks.values()
-        )
-
     async def get_agent_tasks_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Task]:
@@ -4690,6 +4693,7 @@ async def create_import_task(
     plugin_version_id: uuid.UUID | None = None,
     payload_blob_id: uuid.UUID | None = None,
     agent_id: uuid.UUID | None = None,
+    agent_version_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.ABORT,
 ) -> ImportTask:
@@ -4701,6 +4705,7 @@ async def create_import_task(
         plugin_version_id: Importer version the task runs.
         payload_blob_id: Blob holding the payload.
         agent_id: Agent imported sessions are created under.
+        agent_version_id: Agent version recorded on the imported sessions.
         params: Parameters passed to the importer.
         on_failure: Effect of a hard failure on the job.
 
@@ -4716,6 +4721,7 @@ async def create_import_task(
             payload_blob_id if payload_blob_id is not None else uuid.uuid4()
         ),
         agent_id=agent_id if agent_id is not None else uuid.uuid4(),
+        agent_version_id=agent_version_id,
         params=params if params is not None else {},
         on_failure=on_failure,
     )
