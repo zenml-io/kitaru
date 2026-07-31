@@ -1,7 +1,11 @@
 import { Navigate, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { AgentDetailPage, AgentsPage } from "./pages/AgentsPage";
-import { CohortDetailPage, CohortsPage } from "./pages/CohortsPage";
+import {
+  CohortDetailPage,
+  CohortsPage,
+  CohortVersionDetailPage,
+} from "./pages/CohortsPage";
 import { EvaluatorDetailPage, EvaluatorsPage } from "./pages/EvaluatorsPage";
 import { ExperimentRunPage } from "./pages/ExperimentRunPage";
 import { ExperimentDetailPage, ExperimentsPage } from "./pages/ExperimentsPage";
@@ -32,6 +36,10 @@ export function App() {
         <Route path="/agents/:id" element={<AgentDetailPage />} />
         <Route path="/cohorts" element={<CohortsPage />} />
         <Route path="/cohorts/:id" element={<CohortDetailPage />} />
+        <Route
+          path="/cohort-versions/:id"
+          element={<CohortVersionDetailPage />}
+        />
         <Route path="/experiments" element={<ExperimentsPage />} />
         <Route path="/experiments/:id" element={<ExperimentDetailPage />} />
         <Route path="/runs/:id" element={<ExperimentRunPage />} />

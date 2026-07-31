@@ -7,6 +7,7 @@ export type AgentVersion = Schemas["AgentVersionResponse"];
 export type Session = Schemas["SessionResponse"];
 export type SessionNode = Schemas["SessionNodeResponse"];
 export type Cohort = Schemas["CohortResponse"];
+export type CohortVersion = Schemas["CohortVersionResponse"];
 export type Experiment = Schemas["ExperimentResponse"];
 export type ExperimentRun = Schemas["ExperimentRunResponse"];
 export type ExperimentRunProgress = Schemas["ExperimentRunProgress"];

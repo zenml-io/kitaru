@@ -62,7 +62,7 @@ export function ExperimentsPage() {
     <div>
       <PageHeader
         title="Experiments"
-        subtitle="Pure replay configuration — tool policy, override, evaluators. Runs bind a cohort and an agent version."
+        subtitle="Pure replay configuration: tool policy, override, evaluators. Runs bind a cohort version and an agent version."
       />
       <FilterBar filters={FILTERS} />
       <DataTable
@@ -94,9 +94,12 @@ const RUN_COLUMNS: Column<ExperimentRun>[] = [
     className: "whitespace-nowrap",
   },
   {
-    header: "Cohort",
+    header: "Cohort version",
     cell: (run) => (
-      <IdLink id={run.cohort_id} to={`/cohorts/${run.cohort_id}`} />
+      <IdLink
+        id={run.cohort_version_id}
+        to={`/cohort-versions/${run.cohort_version_id}`}
+      />
     ),
   },
   {

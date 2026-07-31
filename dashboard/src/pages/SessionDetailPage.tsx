@@ -2,7 +2,7 @@ import { useParams } from "react-router";
 import { client, unwrap } from "../api/client";
 import { useList, useOne } from "../api/hooks";
 import type { Evaluation } from "../api/types";
-import { StatusBadge } from "../components/Badge";
+import { Badge, StatusBadge } from "../components/Badge";
 import { IdLink, IdText } from "../components/IdLink";
 import { JsonViewer } from "../components/JsonViewer";
 import { KeyValue } from "../components/KeyValue";
@@ -37,6 +37,17 @@ const EVALUATION_COLUMNS: Column<Evaluation>[] = [
     cell: (evaluation) => formatScore(evaluation.score),
   },
   { header: "Value", cell: (evaluation) => evaluation.value ?? "—" },
+  {
+    header: "Passed",
+    cell: (evaluation) =>
+      evaluation.passed == null ? (
+        "—"
+      ) : (
+        <Badge tone={evaluation.passed ? "green" : "red"}>
+          {evaluation.passed ? "Passed" : "Failed"}
+        </Badge>
+      ),
+  },
   {
     header: "Explanation",
     cell: (evaluation) => evaluation.explanation ?? "—",

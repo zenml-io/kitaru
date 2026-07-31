@@ -155,9 +155,12 @@ export function ExperimentRunPage() {
               ),
             },
             {
-              label: "Cohort",
+              label: "Cohort version",
               value: (
-                <IdLink id={data.cohort_id} to={`/cohorts/${data.cohort_id}`} />
+                <IdLink
+                  id={data.cohort_version_id}
+                  to={`/cohort-versions/${data.cohort_version_id}`}
+                />
               ),
             },
             {
