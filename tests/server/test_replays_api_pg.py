@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end replay pipeline tests against PostgreSQL."""
 
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -140,6 +141,17 @@ async def test_replay_pipeline_completes_through_the_api(
     replay_after = (await client.get(f"/v1/replays/{replay['id']}")).json()
     assert replay_after["status"] == "evaluating"
     assert replay_after["result_session_id"] == result_session["id"]
+
+    filtered = (
+        await client.get(
+            "/v1/replays", params={"result_session_id": result_session["id"]}
+        )
+    ).json()["items"]
+    assert [item["id"] for item in filtered] == [replay["id"]]
+    unmatched = (
+        await client.get("/v1/replays", params={"result_session_id": str(uuid.uuid4())})
+    ).json()["items"]
+    assert unmatched == []
 
     claimed = (
         await client.post(

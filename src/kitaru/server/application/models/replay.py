@@ -29,6 +29,7 @@ class ReplayFilter(ListFilter):
 
     experiment_run_id: uuid.UUID | None = None
     baseline_session_id: uuid.UUID | None = None
+    result_session_id: uuid.UUID | None = None
     status: ReplayStatus | None = None
 
 

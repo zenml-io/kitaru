@@ -72,6 +72,9 @@ class ReplayListParams(ListParams):
     baseline_session_id: uuid.UUID | None = Field(
         default=None, description="Filter on baseline session."
     )
+    result_session_id: uuid.UUID | None = Field(
+        default=None, description="Filter on result session."
+    )
     status: ReplayStatus | None = Field(
         default=None, description="Filter on replay status."
     )

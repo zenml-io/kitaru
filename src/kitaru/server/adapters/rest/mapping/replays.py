@@ -116,6 +116,7 @@ def replay_list_params_to_filter(params: ReplayListParams) -> ReplayFilter:
     return ReplayFilter(
         experiment_run_id=params.experiment_run_id,
         baseline_session_id=params.baseline_session_id,
+        result_session_id=params.result_session_id,
         status=params.status,
         cursor=params.cursor,
         size=params.size,

@@ -3484,9 +3484,16 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tasks: Fake task repository, needed to resolve the result session
+                filter, which reads through the agent task rather than the
+                replay row.
+        """
         self._replays: dict[uuid.UUID, Replay] = {}
+        self._tasks = tasks
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -3580,6 +3587,21 @@ class FakeReplayRepository:
                 r
                 for r in replays
                 if r.baseline_session_id == replay_filter.baseline_session_id
+            ]
+        if replay_filter.result_session_id is not None:
+            agent_tasks = (
+                await self._tasks.get_agent_tasks_by_job_ids(
+                    [r.job_id for r in replays]
+                )
+                if self._tasks is not None
+                else {}
+            )
+            replays = [
+                r
+                for r in replays
+                if r.job_id in agent_tasks
+                and agent_tasks[r.job_id].result_session_id
+                == replay_filter.result_session_id
             ]
         if replay_filter.status is not None:
             replays = [r for r in replays if r.status == replay_filter.status]
@@ -4896,7 +4918,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository()
+    replays = FakeReplayRepository(tasks=tasks)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs

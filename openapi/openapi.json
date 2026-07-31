@@ -11773,6 +11773,25 @@
             }
           },
           {
+            "description": "Filter on result session.",
+            "in": "query",
+            "name": "result_session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter on result session.",
+              "title": "Result Session Id"
+            }
+          },
+          {
             "description": "Filter on replay status.",
             "in": "query",
             "name": "status",

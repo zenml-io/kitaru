@@ -19,11 +19,13 @@ from collections.abc import Sequence
 from sqlalchemy import func, select
 
 from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_JOB_ID_UNIQUE_CONSTRAINT,
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
     ReplayORM,
 )
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
@@ -129,6 +131,17 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         if replay_filter.baseline_session_id is not None:
             statement = statement.where(
                 ReplayORM.baseline_session_id == replay_filter.baseline_session_id
+            )
+        if replay_filter.result_session_id is not None:
+            # The result session belongs to the replay's agent task, not to the
+            # replay row, so this filters through the job the two share.
+            statement = statement.where(
+                ReplayORM.job_id.in_(
+                    select(TaskORM.job_id).where(
+                        TaskORM.kind == TaskKind.AGENT.value,
+                        TaskORM.result_session_id == replay_filter.result_session_id,
+                    )
+                )
             )
         if replay_filter.status is not None:
             statement = statement.where(ReplayORM.status == replay_filter.status.value)
