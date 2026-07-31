@@ -21,6 +21,8 @@ import httpx
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
@@ -28,7 +30,9 @@ from conftest import (
     FakeSessionRepository,
     FakeTagRepository,
     FakeTaskRepository,
+    create_agent,
     create_agent_task,
+    create_agent_version,
     create_cohort,
     create_cohort_version,
 )
@@ -106,19 +110,36 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
+def agent_repository() -> FakeAgentRepository:
+    """Provide the fake agent repository backing the app."""
+    return FakeAgentRepository()
+
+
+@pytest.fixture
+def agent_version_repository(
+    agent_repository: FakeAgentRepository,
+) -> FakeAgentVersionRepository:
+    """Provide the fake agent version repository backing the app."""
+    return FakeAgentVersionRepository(agent_repository)
+
+
+@pytest.fixture
 async def client(
     session_repository: FakeSessionRepository,
     node_repository: FakeSessionNodeRepository,
     tag_repository: FakeTagRepository,
     evaluation_repository: FakeEvaluationRepository,
     task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed session services."""
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
     )
     session_service = SessionService(
-        repository=session_repository, task_repository=task_repository
+        repository=session_repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
     )
     node_service = SessionNodeService(
         repository=node_repository, session_repository=session_repository
@@ -561,19 +582,30 @@ async def test_create_session_conflicts_when_task_not_running(
 
 
 async def test_create_session_links_the_agent_task_result_session(
-    client: httpx.AsyncClient, task_repository: FakeTaskRepository
+    client: httpx.AsyncClient,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
     """Creating a session for a running agent task links it as the result session."""
-    task = await create_agent_task(task_repository, uuid.uuid4())
+    agent = await create_agent(agent_repository, ACCOUNT.id)
+    version = await create_agent_version(
+        agent_version_repository, agent_id=agent.id, owner_id=ACCOUNT.id
+    )
+    task = await create_agent_task(
+        task_repository, uuid.uuid4(), agent_version_id=version.id
+    )
     task.claim(uuid.uuid4(), datetime.now(UTC))
     task.start(datetime.now(UTC))
     await task_repository.update(task)
 
     response = await client.post(
-        "/v1/sessions", json=_session_body(task_id=str(task.id))
+        "/v1/sessions", json=_session_body(agent_id=None, task_id=str(task.id))
     )
     assert response.status_code == 201
-    session_id = response.json()["id"]
+    body = response.json()
 
     stored_task = await task_repository.get(task.id)
-    assert str(stored_task.result_session_id) == session_id
+    assert str(stored_task.result_session_id) == body["id"]
+    assert body["agent_id"] == str(agent.id)
+    assert body["agent_version_id"] == str(version.id)

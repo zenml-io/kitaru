@@ -47,7 +47,9 @@ class ReplayCreateRequest(RequestModel):
 
     baseline_session_id: uuid.UUID = Field(description="Session to replay.")
     agent_version_id: uuid.UUID | None = Field(
-        default=None, description="Agent version to replay with."
+        default=None,
+        description="Agent version to replay with, the baseline session's "
+        "recorded version when unset.",
     )
     override: ReplayOverride | None = Field(
         default=None, description="Override to apply."

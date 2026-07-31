@@ -15,6 +15,9 @@
 
 import uuid
 
+from kitaru.server.application.interfaces.agent_version_repository import (
+    AgentVersionRepository,
+)
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
@@ -25,28 +28,43 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.domain.session import (
     Session,
+    SessionAgentMismatch,
+    SessionAgentRequired,
+    SessionAgentVersionMismatch,
     SessionStatus,
     SessionStatusCannotBeCleared,
 )
-from kitaru.server.domain.task import AgentTask, TaskResultSessionAlreadyLinked
+from kitaru.server.domain.task import (
+    AgentTask,
+    ImportTask,
+    Task,
+    TaskResultSessionAlreadyLinked,
+)
 
 
 class SessionService:
     """Session use cases."""
 
     def __init__(
-        self, repository: SessionRepository, task_repository: TaskRepository
+        self,
+        repository: SessionRepository,
+        task_repository: TaskRepository,
+        agent_version_repository: AgentVersionRepository,
     ) -> None:
         """Initialize the service.
 
         Args:
             repository: Session repository.
             task_repository: Task repository, for the create-time task link.
+            agent_version_repository: Agent version repository, for the agent
+                a version belongs to.
         """
         self._repository = repository
         self._tasks = task_repository
+        self._agent_versions = agent_version_repository
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
@@ -56,6 +74,7 @@ class SessionService:
         A session naming a task requires that task to be running. An agent
         task links exactly one session and gets its result session written in
         the same transaction, an import task links every session it creates.
+        The task is the source of truth for the agent and the agent version.
 
         Args:
             command: Fields for the new session.
@@ -66,6 +85,15 @@ class SessionService:
             TaskNotRunning: The named task is not running.
             TaskResultSessionAlreadyLinked: The named agent task already
                 links a session.
+            SessionAgentVersionMismatch: The command names a different agent
+                version than the task runs.
+            SessionAgentMismatch: The command names a different agent than the
+                task creates sessions under.
+            SessionAgentRequired: The command names no agent and no task to
+                infer one from.
+            AgentVersionNotFound: No agent version has the resolved id.
+            AgentVersionAgentMismatch: The resolved agent version belongs to
+                another agent.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
@@ -78,10 +106,11 @@ class SessionService:
             task.check_running()
             if isinstance(task, AgentTask) and task.result_session_id is not None:
                 raise TaskResultSessionAlreadyLinked(task.id)
+        agent_id, agent_version_id = await self._resolve_agent(command, task)
         session = Session(
             owner_id=actor.account.id,
-            agent_id=command.agent_id,
-            agent_version_id=command.agent_version_id,
+            agent_id=agent_id,
+            agent_version_id=agent_version_id,
             task_id=command.task_id,
             origin=command.origin,
             status=command.status
@@ -105,6 +134,57 @@ class SessionService:
             task.link_result_session(stored.id)
             await self._tasks.update(task)
         return stored
+
+    async def _resolve_agent(
+        self, command: SessionCreate, task: Task | None
+    ) -> tuple[uuid.UUID, uuid.UUID | None]:
+        """Resolve the agent and agent version a new session records.
+
+        A session produced by an agent or import task takes both from that
+        task, and a command naming a different one is rejected. Without a
+        task the command carries them, and the agent is inferred whenever a
+        version is named.
+
+        Args:
+            command: Fields for the new session.
+            task: Task the session was produced by, None when it names none.
+
+        Raises:
+            SessionAgentVersionMismatch: The command names a different agent
+                version than the task runs.
+            SessionAgentMismatch: The command names a different agent than the
+                task creates sessions under.
+            SessionAgentRequired: The command names no agent and no task to
+                infer one from.
+            AgentVersionNotFound: No agent version has the resolved id.
+            AgentVersionAgentMismatch: The resolved agent version belongs to
+                another agent.
+
+        Returns:
+            Agent id and agent version id for the session.
+        """
+        agent_id = command.agent_id
+        agent_version_id = command.agent_version_id
+        if isinstance(task, AgentTask | ImportTask):
+            if (
+                agent_version_id is not None
+                and agent_version_id != task.agent_version_id
+            ):
+                raise SessionAgentVersionMismatch(
+                    task.id, agent_version_id, task.agent_version_id
+                )
+            agent_version_id = task.agent_version_id
+            if isinstance(task, ImportTask):
+                if agent_id is not None and agent_id != task.agent_id:
+                    raise SessionAgentMismatch(task.id, agent_id, task.agent_id)
+                agent_id = task.agent_id
+        if agent_version_id is not None:
+            agent_id = await resolve_agent_id(
+                agent_version_id, agent_id, self._agent_versions
+            )
+        if agent_id is None:
+            raise SessionAgentRequired()
+        return agent_id, agent_version_id
 
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.

@@ -60,9 +60,15 @@ class TokenUsage(RequestModel):
 class SessionCreateRequest(RequestModel):
     """Session create request."""
 
-    agent_id: uuid.UUID = Field(description="Agent the session belongs to.")
+    agent_id: uuid.UUID | None = Field(
+        default=None,
+        description="Agent the session belongs to, inferred from the task or "
+        "the agent version when unset.",
+    )
     agent_version_id: uuid.UUID | None = Field(
-        default=None, description="Agent version recorded for the session."
+        default=None,
+        description="Agent version recorded for the session, inferred from "
+        "the task when unset.",
     )
     origin: SessionOrigin = Field(description="How the session came to exist.")
     status: SessionStatus | None = Field(

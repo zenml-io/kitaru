@@ -346,22 +346,6 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         rows = (await self._session.scalars(statement)).all()
         return {row for row in rows if row is not None}
 
-    async def exists_for_agent_version(self, agent_version_id: uuid.UUID) -> bool:
-        """Report whether any task references an agent version.
-
-        Args:
-            agent_version_id: Id of the agent version.
-
-        Returns:
-            Whether a task references the agent version.
-        """
-        statement = select(
-            select(TaskORM.id)
-            .where(TaskORM.agent_version_id == agent_version_id)
-            .exists()
-        )
-        return bool(await self._session.scalar(statement))
-
     async def get_agent_tasks_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Task]:

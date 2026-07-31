@@ -80,13 +80,16 @@ async def api_client(
     )
     session_repository = FakeSessionRepository()
     evaluation_repository = FakeEvaluationRepository()
+    agents = FakeAgentRepository()
+    agent_versions = FakeAgentVersionRepository(agents)
     session_service = SessionService(
-        repository=session_repository, task_repository=FakeTaskRepository()
+        repository=session_repository,
+        task_repository=FakeTaskRepository(),
+        agent_version_repository=agent_versions,
     )
     evaluation_service = EvaluationService(
         repository=evaluation_repository, session_repository=session_repository
     )
-    agents = FakeAgentRepository()
     tasks = FakeTaskRepository(sessions=session_repository)
     jobs = FakeJobRepository(tasks=tasks)
     transitions = TaskTransitions(
@@ -97,7 +100,7 @@ async def api_client(
         task_repository=tasks,
         session_repository=session_repository,
         agent_repository=agents,
-        agent_version_repository=FakeAgentVersionRepository(agents),
+        agent_version_repository=agent_versions,
         plugin_repository=plugin_repository,
         blob_repository=FakeBlobRepository(),
         transitions=transitions,

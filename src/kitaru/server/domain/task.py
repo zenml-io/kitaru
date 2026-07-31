@@ -643,6 +643,7 @@ class ImportTask(Task):
     plugin_version_id: uuid.UUID
     payload_blob_id: uuid.UUID
     agent_id: uuid.UUID
+    agent_version_id: uuid.UUID | None = None
     params: dict[str, Any] = Field(default_factory=dict)
 
     @property

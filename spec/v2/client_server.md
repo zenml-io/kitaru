@@ -410,7 +410,7 @@ There is no run summary. The run's output is its replays, and per-run statistics
 
 ### imports.py
 
-- `ImportCreateRequest`: importer (name), agent_id, version?, payload_blob_id, params: dict[str, JsonValue]. Importer and version resolve at creation to the plugin version id stored on the task, an omitted version resolves to latest. Creation returns `JobResponse`, there is no ImportResponse.
+- `ImportCreateRequest`: importer (name), agent_id, agent_version_id?, version?, payload_blob_id, params: dict[str, JsonValue]. Importer and version resolve at creation to the plugin version id stored on the task, an omitted version resolves to latest. An agent_version_id must belong to agent_id and is stamped on every session the import creates, an omitted one leaves those sessions without a version. Creation returns `JobResponse`, there is no ImportResponse.
 - `ImportFailure`: line, external_id?, error
 - `ImportStats`: created, skipped, failed, failures: list[ImportFailure] (max 20)
 
@@ -458,7 +458,7 @@ Shared by the evaluator and importer resources:
 
 ### replay.py
 
-- `ReplayCreateRequest`: baseline_session_id, agent_version_id?, override?, tool_policy?, evaluators (min 1), evaluate_baselines: bool = false. An omitted agent_version_id resolves to the baseline session's recorded agent version, rejected when the session has none. The resolved version must have a run spec. With `evaluate_baselines`, the replay's job additionally scores the baseline session (see the replay pipeline).
+- `ReplayCreateRequest`: baseline_session_id, agent_version_id?, override?, tool_policy?, evaluators (min 1), evaluate_baselines: bool = false. An omitted agent_version_id resolves to the baseline session's recorded agent version, rejected when the session carries none. The resolved version must have a run spec either way. With `evaluate_baselines`, the replay's job additionally scores the baseline session (see the replay pipeline).
 - `ReplayListParams`: experiment_run_id?, baseline_session_id?, status?
 - `ReplayResponse`: id, job_id, experiment_run_id?, baseline_session_id, result_session_id?, override?, tool_policy, evaluators, evaluate_baselines, status: ReplayStatus, error?, created, updated
 - `ToolLookupRequest`: tool_name, cache_key (64 chars)
@@ -489,7 +489,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 ### session.py
 
 - `TokenUsage` (RequestModel): input_tokens?, output_tokens?, cached_input_tokens?, reasoning_tokens?
-- `SessionCreateRequest`: agent_id, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, task_id?
+- `SessionCreateRequest`: agent_id?, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, task_id?. Both ids are optional on the wire because a task_id naming an agent or import task supplies them, see the session create rules below.
 - `SessionUpdateRequest`: status?, outputs, error?, ended_at?, name?, expected, metadata?
 - `SessionEvaluationsRequest`: evaluations: list[EvaluationResult] (min 1)
 - `SessionListParams`: agent_id?, agent_version_id?, cohort_version_id?, task_id?, origin?, status?, provider?, external_id?, name?, tag?, started_after?, started_before?, ended_after?, ended_before?, has_evaluation?, min_cost?, max_cost?
@@ -536,7 +536,7 @@ replay_config.py is the shared hub for replay configuration: experiment.py and r
 |---|---|
 | `AccountService` | Account CRUD, credentials |
 | `AgentService` | Agent CRUD |
-| `AgentVersionService` | Version CRUD with server-assigned version numbers, run spec and capability updates with freeze checks |
+| `AgentVersionService` | Version CRUD with server-assigned version numbers |
 | `ApiKeyService` | Key issue, list, deactivate |
 | `BlobService` | Content-addressed upload, metadata reads, download |
 | `CohortService` | Cohort namespace CRUD |
@@ -613,7 +613,7 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 |---|---|---|
 | `Account` | is_service_account, name, email?, password_hash?, active | update_active, update_password_hash |
 | `Agent` | name, description?, latest_version | update_name, update_description |
-| `AgentVersion` | agent_id, version: int, display_version?, description?, run_spec: RunSpec?, capabilities: AgentCapabilities | update_display_version, update_description, update_run_spec(frozen), update_capabilities(frozen) |
+| `AgentVersion` | agent_id, version: int, display_version?, description?, run_spec: RunSpec?, capabilities: AgentCapabilities | update_display_version, update_description, update_run_spec, update_capabilities |
 | `ApiKey` | name, key_hash, active, last_used? | update_active, mark_used |
 | `Blob` | sha256, size, media_type, data, no updated | - |
 | `Cohort` | name, description?, agent_id, metadata: dict, latest_version | check_members, update_name, update_description, update_metadata |
@@ -644,7 +644,7 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 |---|---|---|---|
 | `AgentTask` | agent | agent_version_id, inputs | requires an agent version with a run spec, result session required for completion |
 | `EvaluationTask` | evaluator | plugin_version_id, input_session_id, params | no agent version, result must be a non-empty list of `EvaluationResult` with unique names |
-| `ImportTask` | importer | plugin_version_id, payload_blob_id, agent_id, params | no agent version, result must be non-null |
+| `ImportTask` | importer | plugin_version_id, payload_blob_id, agent_id, agent_version_id?, params | the optional agent version is stamped on created sessions and never executed, result must be non-null |
 
 Spec value objects (FrozenModel): `ScriptPluginSpec(entrypoint, blob_id, sha256)` and `PackagePluginSpec(entrypoint, requirement)` with `PluginSpec` as their union, `PayloadSpec(blob_id, sha256)`, per-kind details mirroring the wire details (`AgentTaskDetails`, `EvaluationTaskDetails`, `ImportTaskDetails`), `TaskSpec(task_id, kind, run_spec: TaskRunSpec?, env, secret_env, details)`, `WorkerScope` and `LabelSelector` (the `api_models` models reused directly). The spec value objects share their names with the wire models.
 
@@ -697,7 +697,7 @@ Repository `get_many` methods load id lists through `_load_by_ids` on the base S
 
 ### task table
 
-Single-table polymorphism over the three `Task` subclasses, discriminated by `kind`. Columns: kind, job_id FK CASCADE, agent_version_id FK? (AgentTask), agent_id FK? (ImportTask), plugin_version_id FK? (EvaluationTask, ImportTask), payload_blob_id FK? (ImportTask), input_session_id FK? (EvaluationTask), result_session_id FK?, status, attempt, on_failure, labels JSONB, env JSONB, worker_id FK SET NULL?, inputs JSONB? (AgentTask inputs, EvaluationTask and ImportTask params), claimed_at?, heartbeat_at?, cancel_requested_at?, started_at?, ended_at?, error?, result JSONB?.
+Single-table polymorphism over the three `Task` subclasses, discriminated by `kind`. Columns: kind, job_id FK CASCADE, agent_version_id FK? (AgentTask, optional on ImportTask), agent_id FK? (ImportTask), plugin_version_id FK? (EvaluationTask, ImportTask), payload_blob_id FK? (ImportTask), input_session_id FK? (EvaluationTask), result_session_id FK?, status, attempt, on_failure, labels JSONB, env JSONB, worker_id FK SET NULL?, inputs JSONB? (AgentTask inputs, EvaluationTask and ImportTask params), claimed_at?, heartbeat_at?, cancel_requested_at?, started_at?, ended_at?, error?, result JSONB?.
 
 Constraints and indexes:
 
@@ -819,6 +819,7 @@ erDiagram
 - `JobSettled` maps the outcome onto the `Replay` row (`replay_pipeline.settle_replay`): completed → completed, failed → failed with the job's error, canceled → canceled. `ReplaySettled` then triggers `finalize_run_if_drained`. The replay status tracks the pipeline: `pending` from creation, `evaluating` when the agent task completes, terminal at job settlement.
 - `POST /v1/evaluations` creates one job holding one evaluator task per (input session, evaluator) pair, resolving the evaluator versions at creation. Those tasks carry `on_failure=continue`, so every pair runs regardless of sibling failures and the job outcome reports whether all of them scored. `POST /v1/imports` and `POST /v1/session-runs` create a job with one importer or agent task, session runs put the session name into the task env extras as `KITARU_SESSION_NAME`. Manual evaluations through `POST /v1/sessions/{id}/evaluations` are `INSERT ... ON CONFLICT` upserts on the (session_id, name) partial unique key, so a resent name overwrites its value, data type, explanation, and pass flag. The rollup updates on node ingest are atomic SQL increments. The increments are delta-based: each upserted node contributes new minus old against the stored row for cost and the token columns, and 0 or 1 for the call counts, summed per batch into one atomic UPDATE on the session row, so a replacement corrects itself and a retried identical batch has delta zero.
 - Sessions link to tasks at create time (`SessionCreateRequest.task_id`, task must be running). Agent tasks link exactly one session and get `result_session_id` written in the same transaction, import tasks link every session they create, listable via the `task_id` session filter.
+- The task owns the session's agent and agent version. A session naming an agent or import task takes `agent_version_id` from that task and, for an import task, `agent_id` too, so the adapter records neither. A request that carries a value disagreeing with the task is a 422 (`SessionAgentVersionMismatch`, `SessionAgentMismatch`), which includes sending a version for an import task that carries none. Without a task the request carries them, and naming only a version infers the agent from it. Whenever a version is in play, resolved or given, it must belong to the session's agent, checked by one primary-key read of `agent_version.agent_id` and rejected with `AgentVersionAgentMismatch`. On the agent-task path that read is the same one the agent inference needs, so it costs nothing extra. A request left with no agent at all is a 422 (`SessionAgentRequired`). Enforcing the pair in the database instead is future_improvements.md.
 - The claim path is `POST /v1/tasks/claim`. The scope is read from the caller's worker row, stored at registration, and interpreted by `_scope_conditions` in the task repository. A claim refreshes worker.last_seen_at, so an idle worker polling an empty queue stays live.
 - `heartbeat_worker` updates worker.last_seen_at, stamps heartbeat_at only on reported tasks whose worker_id matches the caller, and returns the rest in cancel_task_ids (cancel-requested, reassigned, or no longer owned). The staleness sweep runs at claim time, before the claim query, capped to a bounded row count per claim (a server setting, default 100, overflow rolls to the next claim), selecting with `FOR UPDATE SKIP LOCKED` so concurrent claims never block on each other's sweep. It applies to tasks whose coalesce(heartbeat_at, claimed_at) is older than the heartbeat timeout (a server setting, default 60 seconds, kept a comfortable multiple of the worker heartbeat interval so one dropped heartbeat never requeues a live task): a stale task with `cancel_requested_at` set settles to canceled, otherwise it is requeued while attempt is under the retry cap (a server setting, default 3) and abandoned at the cap. A requeue unlinks the stale attempt's result session (`session.task_id` and the task's `result_session_id` to null), freeing the one-session-per-task slot so the next attempt can link its own. The sweep routes its writes through the same `_apply_status` dispatch as `update_task`, so an abandoned or canceled last task settles its job, its replay, and its run without any worker transition arriving. `abandoned` is written only by the sweep, `timed_out` only by the worker's process timeout. With no worker polling, nothing sweeps, stale rows surface through effective-status reads until the next claim.
 - `ExperimentRunService.cancel_run` writes the run's `canceling` status and propagates in the same transaction, canceling each non-settled replay's job the way `cancel_job` does: claimed and running tasks get `cancel_requested_at` stamped in one bulk UPDATE and keep their status, pending tasks move to `canceled` through `_apply_status` one by one, so drained jobs settle, their replay rows cancel, and the run can finalize. Claimed and running tasks then reach a terminal status the usual way, through their worker's next heartbeat or through the sweep, so run cancellation adds no second terminal writer. The run settles to `canceled` when it drains.

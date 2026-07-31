@@ -44,7 +44,11 @@ from kitaru.server.application.models.job import (
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import AgentVersionWithoutRunSpec, RunSpec
+from kitaru.server.domain.agent_version import (
+    AgentVersionAgentMismatch,
+    AgentVersionWithoutRunSpec,
+    RunSpec,
+)
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import JobAlreadySettled, JobNotFound
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
@@ -169,6 +173,74 @@ async def test_create_import_resolves_latest_version_by_default(
     assert isinstance(task, ImportTask)
     assert task.plugin_version_id == v2.id
     assert task.plugin_version_id != v1.id
+
+
+async def test_create_import_stamps_the_agent_version_on_its_task(
+    services: JobAndTaskServices,
+) -> None:
+    """An import naming an agent version carries it onto the importer task."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    version = await create_agent_version(
+        services.agent_versions, agent_id=agent.id, owner_id=ACTOR.account.id
+    )
+
+    job = await services.job_service.create_import(
+        ImportCreate(
+            importer="csv",
+            agent_id=agent.id,
+            agent_version_id=version.id,
+            payload_blob_id=payload.id,
+            params={},
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=job.id), actor=ACTOR
+    )
+    task = tasks[0]
+    assert isinstance(task, ImportTask)
+    assert task.agent_version_id == version.id
+
+
+async def test_create_import_rejects_a_version_of_another_agent(
+    services: JobAndTaskServices,
+) -> None:
+    """An import pairing an agent with another agent's version is rejected."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    other = await create_agent(services.agents, ACTOR.account.id, name="other")
+    version = await create_agent_version(
+        services.agent_versions, agent_id=other.id, owner_id=ACTOR.account.id
+    )
+
+    with pytest.raises(AgentVersionAgentMismatch):
+        await services.job_service.create_import(
+            ImportCreate(
+                importer="csv",
+                agent_id=agent.id,
+                agent_version_id=version.id,
+                payload_blob_id=payload.id,
+                params={},
+            ),
+            actor=ACTOR,
+        )
 
 
 async def test_create_evaluations_rejects_over_the_pair_cap() -> None:

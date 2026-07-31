@@ -73,7 +73,9 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
         repository=FakeSessionNodeRepository(), session_repository=services.sessions
     )
     session_service = SessionService(
-        repository=services.sessions, task_repository=services.tasks
+        repository=services.sessions,
+        task_repository=services.tasks,
+        agent_version_repository=services.agent_versions,
     )
     app = create_app(
         APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")

@@ -55,6 +55,20 @@ class AgentVersionRepository(Protocol):
         """
         ...
 
+    async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version belongs to.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        ...
+
     async def query(
         self, agent_version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], str | None]:

@@ -20,6 +20,8 @@ from typing import Any
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -70,7 +72,9 @@ def service(
 def session_service(session_repository: FakeSessionRepository) -> SessionService:
     """Provide a session service sharing the fake session repository."""
     return SessionService(
-        repository=session_repository, task_repository=FakeTaskRepository()
+        repository=session_repository,
+        task_repository=FakeTaskRepository(),
+        agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
     )
 
 
