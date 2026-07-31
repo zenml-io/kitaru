@@ -136,6 +136,53 @@ async def test_direct_api_key_bearer(
     assert stored.last_used is not None
 
 
+async def test_api_key_login(
+    client: httpx.AsyncClient,
+    account: Account,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Exchange an API key for a token and use the token on a protected route."""
+    _, key = await create_api_key(api_key_repository, account.id)
+    response = await client.post(
+        "/v1/login",
+        data={"grant_type": "api-key"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert body["expires_in"] > 0
+
+    response = await client.get(
+        "/v1/api-keys",
+        headers={"Authorization": f"Bearer {body['access_token']}"},
+    )
+    assert response.status_code == 200
+
+
+async def test_api_key_login_rejects_a_deactivated_key(
+    client: httpx.AsyncClient,
+    account: Account,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Observe HTTP 401 when the key was deactivated before the exchange."""
+    _, key = await create_api_key(api_key_repository, account.id, active=False)
+    response = await client.post(
+        "/v1/login",
+        data={"grant_type": "api-key"},
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid API key."}
+
+
+async def test_api_key_login_without_a_credential(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 401 when the api-key grant carries no authorization header."""
+    response = await client.post("/v1/login", data={"grant_type": "api-key"})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing API key."}
+
+
 async def test_login_wrong_password(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 for a wrong password."""
     response = await client.post(
@@ -243,6 +290,30 @@ async def test_missing_bearer_credential(client: httpx.AsyncClient) -> None:
     response = await client.get("/v1/api-keys")
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing bearer credential."}
+
+
+async def test_api_key_login_never_sets_the_auth_cookie(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+    account: Account,
+) -> None:
+    """Leave the auth cookie unset for the api-key grant on a cookie server."""
+    _, key = await create_api_key(api_key_repository, account.id)
+    app = build_app(
+        local_settings(AUTH_COOKIE_NAME=COOKIE_NAME),
+        account_repository,
+        api_key_repository,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/login",
+            data={"grant_type": "api-key"},
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["csrf_token"] is None
+        assert COOKIE_NAME not in response.cookies
 
 
 async def test_cookie_login_and_logout(

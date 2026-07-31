@@ -30,7 +30,7 @@ from kitaru.client.credential_store import (
     get_config_directory,
     normalize_server_url,
 )
-from kitaru.client.credentials import ApiToken, CredentialType
+from kitaru.client.credentials import ApiToken, ApiType
 
 SERVER_URL = "https://kitaru.example.com"
 
@@ -58,7 +58,7 @@ def test_round_trip(tmp_path: Path) -> None:
     device_id = uuid.uuid4()
     token = ApiToken(access_token="session-token", leeway_seconds=30)
 
-    store.set_api_key(SERVER_URL, "kitaru-key", type=CredentialType.CONTROL_PLANE)
+    store.set_api_key(SERVER_URL, "kitaru-key", type=ApiType.CONTROL_PLANE)
     store.set_device(SERVER_URL, device_id, "device-code")
     store.set_token(SERVER_URL, token)
 
@@ -66,7 +66,7 @@ def test_round_trip(tmp_path: Path) -> None:
     credentials = reloaded.get(SERVER_URL)
     assert credentials is not None
     assert credentials.api_key == "kitaru-key"
-    assert credentials.type == CredentialType.CONTROL_PLANE
+    assert credentials.type == ApiType.CONTROL_PLANE
     assert credentials.device_id == device_id
     assert credentials.device_code == "device-code"
     assert credentials.api_token == token

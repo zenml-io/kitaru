@@ -37,7 +37,7 @@ from kitaru.client.auth import TokenProvider
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.control_plane_auth import control_plane_login
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.credentials import ApiToken, CredentialType
+from kitaru.client.credentials import ApiToken, ApiType
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
@@ -173,7 +173,7 @@ async def test_api_key_login_stores_both_credentials(
 
     server = credential_store.get(SERVER_URL)
     assert server is not None
-    assert server.type is CredentialType.SERVER
+    assert server.type is ApiType.SERVER
     assert server.control_plane_api_url == CONTROL_PLANE_URL
     assert server.api_token is not None
 

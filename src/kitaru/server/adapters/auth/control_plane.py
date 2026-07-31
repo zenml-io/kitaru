@@ -37,9 +37,6 @@ from kitaru.transport import RetryTransport
 
 logger = logging.getLogger(__name__)
 
-# Distinguishes control plane API keys from locally issued Kitaru API keys.
-CONTROL_PLANE_API_KEY_PREFIX = "ZENPROKEY_"
-
 # Headers the control plane reads to track a server it does not manage.
 SERVER_ID_HEADER = "zenml-server-id"
 SERVER_VERSION_HEADER = "zenml-server-version"
@@ -274,6 +271,9 @@ class ControlPlaneAuthenticator:
             )
         except AccountNotFound:
             return await self._create_account(user, name)
+        if account.name == name and account.email == user.email and account.active:
+            # Nothing to update, save the DB roundtrip.
+            return account
         account.update_identity(name, user.email)
         account.update_active(True)
         try:
