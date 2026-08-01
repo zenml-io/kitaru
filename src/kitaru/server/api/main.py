@@ -16,9 +16,19 @@
 import logging
 
 import uvicorn
+from fastapi import FastAPI
 
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+
+
+def app() -> FastAPI:
+    """Create the API application from environment settings.
+
+    Returns:
+        Configured FastAPI application.
+    """
+    return create_app(APISettings())
 
 
 def main() -> None:

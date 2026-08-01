@@ -69,13 +69,13 @@ server:
   auth:
     # The Kitaru authentication scheme. Use one of:
     #
-    # NONE - No authentication
-    # LOCAL - Local authentication
-    # CONTROL_PLANE - Control plane authentication
-    # CLOUD - Cloud authentication
+    # none - No authentication
+    # local - Local authentication
+    # control_plane - Control plane authentication
+    # cloud - Cloud authentication
     #
     # This value is overridden if the `kitaru.pro.enabled` value is set.
-    authType: LOCAL
+    authType: local
 
     # The secret key used to sign JWT tokens. This should be set to
     # a random string with a recommended length of at least 32 characters, e.g.:
@@ -132,45 +132,45 @@ server:
     # The maximum number of failed authentication attempts allowed for an OAuth
     # 2.0 device before the device is locked.
     #
-    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
-    # `NO_AUTH`.
+    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # `none`.
     maxFailedDeviceAuthAttempts: 3
 
     # The timeout in seconds after which a pending OAuth 2.0 device
     # authorization request expires.
     #
-    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
-    # `NO_AUTH`.
+    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # `none`.
     deviceAuthTimeoutSeconds: 300
 
     # The polling interval in seconds used by clients to poll the OAuth 2.0
     # device authorization endpoint for the status of a pending device
     # authorization request.
     #
-    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
-    # `NO_AUTH`.
+    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # `none`.
     deviceAuthPollingIntervalSeconds: 5
 
     # The time in minutes that an OAuth 2.0 device is allowed to be used to
     # authenticate with the ZenML server. If not set or if
-    # `zenml.auth.jwtTokenExpireMinutes` is not set, the devices are allowed to
+    # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
     # using an OAuth 2.0 device.
     #
-    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
-    # `NO_AUTH`.
+    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # `none`.
     deviceExpirationMinutes:
 
     # The time in minutes that a trusted OAuth 2.0 device is allowed to be used
     # to authenticate with the ZenML server. If not set or if
-    # `zenml.auth.jwtTokenExpireMinutes` is not set, the devices are allowed to
+    # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
     # using an OAuth 2.0 device that was previously trusted by the user.
     #
-    # This value is ignored if the `zenml.auth.authType` is set to `EXTERNAL` or
-    # `NO_AUTH`.
+    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # `none`.
     trustedDeviceExpirationMinutes:
 
   # The root URL path to use when behind a proxy. This is useful when the
@@ -189,15 +189,15 @@ server:
   # ```
   rootUrlPath:
 
-  # MySQL database configuration.
+  # PostgreSQL database configuration.
   # NOTE: the certificate files need to be copied in the helm chart folder and
   # the paths configured here need to be relative to the root of the helm chart.
   database:
     # The host of the external database service.
-    host: zenml-db
+    host:
 
     # The port where the external database service is accepting connections.
-    port:
+    port: 5432
 
     # The username to use to connect to the external database service.
     username: postgres
@@ -212,6 +212,22 @@ server:
       # name:
       # key:
 
+    # The key used to encrypt secrets stored in the database. This should be a
+    # random string with a recommended length of at least 32 characters. Do not
+    # change this value after secrets have been stored, as the existing secrets
+    # can no longer be decrypted with a different key.
+    #
+    # If neither this value nor encryptionKeySecretRef is set, a random key is
+    # generated when the chart is installed and reused on subsequent upgrades.
+    encryptionKey:
+
+    # Reference to an existing Kubernetes secret containing the database
+    # encryption key. If set, encryptionKey above is ignored and the key is
+    # sourced from the referenced secret instead.
+    encryptionKeySecretRef:
+      # name:
+      # key:
+
     # The name of the database to use. Will be created on first run if it
     # doesn't exist.
     #
@@ -219,19 +235,19 @@ server:
     # database should be created manually before installing the helm chart.
     database: kitaru
 
-    # Set to true to enable SSL for the MySQL database. Defaults to false.
+    # Set to true to enable SSL for the PostgreSQL database. Defaults to false.
     # NOTE: setting any of the SSL certificate options (sslCa, sslCert, sslKey)
     # will automatically set this option to true.
     ssl: false
 
-    # The MySQL SSL CA certificate. Required for SSL enabled authentication if
+    # The PostgreSQL SSL CA certificate. Required for SSL enabled authentication if
     # the CA certificate is not part of the certificates shipped with the
     # container image. Can be provided as an inline value or as a Kubernetes
     # secret reference.
     #
     # NOTE: it is recommended to use the `kitaru.certificates` option instead to
     # configure the CA certificate globally. This option only applies to the
-    # MySQL database.
+    # PostgreSQL database.
     sslCa:
       # value: |
       #   -----BEGIN CERTIFICATE-----
@@ -242,7 +258,7 @@ server:
       #   name: ca-certificate
       #   key: ca.pem
 
-    # The MySQL SSL client certificate. Required for SSL enabled authentication
+    # The PostgreSQL SSL client certificate. Required for SSL enabled authentication
     # if client certificates are used. Can be provided as an inline value or as
     # a Kubernetes secret reference.
     sslCert:
@@ -255,7 +271,7 @@ server:
       #   name: client-certificate
       #   key: client-cert.pem
 
-    # The MySQL SSL client key. Required for SSL enabled authentication if
+    # The PostgreSQL SSL client key. Required for SSL enabled authentication if
     # client certificates are used. Can be provided as an inline value or as
     # a Kubernetes secret reference.
     sslKey:

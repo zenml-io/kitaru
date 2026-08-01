@@ -29,7 +29,7 @@ db_host: {{ .Kitaru.database.host | quote }}
 {{- if .Kitaru.database.port }}
 db_port: {{ .Kitaru.database.port | quote }}
 {{- end }}
-{{- if .Kitaru.database.user }}
+{{- if .Kitaru.database.username }}
 db_user: {{ .Kitaru.database.user | quote }}
 {{- end }}
 {{- if .Kitaru.database.database }}
@@ -196,7 +196,7 @@ Returns:
 {{- define "kitaru.storeSecretEnvVariables" -}}
 {{- $server := include "kitaru.serverValues" . | fromYaml -}}
 {{ $kitaru := dict "Kitaru" $server }}
-{{- range $k, $v := include "kitaru.storeSecretConfigurationAttrs" $kitaru | fromYaml }}
+{{- range $k, $v := include "kitaru.serverSecretConfigurationAttrs" $kitaru | fromYaml }}
 KITARU_SERVER_{{ $k | upper }}: {{ $v | quote }}
 {{- end }}
 {{- end }}
@@ -213,14 +213,6 @@ NODE_OPTIONS: "--use-openssl-ca"
 {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
 REQUESTS_CA_BUNDLE: "/updated-certs/ca-certificates.crt"
 SSL_CERT_FILE: "/updated-certs/ca-certificates.crt"
-{{- end }}
-ZENML_LOGGING_VERBOSITY: {{ default "info" $logging.verbosity | upper | quote }}
-{{- with $logging }}
-{{- if .format }}
-ZENML_CONSOLE_LOGGING_FORMAT: {{ .format | quote }}
-{{- end }}
-{{- if hasKey . "colorsDisabled" }}
-ZENML_LOGGING_COLORS_DISABLED: {{ .colorsDisabled | quote }}
 {{- end }}
 {{- end }}
 
