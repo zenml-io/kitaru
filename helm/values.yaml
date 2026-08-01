@@ -293,44 +293,6 @@ server:
     # poolSize: 20
     # maxOverflow: 20
 
-  # The Kitaru server's secure headers configuration. This can be used to
-  # enable, disable or set custom values for security headers in the Kitaru
-  # server's HTTP responses. The following values can be set for any of the
-  # supported secure headers configuration options:
-  #
-  # - `enabled`, `on`, `true` or `yes` - enables the secure header with the
-  # default value.
-  # - `disabled`, `off`, `false`, `none` or `no` - disables the secure header
-  # entirely, so that it is not set in the Kitaru server's HTTP responses.
-  # - any other value - sets the secure header to the specified value.
-  secure_headers:
-    # The `Server` HTTP header value used to identify the server. The default
-    # value is the Kitaru server ID.
-    server: enabled
-    # The `Strict-Transport-Security` HTTP header value. The default value is
-    # `max-age=63072000; includeSubDomains`.
-    hsts: enabled
-    # The `X-Frame-Options` HTTP header value. The default value is `SAMEORIGIN`.
-    xfo: enabled
-    # The `X-Content-Type-Options` HTTP header value. The default value is
-    # `nosniff`.
-    content: enabled
-    # The `Content-Security-Policy` HTTP header value. This is by default set
-    # to a strict CSP policy that only allows content from the origins required
-    # by the Kitaru dashboard.
-    # NOTE: customizing this header is discouraged, as it may cause the Kitaru
-    # dashboard to malfunction.
-    csp: enabled
-    # The `Referrer-Policy` HTTP header value. The default value is
-    # `no-referrer-when-downgrade`.
-    referrer: enabled
-    # The `Cache-Control` HTTP header value. The default value is
-    # `no-store, no-cache, must-revalidate`.
-    cache: enabled
-    # The `Permissions-Policy` HTTP header value. The default value is
-    # `accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()`.
-    permissions: enabled
-
   # Logging settings for the Kitaru server container.
   logging:
     # Set the logging verbosity.

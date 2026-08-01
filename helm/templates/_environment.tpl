@@ -30,7 +30,7 @@ db_host: {{ .Kitaru.database.host | quote }}
 db_port: {{ .Kitaru.database.port | quote }}
 {{- end }}
 {{- if .Kitaru.database.username }}
-db_user: {{ .Kitaru.database.user | quote }}
+db_user: {{ .Kitaru.database.username | quote }}
 {{- end }}
 {{- if .Kitaru.database.database }}
 db_name: {{ .Kitaru.database.database | quote }}
@@ -118,9 +118,6 @@ analytics_opt_in: "True"
 analytics_opt_in: "False"
 {{- end }}
 log_level: {{ default "info" .Kitaru.logging.verbosity | upper | quote }}
-{{- range $key, $value := .Kitaru.secure_headers }}
-secure_headers_{{ $key }}: {{ $value | quote }}
-{{- end }}
 {{- end }}
 
 
