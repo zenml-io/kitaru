@@ -129,8 +129,7 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default .Chart.Version }}"
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
-          args: ["migrate-database"]
-          command: ['kitaru']
+          command: ["python", "-m", "kitaru.server.database.main"]
           volumeMounts:
           {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
             - name: ca-certificates
