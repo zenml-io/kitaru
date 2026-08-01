@@ -56,8 +56,6 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       volumes:
-        - name: kitaru-config
-          emptyDir: {}
       {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
         - name: custom-certs
           projected:
@@ -195,7 +193,7 @@ spec:
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
             initialDelaySeconds: 15
             periodSeconds: 15
@@ -203,7 +201,7 @@ spec:
             failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health
               port: http
             initialDelaySeconds: 8
             periodSeconds: 15

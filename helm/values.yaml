@@ -11,7 +11,7 @@ server:
   image:
     repository: zenmldocker/kitaru
     pullPolicy: Always
-    # Overrides the image tag whose default is the chart appVersion.
+    # Overrides the image tag whose default is the chart version.
     tag:
 
   # ZenML Pro related options.
@@ -50,13 +50,6 @@ server:
   serverURL:
 
   # The URL where the Kitaru dashboard is reachable.
-  # If not specified, the `serverURL` value is used. This should be
-  # configured if the dashboard is served from a different URL than the
-  # Kitaru server.
-  #
-  # This is value is used to compute the dashboard URLs during the web login
-  # authentication workflow, to print dashboard URLs in log messages when
-  # running a pipeline and for other similar tasks.
   #
   # This value is overridden if the `kitaru.pro.enabled` value is set.
   dashboardURL:
@@ -95,14 +88,12 @@ server:
     # chart is installed and reused for all subsequent upgrades.
     jwtSigningKey:
 
-    # The issuer of the JWT tokens. If not specified, the issuer is set to the
-    # Kitaru Server ID.
+    # The issuer of the JWT tokens.
     #
     # This value is overridden if the `kitaru.pro.enabled` value is set.
     jwtIssuer:
 
-    # The audience of the JWT tokens. If not specified, the audience is set to
-    # the Kitaru Server ID.
+    # The audience of the JWT tokens.
     #
     # This value is overridden if the `kitaru.pro.enabled` value is set.
     jwtAudience:
@@ -152,7 +143,7 @@ server:
     deviceAuthPollingIntervalSeconds: 5
 
     # The time in minutes that an OAuth 2.0 device is allowed to be used to
-    # authenticate with the ZenML server. If not set or if
+    # authenticate with the Kitaru server. If not set or if
     # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
@@ -163,7 +154,7 @@ server:
     deviceExpirationMinutes:
 
     # The time in minutes that a trusted OAuth 2.0 device is allowed to be used
-    # to authenticate with the ZenML server. If not set or if
+    # to authenticate with the Kitaru server. If not set or if
     # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
@@ -190,8 +181,6 @@ server:
   rootUrlPath:
 
   # PostgreSQL database configuration.
-  # NOTE: the certificate files need to be copied in the helm chart folder and
-  # the paths configured here need to be relative to the root of the helm chart.
   database:
     # The host of the external database service.
     host:
