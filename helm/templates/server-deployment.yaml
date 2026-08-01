@@ -1,4 +1,3 @@
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,7 +7,7 @@ metadata:
     app.kubernetes.io/component: server
 spec:
   {{- if not .Values.autoscaling.enabled }}
-  replicas: {{ $server.replicaCount }}
+  replicas: {{ .Values.server.replicaCount }}
   {{- end }}
   selector:
     matchLabels:
@@ -26,11 +25,11 @@ spec:
         {{- include "kitaru.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
     spec:
-      {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+      {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
       initContainers:
         - name: update-ca-certificates
-          image: "{{ $server.image.repository }}:{{ $server.image.tag | default .Chart.Version }}"
-          imagePullPolicy: {{ $server.image.pullPolicy }}
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -59,18 +58,18 @@ spec:
       volumes:
         - name: kitaru-config
           emptyDir: {}
-      {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+      {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
         - name: custom-certs
           projected:
             sources:
-            {{- range $server.certificates.customCAs }}
+            {{- range .Values.server.certificates.customCAs }}
             - secret:
                 name: {{ include "kitaru.fullname" $ }}-custom-ca-{{ .name }}
                 items:
                   - key: certificate
                     path: {{ .name }}.crt
             {{- end }}
-            {{- range $server.certificates.secretRefs }}
+            {{- range .Values.server.certificates.secretRefs }}
             - secret:
                 name: {{ .name }}
                 items:
@@ -80,47 +79,65 @@ spec:
         - name: ca-certificates
           emptyDir: {}
       {{- end }}
-      {{- if or (and $server.database.sslCa $server.database.sslCa.secretRef) (and $server.database.sslCert $server.database.sslCert.secretRef) (and $server.database.sslKey $server.database.sslKey.secretRef) }}
+      {{- if or .Values.server.database.sslCa .Values.server.database.sslCert .Values.server.database.sslKey }}
         - name: db-certs
           projected:
+            defaultMode: 0400
             sources:
-              {{- if and $server.database.sslCa $server.database.sslCa.secretRef }}
+              {{- if or (and .Values.server.database.sslCa .Values.server.database.sslCa.value) (and .Values.server.database.sslCert .Values.server.database.sslCert.value) (and .Values.server.database.sslKey .Values.server.database.sslKey.value) }}
               - secret:
-                  name: {{ $server.database.sslCa.secretRef.name }}
+                  name: {{ include "kitaru.fullname" . }}-db-certs
                   items:
-                    - key: {{ $server.database.sslCa.secretRef.key }}
-                      path: {{ $server.database.sslCa.secretRef.key }}
+                    {{- if and .Values.server.database.sslCa .Values.server.database.sslCa.value }}
+                    - key: ca.pem
+                      path: ca.pem
+                    {{- end }}
+                    {{- if and .Values.server.database.sslCert .Values.server.database.sslCert.value }}
+                    - key: client-cert.pem
+                      path: client-cert.pem
+                    {{- end }}
+                    {{- if and .Values.server.database.sslKey .Values.server.database.sslKey.value }}
+                    - key: client-key.pem
+                      path: client-key.pem
+                    {{- end }}
               {{- end }}
-              {{- if and $server.database.sslCert $server.database.sslCert.secretRef }}
+              {{- if and .Values.server.database.sslCa .Values.server.database.sslCa.secretRef }}
               - secret:
-                  name: {{ $server.database.sslCert.secretRef.name }}
+                  name: {{ .Values.server.database.sslCa.secretRef.name }}
                   items:
-                    - key: {{ $server.database.sslCert.secretRef.key }}
-                      path: {{ $server.database.sslCert.secretRef.key }}
+                    - key: {{ .Values.server.database.sslCa.secretRef.key }}
+                      path: ca.pem
               {{- end }}
-              {{- if and $server.database.sslKey $server.database.sslKey.secretRef }}
+              {{- if and .Values.server.database.sslCert .Values.server.database.sslCert.secretRef }}
               - secret:
-                  name: {{ $server.database.sslKey.secretRef.name }}
+                  name: {{ .Values.server.database.sslCert.secretRef.name }}
                   items:
-                    - key: {{ $server.database.sslKey.secretRef.key }}
-                      path: {{ $server.database.sslKey.secretRef.key }}
+                    - key: {{ .Values.server.database.sslCert.secretRef.key }}
+                      path: client-cert.pem
+              {{- end }}
+              {{- if and .Values.server.database.sslKey .Values.server.database.sslKey.secretRef }}
+              - secret:
+                  name: {{ .Values.server.database.sslKey.secretRef.name }}
+                  items:
+                    - key: {{ .Values.server.database.sslKey.secretRef.key }}
+                      path: client-key.pem
               {{- end }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ $server.image.repository }}:{{ $server.image.tag | default .Chart.Version }}"
-          imagePullPolicy: {{ $server.image.pullPolicy }}
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           args:
             - uvicorn
             - kitaru.server.api.main:app
             - --factory
             - --no-server-header
-            {{ if $server.proxyHeaders.enabled }}
+            {{ if .Values.server.proxyHeaders.enabled }}
             - --proxy-headers
             - --forwarded-allow-ips
-            - {{ $server.proxyHeaders.forwardedAllowIPs | quote }}
+            - {{ .Values.server.proxyHeaders.forwardedAllowIPs | quote }}
             {{ else }}
             - --no-proxy-headers
             {{ end }}
@@ -129,14 +146,14 @@ spec:
             - --host
             - "0.0.0.0"
             - --log-level
-            - {{ default "info" $server.logging.verbosity | lower | quote }}
+            - {{ default "info" .Values.server.logging.verbosity | lower | quote }}
           volumeMounts:
-          {{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+          {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
             - name: ca-certificates
               mountPath: /updated-certs
               readOnly: true
           {{- end }}
-          {{- if or (and $server.database.sslCa $server.database.sslCa.secretRef) (and $server.database.sslCert $server.database.sslCert.secretRef) (and $server.database.sslKey $server.database.sslKey.secretRef) }}
+          {{- if or .Values.server.database.sslCa .Values.server.database.sslCert .Values.server.database.sslKey }}
             - name: db-certs
               mountPath: /dbcerts
               readOnly: true
@@ -148,21 +165,21 @@ spec:
             - name: {{ $k }}
               value: {{ $v | quote }}
             {{- end }}
-            {{- if $server.database.passwordSecretRef }}
+            {{- if .Values.server.database.passwordSecretRef }}
             - name: KITARU_SERVER_DB_PWD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $server.database.passwordSecretRef.name }}
-                  key: {{ $server.database.passwordSecretRef.key }}
+                  name: {{ .Values.server.database.passwordSecretRef.name }}
+                  key: {{ .Values.server.database.passwordSecretRef.key }}
             {{- end }}
-            {{- if $server.database.encryptionKeySecretRef }}
+            {{- if .Values.server.database.encryptionKeySecretRef }}
             - name: KITARU_SERVER_SECRET_ENCRYPTION_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ $server.database.encryptionKeySecretRef.name }}
-                  key: {{ $server.database.encryptionKeySecretRef.key }}
+                  name: {{ .Values.server.database.encryptionKeySecretRef.name }}
+                  key: {{ .Values.server.database.encryptionKeySecretRef.key }}
             {{- end }}
-            {{- range $server.environmentSecretKeyRefs }}
+            {{- range .Values.server.environmentSecretKeyRefs }}
             - name: {{ .name }}
               valueFrom:
                 secretKeyRef:

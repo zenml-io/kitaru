@@ -35,24 +35,24 @@ db_user: {{ .Kitaru.database.username | quote }}
 {{- if .Kitaru.database.database }}
 db_name: {{ .Kitaru.database.database | quote }}
 {{- end }}
-{{- if .Kitaru.database.ssl }}
-db_ssl: {{ .Kitaru.database.ssl | quote }}
+db_ssl_mode: {{ .Kitaru.database.sslMode | default "disable" | quote }}
+{{- if .Kitaru.database.sslCa }}
+db_ssl_ca: /dbcerts/ca.pem
 {{- end }}
-{{- if and .Kitaru.database.sslCa .Kitaru.database.sslCa.secretRef }}
-db_ssl_ca: /dbcerts/{{ .Kitaru.database.sslCa.secretRef.key }}
+{{- if .Kitaru.database.sslCert }}
+db_ssl_cert: /dbcerts/client-cert.pem
 {{- end }}
-{{- if and .Kitaru.database.sslCert .Kitaru.database.sslCert.secretRef }}
-db_ssl_cert: /dbcerts/{{ .Kitaru.database.sslCert.secretRef.key }}
+{{- if .Kitaru.database.sslKey }}
+db_ssl_key: /dbcerts/client-key.pem
 {{- end }}
-{{- if and .Kitaru.database.sslKey .Kitaru.database.sslKey.secretRef }}
-db_ssl_key: /dbcerts/{{ .Kitaru.database.sslKey.secretRef.key }}
-{{- end }}
-db_ssl_verify_server_cert: {{ .Kitaru.database.sslVerifyServerCert | quote }}
 {{- if .Kitaru.database.poolSize }}
 db_pool_size: {{ .Kitaru.database.poolSize | quote }}
 {{- end }}
 {{- if .Kitaru.database.maxOverflow }}
 db_max_overflow: {{ .Kitaru.database.maxOverflow | quote }}
+{{- end }}
+{{- if .Kitaru.database.poolTimeoutSeconds }}
+db_pool_timeout_seconds: {{ .Kitaru.database.poolTimeoutSeconds | quote }}
 {{- end }}
 
 {{- if .Kitaru.pro.enabled }}
@@ -144,15 +144,6 @@ Returns:
 {{- if .Kitaru.database.password }}
 db_pwd: {{ .Kitaru.database.password | quote }}
 {{- end }}
-{{- if and .Kitaru.database.sslCa .Kitaru.database.sslCa.value }}
-ssl_ca: {{ .Kitaru.database.sslCa.value | quote }}
-{{- end }}
-{{- if and .Kitaru.database.sslCert .Kitaru.database.sslCert.value }}
-ssl_cert: {{ .Kitaru.database.sslCert.value | quote }}
-{{- end }}
-{{- if and .Kitaru.database.sslKey .Kitaru.database.sslKey.value }}
-ssl_key: {{ .Kitaru.database.sslKey.value | quote }}
-{{- end }}
 {{- end }}
 
 
@@ -170,8 +161,7 @@ Returns:
   the server (i.e. keys starting with `KITARU_SERVER_`).
 */}}
 {{- define "kitaru.serverEnvVariables" -}}
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
-{{ $kitaru := dict "Kitaru" $server }}
+{{ $kitaru := dict "Kitaru" .Values.server }}
 {{- range $k, $v := include "kitaru.serverConfigurationAttrs" $kitaru | fromYaml }}
 KITARU_SERVER_{{ $k | upper }}: {{ $v | quote }}
 {{- end }}
@@ -191,8 +181,7 @@ Returns:
   the server (i.e. keys starting with `KITARU_SERVER_`).
 */}}
 {{- define "kitaru.storeSecretEnvVariables" -}}
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
-{{ $kitaru := dict "Kitaru" $server }}
+{{ $kitaru := dict "Kitaru" .Values.server }}
 {{- range $k, $v := include "kitaru.serverSecretConfigurationAttrs" $kitaru | fromYaml }}
 KITARU_SERVER_{{ $k | upper }}: {{ $v | quote }}
 {{- end }}
@@ -204,21 +193,18 @@ Base environment variables for Kitaru deployments.
 Returns a dictionary with common configuration env vars.
 */}}
 {{- define "kitaru.baseEnvVariables" -}}
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
-{{- $logging := $server.logging | default dict -}}
 NODE_OPTIONS: "--use-openssl-ca"
-{{- if or $server.certificates.customCAs $server.certificates.secretRefs }}
+{{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
 REQUESTS_CA_BUNDLE: "/updated-certs/ca-certificates.crt"
 SSL_CERT_FILE: "/updated-certs/ca-certificates.crt"
 {{- end }}
-{{- end }}
 
-{{- if $server.proxy.enabled }}
-HTTP_PROXY: {{ $server.proxy.httpProxy | quote }}
-HTTPS_PROXY: {{ $server.proxy.httpsProxy | quote }}
+{{- if .Values.server.proxy.enabled }}
+HTTP_PROXY: {{ .Values.server.proxy.httpProxy | quote }}
+HTTPS_PROXY: {{ .Values.server.proxy.httpsProxy | quote }}
 NO_PROXY: {{ include "kitaru.noProxyList" . | quote }}
-http_proxy: {{ $server.proxy.httpProxy | quote }}
-https_proxy: {{ $server.proxy.httpsProxy | quote }}
+http_proxy: {{ .Values.server.proxy.httpProxy | quote }}
+https_proxy: {{ .Values.server.proxy.httpsProxy | quote }}
 no_proxy: {{ include "kitaru.noProxyList" . | quote }}
 {{- end }}
 {{- end }}
@@ -239,9 +225,8 @@ Returns:
   A dictionary of environment variables ready to be converted to name/value pairs.
 */}}
 {{- define "kitaru.envVariables" -}}
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
 {{- $envVars := include "kitaru.baseEnvVariables" . | fromYaml | default dict }}
 {{- $envVars = merge (include "kitaru.serverEnvVariables" . | fromYaml | default dict) $envVars }}
-{{- $envVars = merge ($server.environment | default dict) $envVars }}
+{{- $envVars = merge (.Values.server.environment | default dict) $envVars }}
 {{ $envVars | toYaml }}
 {{- end }}

@@ -235,10 +235,15 @@ server:
     # database should be created manually before installing the helm chart.
     database: kitaru
 
-    # Set to true to enable SSL for the PostgreSQL database. Defaults to false.
-    # NOTE: setting any of the SSL certificate options (sslCa, sslCert, sslKey)
-    # will automatically set this option to true.
-    ssl: false
+    # PostgreSQL SSL mode. Supported values are:
+    #
+    # disable     - Do not use TLS.
+    # require     - Use TLS without verifying the server certificate.
+    # verify-ca   - Verify the server certificate against sslCa without
+    #               verifying its hostname.
+    # verify-full - Verify the server certificate and hostname. Uses sslCa when
+    #               configured, otherwise the system CA trust store.
+    sslMode: disable
 
     # The PostgreSQL SSL CA certificate. Required for SSL enabled authentication if
     # the CA certificate is not part of the certificates shipped with the
@@ -284,14 +289,11 @@ server:
       #   name: client-key
       #   key: client-key.pem
 
-    # Set to true to verify the identity of the server against the provided
-    # server certificate. Defaults to false.
-    sslVerifyServerCert: false
-
-    # Connection pool settings.
-    #
-    # poolSize: 20
-    # maxOverflow: 20
+    # SQLAlchemy connection pool settings.
+    poolSize: 5
+    maxOverflow: 10
+    # Maximum number of seconds to wait for a connection before timing out.
+    poolTimeoutSeconds: 30
 
   # Logging settings for the Kitaru server container.
   logging:
@@ -363,7 +365,7 @@ server:
   ingress:
     enabled: true
     className: "nginx"
-    annotations:
+    annotations: {}
       # nginx.ingress.kubernetes.io/ssl-redirect: "true"
       # nginx.ingress.kubernetes.io/rewrite-target: /$1
       # kubernetes.io/ingress.class: nginx

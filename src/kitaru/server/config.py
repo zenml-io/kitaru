@@ -13,11 +13,22 @@
 #  permissions and limitations under the License.
 """Server configuration via environment variables."""
 
+from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 from typing import Self
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class DatabaseSSLMode(StrEnum):
+    """PostgreSQL SSL connection mode."""
+
+    DISABLE = "disable"
+    REQUIRE = "require"
+    VERIFY_CA = "verify-ca"
+    VERIFY_FULL = "verify-full"
 
 
 class Settings(BaseSettings):
@@ -53,6 +64,13 @@ class Settings(BaseSettings):
     DB_PWD: str = "password"
     DB_NAME: str = "kitaru"
     DATABASE_URL: str | None = None
+    DB_SSL_MODE: DatabaseSSLMode = DatabaseSSLMode.DISABLE
+    DB_SSL_CA: str | None = None
+    DB_SSL_CERT: str | None = None
+    DB_SSL_KEY: str | None = None
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+    DB_POOL_TIMEOUT_SECONDS: float = 30.0
 
     @model_validator(mode="after")
     def validate_database_settings(self) -> Self:
@@ -67,6 +85,29 @@ class Settings(BaseSettings):
         """
         if not self.DB_HOST and not self.DATABASE_URL:
             raise ValueError("Set KITARU_SERVER_DB_HOST or KITARU_SERVER_DATABASE_URL")
+
+        ssl_paths = (self.DB_SSL_CA, self.DB_SSL_CERT, self.DB_SSL_KEY)
+        if self.DB_SSL_MODE is DatabaseSSLMode.DISABLE and any(ssl_paths):
+            raise ValueError(
+                "Database SSL certificates cannot be configured when "
+                "KITARU_SERVER_DB_SSL_MODE=disable"
+            )
+        if bool(self.DB_SSL_CERT) != bool(self.DB_SSL_KEY):
+            raise ValueError(
+                "KITARU_SERVER_DB_SSL_CERT and KITARU_SERVER_DB_SSL_KEY "
+                "must be set together"
+            )
+        if self.DB_SSL_MODE is DatabaseSSLMode.VERIFY_CA and not self.DB_SSL_CA:
+            raise ValueError(
+                "Set KITARU_SERVER_DB_SSL_CA when KITARU_SERVER_DB_SSL_MODE=verify-ca"
+            )
+        for setting_name, path in (
+            ("KITARU_SERVER_DB_SSL_CA", self.DB_SSL_CA),
+            ("KITARU_SERVER_DB_SSL_CERT", self.DB_SSL_CERT),
+            ("KITARU_SERVER_DB_SSL_KEY", self.DB_SSL_KEY),
+        ):
+            if path and not Path(path).is_file():
+                raise ValueError(f"{setting_name} does not exist: {path}")
         return self
 
 

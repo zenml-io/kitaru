@@ -1,14 +1,12 @@
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
-{{- if $server.ingress.enabled -}}
+{{- if .Values.server.ingress.enabled -}}
 {{- $fullName := include "kitaru.fullname" . -}}
-{{- $svcPort := $server.service.port -}}
-{{- if and $server.ingress.className (not (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion)) }}
-  {{- if not (hasKey $server.ingress.annotations "kubernetes.io/ingress.class") }}
-  {{- $_ := set $server.ingress.annotations "kubernetes.io/ingress.class" $server.ingress.className}}
+{{- if and .Values.server.ingress.className (not (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion)) }}
+  {{- if not (hasKey .Values.server.ingress.annotations "kubernetes.io/ingress.class") }}
+  {{- $_ := set .Values.server.ingress.annotations "kubernetes.io/ingress.class" .Values.server.ingress.className}}
   {{- end }}
 {{- end }}
-{{- if and $server.ingress.tls.enabled (eq $server.ingress.className "nginx") }}
-  {{- $_ := set $server.ingress.annotations "nginx.ingress.kubernetes.io/ssl-redirect" "true"}}
+{{- if and .Values.server.ingress.tls.enabled (eq .Values.server.ingress.className "nginx") }}
+  {{- $_ := set .Values.server.ingress.annotations "nginx.ingress.kubernetes.io/ssl-redirect" "true"}}
 {{- end }}
 
 {{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
@@ -23,24 +21,24 @@ metadata:
   name: {{ $fullName }}
   labels:
     {{- include "kitaru.labels" . | nindent 4 }}
-  {{- with $server.ingress.annotations }}
+  {{- with .Values.server.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- if and $server.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
-  ingressClassName: {{ $server.ingress.className }}
+  {{- if and .Values.server.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
+  ingressClassName: {{ .Values.server.ingress.className }}
   {{- end }}
-  {{- if $server.ingress.tls.enabled }}
+  {{- if .Values.server.ingress.tls.enabled }}
   tls:
     - hosts:
-        - {{ $server.ingress.host | quote }}
-      secretName: {{ $server.ingress.tls.secretName }}
+        - {{ .Values.server.ingress.host | quote }}
+      secretName: {{ .Values.server.ingress.tls.secretName }}
   {{- end }}
   rules:
     - http:
         paths:
-          - path: {{ $server.ingress.path }}
+          - path: {{ .Values.server.ingress.path }}
             {{- if semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion }}
             pathType: Prefix
             {{- end }}
@@ -49,12 +47,12 @@ spec:
               service:
                 name: {{ $fullName }}
                 port:
-                  number: {{ $svcPort }}
+                  number: {{ .Values.server.service.port }}
               {{- else }}
               serviceName: {{ $fullName }}
-              servicePort: {{ $svcPort }}
+              servicePort: {{ .Values.server.service.port }}
               {{- end }}
-      {{- if $server.ingress.host }}
-      host: {{ $server.ingress.host | quote }}
+      {{- if .Values.server.ingress.host }}
+      host: {{ .Values.server.ingress.host | quote }}
       {{- end }}
 {{- end }}

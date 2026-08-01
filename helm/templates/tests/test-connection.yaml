@@ -1,4 +1,3 @@
-{{- $server := include "kitaru.serverValues" . | fromYaml -}}
 apiVersion: v1
 kind: Pod
 metadata:
@@ -12,5 +11,5 @@ spec:
     - name: wget
       image: busybox
       command: ['wget']
-      args: ['{{ include "kitaru.fullname" . }}:{{ $server.service.port }}']
+      args: ['{{ include "kitaru.fullname" . }}:{{ .Values.server.service.port }}']
   restartPolicy: Never

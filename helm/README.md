@@ -25,6 +25,49 @@ This chart offers a multitude of configuration options. For detailed
 information, check the default [`values.yaml`](values.yaml) file. For full
 details of the configuration options, refer to the [Kitaru documentation](https://docs.zenml.io/getting-started/deploying-kitaru/deploy-with-helm).
 
+### PostgreSQL TLS
+
+Configure PostgreSQL TLS with `server.database.sslMode`. Supported modes are
+`disable`, `require`, `verify-ca`, and `verify-full`. The `verify-full` mode
+uses the system CA trust store unless `sslCa` supplies a custom CA.
+
+Certificates can be supplied inline:
+
+```yaml
+server:
+  database:
+    sslMode: verify-full
+    sslCa:
+      value: |
+        -----BEGIN CERTIFICATE-----
+        ...
+        -----END CERTIFICATE-----
+```
+
+For production deployments, referencing an existing Kubernetes Secret avoids
+placing certificate material in Helm values:
+
+```yaml
+server:
+  database:
+    sslMode: verify-full
+    sslCa:
+      secretRef:
+        name: postgres-ca
+        key: ca.crt
+    sslCert:
+      secretRef:
+        name: postgres-client
+        key: tls.crt
+    sslKey:
+      secretRef:
+        name: postgres-client
+        key: tls.key
+```
+
+`sslCert` and `sslKey` configure mutual TLS and must be supplied together. For
+each certificate, configure either `value` or `secretRef`, but not both.
+
 ### Custom CA Certificates
 
 If you need to connect to services using HTTPS with certificates signed by custom Certificate Authorities (e.g., self-signed certificates), you can configure custom CA certificates. There are two ways to provide custom CA certificates:
@@ -84,23 +127,6 @@ You can add additional exclusions using the `additionalNoProxy` list. The NO_PRO
 - IPv4 ranges in CIDR notation (e.g., "10.0.0.0/8")
 - IPv6 addresses (e.g., "::1")
 - IPv6 ranges in CIDR notation (e.g., "fe80::/10")
-
-
-### Server Observability
-
-You can configure server log output and OpenTelemetry export with dedicated Helm values:
-
-```yaml
-server:
-  logging:
-    verbosity: "info" # debug, info, warning, error, or critical
-    format: "console" # console, json, or a custom %-style format
-    colorsDisabled: false
-```
-
-`server.logging.verbosity` sets the Kitaru server log level. The legacy `server.debug` option is still supported for compatibility and forces the server log level to `debug` when set to `true`, but new deployments should use `server.logging.verbosity` instead.
-
-`server.logging.format` controls the server container stdout/stderr output. It can be set to `console`, `json`, or a valid Python `%`-style logging format string. The older `ZENML_LOGGING_FORMAT` environment variable is still supported through `server.environment` as a deprecated alias but will be removed in a future version.
 
 ## Telemetry
 
