@@ -321,6 +321,31 @@ async def test_sweep_requeue_unlinks_the_result_session(
     assert reloaded_session.task_id is None
 
 
+async def test_sweep_stale_tasks_works_outside_the_claim_path() -> None:
+    """sweep_stale_tasks abandons a stale task and settles its job, called directly.
+
+    claim_tasks calls the same method, this proves it also works standalone
+    so a caller outside the claim path, such as a background sweep loop, can
+    reuse it without duplicating the sweep logic.
+    """
+    services = build_job_and_task_services(policy=TaskPolicy(retry_limit=1))
+    job_id = await _pending_job(services)
+    task = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+
+    stored = await services.tasks.get(task.id)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+
+    await services.task_service.sweep_stale_tasks(datetime.now(UTC))
+
+    stored = await services.tasks.get(task.id)
+    assert stored.status is TaskStatus.ABANDONED
+    job = await services.jobs.get(job_id)
+    assert job.status.value == "failed"
+
+
 async def test_heartbeat_stamps_owned_reported_tasks(
     services: JobAndTaskServices,
 ) -> None:

@@ -63,6 +63,7 @@ from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
+from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -192,9 +193,11 @@ def create_app(settings: APISettings) -> FastAPI:
                     settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
                 )
                 await session.commit()
+        sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
         finally:
+            await stop_task_sweeper(sweep_task)
             await analytics.aclose()
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()
