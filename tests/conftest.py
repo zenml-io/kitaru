@@ -96,6 +96,7 @@ from kitaru.server.application.services.experiment_service import ExperimentServ
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.base import ListFilter
 from kitaru.server.database.service import DatabaseService
@@ -1024,10 +1025,9 @@ def mint_worker_token(
     Returns:
         Encoded worker bearer token.
     """
-    token, _ = auth_service.issue_worker_token(
+    return auth_service.issue_worker_token(
         worker_id=worker_id, account_id=account.id
-    )
-    return token
+    ).token
 
 
 class FakeDeviceRepository:
@@ -5033,15 +5033,19 @@ def build_job_and_task_services(
         dispatcher=EventDispatcher(),
     )
     task_policy = policy if policy is not None else TaskPolicy()
-    task_service = TaskService(
-        repository=substrate.tasks,
-        worker_repository=substrate.workers,
-        session_repository=substrate.sessions,
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
+        policy=task_policy,
+    )
+    task_service = TaskService(
+        repository=substrate.tasks,
+        worker_repository=substrate.workers,
+        session_repository=substrate.sessions,
         job_repository=substrate.jobs,
+        spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,
     )
@@ -5155,15 +5159,19 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         task_repository=tasks, job_repository=jobs, dispatcher=dispatcher
     )
     task_policy = policy if policy is not None else TaskPolicy()
-    task_service = TaskService(
-        repository=tasks,
-        worker_repository=workers,
-        session_repository=sessions,
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
         blob_repository=blobs,
         secret_repository=secrets,
+        policy=task_policy,
+    )
+    task_service = TaskService(
+        repository=tasks,
+        worker_repository=workers,
+        session_repository=sessions,
         job_repository=jobs,
+        spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,
     )

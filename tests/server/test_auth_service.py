@@ -193,13 +193,13 @@ async def test_login_with_password(
     """Issue a session token for valid password credentials."""
     account = await create_account(account_repository)
 
-    token, expires_at, csrf_token = await service.login_with_password("alice", "secret")
-    assert csrf_token is None
-    decoded = JWTToken.decode(token, local_settings())
+    issued = await service.login_with_password("alice", "secret")
+    assert issued.csrf_token is None
+    decoded = JWTToken.decode(issued.token, local_settings())
     assert decoded.subject.account_id == account.id
-    assert decoded.expires_at == expires_at.replace(microsecond=0)
+    assert decoded.expires_at == issued.expires_at.replace(microsecond=0)
 
-    context = await service.resolve(token)
+    context = await service.resolve(issued.token)
     assert context.account.id == account.id
 
 
@@ -228,7 +228,7 @@ async def test_resolved_token_with_deactivated_account(
 ) -> None:
     """Reject a session token whose account was deactivated after issuance."""
     account = await create_account(account_repository)
-    token, _, _ = await service.login_with_password("alice", "secret")
+    token = (await service.login_with_password("alice", "secret")).token
 
     stored = await account_repository.get(account.id)
     stored.update_active(False)
@@ -252,15 +252,15 @@ async def test_csrf_token(
     )
     await create_account(account_repository)
 
-    token, _, csrf_token = await service.login_with_password("alice", "secret")
-    assert csrf_token is not None
+    issued = await service.login_with_password("alice", "secret")
+    assert issued.csrf_token is not None
 
-    await service.resolve(token, csrf_token=csrf_token, from_cookie=True)
+    await service.resolve(issued.token, csrf_token=issued.csrf_token, from_cookie=True)
 
     with pytest.raises(AuthenticationError, match="Missing or invalid CSRF token"):
-        await service.resolve(token, from_cookie=True)
+        await service.resolve(issued.token, from_cookie=True)
     with pytest.raises(AuthenticationError, match="Missing or invalid CSRF token"):
-        await service.resolve(token, csrf_token="wrong", from_cookie=True)
+        await service.resolve(issued.token, csrf_token="wrong", from_cookie=True)
 
 
 async def test_csrf_token_not_required_for_header_credentials(
@@ -277,7 +277,7 @@ async def test_csrf_token_not_required_for_header_credentials(
     )
     await create_account(account_repository)
 
-    token, _, _ = await service.login_with_password("alice", "secret")
+    token = (await service.login_with_password("alice", "secret")).token
 
     context = await service.resolve(token)
     assert context.account.name == "alice"
@@ -290,7 +290,7 @@ async def test_worker_token_resolves_to_a_worker_principal(
     """Resolve a worker token into a worker principal scoped to its account."""
     account = await create_account(account_repository)
     worker_id = uuid.uuid4()
-    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+    token = service.issue_worker_token(worker_id=worker_id, account_id=account.id).token
 
     context = await service.resolve(token)
 
@@ -314,8 +314,8 @@ async def test_task_token_resolves_to_a_task_principal(
             worker_id=worker_id,
             account_id=account.id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     context = await service.resolve(token)
 
@@ -341,8 +341,8 @@ async def test_task_token_carries_input_session_id(
             account_id=account.id,
             input_session_id=input_session_id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     context = await service.resolve(token)
 
@@ -363,8 +363,8 @@ async def test_task_token_input_session_id_defaults_to_none(
             worker_id=uuid.uuid4(),
             account_id=account.id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     context = await service.resolve(token)
 
@@ -378,7 +378,9 @@ async def test_worker_token_rejects_a_deactivated_account(
 ) -> None:
     """Reject a worker token whose account was deactivated after issuance."""
     account = await create_account(account_repository, active=False)
-    token, _ = service.issue_worker_token(worker_id=uuid.uuid4(), account_id=account.id)
+    token = service.issue_worker_token(
+        worker_id=uuid.uuid4(), account_id=account.id
+    ).token
 
     with pytest.raises(AuthenticationError, match="Invalid worker token"):
         await service.resolve(token)
@@ -397,8 +399,8 @@ async def test_task_token_rejects_a_deactivated_account(
             worker_id=uuid.uuid4(),
             account_id=account.id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     with pytest.raises(AuthenticationError, match="Invalid task token"):
         await service.resolve(token)
@@ -418,7 +420,7 @@ async def test_try_resolve_worker_or_task_resolves_a_worker_token(
     )
     account = await create_account(account_repository)
     worker_id = uuid.uuid4()
-    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+    token = service.issue_worker_token(worker_id=worker_id, account_id=account.id).token
 
     context = await service.try_resolve_worker_or_task(token)
 
@@ -448,8 +450,8 @@ async def test_try_resolve_worker_or_task_resolves_a_task_token(
             worker_id=uuid.uuid4(),
             account_id=account.id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     context = await service.try_resolve_worker_or_task(token)
 
@@ -471,7 +473,7 @@ async def test_try_resolve_worker_or_task_returns_none_for_an_account_token(
         password_hasher=FakePasswordHasher(),
     )
     await create_account(account_repository)
-    token, _, _ = await service.login_with_password("alice", "secret")
+    token = (await service.login_with_password("alice", "secret")).token
 
     assert await service.try_resolve_worker_or_task(token) is None
 
@@ -506,7 +508,7 @@ async def test_control_plane_scheme_resolves_a_worker_token_without_an_external_
     account = await create_account(account_repository)
     assert account.external_id is None
     worker_id = uuid.uuid4()
-    token, _ = service.issue_worker_token(worker_id=worker_id, account_id=account.id)
+    token = service.issue_worker_token(worker_id=worker_id, account_id=account.id).token
 
     context = await service.resolve(token)
 
@@ -536,8 +538,8 @@ async def test_control_plane_scheme_resolves_a_task_token_without_an_external_ac
             worker_id=uuid.uuid4(),
             account_id=account.id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
     context = await service.resolve(token)
 

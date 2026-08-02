@@ -38,6 +38,10 @@ from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
+from kitaru.server.application.services.plugin_resolution import (
+    resolve_plugin,
+    resolve_plugin_version,
+)
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled
@@ -294,11 +298,12 @@ class JobService:
         Returns:
             Created job.
         """
-        plugin = await self._plugins.get_by_name(PluginKind.IMPORTER, command.importer)
-        version = (
-            command.version if command.version is not None else plugin.latest_version
+        plugin = await resolve_plugin(
+            command.importer, PluginKind.IMPORTER, self._plugins
         )
-        plugin_version = await self._plugins.get_version(plugin.id, version)
+        plugin_version = await resolve_plugin_version(
+            plugin, command.version, self._plugins
+        )
         payload = await self._blobs.get_metadata(command.payload_blob_id)
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:

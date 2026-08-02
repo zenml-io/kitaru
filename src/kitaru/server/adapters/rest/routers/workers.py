@@ -84,15 +84,15 @@ async def register_worker(
         metadata=body.metadata,
         actor=actor,
     )
-    token, token_expires_at = auth_service.issue_worker_token(
+    issued = auth_service.issue_worker_token(
         worker_id=worker.id, account_id=actor.account.id
     )
     return WorkerRegistrationResponse(
         worker=worker_to_response(
             worker, datetime.now(UTC), settings.WORKER_LIVENESS_TIMEOUT_SECONDS
         ),
-        token=token,
-        token_expires_at=token_expires_at,
+        token=issued.token,
+        token_expires_at=issued.expires_at,
     )
 
 

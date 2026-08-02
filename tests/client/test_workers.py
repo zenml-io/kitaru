@@ -60,6 +60,7 @@ from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
@@ -111,8 +112,7 @@ def job_repository(task_repository: FakeTaskRepository) -> FakeJobRepository:
 @pytest.fixture
 async def account_token(auth_service: AuthService, account: Account) -> str:
     """Provide a bearer token authenticating as the fixture account."""
-    token, _ = auth_service.issue_token(AuthContext(account=account))
-    return token
+    return auth_service.issue_token(AuthContext(account=account)).token
 
 
 @pytest.fixture
@@ -132,17 +132,22 @@ async def api_client(
         job_repository=job_repository,
         dispatcher=EventDispatcher(),
     )
-    task_service = TaskService(
-        repository=task_repository,
-        worker_repository=worker_repository,
-        session_repository=FakeSessionRepository(),
+    task_policy = TaskPolicy()
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=FakeAgentVersionRepository(agents),
         plugin_repository=FakePluginRepository(),
         blob_repository=FakeBlobRepository(),
         secret_repository=FakeSecretRepository(),
+        policy=task_policy,
+    )
+    task_service = TaskService(
+        repository=task_repository,
+        worker_repository=worker_repository,
+        session_repository=FakeSessionRepository(),
         job_repository=job_repository,
+        spec_builder=spec_builder,
         transitions=transitions,
-        policy=TaskPolicy(),
+        policy=task_policy,
     )
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service

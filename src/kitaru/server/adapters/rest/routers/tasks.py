@@ -14,7 +14,6 @@
 """Task routes."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -36,7 +35,6 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize_task_only,
     authorize_with_task,
     authorize_worker_only,
-    get_app_settings,
     get_auth_service,
     get_task_service,
 )
@@ -47,7 +45,6 @@ from kitaru.server.adapters.rest.mapping.tasks import (
     task_to_response,
     task_update_to_command,
 )
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -90,7 +87,6 @@ async def claim_tasks(
     body: TaskClaimRequest,
     service: Annotated[TaskService, Depends(get_task_service)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
     actor: Annotated[WorkerAuthContext, Depends(authorize_worker_only)],
 ) -> TaskClaimResponse:
     """Claim pending tasks matching the worker's stored scope.
@@ -103,7 +99,6 @@ async def claim_tasks(
         body: Task claim request.
         service: Task service.
         auth_service: Authentication service for the current request.
-        settings: API settings for this process.
         actor: Caller context.
 
     Returns:
@@ -122,12 +117,8 @@ async def claim_tasks(
                 if isinstance(item.task, EvaluationTask)
                 else None,
             ),
-            expires_at=datetime.now(UTC)
-            + timedelta(
-                seconds=item.spec.timeout_seconds
-                + settings.TASK_TOKEN_EXPIRY_SLACK_SECONDS
-            ),
-        )
+            timeout_seconds=item.spec.timeout_seconds,
+        ).token
         for item in claimed
     }
     return claimed_tasks_to_response(claimed, tokens)

@@ -16,7 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import httpx
 import pytest
@@ -801,9 +801,9 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        worker_token, _ = auth_service.issue_worker_token(
+        worker_token = auth_service.issue_worker_token(
             worker_id=uuid.uuid4(), account_id=account.id
-        )
+        ).token
         response = await client.get(
             "/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
         )
@@ -816,8 +816,8 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
                 worker_id=uuid.uuid4(),
                 account_id=account.id,
             ),
-            expires_at=datetime.now(UTC) + timedelta(hours=1),
-        )
+            timeout_seconds=3600,
+        ).token
         response = await client.get(
             "/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
         )
@@ -874,8 +874,8 @@ def _task_token(
             account_id=account.id,
             input_session_id=input_session_id,
         ),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
-    )
+        timeout_seconds=3600,
+    ).token
 
 
 async def test_get_session_denies_a_task_token_for_another_tasks_session(

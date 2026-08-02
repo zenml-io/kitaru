@@ -28,7 +28,6 @@ from kitaru.server.adapters.auth.jwt import (
     TokenError,
     WorkerSubject,
 )
-from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 
 
@@ -56,9 +55,11 @@ def test_account_token_round_trips() -> None:
     """Encoding then decoding an account token recovers its claims."""
     settings = local_settings()
     account = Account(id=uuid.uuid4(), name="ann")
-    token = JWTToken.from_auth_context(AuthContext(account=account), csrf_token="csrf")
-    expires_at = token.expires(settings)
-    token = token.model_copy(update={"expires_at": expires_at})
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    token = JWTToken(
+        subject=AccountSubject(account_id=account.id, csrf_token="csrf"),
+        expires_at=expires_at,
+    )
 
     decoded = JWTToken.decode(token.encode(settings), settings)
 

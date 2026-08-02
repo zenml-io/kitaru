@@ -14,14 +14,13 @@
 """JWT support for Kitaru server sessions, workers, and tasks."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal, Self
 
 import jwt
 from pydantic import BaseModel, Field
 
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.utils import to_tz_aware
 
 DEFAULT_JWT_ALGORITHM = "HS256"
@@ -194,32 +193,7 @@ class JWTToken(BaseModel):
     """Kitaru server token for an account session, a worker, or a task attempt."""
 
     subject: TokenSubject
-    expires_at: datetime | None = None
-
-    @classmethod
-    def from_auth_context(
-        cls,
-        context: AuthContext,
-        csrf_token: str | None = None,
-        device_id: uuid.UUID | None = None,
-    ) -> Self:
-        """Build a local session token from an authenticated context.
-
-        Args:
-            context: Authenticated request context.
-            csrf_token: CSRF token associated with a browser cookie session.
-            device_id: Device the session was issued for.
-
-        Returns:
-            Token representation for the supplied context.
-        """
-        return cls(
-            subject=AccountSubject(
-                account_id=context.account.id,
-                csrf_token=csrf_token,
-                device_id=device_id,
-            )
-        )
+    expires_at: datetime
 
     @classmethod
     def decode(
@@ -298,27 +272,13 @@ class JWTToken(BaseModel):
             "aud": settings.JWT_AUDIENCE,
         }
         claims["iat"] = int(datetime.now(UTC).timestamp())
-        if self.expires_at is not None:
-            claims["exp"] = int(to_tz_aware(self.expires_at).timestamp())
-        else:
-            claims["exp"] = int(self.expires(settings).timestamp())
+        claims["exp"] = int(to_tz_aware(self.expires_at).timestamp())
 
         return jwt.encode(
             payload=claims,
             key=settings.JWT_SIGNING_KEY,
             algorithm=algorithm,
         )
-
-    def expires(self, settings: APISettings) -> datetime:
-        """Return the expiration time that will be used when encoding.
-
-        Args:
-            settings: Runtime settings controlling local session lifetime.
-
-        Returns:
-            Expiration time for the encoded local session.
-        """
-        return datetime.now(UTC) + timedelta(seconds=settings.JWT_LIFETIME_SECONDS)
 
     @staticmethod
     def _timestamp_claim(value: object) -> datetime:

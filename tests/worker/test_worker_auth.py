@@ -69,7 +69,7 @@ async def _registration_app() -> tuple[FastAPI, _CountingWorkerRepository, str]:
         api_key_repository=FakeApiKeyRepository(),
         password_hasher=FakePasswordHasher(),
     )
-    account_token, _ = auth_service.issue_token(AuthContext(account=account))
+    account_token = auth_service.issue_token(AuthContext(account=account)).token
     repository = _CountingWorkerRepository()
     app = create_app(local_settings())
     app.dependency_overrides[get_worker_service] = lambda: WorkerService(

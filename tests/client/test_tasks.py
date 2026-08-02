@@ -84,8 +84,7 @@ def services() -> JobAndTaskServices:
 @pytest.fixture
 async def account_token(auth_service: AuthService, account: Account) -> str:
     """Provide a bearer token authenticating as the fixture account."""
-    token, _ = auth_service.issue_token(AuthContext(account=account))
-    return token
+    return auth_service.issue_token(AuthContext(account=account)).token
 
 
 @pytest.fixture

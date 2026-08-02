@@ -124,6 +124,7 @@ from kitaru.server.application.services.session_node_service import (
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
@@ -452,19 +453,24 @@ def get_task_service(
     Returns:
         Task service bound to the SQL repositories.
     """
-    return TaskService(
-        repository=SQLTaskRepository(session),
-        worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session),
+    policy = get_task_policy(settings)
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+        policy=policy,
+    )
+    return TaskService(
+        repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        session_repository=SQLSessionRepository(session),
         job_repository=SQLJobRepository(session),
+        spec_builder=spec_builder,
         transitions=_build_task_transitions(session, analytics),
-        policy=get_task_policy(settings),
+        policy=policy,
     )
 
 
@@ -710,6 +716,24 @@ def get_auth_service(
     )
 
 
+def get_bearer_credential(request: Request) -> str | None:
+    """Read the bearer credential from the request authorization header.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Credential string without the ``Bearer`` prefix, or ``None``.
+    """
+    header = request.headers.get("Authorization")
+    if not header:
+        return None
+    scheme, _, credential = header.partition(" ")
+    if scheme.lower() != "bearer" or not credential:
+        return None
+    return credential
+
+
 def get_optional_bearer_credential(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
@@ -724,12 +748,10 @@ def get_optional_bearer_credential(
         Credential without the ``Bearer`` prefix, the CSRF token, and where
         the credential came from, or ``None``.
     """
-    header = request.headers.get("Authorization")
+    credential = get_bearer_credential(request)
     csrf_token = request.headers.get(CSRF_HEADER)
-    if header:
-        scheme, _, credential = header.partition(" ")
-        if scheme.lower() == "bearer" and credential:
-            return RequestCredential(credential, csrf_token, from_cookie=False)
+    if credential is not None:
+        return RequestCredential(credential, csrf_token, from_cookie=False)
     if settings.AUTH_COOKIE_NAME:
         cookie = request.cookies.get(settings.AUTH_COOKIE_NAME)
         if cookie:
