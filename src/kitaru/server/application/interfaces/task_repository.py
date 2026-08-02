@@ -41,6 +41,17 @@ class TaskRepository(Protocol):
         """
         ...
 
+    async def create_many(self, tasks: list[Task]) -> list[Task]:
+        """Persist many new tasks in one round trip.
+
+        Args:
+            tasks: Tasks to store.
+
+        Returns:
+            Stored tasks with timestamps set, in the same order.
+        """
+        ...
+
     async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:
         """Load a task by id.
 
@@ -180,6 +191,20 @@ class TaskRepository(Protocol):
         Returns:
             Plugin version ids of every completed evaluator task scoring the
             session.
+        """
+        ...
+
+    async def get_scored_evaluator_version_ids_many(
+        self, input_session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """Read the evaluator versions that already completed against each session.
+
+        Args:
+            input_session_ids: Ids of the scored sessions.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session, keyed by session id, sessions without one omitted.
         """
         ...
 

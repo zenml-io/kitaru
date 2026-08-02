@@ -52,7 +52,7 @@ from kitaru.server.application.services.agent_version_resolution import (
 from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
-from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
+from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
@@ -353,7 +353,7 @@ class ExperimentService:
         )
         return await paginate_all(
             lambda cursor: self._sessions.query(
-                SessionFilter(expression=membership, cursor=cursor)
+                SessionFilter(expression=membership, cursor=cursor, size=1000)
             )
         )
 
@@ -407,17 +407,16 @@ class ExperimentService:
         run.start(datetime.now(UTC))
         run = await self._experiment_runs.create(run)
 
-        for session in sessions:
-            await create_replay_pipeline(
-                baseline=session,
-                agent_version_id=agent_version.id,
-                config=config,
-                evaluate_baselines=command.evaluate_baselines,
-                experiment_run_id=run.id,
-                actor=actor,
-                replay_repository=self._replays,
-                job_repository=self._jobs,
-                task_repository=self._tasks,
-            )
+        await create_replay_pipelines(
+            baselines=sessions,
+            agent_version_id=agent_version.id,
+            config=config,
+            evaluate_baselines=command.evaluate_baselines,
+            experiment_run_id=run.id,
+            actor=actor,
+            replay_repository=self._replays,
+            job_repository=self._jobs,
+            task_repository=self._tasks,
+        )
         counts = await self._replays.count_by_status(run.id)
         return run, counts
