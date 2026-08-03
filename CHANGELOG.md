@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- CLI commands to create, inspect, update, and delete experiments with exact evaluator versions, inline replay configuration, sparse updates, and explicit destructive-delete confirmation.
+- CLI commands to create, inspect, update, and delete cohorts and immutable cohort versions, including exact version references and explicit destructive-delete confirmation.
 - CLI commands to import and inspect sessions and nodes, run bounded session evaluations with optional job waiting, and inspect stored evaluations.
 - The server sweeps stale tasks on a background interval, so tasks held by dead workers are requeued or abandoned even when no worker is polling for new tasks. Configured through `KITARU_SERVER_TASK_SWEEP_INTERVAL_SECONDS`, 0 disables the loop.
 - Agents and agent versions, managed via `/v1/agents` and `/v1/agent-versions`, where a version carries a run spec and its attached secrets.

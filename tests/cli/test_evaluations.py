@@ -37,7 +37,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import evaluations
+from kitaru.cli import evaluations, registration
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -281,6 +281,38 @@ class StubEvaluationClient:
             return self.owner.job
 
 
+async def test_resolve_evaluator_configs_pins_latest_and_returns_identities() -> None:
+    """Shared evaluator resolution returns concrete configs and typed version IDs."""
+    client = StubEvaluationClient()
+
+    configs, identities, version_ids = await registration.resolve_evaluator_configs(
+        client,
+        ["quality@latest", "judge@1"],
+        ['quality@latest={"threshold":0.7}'],
+    )
+
+    assert [config.model_dump(mode="json") for config in configs] == [
+        {"evaluator": "quality", "version": 2, "params": {"threshold": 0.7}},
+        {"evaluator": "judge", "version": 1, "params": {}},
+    ]
+    assert identities == [
+        {
+            "id": str(client.quality.id),
+            "name": "quality",
+            "version_id": str(client.quality_version.id),
+            "version": 2,
+        },
+        {
+            "id": str(client.judge.id),
+            "name": "judge",
+            "version_id": str(client.judge_version.id),
+            "version": 1,
+        },
+    ]
+    assert version_ids == [client.quality_version.id, client.judge_version.id]
+    assert all(isinstance(version_id, uuid.UUID) for version_id in version_ids)
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -457,6 +489,7 @@ async def test_duplicate_session_across_sources_is_rejected_before_mutation(
 @pytest.mark.parametrize(
     ("evaluators", "params"),
     [
+        ([], None),
         (["quality@2", "quality@2"], None),
         (["quality@2"], ["judge@1={}"]),
         (["quality@2"], ["quality@2={}", "quality@2={}"]),
