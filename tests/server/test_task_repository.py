@@ -196,6 +196,21 @@ async def test_create_and_get(setup: Setup) -> None:
     assert loaded == created
 
 
+async def test_create_many_round_trips_tasks(setup: Setup) -> None:
+    """Bulk-create persists every task in one round trip, timestamps set."""
+    tasks: list[Task] = [_agent_task(setup, labels={"i": str(i)}) for i in range(3)]
+    created = await setup.tasks.create_many(tasks)
+    assert [task.id for task in created] == [task.id for task in tasks]
+    assert all(task.created is not None for task in created)
+    loaded = await setup.tasks.get_many([task.id for task in tasks])
+    assert set(loaded) == {task.id for task in tasks}
+
+
+async def test_create_many_empty(setup: Setup) -> None:
+    """Bulk-create with no tasks is a no-op."""
+    assert await setup.tasks.create_many([]) == []
+
+
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown task id."""
     missing_id = uuid.uuid4()
@@ -226,6 +241,30 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
     )
     with pytest.raises(DuplicateEvaluationTask):
         await setup.tasks.create(duplicate)
+
+
+async def test_get_scored_evaluator_version_ids_many(setup: Setup) -> None:
+    """Group completed evaluator tasks by session id, other ids omitted."""
+    completed = EvaluationTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        input_session_id=setup.session_id,
+    )
+    completed.claim(setup.worker_id, datetime.now(UTC))
+    completed.start(datetime.now(UTC))
+    completed.complete([{"name": "exact_match", "score": 1.0}], datetime.now(UTC))
+    await setup.tasks.create(completed)
+
+    other_session_id = uuid.uuid4()
+    scored = await setup.tasks.get_scored_evaluator_version_ids_many(
+        [setup.session_id, other_session_id]
+    )
+    assert scored == {setup.session_id: {setup.plugin_version_id}}
+
+
+async def test_get_scored_evaluator_version_ids_many_empty(setup: Setup) -> None:
+    """An empty id list needs no lookup and returns no matches."""
+    assert await setup.tasks.get_scored_evaluator_version_ids_many([]) == {}
 
 
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:

@@ -170,6 +170,32 @@ async def test_create_sets_timestamps(setup: Setup) -> None:
     assert replay.updated is not None
 
 
+async def test_create_many_round_trips_replays(setup: Setup) -> None:
+    """Bulk-create persists every replay in one round trip, timestamps set."""
+    repository, owner_id, make_job_id, make_config_id, make_session_id = setup
+    config_id = await make_config_id()
+    replays = [
+        Replay(
+            owner_id=owner_id,
+            job_id=await make_job_id(),
+            replay_config_id=config_id,
+            baseline_session_id=await make_session_id(),
+        )
+        for _ in range(3)
+    ]
+    created = await repository.create_many(replays)
+    assert [replay.id for replay in created] == [replay.id for replay in replays]
+    assert all(replay.created is not None for replay in created)
+    for replay in created:
+        assert await repository.get(replay.id) == replay
+
+
+async def test_create_many_empty(setup: Setup) -> None:
+    """Bulk-create with no replays is a no-op."""
+    repository, *_ = setup
+    assert await repository.create_many([]) == []
+
+
 async def test_get(setup: Setup) -> None:
     """Load a stored replay by id."""
     repository, owner_id, make_job_id, make_config_id, make_session_id = setup

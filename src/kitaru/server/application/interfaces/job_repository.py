@@ -34,6 +34,17 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist many new jobs in one round trip.
+
+        Args:
+            jobs: Jobs to store.
+
+        Returns:
+            Stored jobs with timestamps set, in the same order.
+        """
+        ...
+
     async def get(self, job_id: uuid.UUID, exclusive: bool = False) -> Job:
         """Load a job by id.
 
