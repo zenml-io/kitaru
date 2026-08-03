@@ -15,7 +15,6 @@
 
 import uuid
 from typing import Self
-from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import SettingsConfigDict
@@ -131,23 +130,11 @@ class APISettings(Settings):
             and not self.JWT_SIGNING_KEY
         ):
             raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
-        if self.AUTH_SCHEME in (AuthScheme.CONTROL_PLANE, AuthScheme.CLOUD):
+        if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             if not self.CONTROL_PLANE_API_URL:
                 raise ValueError("Set KITARU_SERVER_CONTROL_PLANE_API_URL")
             if self.SERVER_ID == UNSET_SERVER_ID:
                 raise ValueError("Set KITARU_SERVER_SERVER_ID")
-        if self.AUTH_SCHEME is AuthScheme.CLOUD:
-            parsed_control_plane_url = urlparse(self.CONTROL_PLANE_API_URL)
-            if (
-                parsed_control_plane_url.scheme != "https"
-                or not parsed_control_plane_url.hostname
-                or parsed_control_plane_url.username
-                or parsed_control_plane_url.password
-            ):
-                raise ValueError(
-                    "KITARU_SERVER_CONTROL_PLANE_API_URL must be an HTTPS URL "
-                    "without embedded credentials"
-                )
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")
         return self

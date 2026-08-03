@@ -186,14 +186,11 @@ def create_app(settings: APISettings) -> FastAPI:
         if not settings.SKIP_DB_MIGRATION:
             await database.create_db_and_tables()
         app.state.database = database
-        if settings.AUTH_SCHEME in (AuthScheme.CONTROL_PLANE, AuthScheme.CLOUD):
+        if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             app.state.control_plane_client = ControlPlaneClient(settings)
-        # External identity providers own accounts under both managed schemes,
-        # so there is no local default account to fall back on.
-        if settings.AUTH_SCHEME not in (
-            AuthScheme.CONTROL_PLANE,
-            AuthScheme.CLOUD,
-        ):
+        # The control plane owns every account under its auth scheme, so there
+        # is no local default account to fall back on.
+        if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
             async for session in database.get_async_session():
                 account_service = AccountService(
                     repository=SQLAccountRepository(session),

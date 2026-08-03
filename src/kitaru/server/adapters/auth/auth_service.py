@@ -87,7 +87,7 @@ class AuthService:
             device_service: Device service backing the device authorization
                 grant.
             control_plane: Control plane authenticator, set when the server
-                runs the control plane or Cloud auth scheme.
+                runs the control plane auth scheme.
         """
         self._settings = settings
         self._account_repository = account_repository
@@ -115,9 +115,7 @@ class AuthService:
         Returns:
             Request context accepted by this server.
         """
-        if self._settings.AUTH_SCHEME is AuthScheme.CLOUD:
-            context = await self._authenticate_control_plane(credential)
-        elif self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+        if self._settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             context = await self._resolve_control_plane_credential(credential)
         elif credential.startswith(API_KEY_PREFIX):
             context = await self._authenticate_api_key(credential)

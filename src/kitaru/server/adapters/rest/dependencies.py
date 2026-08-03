@@ -688,10 +688,7 @@ def get_auth_service(
     account_repository = SQLAccountRepository(session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
-    if client is not None and settings.AUTH_SCHEME in (
-        AuthScheme.CONTROL_PLANE,
-        AuthScheme.CLOUD,
-    ):
+    if client is not None and settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
