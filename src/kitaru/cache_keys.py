@@ -18,7 +18,7 @@ import json
 from typing import Any
 
 
-def compute_tool_cache_key(tool_name: str, inputs: Any) -> str:
+def compute_tool_cache_key(tool_name: str, inputs: Any) -> str | None:
     """Compute the cache key for a tool call.
 
     Args:
@@ -26,9 +26,18 @@ def compute_tool_cache_key(tool_name: str, inputs: Any) -> str:
         inputs: Tool call inputs.
 
     Returns:
-        SHA-256 hex digest over the tool name and canonical JSON inputs.
+        SHA-256 hex digest over the tool name and canonical JSON inputs, or
+        None when the inputs cannot be canonicalized.
     """
-    canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":"))
+    if inputs is None:
+        # We cannot compute a useful cache key in this case
+        return None
+    try:
+        canonical = json.dumps(
+            inputs, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+    except (TypeError, ValueError):
+        return None
     digest = hashlib.sha256()
     digest.update(tool_name.encode("utf-8"))
     digest.update(b"\x00")
