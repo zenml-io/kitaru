@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h3 align="center">Debug your agents where they failed: in production.</h3>
+<h3 align="center">Traces you can run, not just read.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is a debugger for production AI agents: re-run what your agent already did against your real code — reproduce it exactly, fork it at the step that broke, diff what happens. No migration: wrap the harness you already use, or import runs your observability stack already captured. Self-hosted on your own infrastructure.
+  Kitaru (来る, "to arrive") is replay-based evals for AI agents. It records every agent run as a session — every model call, tool call, and decision — and replays it against your real code: tool calls answered from the recording, nothing touching real systems. Reproduce a run exactly. Fork it with one thing changed. Trust the diff. Open source, self-hosted, framework-agnostic.
 </p>
 
 <p align="center">
@@ -19,214 +19,168 @@
 <p align="center">
   <a href="https://docs.zenml.io/kitaru">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="https://docs.zenml.io/kitaru/getting-started/examples">Examples</a> &middot;
-  <a href="GETTING_STARTED.md">Getting Started Guide</a> &middot;
   <a href="https://www.zenml.io/roadmap">Roadmap</a> &middot;
   <a href="https://www.zenml.io/slack">Community</a>
 </p>
 
 ---
 
-<p align="center">
-  <img src="assets/dashboard.png" alt="The replay loop: import a failing trace, score it, replay it against your real code, fork the failing step, and verify the fix on every failure like it — the complaint becomes a regression test" width="720">
-</p>
-
 ## 🎯 Why Kitaru?
 
-Observability tells you what your agent did. Kitaru lets you do something
-about it — a debugger with a memory. Import the runs your observability
-stack already captured, or record natively, and your actual code runs
-again with the recording answering for everything the original run saw:
-the failure reproduces on your desk instead of in a dashboard. Every
-incident becomes a reproducible test case, "would the cheaper model have
-held?" becomes an experiment over real runs, and what arrives as a
-complaint leaves as a regression test.
+You can't unit-test an agent that writes to real systems — and your agent
+left the test suite behind the day it shipped. But it has been generating
+test cases ever since: every production run. The problem is that traces
+are transcripts. You read them, nod, and still can't answer the only
+question that matters: *would it have gone better with the new prompt,
+the cheaper model, the fix in my working tree?*
 
-- **Every run is a recording.** Each checkpoint output — model call, tool
-  call, decision — is written to your object store as a typed, versioned
-  artifact. Step through it, diff it against other runs, walk a bad output
-  back to the step that produced it.
-- **Replay is re-execution, not re-scoring.** An unchanged replay reproduces
-  the original exactly — and that faithful baseline is what lets you fork
-  from any checkpoint with one thing changed and trust that the diff is your
-  change, not replay noise.
-- **Bring runs from anywhere.** Wrap your existing agent for native
-  recording, or import what your observability stack already captured —
-  either way it lands as an execution you can replay. Kitaru needs your
-  code and a recording, not a migration.
-- **Decide with evidence.** Every recording includes the model traffic —
-  prompt, response, tokens, latency, estimated cost — so model and cost
-  decisions are read off what actually happened.
+Kitaru makes prod's past your test bench. A Kitaru trace re-executes:
+your actual code runs again, with the recording answering for everything
+the original run saw. Kitaru is a debugger with a memory, sitting beside
+your observability stack — traces tell you what happened; Kitaru re-runs
+it.
+
+- **Every run is a recording.** Wrap your agent once, or import the
+  traces you already collect — Langfuse stays your system of record.
+- **Replay is re-execution, not re-scoring.** An unchanged replay
+  reproduces the original; that faithful baseline is what makes the diff
+  of a fork trustworthy. Recorded tool calls are answered from the
+  recording, so no card gets refunded twice.
+- **Improvement is measured, not vibed.** Evaluators — compiled from your
+  domain expert's criteria, calibrated against human labels — score both
+  sides. Cohorts freeze the population. Experiments replay a cohort
+  against a change and show what improved and what regressed. The cohort
+  that caught a failure becomes the regression gate that keeps it caught.
 
 <a id="quick-start"></a>
 
 ## 🔁 The loop
 
 ```bash
-uv add "kitaru[pydantic-ai]"   # plain `kitaru` for the raw @flow/@checkpoint path
-kitaru init
+pip install "kitaru[cli,pydantic-ai]"
+docker compose up -d          # server, from this repo — or your team's server
+kitaru login --local
+kitaru agent register support-agent --command "python support.py"
 ```
 
-No decorators, no graph, no rewrite. Wrap the agent you already have and run
-it — Kitaru opens a flow around the call and records every model request and
-tool call as a checkpoint:
+One wrapper, no rewrite:
 
 ```python
-# agent.py
+# support.py
 from pydantic_ai import Agent
 from kitaru.adapters.pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-5.6", name="support-agent",
+agent = Agent("openai:gpt-5.4", name="support-agent",
               system_prompt="You resolve support tickets.")
 
 @agent.tool_plain
 def refund_payment(order_id: str) -> str:
     return payments.refund(order_id)  # your real API
 
-support = KitaruAgent(agent)
+support = KitaruAgent(agent, agent_id=AGENT_ID)
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-#### Already have traces? Import them
-
-You don't need to run the agent through Kitaru to get a recording. Traces
-recorded elsewhere land the same way — import them, and they become
-executions like any other:
+Already tracing elsewhere? Import instead of wrapping — same result:
 
 ```python
-from kitaru import KitaruClient
-
-client = KitaruClient()
-client.executions.import_traces("support-traces.jsonl", format="otel")
-client.executions.import_traces("langfuse://trace/8f3a91c2", name="ticket-48211")
+blob = await client.blobs.upload(Path("langfuse-export.jsonl").read_bytes())
+await client.imports.create(ImportCreateRequest(
+    importer="langfuse", agent_id=AGENT_ID, payload_blob_id=blob.id,
+))
 ```
 
-Every run is now an execution you can replay:
+Every run is now a session you can replay. Define what "good" means once
+(`kitaru evaluator register refund-check --script refund_check.py
+--entrypoint evaluate`), start a worker (`kitaru worker start`), and ask
+real questions of real traffic:
 
 ```python
-execution = client.executions.latest()
+# Baseline: re-run it unchanged, tools answered from the recording.
+# If this doesn't reproduce, stop — nothing forked from it can be trusted.
+await client.replays.create(ReplayCreateRequest(
+    baseline_session_id=session_id,
+    evaluators=[EvaluatorConfig(evaluator="refund-check")],
+    tool_policy=ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail")),
+    evaluate_baselines=True,
+))
 
-# Replay — start from the agent's first model call, and your real code
-# runs again against the recorded world. Unchanged, it reproduces the
-# original exactly. That's your baseline.
-client.executions.replay(execution.exec_id, at="support-agent_model_request")
+# Fork: would the cheaper model have held? Same run, one thing changed.
+await client.replays.create(ReplayCreateRequest(
+    baseline_session_id=session_id,
+    override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
+    evaluators=[EvaluatorConfig(evaluator="refund-check")],
+    tool_policy=ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail")),
+))
 
-# Fork — same execution, one thing changed: patch the recorded tool output.
-# What would the agent have done if the refund had succeeded?
-client.executions.replay(
-    execution.exec_id,
-    at="refund_payment_tool",
-    checkpoint_overrides={
-        "refund_payment_tool": {"output": "refund issued: $129.00"},
-    },
-)
-
-# Widen — the same call takes a list. Replay last week's runs against
-# the code in your working tree, and the cohort is a regression test.
-recent = client.executions.list(limit=20)
-client.executions.replay(
-    [e.exec_id for e in recent],
-    at="support-agent_model_request",
-    tag="pr-1234-check",
-)
+# Widen: freeze a week of traffic into a cohort, make the change an
+# experiment, and replay the population — pass rates and cost, both sides.
+run = await client.experiments.start_run(experiment_id, ExperimentRunCreateRequest(
+    cohort_version_id=cohort_version_id,
+    agent_version_id=agent_version_id,
+    evaluate_baselines=True,
+))
 ```
 
-Overrides can also swap the model on an LLM call, edit tool arguments, or
-swap a checkpoint's code — see
-[Debug and test on real runs](https://docs.zenml.io/kitaru/guides/replay-and-overrides).
-Explicit `@flow`/`@checkpoint` decorators are there when you want named
-replay boundaries or multi-turn workflows, and `flow.deploy()` ships a winner
-as a versioned deployment invoked by name — optional; stopping at the
-regression test is a fine place to stop.
+The full walkthrough — same support agent, same ticket — is the
+[Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart).
 
-### Durable execution (the plumbing)
+### Works with your agent SDK
 
-Recording a run means surviving one. Checkpoints double as crash recovery — a
-crash or pod eviction resumes from cached outputs instead of re-burning
-tokens. `kitaru.wait()` pauses a flow for hours or days until a human or
-webhook responds. `flow.deploy()` freezes versioned snapshots that consumers
-invoke by name, and `@checkpoint(runtime="isolated")` runs heavy steps in
-their own pod on Kubernetes, AWS, GCP, or Azure. This is how a faithful
-recording gets minted — not the reason you reach for Kitaru.
-
-### Works with your existing stack
-
-#### Wrap the agent you already have
-
-One line around your existing agent records every run natively. Adapters
-ship for PydanticAI, OpenAI Agents SDK, Claude Agent SDK, LangGraph,
-Gemini, and Google ADK — see the
-[adapter guides](https://docs.zenml.io/kitaru/adapters). For raw-Python
-agents, `@flow` and `@checkpoint` give you the same recording without an
-adapter.
-
-#### Import the traces you already collect
-
-Runs recorded elsewhere land as executions too — bring a Langfuse trace or
-a JSONL export and replay it like anything recorded natively.
-
-Your model, your tools, your framework, your telemetry — Kitaru wraps
-them, not the other way around.
+Adapters wrap your existing agent — your model, your tools, your
+framework. PydanticAI ships today
+(`kitaru.adapters.pydantic_ai.KitaruAgent`); more adapters are being
+ported to the v2 recording API. Any framework that traces to Langfuse can
+come in through the
+[import path](https://docs.zenml.io/kitaru/getting-started/import-your-traces)
+today, and the recording API itself is two client calls if you want to
+wire a framework directly.
 
 ### Drive it from your coding agent
 
-Everything in the loop is scriptable: each step has a CLI command
-(`kitaru executions list / logs / replay`) and an MCP tool, so Claude Code,
-Codex, or any MCP-capable agent can inspect executions, replay them, and read
-back the diff. Hook up the MCP server:
+Kitaru observes your production agents; your coding assistant is how you
+talk to Kitaru. Every step is scriptable — a CLI with `--output json`
+(`kitaru agent register`, `kitaru evaluator test`, `kitaru worker start`,
+`kitaru job watch`) and a typed async Python client — so Claude Code,
+Codex, or Cursor can triage a failing session, write the evaluator, run
+the experiment, and report the diff while you review.
 
-```bash
-uv add "kitaru[mcp]"
-claude mcp add kitaru -- kitaru-mcp   # or point any agent's MCP config at `kitaru-mcp`
-```
+### Self-hosted, by design
 
-Claude Code users can also install the
-[kitaru-skills](https://github.com/zenml-io/kitaru-skills) plugin —
-quickstart, workflow authoring, and adapter-migration skills:
-
-```
-/plugin marketplace add zenml-io/kitaru-skills
-/plugin install kitaru@kitaru
-```
-
-### Self-hosted, batteries included
-
-A single server on your own infra. Flows run on whichever **stack** you
-pick — local, Kubernetes, GCP, AWS, or Azure — with artifacts in your own
-S3/GCS/Azure Blob bucket, and a built-in UI to step through executions, diff
-replays, and approve human-in-the-loop wait steps. No mandatory SaaS control
+One FastAPI + Postgres server on your infrastructure — and no code
+executes on it. Replays, imports, and evaluations run on **workers** in
+your own environment: your virtualenv, your credentials, your network.
+Traces don't leave your systems. Apache 2.0, no mandatory SaaS control
 plane.
+
+## 🌱 Where ZenML fits
+
+Kitaru is built by the team behind [ZenML](https://zenml.io) and is a
+ZenML sub-brand. The split is clean: **ZenML runs agents durably; Kitaru
+replays and improves them.** Durable execution, checkpointed pipelines,
+and orchestration live in ZenML. Kitaru assumes your agent already runs
+somewhere — its job is what the recordings can teach you.
 
 ## 📚 Learn more
 
 | Resource | Description |
 |---|---|
-| [Getting Started Guide](GETTING_STARTED.md) | Full setup walkthrough with all examples |
-| [Documentation](https://docs.zenml.io/kitaru) | Complete reference and guides |
-| [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
-| [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
-| [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
-| [Drive it from your coding agent](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Query, replay, and diff executions from Claude Code, Codex, or Cursor via MCP |
-
-## 🌱 Origins
-
-Kitaru is built by the team behind [ZenML](https://zenml.io), drawing on five
-years of production orchestration experience (JetBrains, Adeo, Brevo). The
-orchestration primitives (stacks, artifacts, lineage) are purpose-rebuilt here
-for autonomous agents.
+| [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
+| [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the Langfuse history you already have |
+| [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Production traffic as your test suite, gated in CI |
+| [Run the Server](https://docs.zenml.io/kitaru/deploy) | Self-host for your team |
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for development
-setup, code style, and how to submit changes. The default branch is `develop` —
-all PRs should target it.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, code style, and how to submit changes. The default
+branch is `develop` — all PRs should target it.
 
 ## 💬 Community and support
 
-- [Discussions](https://www.zenml.io/slack) — ask questions, share ideas
+- [Community](https://www.zenml.io/slack) — ask questions, share ideas
 - [Issues](https://github.com/zenml-io/kitaru/issues) — report bugs, request features
 - [Roadmap](https://www.zenml.io/roadmap) — see what's coming next
-- [Docs](https://docs.zenml.io/kitaru) — guides and reference
 
 ## 📄 License
 
