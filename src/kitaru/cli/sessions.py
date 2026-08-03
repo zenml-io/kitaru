@@ -14,13 +14,21 @@
 """Session import and inspection commands."""
 
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
+from kitaru.api_models.v1.agent import AgentListParams
+from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.session import (
+    SessionListParams,
+    SessionOrigin,
+    SessionStatus,
+)
 from kitaru.api_models.v1.session_node import SessionNodeListParams
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
@@ -270,10 +278,81 @@ async def list_sessions(
     cursor: str | None,
     sort: str,
     filter: str | None,
+    status: SessionStatus | None = None,
+    agent: str | None = None,
+    origin: SessionOrigin | None = None,
+    provider: str | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
 ) -> CommandResult:
     """List one bounded server page of sessions."""
     params = list_params("session", size=size, cursor=cursor, sort=sort, filter=filter)
+    assert isinstance(params, SessionListParams)
+    conditions = []
+    if params.filter is not None:
+        conditions.append(params.filter)
+    if status is not None:
+        conditions.append(
+            FilterCondition(field="status", op=FilterOp.EQ, value=status.value)
+        )
+    if agent is not None:
+        agent_id = await _get_agent_filter_id(client, agent)
+        conditions.append(
+            FilterCondition(field="agent_id", op=FilterOp.EQ, value=str(agent_id))
+        )
+    if origin is not None:
+        conditions.append(
+            FilterCondition(field="origin", op=FilterOp.EQ, value=origin.value)
+        )
+    if provider is not None:
+        conditions.append(
+            FilterCondition(field="provider", op=FilterOp.EQ, value=provider)
+        )
+    for option, field_operator, value in (
+        ("--started-after", FilterOp.GE, started_after),
+        ("--started-before", FilterOp.LT, started_before),
+    ):
+        if value is None:
+            continue
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise CLIError(
+                "invalid_arguments",
+                f"{option} must include a timezone, such as Z or +02:00.",
+            )
+        conditions.append(
+            FilterCondition(field="started_at", op=field_operator, value=value)
+        )
+    if conditions:
+        expression = (
+            conditions[0]
+            if len(conditions) == 1
+            else AndFilter.model_validate({"and": conditions})
+        )
+        params = params.model_copy(update={"filter": expression})
     return page_result(await client.sessions.list(params), size=size)
+
+
+async def _get_agent_filter_id(client: Any, reference: str) -> uuid.UUID:
+    """Resolve a session agent filter with at most one bounded list request."""
+    try:
+        return uuid.UUID(reference)
+    except ValueError:
+        pass
+    params = AgentListParams(
+        size=2,
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=reference),
+    )
+    page = await client.agents.list(params)
+    matches = [agent for agent in page.items if agent.name == reference]
+    if not matches:
+        raise CLIError("not_found", f"Agent {reference!r} was not found.")
+    if len(matches) > 1:
+        raise CLIError(
+            "conflict",
+            f"More than one agent has the exact name {reference!r}.",
+            details={"ids": [str(agent.id) for agent in matches]},
+        )
+    return matches[0].id
 
 
 async def get_session(client: Any, session_id: uuid.UUID) -> CommandResult:
