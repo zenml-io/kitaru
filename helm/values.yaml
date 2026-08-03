@@ -31,6 +31,9 @@ server:
     # Additional origins to allow in the CORS policy.
     extraCorsOrigins:
 
+    # Hosts that may receive Cloud bearer credentials.
+    allowedHosts: []
+
     # The ID of the ZenML Pro workspace to use.
     workspaceID:
 

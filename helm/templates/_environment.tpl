@@ -58,6 +58,9 @@ db_pool_timeout_seconds: {{ .Kitaru.database.poolTimeoutSeconds | quote }}
 {{- if .Kitaru.pro.enabled }}
 auth_scheme: cloud
 control_plane_api_url: "{{ .Kitaru.pro.apiURL }}"
+{{- if .Kitaru.pro.allowedHosts }}
+control_plane_allowed_hosts: {{ .Kitaru.pro.allowedHosts | toJson | quote }}
+{{- end }}
 jwt_audience: "{{ .Kitaru.pro.apiURL }}"
 jwt_issuer: "{{ .Kitaru.pro.apiURL }}"
 auth_cookie_name: kitaru-server-{{ .Kitaru.pro.workspaceID }}
