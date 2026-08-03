@@ -289,6 +289,29 @@ server:
     # Supported values are: debug, info, warning, error, critical
     verbosity: info
 
+  # OpenTelemetry export settings for the Kitaru server container.
+  openTelemetry:
+    # Base OTLP/HTTP collector endpoint. When set, traces, metrics, and logs
+    # use this endpoint with /v1/traces, /v1/metrics, and /v1/logs appended
+    # unless a per-signal endpoint below overrides it.
+    endpoint:
+
+    # Service name attached to exported telemetry. If not set, the server uses
+    # its default service name.
+    serviceName:
+
+    # Optional per-signal OTLP/HTTP endpoints. Without a base endpoint, only
+    # signals with a per-signal endpoint are exported.
+    tracesEndpoint:
+    metricsEndpoint:
+    logsEndpoint:
+
+    # Controls whether each telemetry signal is exported when an endpoint is
+    # configured.
+    tracesEnabled: true
+    metricsEnabled: true
+    logsEnabled: true
+
   # Extra environment variables to set in the Kitaru server container.
   environment: {}
 

@@ -112,6 +112,34 @@ root_url_path: {{ .Kitaru.rootUrlPath | quote }}
 {{- if .Kitaru.serverURL }}
 server_url: {{ .Kitaru.serverURL | quote }}
 {{- end }}
+{{- with .Kitaru.openTelemetry }}
+{{- if or .endpoint .tracesEndpoint .metricsEndpoint .logsEndpoint }}
+{{- if .endpoint }}
+otel_exporter_otlp_endpoint: {{ .endpoint | quote }}
+{{- end }}
+{{- if .serviceName }}
+otel_service_name: {{ .serviceName | quote }}
+{{- end }}
+{{- if .tracesEndpoint }}
+otel_exporter_otlp_traces_endpoint: {{ .tracesEndpoint | quote }}
+{{- end }}
+{{- if .metricsEndpoint }}
+otel_exporter_otlp_metrics_endpoint: {{ .metricsEndpoint | quote }}
+{{- end }}
+{{- if .logsEndpoint }}
+otel_exporter_otlp_logs_endpoint: {{ .logsEndpoint | quote }}
+{{- end }}
+{{- if hasKey . "tracesEnabled" }}
+otel_traces_enabled: {{ .tracesEnabled | quote }}
+{{- end }}
+{{- if hasKey . "metricsEnabled" }}
+otel_metrics_enabled: {{ .metricsEnabled | quote }}
+{{- end }}
+{{- if hasKey . "logsEnabled" }}
+otel_logs_enabled: {{ .logsEnabled | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- if .Kitaru.analyticsOptIn }}
 analytics_opt_in: "True"
 {{- else }}
