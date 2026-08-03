@@ -749,6 +749,15 @@ async def test_duplicate_replay_for_the_same_baseline_in_a_run_conflicts(
         )
 
 
+async def _cancel_run(services: ReplayServices, run_id: uuid.UUID) -> None:
+    """Drive the two cancellation phases the way the endpoint does."""
+    await services.experiment_run_service.mark_run_canceling(run_id, actor=ACTOR)
+    for job_id in await services.experiment_run_service.list_cancelable_job_ids(
+        run_id, actor=ACTOR
+    ):
+        await services.experiment_run_service.cancel_run_job(job_id, actor=ACTOR)
+
+
 async def test_run_cancel_pending_only_run_cancels_immediately(
     services: ReplayServices,
 ) -> None:
@@ -767,12 +776,43 @@ async def test_run_cancel_pending_only_run_cancels_immediately(
         actor=ACTOR,
     )
 
-    canceled_run, counts = await services.experiment_run_service.cancel_run(
+    await _cancel_run(services, run.id)
+    canceled_run, counts = await services.experiment_run_service.get_run(
         run.id, actor=ACTOR
     )
     assert canceled_run.status is ExperimentRunStatus.CANCELED
     assert counts.canceled == 2
     assert counts.non_settled == 0
+
+
+async def test_marking_an_already_canceling_run_is_a_no_op(
+    services: ReplayServices,
+) -> None:
+    """Re-marking a canceling run leaves it alone so a retry can finish phase two."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    run, _ = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+        ),
+        actor=ACTOR,
+    )
+
+    await services.experiment_run_service.mark_run_canceling(run.id, actor=ACTOR)
+    await services.experiment_run_service.mark_run_canceling(run.id, actor=ACTOR)
+
+    marked, _ = await services.experiment_run_service.get_run(run.id, actor=ACTOR)
+    assert marked.status is ExperimentRunStatus.CANCELING
+    await _cancel_run(services, run.id)
+    canceled_run, _ = await services.experiment_run_service.get_run(
+        run.id, actor=ACTOR
+    )
+    assert canceled_run.status is ExperimentRunStatus.CANCELED
 
 
 async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
@@ -806,7 +846,8 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
         10, actor=build_worker_actor(ACTOR.account, worker.id)
     )
 
-    canceling_run, _ = await services.experiment_run_service.cancel_run(
+    await _cancel_run(services, run.id)
+    canceling_run, _ = await services.experiment_run_service.get_run(
         run.id, actor=ACTOR
     )
     assert canceling_run.status is ExperimentRunStatus.CANCELING
@@ -870,7 +911,7 @@ async def test_finalize_precedence_canceling_beats_failure(
         10, actor=build_worker_actor(ACTOR.account, worker.id)
     )
 
-    await services.experiment_run_service.cancel_run(run.id, actor=ACTOR)
+    await _cancel_run(services, run.id)
 
     tasks_a, _ = await services.task_service.list_tasks(
         TaskFilter(job_id=replay_a.job_id), actor=ACTOR

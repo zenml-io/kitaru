@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from functools import partial
 
 import httpx
 import pytest
@@ -39,11 +40,17 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.run_cancellation import get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment import ExperimentCreate
+from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.services.experiment_run_service import (
+    ExperimentRunService,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -53,6 +60,18 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 def services() -> ReplayServices:
     """Provide fake-backed experiment, replay, and run services."""
     return build_replay_services()
+
+
+async def _cancel_run(
+    service: ExperimentRunService, experiment_run_id: uuid.UUID, actor: AuthContext
+) -> tuple[ExperimentRun, ReplayStatusCounts]:
+    """Drive both cancellation phases against one fake-backed service."""
+    await service.mark_run_canceling(experiment_run_id, actor=actor)
+    for job_id in await service.list_cancelable_job_ids(
+        experiment_run_id, actor=actor
+    ):
+        await service.cancel_run_job(job_id, actor=actor)
+    return await service.get_run(experiment_run_id, actor=actor)
 
 
 @pytest.fixture
@@ -72,6 +91,9 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
         services.experiment_run_service
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[get_run_canceler] = lambda: partial(
+        _cancel_run, services.experiment_run_service
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

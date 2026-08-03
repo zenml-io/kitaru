@@ -36,6 +36,7 @@ from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_to_response,
 )
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
+from kitaru.server.api.run_cancellation import RunCanceler, get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -145,6 +146,7 @@ async def cancel_experiment_run(
     experiment_run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    cancel: Annotated[RunCanceler, Depends(get_run_canceler)],
 ) -> ExperimentRunResponse:
     """Request cancellation of a running experiment run.
 
@@ -155,9 +157,10 @@ async def cancel_experiment_run(
         experiment_run_id: Id of the run.
         service: Experiment run service.
         actor: Caller context.
+        cancel: Run cancellation flow, committed across its own transactions.
 
     Returns:
         Run carrying the cancel request.
     """
-    run, counts = await service.cancel_run(experiment_run_id, actor=actor)
+    run, counts = await cancel(experiment_run_id, actor)
     return experiment_run_to_response(run, counts)

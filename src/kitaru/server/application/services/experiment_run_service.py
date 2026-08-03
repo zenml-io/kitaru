@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
@@ -132,15 +133,15 @@ class ExperimentRunService:
             )
         )
 
-    async def cancel_run(
+    async def mark_run_canceling(
         self, experiment_run_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[ExperimentRun, ReplayStatusCounts]:
-        """Request cancellation of a running experiment run.
+    ) -> None:
+        """Move a running run to canceling, leaving an already canceling run alone.
 
-        Every non-settled replay's job is canceled the way job cancellation
-        works: pending tasks move straight to canceled, claimed and running
-        tasks are stamped for their worker or the sweep to settle. A run
-        whose jobs are already fully drained finalizes within this call.
+        Locks the run row and nothing else, so the caller commits and releases
+        it before the cancellation takes any task or job lock. Finalization
+        reads the canceling status to settle the run as canceled, so the run
+        has to carry it before its jobs drain.
 
         Args:
             experiment_run_id: Id of the run.
@@ -149,21 +150,47 @@ class ExperimentRunService:
         Raises:
             ExperimentRunNotFound: No run has this id.
             IllegalExperimentRunStatusTransition: The run is not running.
-
-        Returns:
-            Run carrying the cancel request, and its replay counts by status.
         """
         _ = actor
         run = await self._repository.get(experiment_run_id, exclusive=True)
+        if run.status is ExperimentRunStatus.CANCELING:
+            return
         run.cancel()
         await self._repository.update(run)
-        for replay in await self._replays.list_by_experiment_run(experiment_run_id):
-            if replay.settled:
-                continue
-            await self._transitions.cancel_job(replay.job_id)
-        run = await self._repository.get(experiment_run_id)
-        counts = await self._replays.count_by_status(experiment_run_id)
-        return run, counts
+
+    async def list_cancelable_job_ids(
+        self, experiment_run_id: uuid.UUID, actor: AuthContext
+    ) -> list[uuid.UUID]:
+        """List the jobs of the run's replays that have not settled.
+
+        Args:
+            experiment_run_id: Id of the run.
+            actor: Caller context.
+
+        Returns:
+            Job ids to cancel, in replay order.
+        """
+        _ = actor
+        replays = await self._replays.list_by_experiment_run(experiment_run_id)
+        return [replay.job_id for replay in replays if not replay.settled]
+
+    async def cancel_run_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
+        """Cancel one job of a canceling run.
+
+        Pending tasks move straight to canceled and claimed or running tasks
+        are stamped for their worker or the sweep to settle. The caller
+        commits between jobs, so this never holds the run row lock the
+        settlement takes while reaching for the next job's task rows.
+
+        Args:
+            job_id: Id of the job.
+            actor: Caller context.
+
+        Raises:
+            JobNotFound: No job has this id.
+        """
+        _ = actor
+        await self._transitions.cancel_job(job_id)
 
     async def delete_run(
         self, experiment_run_id: uuid.UUID, actor: AuthContext
