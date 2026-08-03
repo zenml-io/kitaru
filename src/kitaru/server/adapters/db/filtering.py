@@ -75,6 +75,77 @@ def build_tag_condition_binding(
     return compile_tag_condition
 
 
+def build_scope_condition_binding(
+    local_column: InstrumentedAttribute[Any],
+    related_key: InstrumentedAttribute[Any],
+    scope_column: InstrumentedAttribute[Any],
+) -> Callable[[FilterCondition], ColumnElement[bool]]:
+    """Build a filter binding for a field held by a related row.
+
+    Args:
+        local_column: Column on the filtered table referencing the related row.
+        related_key: Column on the related table that ``local_column`` points at.
+        scope_column: Column on the related table the condition applies to.
+
+    Returns:
+        Binding compiling a scope condition into a membership predicate.
+    """
+
+    def compile_scope_condition(condition: FilterCondition) -> ColumnElement[bool]:
+        """Compile a scope condition into a membership predicate.
+
+        Args:
+            condition: Validated scope condition.
+
+        Returns:
+            SQL predicate.
+        """
+        related = select(related_key).where(
+            compile_column_condition(scope_column, condition)
+        )
+        return local_column.in_(related)
+
+    return compile_scope_condition
+
+
+def compile_column_condition(
+    column: InstrumentedAttribute[Any], condition: FilterCondition
+) -> ColumnElement[bool]:
+    """Compile a filter condition against a column.
+
+    Args:
+        column: Column the condition applies to.
+        condition: Validated filter condition.
+
+    Returns:
+        SQL predicate.
+    """
+    value = condition.value
+    match condition.op:
+        case FilterOp.EQ:
+            return column == value
+        case FilterOp.NE:
+            return column != value
+        case FilterOp.LT:
+            return column < value
+        case FilterOp.LE:
+            return column <= value
+        case FilterOp.GT:
+            return column > value
+        case FilterOp.GE:
+            return column >= value
+        case FilterOp.IN:
+            return column.in_(value)
+        case FilterOp.IS_NULL:
+            return column.is_(None)
+        case FilterOp.STARTSWITH:
+            return column.startswith(value, autoescape=True)
+        case FilterOp.ENDSWITH:
+            return column.endswith(value, autoescape=True)
+        case FilterOp.CONTAINS:
+            return column.contains(value, autoescape=True)
+
+
 def _compile_condition(
     condition: FilterCondition,
     bindings: Mapping[str, FilterBinding],
@@ -92,30 +163,7 @@ def _compile_condition(
     binding = bindings[condition.field]
     if not isinstance(binding, InstrumentedAttribute):
         return binding(condition)
-    value = condition.value
-    match condition.op:
-        case FilterOp.EQ:
-            return binding == value
-        case FilterOp.NE:
-            return binding != value
-        case FilterOp.LT:
-            return binding < value
-        case FilterOp.LE:
-            return binding <= value
-        case FilterOp.GT:
-            return binding > value
-        case FilterOp.GE:
-            return binding >= value
-        case FilterOp.IN:
-            return binding.in_(value)
-        case FilterOp.IS_NULL:
-            return binding.is_(None)
-        case FilterOp.STARTSWITH:
-            return binding.startswith(value, autoescape=True)
-        case FilterOp.ENDSWITH:
-            return binding.endswith(value, autoescape=True)
-        case FilterOp.CONTAINS:
-            return binding.contains(value, autoescape=True)
+    return compile_column_condition(binding, condition)
 
 
 def compile_filter_expression(

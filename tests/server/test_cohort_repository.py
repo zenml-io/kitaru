@@ -136,6 +136,32 @@ async def test_query_filters_by_name(setup: Setup) -> None:
     assert [cohort.name for cohort in cohorts] == ["beta"]
 
 
+async def test_query_filters_by_agent(setup: Setup) -> None:
+    """Filter cohorts by the agent their sessions belong to."""
+    repository, owner_id, agent_id, _ = setup
+    first = await repository.create(
+        Cohort(owner_id=owner_id, name="first", agent_id=agent_id)
+    )
+    second = await repository.create(
+        Cohort(owner_id=owner_id, name="second", agent_id=agent_id)
+    )
+    cohorts, _ = await repository.query(
+        CohortFilter(
+            expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+        )
+    )
+    assert {cohort.id for cohort in cohorts} == {first.id, second.id}
+
+    cohorts, _ = await repository.query(
+        CohortFilter(
+            expression=FilterCondition(
+                field="agent_id", op=FilterOp.EQ, value=uuid.uuid4()
+            )
+        )
+    )
+    assert cohorts == []
+
+
 async def test_query_filters_by_tag(setup: Setup) -> None:
     """Filter cohorts linked to a tag through tag_link."""
     repository, owner_id, agent_id, tags = setup

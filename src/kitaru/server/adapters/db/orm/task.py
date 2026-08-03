@@ -59,6 +59,7 @@ TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
 )
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
+TASK_RESULT_SESSION_ID_INDEX = index_name("task", ["result_session_id"])
 # Partial indexes covering the two queue scans: the claim query reads pending
 # rows in id order and matches selectors against labels, the staleness sweep
 # reads in-flight rows by their last sign of life.
@@ -119,6 +120,14 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(TASK_JOB_ID_STATUS_INDEX, "job_id", "status"),
         Index(TASK_INPUT_SESSION_ID_INDEX, "input_session_id"),
+        # Partial: only agent tasks ever set a result session, and both the
+        # replay result-session filter and its is_null anti-join probe read
+        # this column.
+        Index(
+            TASK_RESULT_SESSION_ID_INDEX,
+            "result_session_id",
+            postgresql_where=text("result_session_id IS NOT NULL"),
+        ),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
             TASK_PENDING_LABELS_INDEX,

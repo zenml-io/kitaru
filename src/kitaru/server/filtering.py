@@ -36,6 +36,12 @@ STRING_OPS = EQUALITY_OPS | {
 }
 BOOLEAN_OPS = frozenset({FilterOp.EQ, FilterOp.NE})
 NULLABLE_OPS = frozenset({FilterOp.IS_NULL})
+# Ops for a field held by a related row rather than by the filtered table.
+# NE is left out because it reads as "belongs to some other row" but compiles
+# to "matches a row that is not X", and the two differ for every row the join
+# drops. Wrapping the condition in `not` still expresses the negation, with the
+# three-valued semantics that spelling makes explicit.
+SCOPE_OPS = frozenset({FilterOp.EQ, FilterOp.IN})
 
 
 class FilterField(FrozenModel):

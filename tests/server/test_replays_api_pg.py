@@ -14,6 +14,7 @@
 """End-to-end replay pipeline tests against PostgreSQL."""
 
 import json
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -142,6 +143,46 @@ async def test_replay_pipeline_completes_through_the_api(
     replay_after = (await client.get(f"/v1/replays/{replay['id']}")).json()
     assert replay_after["status"] == "evaluating"
     assert replay_after["result_session_id"] == result_session["id"]
+
+    filtered = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {
+                        "field": "result_session_id",
+                        "op": "eq",
+                        "value": result_session["id"],
+                    }
+                )
+            },
+        )
+    ).json()["items"]
+    assert [item["id"] for item in filtered] == [replay["id"]]
+    unmatched = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {
+                        "field": "result_session_id",
+                        "op": "eq",
+                        "value": str(uuid.uuid4()),
+                    }
+                )
+            },
+        )
+    ).json()["items"]
+    assert unmatched == []
+    pending = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps({"field": "result_session_id", "op": "is_null"})
+            },
+        )
+    ).json()["items"]
+    assert replay["id"] not in {item["id"] for item in pending}
 
     claimed = (
         await client.post(

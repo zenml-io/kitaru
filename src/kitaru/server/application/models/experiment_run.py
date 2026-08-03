@@ -22,7 +22,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, SCOPE_OPS, FilterField
 
 
 class ExperimentRunFilter(ListFilter):
@@ -31,6 +31,9 @@ class ExperimentRunFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "experiment_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "cohort_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "cohort_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "agent_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "agent_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "status": FilterField(value_type=ExperimentRunStatus, ops=EQUALITY_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
     }

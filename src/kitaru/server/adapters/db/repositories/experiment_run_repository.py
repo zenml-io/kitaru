@@ -21,9 +21,12 @@ from sqlalchemy import func, select
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
+    build_scope_condition_binding,
     build_tag_condition_binding,
     compile_filter_expression,
 )
+from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
+from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
@@ -41,6 +44,17 @@ from kitaru.server.domain.experiment_run import (
 EXPERIMENT_RUN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "experiment_id": ExperimentRunORM.experiment_id,
     "cohort_version_id": ExperimentRunORM.cohort_version_id,
+    # A run pins one cohort version, so a cohort-wide history spans every
+    # version of that cohort.
+    "cohort_id": build_scope_condition_binding(
+        ExperimentRunORM.cohort_version_id,
+        CohortVersionORM.id,
+        CohortVersionORM.cohort_id,
+    ),
+    "agent_version_id": ExperimentRunORM.agent_version_id,
+    "agent_id": build_scope_condition_binding(
+        ExperimentRunORM.agent_version_id, AgentVersionORM.id, AgentVersionORM.agent_id
+    ),
     "status": ExperimentRunORM.status,
     "tag": build_tag_condition_binding(
         TagResourceType.EXPERIMENT_RUN, ExperimentRunORM.id

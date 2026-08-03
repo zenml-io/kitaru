@@ -20,7 +20,13 @@ from typing import ClassVar
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, STRING_OPS, FilterField
+from kitaru.server.filtering import (
+    EQUALITY_OPS,
+    NULLABLE_OPS,
+    SCOPE_OPS,
+    STRING_OPS,
+    FilterField,
+)
 
 
 class EvaluationFilter(ListFilter):
@@ -34,6 +40,9 @@ class EvaluationFilter(ListFilter):
         ),
         "name": FilterField(value_type=str, ops=STRING_OPS),
         "data_type": FilterField(value_type=EvaluationDataType, ops=EQUALITY_OPS),
+        "agent_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "cohort_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "experiment_run_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
     }
 
 

@@ -17,12 +17,23 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
+from sqlalchemy import ColumnElement, select, text
 from sqlalchemy.dialects.postgresql import insert
 
-from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_scope_condition_binding,
+    compile_filter_expression,
+)
+from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
+from kitaru.server.adapters.db.orm.cohort_version_session import (
+    CohortVersionSessionORM,
+)
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -31,8 +42,56 @@ from kitaru.server.application.interfaces.evaluation_repository import (
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
+from kitaru.server.filtering import FilterCondition
 
 EvaluatorInfo = tuple[str, int]
+
+
+# Sessions hang off a cohort version, so a cohort scope spans every version of
+# the cohort rather than only its latest.
+_in_cohort = build_scope_condition_binding(
+    CohortVersionSessionORM.cohort_version_id,
+    CohortVersionORM.id,
+    CohortVersionORM.cohort_id,
+)
+
+# A replay's evaluator tasks share its job, and the run owns the replay.
+_in_experiment_run = build_scope_condition_binding(
+    TaskORM.job_id, ReplayORM.job_id, ReplayORM.experiment_run_id
+)
+
+
+def _compile_cohort_condition(condition: FilterCondition) -> ColumnElement[bool]:
+    """Compile a cohort scope condition into a session membership predicate.
+
+    Args:
+        condition: Validated cohort condition.
+
+    Returns:
+        SQL predicate.
+    """
+    cohort_sessions = select(CohortVersionSessionORM.session_id).where(
+        _in_cohort(condition)
+    )
+    return EvaluationORM.session_id.in_(cohort_sessions)
+
+
+def _compile_experiment_run_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile an experiment run scope condition into a task predicate.
+
+    Args:
+        condition: Validated experiment run condition.
+
+    Returns:
+        SQL predicate.
+    """
+    # Scoped by producing task rather than by session, so a run's baseline and
+    # result evaluations both land in the same page.
+    run_tasks = select(TaskORM.id).where(_in_experiment_run(condition))
+    return EvaluationORM.task_id.in_(run_tasks)
+
 
 EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "session_id": EvaluationORM.session_id,
@@ -40,6 +99,11 @@ EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "evaluator_version_id": EvaluationORM.evaluator_version_id,
     "name": EvaluationORM.name,
     "data_type": EvaluationORM.data_type,
+    "agent_id": build_scope_condition_binding(
+        EvaluationORM.session_id, SessionORM.id, SessionORM.agent_id
+    ),
+    "cohort_id": _compile_cohort_condition,
+    "experiment_run_id": _compile_experiment_run_condition,
 }
 
 

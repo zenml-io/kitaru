@@ -16,15 +16,22 @@
 import uuid
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    compile_column_condition,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_JOB_ID_UNIQUE_CONSTRAINT,
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
     ReplayORM,
 )
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
@@ -35,10 +42,49 @@ from kitaru.server.domain.replay import (
     ReplayAlreadyExistsForJob,
     ReplayNotFound,
 )
+from kitaru.server.filtering import FilterCondition
+
+
+def _compile_result_session_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile a result session condition into an agent task predicate.
+
+    Args:
+        condition: Validated result session condition.
+
+    Returns:
+        SQL predicate.
+    """
+    # The result session belongs to the replay's agent task, not to the replay
+    # row, so this resolves through the job the two share.
+    agent_tasks = select(TaskORM.job_id).where(TaskORM.kind == TaskKind.AGENT.value)
+    if condition.op is FilterOp.IS_NULL:
+        # A replay whose agent task has not produced a session yet, which
+        # includes one that never will because the task failed. Written as a
+        # correlated NOT EXISTS: Postgres cannot turn NOT IN into an anti-join,
+        # so the IN form would hash the whole task table on every call.
+        linked = (
+            select(TaskORM.id)
+            .where(
+                TaskORM.job_id == ReplayORM.job_id,
+                TaskORM.kind == TaskKind.AGENT.value,
+                TaskORM.result_session_id.is_not(None),
+            )
+            .correlate(ReplayORM)
+        )
+        return ~linked.exists()
+    return ReplayORM.job_id.in_(
+        agent_tasks.where(
+            compile_column_condition(TaskORM.result_session_id, condition)
+        )
+    )
+
 
 REPLAY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "experiment_run_id": ReplayORM.experiment_run_id,
     "baseline_session_id": ReplayORM.baseline_session_id,
+    "result_session_id": _compile_result_session_condition,
     "status": ReplayORM.status,
 }
 
