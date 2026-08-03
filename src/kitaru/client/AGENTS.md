@@ -15,10 +15,11 @@
   `next_cursor` across pages until it is exhausted.
 - The SDK reuses `api_models` DTOs and carries no business rules. The server
   re-validates everything.
-- `KitaruAPIClient.request` attaches a bearer token from the credential store
-  and renews it once after an HTTP 401. Endpoints that carry their own
-  credential, meaning everything on `AuthResource`, pass `authenticate=False`
-  so the token provider does not recurse into the login call it is making.
+- `KitaruAPIClient.request` sends through the client's `TokenAuth` flow, which
+  attaches a bearer token and renews it once after an HTTP 401. Endpoints that
+  carry their own credential, meaning everything on `AuthResource`, pass
+  `authenticate=False` so the auth flow does not recurse into the login call
+  it is making.
 - Docstrings document `APIError` under `Raises` and name status codes worth
   knowing, such as 409 for duplicate names.
 - The client package never imports server code.

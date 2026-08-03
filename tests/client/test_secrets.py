@@ -46,7 +46,11 @@ VALUES = {"username": SecretStr("svc"), "password": SecretStr("hunter2")}
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed service."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     service = SecretService(repository=FakeSecretRepository())
     app.dependency_overrides[get_secret_service] = lambda: service

@@ -103,6 +103,15 @@ async def test_get_not_found(setup: Setup) -> None:
         await repository.get(missing_id)
 
 
+async def test_get_many(setup: Setup) -> None:
+    """Bulk-load jobs keyed by id, missing ids omitted."""
+    repository, owner_id = setup
+    first = await repository.create(_job(owner_id))
+    second = await repository.create(_job(owner_id))
+    loaded = await repository.get_many([first.id, second.id, uuid.uuid4()])
+    assert set(loaded) == {first.id, second.id}
+
+
 async def test_get_exclusive(setup: Setup) -> None:
     """Load a job with a row lock, a no-op difference for the fake backend."""
     repository, owner_id = setup

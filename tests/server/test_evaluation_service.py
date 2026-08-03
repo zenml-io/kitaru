@@ -20,7 +20,11 @@ import pytest
 from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    GrantKind,
+    TaskPrincipal,
+)
 from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
     EvaluationMerge,
@@ -28,7 +32,7 @@ from kitaru.server.application.models.evaluation import (
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch
-from kitaru.server.domain.session import SessionNotFound
+from kitaru.server.domain.session import SessionAccessDenied, SessionNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -232,3 +236,71 @@ async def test_merge_evaluations_accepts_any_session_status(
         actor=ACTOR,
     )
     assert stored[0].name == "a"
+
+
+def _task_principal(
+    task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
+) -> AuthContext:
+    """Build an auth context for a task principal owning the given task."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
+    return AuthContext(
+        account=Account(id=uuid.uuid4(), name="job-owner"),
+        principal=TaskPrincipal(
+            task_id=task_id,
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            job_id=uuid.uuid4(),
+            grants=grants,
+        ),
+    )
+
+
+async def test_merge_evaluations_allows_a_task_principal_for_its_own_session(
+    service: EvaluationService, session_repository: FakeSessionRepository
+) -> None:
+    """Allow a task principal to merge evaluations into the session it owns."""
+    task_id = uuid.uuid4()
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=task_id
+    )
+    actor = _task_principal(task_id)
+    stored = await service.merge_evaluations(
+        session.id,
+        [EvaluationMerge(name="a", data_type=EvaluationDataType.FLOAT, score=1.0)],
+        actor=actor,
+    )
+    assert stored[0].name == "a"
+
+
+async def test_merge_evaluations_allows_a_task_principal_for_its_input_session(
+    service: EvaluationService, session_repository: FakeSessionRepository
+) -> None:
+    """Allow an evaluator task to merge results into the session it scored."""
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
+    stored = await service.merge_evaluations(
+        session.id,
+        [EvaluationMerge(name="a", data_type=EvaluationDataType.FLOAT, score=1.0)],
+        actor=actor,
+    )
+    assert stored[0].name == "a"
+
+
+async def test_merge_evaluations_denies_a_task_principal_for_an_unrelated_session(
+    service: EvaluationService, session_repository: FakeSessionRepository
+) -> None:
+    """Reject a task principal merging evaluations into an unrelated session."""
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
+    )
+    actor = _task_principal(uuid.uuid4())
+    with pytest.raises(SessionAccessDenied):
+        await service.merge_evaluations(
+            session.id,
+            [EvaluationMerge(name="a", data_type=EvaluationDataType.FLOAT, score=1.0)],
+            actor=actor,
+        )

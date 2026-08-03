@@ -20,6 +20,7 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     OwnedResponseModel,
+    PlainSerializedSecretStr,
     RequestModel,
     ResponseModel,
 )
@@ -87,3 +88,13 @@ class WorkerResponse(OwnedResponseModel):
     last_seen_at: datetime = Field(description="Time of the worker's last heartbeat.")
     live: bool = Field(description="Whether the worker is considered alive.")
     metadata: dict[str, str] = Field(description="Arbitrary metadata.")
+
+
+class WorkerRegistrationResponse(ResponseModel):
+    """Worker registration response."""
+
+    worker: WorkerResponse = Field(description="Registered worker.")
+    token: PlainSerializedSecretStr = Field(
+        description="Bearer token scoped to this worker."
+    )
+    token_expires_at: datetime = Field(description="Time the token expires.")

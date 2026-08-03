@@ -99,22 +99,27 @@ async def test_replay_pipeline_completes_through_the_api(
     ).json()
     assert replay["status"] == "pending"
 
-    worker = (
+    registration = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
-    agent_task = claimed["tasks"][0]["task"]
+    agent_entry = claimed["tasks"][0]
+    agent_task = agent_entry["task"]
     assert agent_task["kind"] == "agent"
+    agent_task_headers = {"Authorization": f"Bearer {agent_entry['token']}"}
 
     await client.patch(
-        f"/v1/tasks/{agent_task['id']}", json={"status": "running", "attempt": 1}
+        f"/v1/tasks/{agent_task['id']}",
+        json={"status": "running"},
+        headers=agent_task_headers,
     )
     result_session = (
         await client.post(
@@ -135,7 +140,9 @@ async def test_replay_pipeline_completes_through_the_api(
         json={"status": "completed", "outputs": {}},
     )
     response = await client.patch(
-        f"/v1/tasks/{agent_task['id']}", json={"status": "completed", "attempt": 1}
+        f"/v1/tasks/{agent_task['id']}",
+        json={"status": "completed"},
+        headers=agent_task_headers,
     )
     assert response.status_code == 200
 
@@ -145,22 +152,26 @@ async def test_replay_pipeline_completes_through_the_api(
 
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
-    eval_task = claimed["tasks"][0]["task"]
+    eval_entry = claimed["tasks"][0]
+    eval_task = eval_entry["task"]
     assert eval_task["kind"] == "evaluator"
+    eval_task_headers = {"Authorization": f"Bearer {eval_entry['token']}"}
 
     await client.patch(
-        f"/v1/tasks/{eval_task['id']}", json={"status": "running", "attempt": 1}
+        f"/v1/tasks/{eval_task['id']}",
+        json={"status": "running"},
+        headers=eval_task_headers,
     )
     await client.patch(
         f"/v1/tasks/{eval_task['id']}",
         json={
             "status": "completed",
-            "attempt": 1,
             "result": [{"name": "accuracy", "score": 0.9}],
         },
+        headers=eval_task_headers,
     )
 
     replay_final = (await client.get(f"/v1/replays/{replay['id']}")).json()

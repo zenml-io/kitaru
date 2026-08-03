@@ -36,7 +36,11 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed API key service."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     service = ApiKeyService(repository=FakeApiKeyRepository())
     app.dependency_overrides[get_api_key_service] = lambda: service

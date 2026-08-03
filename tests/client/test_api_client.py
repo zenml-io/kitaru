@@ -14,11 +14,13 @@
 """Retry and idempotency tests for the API client."""
 
 from collections.abc import AsyncIterator, Callable
+from pathlib import Path
 
 import httpx
 import pytest
 
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import NotFoundError, ServerError
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
 
@@ -188,6 +190,48 @@ def test_client_registers_every_resource() -> None:
         "workers",
     }
     assert expected <= vars(client).keys()
+
+
+def test_conflicting_auth_inputs_are_rejected(tmp_path: Path) -> None:
+    """Raise ValueError when both an API key and a credential store are supplied."""
+    store = CredentialStore(path=tmp_path / "credentials.json")
+    with pytest.raises(ValueError):
+        KitaruAPIClient("http://test", api_key="key", credential_store=store)
+
+
+async def test_closing_a_view_keeps_the_shared_transport_open() -> None:
+    """Close a token view without closing the transport it shares."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    view = client.with_token("view-token")
+
+    async with view:
+        pass
+    response = await client.request("GET", "/v1/accounts")
+
+    assert response.status_code == 200
+    await client.close()
+
+
+async def test_view_authenticates_with_its_own_token() -> None:
+    """Send the view's bearer token instead of the parent client's."""
+    tokens: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        header = request.headers.get("Authorization")
+        tokens.append(header.removeprefix("Bearer ") if header else None)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    view = client.with_token("view-token")
+
+    await client.request("GET", "/v1/accounts")
+    await view.request("GET", "/v1/accounts")
+
+    assert tokens == [None, "view-token"]
 
 
 async def test_streaming_response_is_not_consumed() -> None:

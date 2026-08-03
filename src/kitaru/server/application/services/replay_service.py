@@ -34,7 +34,7 @@ from kitaru.server.application.interfaces.session_node_repository import (
 )
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
 from kitaru.server.application.models.replay import (
     ReplayCreate,
     ReplayFilter,
@@ -49,7 +49,7 @@ from kitaru.server.application.services.evaluator_resolution import validate_eva
 from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.replay import Replay, ReplayAccessDenied
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     ReplayConfig,
@@ -207,13 +207,15 @@ class ReplayService:
             actor: Caller context.
 
         Raises:
+            ReplayAccessDenied: The caller's task token names a task outside
+                this replay's job.
             ReplayNotFound: No replay has this id.
 
         Returns:
             Stored replay, paired with its config and result session id.
         """
-        _ = actor
         replay = await self._repository.get(replay_id)
+        await self._check_task_access(replay, actor)
         return (await self._bundle([replay]))[0]
 
     async def list_replays(
@@ -252,14 +254,16 @@ class ReplayService:
             actor: Caller context.
 
         Raises:
+            ReplayAccessDenied: The caller's task token names a task outside
+                this replay's job.
             ReplayNotFound: No replay has this id.
             ValidationError: The tool's config is not a history config.
 
         Returns:
             Whether a cached result was found, and the result if so.
         """
-        _ = actor
         replay = await self._repository.get(replay_id)
+        await self._check_task_access(replay, actor)
         config = await self._experiments.get_replay_config(replay.replay_config_id)
         tool_config = config.tool_policy.tools.get(
             tool_name, config.tool_policy.default
@@ -270,6 +274,24 @@ class ReplayService:
         if node is None:
             return ToolLookupResult(found=False, result=None)
         return ToolLookupResult(found=True, result=node.outputs)
+
+    async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:
+        """Require a task principal's task to belong to the replay's job.
+
+        An account principal always passes.
+
+        Args:
+            replay: Replay being accessed.
+            actor: Caller context.
+
+        Raises:
+            ReplayAccessDenied: The caller's task token names a task outside
+                this replay's job.
+        """
+        if not isinstance(actor.principal, TaskPrincipal):
+            return
+        if actor.principal.job_id != replay.job_id:
+            raise ReplayAccessDenied(replay.id)
 
     async def _find_history_node(
         self, replay: Replay, scope: HistoryScope, cache_key: str

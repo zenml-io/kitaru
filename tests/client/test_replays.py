@@ -38,7 +38,11 @@ from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
-from kitaru.server.adapters.rest.dependencies import authorize, get_replay_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_task,
+    get_replay_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -59,10 +63,15 @@ def services() -> ReplayServices:
 async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_replay_service] = lambda: services.replay_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

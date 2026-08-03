@@ -2,13 +2,9 @@
 
 Deferred by choice. Each entry names the improvement, the trigger that makes it worth doing, and where it hooks in.
 
-## Worker auth via registration-issued tokens
+## Liveness checks for worker and task tokens
 
-Workers authenticate with a plain account API key today, so any authenticated caller can write task transitions and read decrypted `secret_env` from `GET /v1/tasks/{id}/spec`. Issue a worker-scoped token at registration, require it on claim, heartbeat, and task updates, and restrict `get_spec` to the claiming worker. Trigger: running untrusted plugin code in shared deployments, or any hardening pass before exposing the API beyond a trusted team. Needs answers for token rotation on re-registration upserts, expiry, and worker-row deletion.
-
-## Worker-only task status updates
-
-`PATCH /v1/tasks/{id}` is the executor surface, but any authenticated caller can write status transitions, guarded only by the attempt fence. Reject status writes from callers other than the claiming worker, leaving `POST /v1/jobs/{id}/cancel` as the only user-facing write into the execution substrate. Needs the worker identity from the registration-issued tokens above. Trigger: the same hardening pass, a forged transition corrupts settlement and run finalization. Hooks: the tasks router, `TaskService.update_task`.
+Resolving a worker or task token verifies the JWT and the account being active, never the worker or task row. Worker operations that dereference the worker (claim, heartbeat, get) fail on a deleted worker, but blob download and job get do not, so a deleted worker's token keeps read access until it expires. Task token writes are fenced by the attempt and transition legality, and session create checks the task is running, but reads (`get_task`, `get_spec`, granted sessions and blobs) never re-check the task row, so a superseded or finished attempt keeps read access until expiry, concurrently with the new attempt's token. Load the rows at token resolution, rejecting a deleted worker and a superseded attempt, at the cost of one read per request. Trigger: treating worker deletion as revocation, or running untrusted plugin code where a leaked task token's read window matters. Hooks: `AuthService._resolve_worker_token`, `AuthService._resolve_task_token`.
 
 ## Idempotency keys on job-creating POSTs
 

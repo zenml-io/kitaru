@@ -21,7 +21,12 @@ from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
 from kitaru.api_models.v1.blob import BlobResponse
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_blob_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_task,
+    authorize_with_worker_or_task,
+    get_blob_service,
+)
 from kitaru.server.adapters.rest.mapping.blobs import blob_to_response
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
@@ -52,7 +57,7 @@ async def upload_blob(
     response: Response,
     file: Annotated[UploadFile, File()],
     service: Annotated[BlobService, Depends(get_blob_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> BlobResponse:
     """Upload a blob, deduping identical content by sha256.
 
@@ -80,7 +85,7 @@ async def upload_blob(
 async def get_blob(
     blob_id: uuid.UUID,
     service: Annotated[BlobService, Depends(get_blob_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> BlobResponse:
     """Get a blob's metadata by id.
 
@@ -102,7 +107,7 @@ async def get_blob(
 async def download_blob(
     blob_id: uuid.UUID,
     service: Annotated[BlobService, Depends(get_blob_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_worker_or_task)],
 ) -> Response:
     """Download a blob's raw content.
 

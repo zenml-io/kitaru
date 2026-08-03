@@ -19,7 +19,12 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
+from kitaru.server.domain.base import (
+    ConflictError,
+    DomainModel,
+    ForbiddenError,
+    NotFoundError,
+)
 from kitaru.server.domain.ids import uuid7
 
 TERMINAL_REPLAY_STATUSES = frozenset(
@@ -37,6 +42,18 @@ class ReplayNotFound(NotFoundError):
             replay_id: Id of the missing replay.
         """
         super().__init__(f"Replay {replay_id} was not found")
+
+
+class ReplayAccessDenied(ForbiddenError):
+    """Raised when the caller's credential does not authorize this replay."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay.
+        """
+        super().__init__(f"Replay {replay_id} is not accessible to this caller")
 
 
 class IllegalReplayStatusTransition(ConflictError):

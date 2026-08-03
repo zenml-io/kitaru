@@ -20,10 +20,19 @@ from collections.abc import AsyncIterator
 import pytest
 
 from conftest import FakeBlobRepository, create_blob
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    GrantKind,
+    TaskPrincipal,
+)
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.blob import BlobInUse, BlobNotFound, BlobTooLarge
+from kitaru.server.domain.blob import (
+    BlobAccessDenied,
+    BlobInUse,
+    BlobNotFound,
+    BlobTooLarge,
+)
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -162,3 +171,47 @@ async def test_delete_blob_in_use(
     repository.mark_referenced(blob.id)
     with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
         await service.delete_blob(blob.id, actor=ACTOR)
+
+
+def _task_actor(granted_blob_id: uuid.UUID | None = None) -> AuthContext:
+    """Build an auth context for a task principal holding the given blob grant."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_blob_id is not None:
+        grants[GrantKind.BLOB] = frozenset({granted_blob_id})
+    return AuthContext(
+        account=ACTOR.account,
+        principal=TaskPrincipal(
+            task_id=uuid.uuid4(),
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            job_id=uuid.uuid4(),
+            grants=grants,
+        ),
+    )
+
+
+async def test_get_blob_denies_a_task_principal_without_a_grant(
+    service: BlobService, repository: FakeBlobRepository
+) -> None:
+    """Raise when a task principal reads metadata of a blob it was not granted."""
+    blob = await create_blob(repository, ACTOR.account.id)
+    with pytest.raises(BlobAccessDenied, match=f"Blob {blob.id} is not accessible"):
+        await service.get_blob(blob.id, actor=_task_actor())
+
+
+async def test_download_blob_denies_a_task_principal_without_a_grant(
+    service: BlobService, repository: FakeBlobRepository
+) -> None:
+    """Raise when a task principal downloads a blob it was not granted."""
+    blob = await create_blob(repository, ACTOR.account.id)
+    with pytest.raises(BlobAccessDenied):
+        await service.download_blob(blob.id, actor=_task_actor())
+
+
+async def test_download_blob_allows_a_task_principal_holding_the_grant(
+    service: BlobService, repository: FakeBlobRepository
+) -> None:
+    """Download a blob the task principal's spec granted it."""
+    blob = await create_blob(repository, ACTOR.account.id)
+    stored = await service.download_blob(blob.id, actor=_task_actor(blob.id))
+    assert stored.id == blob.id
