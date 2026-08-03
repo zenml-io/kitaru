@@ -33,6 +33,7 @@ OutputMode = Literal["auto", "text", "json", "jsonl"]
 
 ERROR_EXIT_CODES: dict[str, int] = {
     "internal_error": 1,
+    "interrupted": 130,
     "invalid_arguments": 2,
     "invalid_configuration": 2,
     "authentication_failed": 3,
@@ -400,6 +401,7 @@ def _write_json(stream: TextIO, payload: Any) -> None:
     """Write exactly one compact JSON document."""
     stream.write(json.dumps(redact_data(payload), separators=(",", ":")))
     stream.write("\n")
+    stream.flush()
 
 
 def _json_value(value: Any) -> Any:

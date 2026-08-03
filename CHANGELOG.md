@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - A client configuration file, `config.json` in the Kitaru config directory, storing the server URL and the client installation id. Client construction resolves the server URL from `KITARU_API_URL`, falling back to the stored server URL, and authenticates through the credential store when the environment carries no credential.
+- Stage 4 CLI hardening adds client/server compatibility diagnostics, structured interrupt handling, graceful SIGINT/SIGTERM worker draining, and isolated wheel/sdist artifact smoke coverage.
 - CLI commands to create, inspect, update, and delete experiments with exact evaluator versions, inline replay configuration, sparse updates, and explicit destructive-delete confirmation.
 - CLI commands to create, inspect, update, and delete cohorts and immutable cohort versions, including exact version references and explicit destructive-delete confirmation.
 - CLI commands to import and inspect sessions and nodes, run bounded session evaluations with optional job waiting, and inspect stored evaluations.
