@@ -2736,11 +2736,14 @@ class FakeCohortVersionRepository:
             self._sessions._mark_cohort_member(session_id)
         return stored.model_copy()
 
-    async def get(self, cohort_version_id: uuid.UUID) -> CohortVersion:
+    async def get(
+        self, cohort_version_id: uuid.UUID, exclusive: bool = False
+    ) -> CohortVersion:
         """Load a cohort version by id.
 
         Args:
             cohort_version_id: Id of the cohort version.
+            exclusive: Ignored, the fake holds no rows to lock.
 
         Raises:
             CohortVersionIdNotFound: No cohort version has this id.

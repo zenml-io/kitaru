@@ -104,11 +104,15 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         await self._flush()
         return row.to_domain()
 
-    async def get(self, cohort_version_id: uuid.UUID) -> CohortVersion:
+    async def get(
+        self, cohort_version_id: uuid.UUID, exclusive: bool = False
+    ) -> CohortVersion:
         """Load a cohort version by id.
 
         Args:
             cohort_version_id: Id of the cohort version.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             CohortVersionIdNotFound: No cohort version has this id.
@@ -116,7 +120,11 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         Returns:
             Stored cohort version.
         """
-        row = await self._get_row(cohort_version_id)
+        row = await self._session.get(
+            self.orm_class, cohort_version_id, with_for_update=exclusive
+        )
+        if row is None:
+            raise CohortVersionIdNotFound(cohort_version_id)
         return row.to_domain()
 
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:
