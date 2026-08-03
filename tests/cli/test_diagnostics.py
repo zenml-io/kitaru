@@ -13,11 +13,18 @@
 #  permissions and limitations under the License.
 """Status and doctor aggregate behavior."""
 
+import json
+import os
 from types import SimpleNamespace
+from typing import Any
+
+import httpx
+import pytest
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
+from kitaru.cli import app as app_module
 from kitaru.cli import diagnostics
-from kitaru.cli.config import ConfigStore, ResolvedTarget
+from kitaru.cli.config import ConfigStore, ResolvedCredential, ResolvedTarget
 from kitaru.client.credential_store import CredentialStore
 
 
@@ -29,14 +36,18 @@ class FakeWorkers:
         for live in (True, False, True):
             yield SimpleNamespace(live=live)
 
+    async def list(self) -> list[object]:
+        """Return an empty worker collection for authentication checks."""
+        return []
+
 
 class FakeClient:
     """Minimal unauthenticated server used by status."""
 
-    def __init__(self) -> None:
+    def __init__(self, version: str = "0.21.0") -> None:
         """Initialize resources and closure state."""
         info = ServerInfoResponse(
-            version="0.21.0",
+            version=version,
             auth_scheme=AuthScheme.NONE,
             dashboard_url="https://dashboard.example.com",
         )
@@ -45,7 +56,7 @@ class FakeClient:
             async def get(self) -> ServerInfoResponse:
                 return info
 
-        self.info = InfoResource()
+        self.info: Any = InfoResource()
         self.workers = FakeWorkers()
         self.closed = False
 
@@ -75,6 +86,55 @@ async def test_status_reports_provenance_and_live_worker_count(
     assert result.item["live_worker_count"] == 2
     assert result.item["credential_status"]["source"] == "none"
     assert client.closed is True
+
+
+@pytest.mark.parametrize(
+    ("client_version", "server_version", "status", "warning"),
+    [
+        ("1.2.0", "1.9.0", "compatible", None),
+        ("1.2.0", "2.0.0", "major_version_mismatch", "major versions differ"),
+        ("invalid", "1.0.0", "unknown", "could not be determined"),
+        ("1.0.0", "invalid", "unknown", "could not be determined"),
+    ],
+)
+async def test_status_and_info_add_non_blocking_compatibility_warnings(
+    tmp_path,
+    monkeypatch,
+    client_version: str,
+    server_version: str,
+    status: str,
+    warning: str | None,
+) -> None:
+    """Compatibility diagnostics warn without changing successful exits."""
+    monkeypatch.setattr(diagnostics, "package_version", lambda: client_version)
+    target = ResolvedTarget("https://api.example.com", "explicit", None)
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+
+    status_client = FakeClient(server_version)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: status_client)
+    status_result = await diagnostics.status(
+        target=target,
+        credential_store=credential_store,
+        timeout=30,
+    )
+
+    info_client = FakeClient(server_version)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: info_client)
+    info_result = await diagnostics.info(
+        target=target,
+        credential_store=credential_store,
+        timeout=30,
+    )
+
+    for result in (status_result, info_result):
+        assert result.exit_code == 0
+        assert result.item["compatibility"]["status"] == status
+        if warning is None:
+            assert result.warnings == []
+        else:
+            assert len(result.warnings) == 1
+            assert warning in result.warnings[0]
+            assert "not blocked" in result.warnings[0]
 
 
 async def test_info_reports_runtime_and_server_details(tmp_path, monkeypatch) -> None:
@@ -120,9 +180,180 @@ async def test_doctor_reports_every_check_when_no_server_is_configured(
         "liveness",
         "readiness",
         "server_info",
+        "compatibility",
         "authentication",
         "worker_extra",
         "uv",
     ]
     assert checks[2]["status"] == "fail"
-    assert all(check["status"] == "skip" for check in checks[3:7])
+    assert all(check["status"] == "skip" for check in checks[3:8])
+    assert checks[6]["required"] is False
+
+
+@pytest.mark.parametrize(
+    ("server_version", "expected_status"),
+    [
+        ("1.8.0", "pass"),
+        ("2.0.0", "warn"),
+        ("invalid", "warn"),
+    ],
+)
+async def test_doctor_compatibility_check_is_non_failing(
+    tmp_path, monkeypatch, server_version: str, expected_status: str
+) -> None:
+    """Doctor reports compatibility immediately after server info without gating."""
+
+    async def successful_probe(*args) -> int:
+        return 200
+
+    monkeypatch.setattr(diagnostics, "package_version", lambda: "1.2.0")
+    monkeypatch.setattr(diagnostics, "_probe", successful_probe)
+    monkeypatch.setattr(
+        diagnostics,
+        "build_api_client",
+        lambda *args: FakeClient(server_version),
+    )
+
+    result = await diagnostics.doctor(
+        config_store=ConfigStore(tmp_path / "config.json"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server="https://api.example.com",
+        context_name=None,
+        timeout=0.1,
+    )
+
+    assert result.exit_code == 0
+    checks = result.item["checks"]
+    assert [check["name"] for check in checks[5:8]] == [
+        "server_info",
+        "compatibility",
+        "authentication",
+    ]
+    compatibility = checks[6]
+    assert compatibility["status"] == expected_status
+    assert compatibility["required"] is False
+    if expected_status == "warn":
+        assert "not blocked" in compatibility["detail"]
+
+
+async def test_doctor_skips_compatibility_when_server_info_is_unavailable(
+    tmp_path, monkeypatch
+) -> None:
+    """A server-info failure skips compatibility and retains the server exit."""
+
+    async def successful_probe(*args) -> int:
+        return 200
+
+    class FailingInfo:
+        async def get(self) -> ServerInfoResponse:
+            raise httpx.ConnectError("server info unavailable")
+
+    client = FakeClient()
+    client.info = FailingInfo()
+    monkeypatch.setattr(diagnostics, "_probe", successful_probe)
+    monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
+
+    result = await diagnostics.doctor(
+        config_store=ConfigStore(tmp_path / "config.json"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server="https://api.example.com",
+        context_name=None,
+        timeout=0.1,
+    )
+
+    assert result.exit_code == 6
+    compatibility = next(
+        check for check in result.item["checks"] if check["name"] == "compatibility"
+    )
+    assert compatibility == {
+        "name": "compatibility",
+        "status": "skip",
+        "required": False,
+        "detail": "Server info unavailable.",
+    }
+
+
+def test_doctor_continues_without_reusing_malformed_credentials(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """Malformed credentials do not block independent explicit-server checks."""
+    fake_token = "FAKE-TOKEN-MUST-NOT-LEAK"
+    server_url = "https://api.example.com"
+    credentials_path = tmp_path / "credentials.json"
+    credentials_path.write_text(
+        json.dumps(
+            {
+                server_url: {
+                    "url": server_url,
+                    "device_id": fake_token,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    if os.name == "posix":
+        credentials_path.chmod(0o600)
+
+    async def successful_probe(*args) -> int:
+        return 200
+
+    resolved_credentials: list[ResolvedCredential] = []
+
+    def build_client(
+        _server_url: str, credential: ResolvedCredential, *_args: Any
+    ) -> FakeClient:
+        resolved_credentials.append(credential)
+        return FakeClient()
+
+    monkeypatch.setenv("KITARU_CONFIG_PATH", str(tmp_path / "config.json"))
+    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.delenv("KITARU_API_KEY", raising=False)
+    monkeypatch.setattr(diagnostics, "_probe", successful_probe)
+    monkeypatch.setattr(diagnostics, "build_api_client", build_client)
+
+    assert app_module.main(["doctor", "--server", server_url, "--output", "json"]) == 2
+
+    captured = capsys.readouterr()
+    assert fake_token not in captured.out
+    assert fake_token not in captured.err
+    assert [credential.source for credential in resolved_credentials] == ["none"]
+    payload = json.loads(captured.out)
+    checks = payload["item"]["checks"]
+    assert [check["name"] for check in checks] == [
+        "config",
+        "credentials",
+        "server_resolution",
+        "liveness",
+        "readiness",
+        "server_info",
+        "compatibility",
+        "authentication",
+        "worker_extra",
+        "uv",
+    ]
+    credential_check = checks[1]
+    assert credential_check["detail"] == (
+        f"Credential document at {credentials_path} is invalid."
+    )
+
+
+async def test_doctor_worker_extra_hint_names_cli_and_worker(
+    tmp_path, monkeypatch
+) -> None:
+    """Doctor recommends the same install extra required by worker start."""
+    monkeypatch.delenv("KITARU_API_URL", raising=False)
+    monkeypatch.setattr(diagnostics.importlib.util, "find_spec", lambda name: None)
+
+    result = await diagnostics.doctor(
+        config_store=ConfigStore(tmp_path / "config.json"),
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server=None,
+        context_name=None,
+        timeout=0.1,
+    )
+
+    worker_extra = next(
+        check for check in result.item["checks"] if check["name"] == "worker_extra"
+    )
+    assert worker_extra["status"] == "warn"
+    assert worker_extra["detail"] == "Install kitaru[cli,worker] to run workers."

@@ -397,8 +397,7 @@ async def _launch(
             )
         return emit_result(result)
     except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
-        return 130
+        return emit_error(CLIError("interrupted", "Interrupted."))
     except BrokenPipeError:
         return 0
     except asyncio.CancelledError:
@@ -454,6 +453,8 @@ def _spec(
     """Create one leaf contract including shared global options."""
     if "invalid_arguments" not in errors:
         errors = ("invalid_arguments", *errors)
+    if "interrupted" not in errors:
+        errors = (*errors, "interrupted")
     if not offline and "reads_local_file" not in side_effects:
         side_effects = ("reads_local_file", *side_effects)
     return CommandSpec(
@@ -3022,8 +3023,8 @@ _WORKER_START_PARAMETERS = (
     _spec(
         ("worker", "start"),
         "Run a generic local worker in the foreground without durable provider "
-        "binding. The first SIGINT drains held tasks; a second exits immediately "
-        "and may leave child processes running.",
+        "binding. The first SIGINT or SIGTERM drains held tasks; a SIGINT after "
+        "either signal exits immediately and may leave child processes running.",
         parameters=_WORKER_START_PARAMETERS,
         read_only=False,
         side_effects=(
@@ -3208,31 +3209,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
-        result = app.meta(
-            tokens,
-            exit_on_error=False,
-            print_error=False,
-            result_action="return_value",
-            backend="asyncio",
-        )
-        return int(result or 0)
-    except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
-        return 130
+        try:
+            result = app.meta(
+                tokens,
+                exit_on_error=False,
+                print_error=False,
+                result_action="return_value",
+                backend="asyncio",
+            )
+            return int(result or 0)
+        except KeyboardInterrupt:
+            return _emit_unparsed_error(
+                CLIError("interrupted", "Interrupted."),
+                tokens=tokens,
+                streaming=True,
+            )
+        except CycloptsError as exception:
+            return _emit_unparsed_error(
+                CLIError("invalid_arguments", str(exception)),
+                tokens=tokens,
+                exception=exception,
+            )
     except BrokenPipeError:
         return 0
-    except CycloptsError as exception:
-        requested = _extract_output(tokens)
-        return _emit_early_error(
-            CLIError("invalid_arguments", str(exception)),
-            tokens=tokens,
-            output=requested,
-            machine="--machine" in tokens,
-            non_interactive="--non-interactive" in tokens,
-            debug="--debug" in tokens,
-            traceback="--traceback" in tokens,
-            exception=exception,
-        )
+
+
+def _emit_unparsed_error(
+    error: CLIError,
+    *,
+    tokens: Sequence[str],
+    exception: BaseException | None = None,
+    streaming: bool = False,
+) -> int:
+    """Emit an error using global options extracted before command parsing."""
+    output = _extract_output(tokens)
+    return _emit_early_error(
+        error,
+        tokens=tokens,
+        output=output,
+        machine="--machine" in tokens,
+        non_interactive="--non-interactive" in tokens,
+        debug="--debug" in tokens,
+        traceback="--traceback" in tokens,
+        exception=exception,
+        streaming=streaming and output == "jsonl",
+    )
 
 
 def _emit_early_error(
@@ -3245,10 +3266,13 @@ def _emit_early_error(
     debug: bool,
     traceback: bool,
     exception: BaseException | None = None,
+    streaming: bool = False,
 ) -> int:
     """Emit a global-option or parsing error before invocation bootstrap."""
     try:
-        mode = resolve_output_mode(output, is_tty=sys.stdout.isatty())
+        mode = resolve_output_mode(
+            output, is_tty=sys.stdout.isatty(), streaming=streaming
+        )
     except CLIError:
         mode = "text" if sys.stdout.isatty() else "json"
     command = _guess_command(tokens)

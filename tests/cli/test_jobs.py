@@ -419,7 +419,7 @@ def test_watch_ctrl_c_closes_client_without_canceling(
     assert closed is True
     assert resource.cancel_calls == 0
     assert captured.out == ""
-    assert captured.err == "Interrupted.\n"
+    assert json.loads(captured.err)["error"]["message"] == "Interrupted."
 
 
 async def test_watch_cancellation_propagates_after_client_cleanup(

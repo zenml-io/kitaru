@@ -13,9 +13,38 @@
 #  permissions and limitations under the License.
 """Offline command discovery metadata."""
 
+import inspect
+import re
+
 from kitaru.cli import app as _registered_app
 from kitaru.cli import app as app_module
-from kitaru.cli.schema import describe_schema
+from kitaru.cli.schema import ParameterSpec, describe_schema
+
+
+def _normalize_parameter_name(parameter: ParameterSpec) -> str:
+    """Normalize a public schema parameter to its handler parameter name."""
+    name = parameter.name
+    if parameter.kind == "option":
+        name = next(part for part in name.split("/") if part.startswith("--"))
+        name = name.removeprefix("--")
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def test_handler_parameters_match_command_schema() -> None:
+    """Every command-local handler parameter has exactly one schema entry."""
+    for function, spec in app_module._FUNCTION_SPECS.items():
+        local_parameters = spec.parameters[len(app_module._GLOBAL_PARAMETERS) :]
+        schema_names = [_normalize_parameter_name(item) for item in local_parameters]
+        if spec.path == ("worker", "start"):
+            # The singular public --selector option intentionally maps to the
+            # plural handler parameter that receives its repeatable values.
+            schema_names = [
+                "selectors" if name == "selector" else name for name in schema_names
+            ]
+        handler_names = list(inspect.signature(function).parameters)
+
+        assert len(schema_names) == len(set(schema_names)), spec.command
+        assert set(schema_names) == set(handler_names), spec.command
 
 
 def test_top_level_schema_includes_completed_stage_one_slices() -> None:
@@ -64,6 +93,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert login["command"] == "login"
     assert login["mutating"] is True
     assert login["streams"] is False
+    assert login["offline"] is False
     assert login["side_effects"]["writes_local_config"] is True
     assert {error["kind"]: error["exit_code"] for error in login["errors"]}[
         "authentication_failed"
@@ -83,6 +113,9 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
     assert importer_scaffold["side_effects"]["creates_remote_state"] is False
+
+    [version] = describe_schema(("version",))
+    assert version["offline"] is True
 
     [worker_start] = describe_schema(("worker", "start"))
     assert worker_start["streams"] is True
