@@ -159,10 +159,13 @@ class TaskTransitions:
             for task in tasks
         ):
             await self._propagate_abort(job_id, tasks)
-            tasks = await self._tasks.list_by_job(job_id)
         job = await self._jobs.get(job_id, exclusive=True)
         if job.settled:
             return job
+
+        # Read the tasks after the job row lock to prevent race conditions
+        # during concurrent task settlements.
+        tasks = await self._tasks.list_by_job(job_id)
         if not tasks or not all(task.terminal for task in tasks):
             return job
         status, error = _settlement_outcome(tasks)
