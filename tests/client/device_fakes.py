@@ -25,6 +25,7 @@ from fastapi import FastAPI
 
 from conftest import FakeAccountRepository, FakeApiKeyRepository, FakePasswordHasher
 from conftest import local_settings as base_local_settings
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
@@ -36,6 +37,46 @@ from kitaru.server.application.models.device import DeviceFilter, DevicePolicy
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.domain.device import Device, DeviceNotFound
+from kitaru.server.filtering import (
+    AndExpression,
+    FilterCondition,
+    FilterExpression,
+    NotExpression,
+    OrExpression,
+)
+
+
+def _matches_device_filter(device: Device, expression: FilterExpression) -> bool:
+    """Evaluate a filter expression against a device.
+
+    Args:
+        device: Device to evaluate the expression against.
+        expression: Filter expression.
+
+    Returns:
+        Whether the device matches the expression.
+    """
+    if isinstance(expression, AndExpression):
+        return all(
+            _matches_device_filter(device, operand) for operand in expression.operands
+        )
+    if isinstance(expression, OrExpression):
+        return any(
+            _matches_device_filter(device, operand) for operand in expression.operands
+        )
+    if isinstance(expression, NotExpression):
+        return not _matches_device_filter(device, expression.operand)
+    assert isinstance(expression, FilterCondition)
+    value = getattr(device, expression.field)
+    match expression.op:
+        case FilterOp.EQ:
+            return value == expression.value
+        case FilterOp.NE:
+            return value != expression.value
+        case FilterOp.IN:
+            return value in expression.value
+        case _:
+            raise ValueError(f"Unsupported device filter operator {expression.op}")
 
 
 def _renewed_timestamp(previous: datetime | None) -> datetime:
@@ -109,9 +150,11 @@ class FakeDeviceRepository:
                 for device in devices
                 if device.account_id == device_filter.account_id
             ]
-        if device_filter.status is not None:
+        if device_filter.expression is not None:
             devices = [
-                device for device in devices if device.status == device_filter.status
+                device
+                for device in devices
+                if _matches_device_filter(device, device_filter.expression)
             ]
         _, _, direction = device_filter.sort.partition(":")
         descending = direction == "desc"

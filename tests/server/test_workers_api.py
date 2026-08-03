@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the worker routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
@@ -209,7 +210,10 @@ async def test_list_workers(client: httpx.AsyncClient) -> None:
         "worker-1",
     ]
 
-    response = await client.get("/v1/workers", params={"name": "worker-2"})
+    filter_expression = {"field": "name", "op": "eq", "value": "worker-2"}
+    response = await client.get(
+        "/v1/workers", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "worker-2"
 

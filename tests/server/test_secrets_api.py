@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the secret routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -155,7 +156,10 @@ async def test_list_secrets(client: httpx.AsyncClient) -> None:
     assert all("values" not in item for item in body["items"])
     assert all("internal" not in item for item in body["items"])
 
-    response = await client.get("/v1/secrets", params={"name": "smtp"})
+    filter_expression = {"field": "name", "op": "eq", "value": "smtp"}
+    response = await client.get(
+        "/v1/secrets", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None

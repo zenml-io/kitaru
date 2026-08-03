@@ -19,11 +19,11 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    ListParams,
     OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.plugin import PluginSource
 
 
@@ -51,11 +51,8 @@ class ImporterUpdateRequest(RequestModel):
     )
 
 
-class ImporterListParams(ListParams):
+class ImporterListParams(FilterableListParams):
     """Importer list params."""
-
-    name: str | None = Field(default=None, description="Filter on importer name.")
-    provider: str | None = Field(default=None, description="Filter on source system.")
 
 
 class ImporterResponse(OwnedResponseModel):

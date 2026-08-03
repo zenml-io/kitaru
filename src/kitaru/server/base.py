@@ -15,12 +15,18 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from typing import ClassVar
 
 from pydantic import Field, field_validator
 
 from kitaru.base import FrozenModel
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.filtering import (
+    FilterExpression,
+    FilterField,
+    validate_filter_expression,
+)
 
 __all__ = ["FrozenModel", "ListFilter"]
 
@@ -29,10 +35,12 @@ class ListFilter(FrozenModel):
     """Base type for list filter models using cursor pagination."""
 
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"created"})
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {}
 
     cursor: str | None = None
     size: int = Field(default=20, ge=1, le=1000)
     sort: str = "created:desc"
+    expression: FilterExpression | None = None
 
     @field_validator("sort")
     @classmethod
@@ -53,6 +61,27 @@ class ListFilter(FrozenModel):
         if direction not in ("asc", "desc") or field not in cls.sortable_fields:
             raise ValidationError(f"Invalid sort '{value}'")
         return value
+
+    @field_validator("expression")
+    @classmethod
+    def _validate_expression(
+        cls, value: FilterExpression | None
+    ) -> FilterExpression | None:
+        """Validate the filter expression against the filterable fields.
+
+        Args:
+            value: Filter expression.
+
+        Raises:
+            ValidationError: The expression exceeds the size caps or uses a
+                field, operator, or value outside the filterable allowlist.
+
+        Returns:
+            Validated expression with condition values coerced.
+        """
+        if value is None:
+            return None
+        return validate_filter_expression(value, cls.filterable_fields)
 
     def compute_filter_hash(self) -> str:
         """Hash the filter's non-pagination fields.

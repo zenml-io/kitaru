@@ -18,6 +18,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyListParams,
     ApiKeyResponse,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.domain.api_key import ApiKey
 
@@ -78,7 +79,9 @@ def api_key_list_params_to_filter(params: ApiKeyListParams) -> ApiKeyFilter:
         API key filter.
     """
     return ApiKeyFilter(
-        name=params.name,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

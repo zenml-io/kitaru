@@ -26,6 +26,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyResponse,
     ApiKeyUpdateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import authorize, get_api_key_service
@@ -93,7 +94,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["local", "deploy", "ci"]
 
-    page = await api_client.api_keys.list(ApiKeyListParams(name="deploy"))
+    page = await api_client.api_keys.list(
+        ApiKeyListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="deploy")
+        )
+    )
     assert page.next_cursor is None
     assert page.items[0].name == "deploy"
 

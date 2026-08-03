@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the agent routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -123,7 +124,10 @@ async def test_list_agents(client: httpx.AsyncClient) -> None:
         "assistant",
     ]
 
-    response = await client.get("/v1/agents", params={"name": "reviewer"})
+    filter_expression = {"field": "name", "op": "eq", "value": "reviewer"}
+    response = await client.get(
+        "/v1/agents", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "reviewer"
 

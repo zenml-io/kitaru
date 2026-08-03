@@ -34,6 +34,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
@@ -53,6 +54,7 @@ from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginS
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, EvaluationTask
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -194,7 +196,11 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     )
 
     evaluations, _ = await services.evaluations.query(
-        EvaluationFilter(session_id=result_session.id)
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="session_id", op=FilterOp.EQ, value=result_session.id
+            )
+        )
     )
     assert len(evaluations) == 1
     assert evaluations[0].evaluation.name == "accuracy"
@@ -406,7 +412,12 @@ async def test_start_run_creates_one_replay_per_cohort_session(
     assert counts.pending == 3
 
     bundles, _ = await services.replay_service.list_replays(
-        ReplayFilter(experiment_run_id=run.id), actor=ACTOR
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
     )
     assert {bundle.replay.baseline_session_id for bundle in bundles} == {
         session.id for session in sessions
@@ -496,7 +507,12 @@ async def test_duplicate_replay_for_the_same_baseline_in_a_run_conflicts(
         actor=ACTOR,
     )
     bundles, _ = await services.replay_service.list_replays(
-        ReplayFilter(experiment_run_id=run.id), actor=ACTOR
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
     )
     existing = bundles[0]
     other_job = await create_job(services.jobs, ACTOR.account.id)
@@ -555,7 +571,12 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
         actor=ACTOR,
     )
     bundles, _ = await services.replay_service.list_replays(
-        ReplayFilter(experiment_run_id=run.id), actor=ACTOR
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
     )
     replay = bundles[0].replay
     worker = await create_worker(services.workers, ACTOR.account.id)
@@ -605,7 +626,12 @@ async def test_finalize_precedence_canceling_beats_failure(
         actor=ACTOR,
     )
     bundles, _ = await services.replay_service.list_replays(
-        ReplayFilter(experiment_run_id=run.id), actor=ACTOR
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
     )
     replay_a, replay_b = bundles[0].replay, bundles[1].replay
 

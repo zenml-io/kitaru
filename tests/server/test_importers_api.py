@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the importer routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -93,7 +94,10 @@ async def test_list_importers_filter_by_provider(client: httpx.AsyncClient) -> N
         "/v1/importers", json={"name": "braintrust-import", "provider": "braintrust"}
     )
 
-    response = await client.get("/v1/importers", params={"provider": "langfuse"})
+    filter_expression = {"field": "provider", "op": "eq", "value": "langfuse"}
+    response = await client.get(
+        "/v1/importers", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert [item["name"] for item in body["items"]] == ["langfuse-import"]

@@ -19,8 +19,8 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import ListParams, OwnedResponseModel
-from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.base import OwnedResponseModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class JobStatus(StrEnum):
@@ -50,16 +50,9 @@ class JobResponse(OwnedResponseModel):
     )
 
 
-class JobListParams(ListParams):
+class JobListParams(FilterableListParams):
     """Job list params."""
 
-    status: JobStatus | None = Field(default=None, description="Filter on job status.")
 
-
-class JobTasksListParams(ListParams):
+class JobTasksListParams(FilterableListParams):
     """Job tasks list params."""
-
-    kind: TaskKind | None = Field(default=None, description="Filter on task kind.")
-    status: TaskStatus | None = Field(
-        default=None, description="Filter on task status."
-    )

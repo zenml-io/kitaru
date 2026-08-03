@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the task routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -97,7 +98,10 @@ async def test_list_tasks_filters(
     task = await create_agent_task(services.tasks, job.id)
     await create_agent_task(services.tasks, other_job.id)
 
-    response = await client.get("/v1/tasks", params={"job_id": str(job.id)})
+    filter_expression = {"field": "job_id", "op": "eq", "value": str(job.id)}
+    response = await client.get(
+        "/v1/tasks", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1

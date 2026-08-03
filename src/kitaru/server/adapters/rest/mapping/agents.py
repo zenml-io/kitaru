@@ -18,6 +18,7 @@ from kitaru.api_models.v1.agent import (
     AgentResponse,
     AgentUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.domain.agent import Agent
 
@@ -54,7 +55,9 @@ def agent_list_params_to_filter(params: AgentListParams) -> AgentFilter:
         Agent filter.
     """
     return AgentFilter(
-        name=params.name,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

@@ -38,7 +38,7 @@ FROM base AS builder
 ARG KITARU_VERSION
 
 RUN uv venv /app/.venv && \
-  uv pip install "kitaru[server]${KITARU_VERSION:+==$KITARU_VERSION}"
+  uv pip install "kitaru[server,otel]${KITARU_VERSION:+==$KITARU_VERSION}"
 
 FROM base AS runtime
 

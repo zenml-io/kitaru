@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end replay pipeline tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -165,8 +166,15 @@ async def test_replay_pipeline_completes_through_the_api(
     replay_final = (await client.get(f"/v1/replays/{replay['id']}")).json()
     assert replay_final["status"] == "completed"
 
+    filter_expression = {
+        "field": "session_id",
+        "op": "eq",
+        "value": result_session["id"],
+    }
     evaluations = (
-        await client.get("/v1/evaluations", params={"session_id": result_session["id"]})
+        await client.get(
+            "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+        )
     ).json()["items"]
     assert len(evaluations) == 1
     assert evaluations[0]["name"] == "accuracy"

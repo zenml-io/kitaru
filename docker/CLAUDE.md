@@ -10,8 +10,8 @@ and differ only in where the package comes from:
 
 | Dockerfile | Installs Kitaru from |
 |---|---|
-| `dev.Dockerfile` | Local source, `uv sync --locked --no-dev --extra server` |
-| `release.Dockerfile` | PyPI, `kitaru[server]` (latest, or `KITARU_VERSION` when set) |
+| `dev.Dockerfile` | Local source, `uv sync --locked --no-dev --extra server --extra otel` |
+| `release.Dockerfile` | PyPI, `kitaru[server,otel]` (latest, or `KITARU_VERSION` when set) |
 
 The source build pins every dependency through the committed `uv.lock`. The
 release build resolves dependencies from PyPI at build time.
@@ -21,11 +21,11 @@ release build resolves dependencies from PyPI at build time.
 | Stage | Purpose |
 |---|---|
 | `base` | Slim Python, uv binary, non-root user `kitaru` (UID 1000) |
-| `builder` | `uv sync --locked --no-dev --extra server --no-editable` into `/app/.venv` |
+| `builder` | `uv sync --locked --no-dev --extra server --extra otel --no-editable` into `/app/.venv` |
 | `runtime` | Final image, copies only the venv from `builder` |
 
 `release.Dockerfile` has the same `base`, `builder`, and `runtime` stages, with
-the builder running `uv pip install "kitaru[server]"` instead of a source sync.
+the builder running `uv pip install "kitaru[server,otel]"` instead of a source sync.
 
 The server listens on port 8000 and starts via
 `python -m kitaru.server.api.main`. Database migrations run on startup unless

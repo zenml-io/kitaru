@@ -65,6 +65,14 @@ server = [
 worker = [
     "pydantic-settings>=2.14",
 ]
+otel = [
+    "opentelemetry-sdk>=1.44",
+    "opentelemetry-exporter-otlp-proto-http>=1.44",
+    "opentelemetry-instrumentation-fastapi>=0.65b0",
+    "opentelemetry-instrumentation-httpx>=0.65b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
+    "opentelemetry-instrumentation-logging>=0.65b0",
+]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

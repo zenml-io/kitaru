@@ -14,9 +14,11 @@
 """SQL API key repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.api_key import (
     API_KEY_NAME_UNIQUE_CONSTRAINT,
     ApiKeyORM,
@@ -30,6 +32,10 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
 )
 from kitaru.server.domain.base import NotFoundError
+
+API_KEY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": ApiKeyORM.name,
+}
 
 
 class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
@@ -94,10 +100,14 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
             Page of matching API keys and the next cursor.
         """
         statement = select(ApiKeyORM)
-        if api_key_filter.name is not None:
-            statement = statement.where(ApiKeyORM.name == api_key_filter.name)
         if api_key_filter.owner_id is not None:
             statement = statement.where(ApiKeyORM.owner_id == api_key_filter.owner_id)
+        if api_key_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    api_key_filter.expression, API_KEY_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session,
             statement,

@@ -28,6 +28,7 @@ from conftest import (
     create_job,
     create_worker,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import (
     TaskClaimRequest,
     TaskListParams,
@@ -101,13 +102,16 @@ async def test_list_and_iter(
     for _ in range(3):
         await create_agent_task(services.tasks, job.id)
 
-    page = await api_client.tasks.list(TaskListParams(job_id=job.id))
+    job_filter = FilterCondition(field="job_id", op=FilterOp.EQ, value=job.id)
+    page = await api_client.tasks.list(TaskListParams(filter=job_filter))
     assert page.next_cursor is None
     assert len(page.items) == 3
 
     collected = [
         item.id
-        async for item in api_client.tasks.iter(TaskListParams(job_id=job.id, size=1))
+        async for item in api_client.tasks.iter(
+            TaskListParams(filter=job_filter, size=1)
+        )
     ]
     assert len(collected) == 3
 

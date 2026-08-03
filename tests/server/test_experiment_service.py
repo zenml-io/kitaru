@@ -26,6 +26,7 @@ from conftest import (
     create_plugin,
     create_replay,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment import (
@@ -51,6 +52,7 @@ from kitaru.server.domain.replay_config import (
     ToolPolicy,
 )
 from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -236,7 +238,10 @@ async def test_list_experiments_by_tag(
     )
 
     pairs, next_cursor = await service.list_experiments(
-        ExperimentFilter(tag="smoke"), actor=ACTOR
+        ExperimentFilter(
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert [experiment.name for experiment, _ in pairs] == ["tagged"]

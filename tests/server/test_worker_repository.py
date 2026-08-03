@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import FakeWorkerRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import LabelSelector, WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -33,6 +34,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[WorkerRepository, uuid.UUID]
 
@@ -180,11 +182,19 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert [worker.name for worker in workers] == ["worker-3", "worker-2", "worker-1"]
 
-    workers, next_cursor = await repository.query(WorkerFilter(name="worker-1"))
+    workers, next_cursor = await repository.query(
+        WorkerFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="worker-1")
+        )
+    )
     assert next_cursor is None
     assert workers[0] == first
 
-    workers, next_cursor = await repository.query(WorkerFilter(name="missing"))
+    workers, next_cursor = await repository.query(
+        WorkerFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert workers == []
     assert third.name == "worker-3"

@@ -19,6 +19,7 @@ from kitaru.api_models.v1.cohort import (
     CohortResponse,
     CohortUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.cohort import (
     CohortCreate,
     CohortFilter,
@@ -78,8 +79,9 @@ def cohort_list_params_to_filter(params: CohortListParams) -> CohortFilter:
         Cohort filter.
     """
     return CohortFilter(
-        name=params.name,
-        tag=params.tag,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

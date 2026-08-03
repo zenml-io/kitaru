@@ -508,6 +508,39 @@
         "title": "AgentVersionUpdateRequest",
         "type": "object"
       },
+      "AndFilter": {
+        "additionalProperties": false,
+        "description": "And filter.",
+        "properties": {
+          "and": {
+            "description": "Operands.",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "And",
+            "type": "array"
+          }
+        },
+        "required": [
+          "and"
+        ],
+        "title": "AndFilter",
+        "type": "object"
+      },
       "ApiKeyCreateRequest": {
         "additionalProperties": false,
         "description": "API key create request.",
@@ -2438,6 +2471,50 @@
         "title": "ExperimentUpdateRequest",
         "type": "object"
       },
+      "FilterCondition": {
+        "additionalProperties": false,
+        "description": "Filter condition.",
+        "properties": {
+          "field": {
+            "description": "Field to filter on.",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "title": "Field",
+            "type": "string"
+          },
+          "op": {
+            "$ref": "#/components/schemas/FilterOp",
+            "description": "Comparison operator."
+          },
+          "value": {
+            "description": "Comparison value.",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "field",
+          "op"
+        ],
+        "title": "FilterCondition",
+        "type": "object"
+      },
+      "FilterOp": {
+        "description": "Filter condition operator.",
+        "enum": [
+          "eq",
+          "ne",
+          "lt",
+          "le",
+          "gt",
+          "ge",
+          "in",
+          "is_null",
+          "startswith",
+          "endswith",
+          "contains"
+        ],
+        "title": "FilterOp",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3103,6 +3180,68 @@
         ],
         "title": "NodeType",
         "type": "string"
+      },
+      "NotFilter": {
+        "additionalProperties": false,
+        "description": "Not filter.",
+        "properties": {
+          "not": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterCondition"
+              },
+              {
+                "$ref": "#/components/schemas/AndFilter"
+              },
+              {
+                "$ref": "#/components/schemas/OrFilter"
+              },
+              {
+                "$ref": "#/components/schemas/NotFilter"
+              }
+            ],
+            "description": "Operand.",
+            "title": "Not"
+          }
+        },
+        "required": [
+          "not"
+        ],
+        "title": "NotFilter",
+        "type": "object"
+      },
+      "OrFilter": {
+        "additionalProperties": false,
+        "description": "Or filter.",
+        "properties": {
+          "or": {
+            "description": "Operands.",
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                }
+              ]
+            },
+            "minItems": 1,
+            "title": "Or",
+            "type": "array"
+          }
+        },
+        "required": [
+          "or"
+        ],
+        "title": "OrFilter",
+        "type": "object"
       },
       "PackagePluginSource": {
         "additionalProperties": false,
@@ -7035,39 +7174,30 @@
             }
           },
           {
-            "description": "Filter on account name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on account name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on active state.",
-            "in": "query",
-            "name": "active",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on active state.",
-              "title": "Active"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -7417,21 +7547,30 @@
             }
           },
           {
-            "description": "Filter on agent name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on agent name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -7826,21 +7965,30 @@
             }
           },
           {
-            "description": "Filter on API key name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on API key name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -8388,39 +8536,30 @@
             }
           },
           {
-            "description": "Filter on cohort name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on cohort name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on tag name.",
-            "in": "query",
-            "name": "tag",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on tag name.",
-              "title": "Tag"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -8856,21 +8995,30 @@
             }
           },
           {
-            "description": "Filter on device status.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "status",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/DeviceStatus"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on device status.",
-              "title": "Status"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -9138,96 +9286,30 @@
             }
           },
           {
-            "description": "Filter on session.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "session_id",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on session.",
-              "title": "Session Id"
-            }
-          },
-          {
-            "description": "Filter on evaluator task.",
-            "in": "query",
-            "name": "task_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on evaluator task.",
-              "title": "Task Id"
-            }
-          },
-          {
-            "description": "Filter on evaluator version.",
-            "in": "query",
-            "name": "evaluator_version_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on evaluator version.",
-              "title": "Evaluator Version Id"
-            }
-          },
-          {
-            "description": "Filter on evaluation name.",
-            "in": "query",
-            "name": "name",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on evaluation name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on data type.",
-            "in": "query",
-            "name": "data_type",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/EvaluationDataType"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on data type.",
-              "title": "Data Type"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -9394,21 +9476,30 @@
             }
           },
           {
-            "description": "Filter on evaluator name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on evaluator name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -9917,58 +10008,30 @@
             }
           },
           {
-            "description": "Filter on experiment.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "experiment_id",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on experiment.",
-              "title": "Experiment Id"
-            }
-          },
-          {
-            "description": "Filter on run status.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/ExperimentRunStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on run status.",
-              "title": "Status"
-            }
-          },
-          {
-            "description": "Filter on tag name.",
-            "in": "query",
-            "name": "tag",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on tag name.",
-              "title": "Tag"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -10184,21 +10247,30 @@
             }
           },
           {
-            "description": "Filter on job status.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "status",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/JobStatus"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on job status.",
-              "title": "Status"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -10281,39 +10353,30 @@
             }
           },
           {
-            "description": "Filter on experiment name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on experiment name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on tag name.",
-            "in": "query",
-            "name": "tag",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on tag name.",
-              "title": "Tag"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -10621,39 +10684,30 @@
             }
           },
           {
-            "description": "Filter on importer name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on importer name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on source system.",
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on source system.",
-              "title": "Provider"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -11226,21 +11280,30 @@
             }
           },
           {
-            "description": "Filter on job status.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "status",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/JobStatus"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on job status.",
-              "title": "Status"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -11456,39 +11519,30 @@
             }
           },
           {
-            "description": "Filter on task kind.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "kind",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/TaskKind"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on task kind.",
-              "title": "Kind"
-            }
-          },
-          {
-            "description": "Filter on task status.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/TaskStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on task status.",
-              "title": "Status"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -11637,59 +11691,30 @@
             }
           },
           {
-            "description": "Filter on experiment run.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "experiment_run_id",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on experiment run.",
-              "title": "Experiment Run Id"
-            }
-          },
-          {
-            "description": "Filter on baseline session.",
-            "in": "query",
-            "name": "baseline_session_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on baseline session.",
-              "title": "Baseline Session Id"
-            }
-          },
-          {
-            "description": "Filter on replay status.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/ReplayStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on replay status.",
-              "title": "Status"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -11910,21 +11935,30 @@
             }
           },
           {
-            "description": "Filter on secret name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on secret name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -12238,325 +12272,30 @@
             }
           },
           {
-            "description": "Filter on agent.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "agent_id",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on agent.",
-              "title": "Agent Id"
-            }
-          },
-          {
-            "description": "Filter on agent version.",
-            "in": "query",
-            "name": "agent_version_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on agent version.",
-              "title": "Agent Version Id"
-            }
-          },
-          {
-            "description": "Filter on cohort version membership.",
-            "in": "query",
-            "name": "cohort_version_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on cohort version membership.",
-              "title": "Cohort Version Id"
-            }
-          },
-          {
-            "description": "Filter on producing task.",
-            "in": "query",
-            "name": "task_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on producing task.",
-              "title": "Task Id"
-            }
-          },
-          {
-            "description": "Filter on session origin.",
-            "in": "query",
-            "name": "origin",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/SessionOrigin"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on session origin.",
-              "title": "Origin"
-            }
-          },
-          {
-            "description": "Filter on session status.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/SessionStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on session status.",
-              "title": "Status"
-            }
-          },
-          {
-            "description": "Filter on source system.",
-            "in": "query",
-            "name": "provider",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on source system.",
-              "title": "Provider"
-            }
-          },
-          {
-            "description": "Filter on source system id.",
-            "in": "query",
-            "name": "external_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on source system id.",
-              "title": "External Id"
-            }
-          },
-          {
-            "description": "Filter on session name.",
-            "in": "query",
-            "name": "name",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on session name.",
-              "title": "Name"
-            }
-          },
-          {
-            "description": "Filter on tag name.",
-            "in": "query",
-            "name": "tag",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on tag name.",
-              "title": "Tag"
-            }
-          },
-          {
-            "description": "Filter on sessions started at or after this time.",
-            "in": "query",
-            "name": "started_after",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on sessions started at or after this time.",
-              "title": "Started After"
-            }
-          },
-          {
-            "description": "Filter on sessions started before this time.",
-            "in": "query",
-            "name": "started_before",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on sessions started before this time.",
-              "title": "Started Before"
-            }
-          },
-          {
-            "description": "Filter on sessions ended at or after this time.",
-            "in": "query",
-            "name": "ended_after",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on sessions ended at or after this time.",
-              "title": "Ended After"
-            }
-          },
-          {
-            "description": "Filter on sessions ended before this time.",
-            "in": "query",
-            "name": "ended_before",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on sessions ended before this time.",
-              "title": "Ended Before"
-            }
-          },
-          {
-            "description": "Filter on whether the session has an evaluation.",
-            "in": "query",
-            "name": "has_evaluation",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on whether the session has an evaluation.",
-              "title": "Has Evaluation"
-            }
-          },
-          {
-            "description": "Filter on minimum cost.",
-            "in": "query",
-            "name": "min_cost",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on minimum cost.",
-              "title": "Min Cost"
-            }
-          },
-          {
-            "description": "Filter on maximum cost.",
-            "in": "query",
-            "name": "max_cost",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "number"
-                },
-                {
-                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on maximum cost.",
-              "title": "Max Cost"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -13012,21 +12751,30 @@
             }
           },
           {
-            "description": "Filter on tag name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on tag name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -13347,77 +13095,30 @@
             }
           },
           {
-            "description": "Filter on owning job.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "job_id",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "format": "uuid",
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on owning job.",
-              "title": "Job Id"
-            }
-          },
-          {
-            "description": "Filter on task kind.",
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/TaskKind"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on task kind.",
-              "title": "Kind"
-            }
-          },
-          {
-            "description": "Filter on task status.",
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/TaskStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on task status.",
-              "title": "Status"
-            }
-          },
-          {
-            "description": "Filter on the claiming worker.",
-            "in": "query",
-            "name": "worker_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter on the claiming worker.",
-              "title": "Worker Id"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -13682,21 +13383,30 @@
             }
           },
           {
-            "description": "Filter on worker name.",
+            "description": "Filter expression, JSON-encoded in the query string.",
             "in": "query",
-            "name": "name",
+            "name": "filter",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter on worker name.",
-              "title": "Name"
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],

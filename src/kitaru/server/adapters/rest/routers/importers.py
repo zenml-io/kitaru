@@ -84,12 +84,7 @@ async def list_importers(
         Page of importers.
     """
     return await plugins.list_plugins(
-        service,
-        params,
-        ImporterResponse,
-        actor=actor,
-        name=params.name,
-        provider=params.provider,
+        service, params, ImporterResponse, actor=actor, filter_=params.filter
     )
 
 

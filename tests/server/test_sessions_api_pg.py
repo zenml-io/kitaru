@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end session tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -196,3 +197,20 @@ async def test_ingest_into_terminal_recorded_session_rejected(
         },
     )
     assert response.status_code == 409
+
+
+async def test_list_sessions_filters_by_status_filter(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Filter sessions by a status filter expression end to end."""
+    completed = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
+    await client.patch(f"/v1/sessions/{completed['id']}", json={"status": "completed"})
+    await client.post("/v1/sessions", json=_session_body(agent_id))
+
+    filter_expression = {"field": "status", "op": "eq", "value": "completed"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [completed["id"]]

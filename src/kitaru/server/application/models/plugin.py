@@ -14,19 +14,36 @@
 """Plugin filter and update command models."""
 
 import uuid
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.plugin import PluginKind
+from kitaru.server.filtering import NULLABLE_OPS, STRING_OPS, FilterField
 
 
 class PluginFilter(ListFilter):
     """Plugin list filter."""
 
     kind: PluginKind
-    name: str | None = None
-    provider: str | None = None
+
+
+class EvaluatorFilter(PluginFilter):
+    """Evaluator list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+    }
+
+
+class ImporterFilter(PluginFilter):
+    """Importer list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+    }
 
 
 class PluginVersionFilter(ListFilter):

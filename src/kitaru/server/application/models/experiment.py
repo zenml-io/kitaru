@@ -13,17 +13,24 @@
 #  permissions and limitations under the License.
 """Experiment filter and command models."""
 
+from collections.abc import Mapping
+from typing import ClassVar
+
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.replay_config import ReplayOverride, ToolPolicy
+from kitaru.server.filtering import STRING_OPS, FilterField
 
 
 class ExperimentFilter(ListFilter):
     """Experiment list filter."""
 
-    name: str | None = None
-    tag: str | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
+    }
 
 
 class ExperimentCreate(FrozenModel):

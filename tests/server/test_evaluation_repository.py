@@ -27,6 +27,7 @@ from conftest import (
     postgres_available,
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResult
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -56,6 +57,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
 )
 from kitaru.server.domain.session import Session
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[EvaluationRepository, uuid.UUID, uuid.UUID]
 PluginSetup = tuple[PluginRepository, EvaluationRepository, uuid.UUID, uuid.UUID]
@@ -294,11 +296,21 @@ async def test_query_filters_by_session_and_name(
         other_session_id, [_evaluation(owner_id, other_session_id, "a", score=2.0)]
     )
 
-    items, next_cursor = await repository.query(EvaluationFilter(session_id=session_id))
+    items, next_cursor = await repository.query(
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="session_id", op=FilterOp.EQ, value=session_id
+            )
+        )
+    )
     assert next_cursor is None
     assert [item.evaluation.session_id for item in items] == [session_id]
 
-    items, next_cursor = await repository.query(EvaluationFilter(name="a"))
+    items, next_cursor = await repository.query(
+        EvaluationFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="a")
+        )
+    )
     assert next_cursor is None
     assert len(items) == 2
 
@@ -314,7 +326,11 @@ async def test_query_filters_by_data_type(setup: Setup) -> None:
         ],
     )
     items, next_cursor = await repository.query(
-        EvaluationFilter(data_type=EvaluationDataType.BOOL)
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="data_type", op=FilterOp.EQ, value=EvaluationDataType.BOOL
+            )
+        )
     )
     assert next_cursor is None
     assert [item.evaluation.name for item in items] == ["b"]
@@ -333,7 +349,13 @@ async def test_query_walks_pages(setup: Setup) -> None:
     cursor = None
     while True:
         items, next_cursor = await repository.query(
-            EvaluationFilter(session_id=session_id, cursor=cursor, size=2)
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="session_id", op=FilterOp.EQ, value=session_id
+                ),
+                cursor=cursor,
+                size=2,
+            )
         )
         collected.extend(item.evaluation for item in items)
         if next_cursor is None:
@@ -350,7 +372,13 @@ async def test_query_task_id_filter(setup: Setup) -> None:
     await repository.merge_session_evaluations(
         session_id, [_evaluation(owner_id, session_id, "a", score=1.0)]
     )
-    items, _ = await repository.query(EvaluationFilter(task_id=uuid.uuid4()))
+    items, _ = await repository.query(
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="task_id", op=FilterOp.EQ, value=uuid.uuid4()
+            )
+        )
+    )
     assert items == []
 
 
@@ -409,7 +437,11 @@ async def test_denormalized_evaluator_name_and_version(
     assert item.evaluator_version == version.version
 
     items, _ = await evaluation_repository.query(
-        EvaluationFilter(evaluator_version_id=version.id)
+        EvaluationFilter(
+            expression=FilterCondition(
+                field="evaluator_version_id", op=FilterOp.EQ, value=version.id
+            )
+        )
     )
     assert items[0].evaluator_name == "accuracy-scorer"
     assert items[0].evaluator_version == version.version

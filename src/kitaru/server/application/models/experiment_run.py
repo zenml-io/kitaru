@@ -14,25 +14,34 @@
 """Experiment run filter and command models."""
 
 import uuid
+from collections.abc import Mapping
+from typing import ClassVar
 
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
 
 class ExperimentRunFilter(ListFilter):
     """Experiment run list filter."""
 
-    experiment_id: uuid.UUID | None = None
-    status: ExperimentRunStatus | None = None
-    tag: str | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "experiment_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "cohort_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "status": FilterField(value_type=ExperimentRunStatus, ops=EQUALITY_OPS),
+        "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
+    }
 
 
 class ExperimentRunJobsFilter(ListFilter):
     """Experiment run jobs list filter."""
 
-    status: JobStatus | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "status": FilterField(value_type=JobStatus, ops=EQUALITY_OPS),
+    }
 
 
 class ExperimentRunCreate(FrozenModel):

@@ -14,37 +14,58 @@
 """Session filter and command models."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import AwareDatetime, Field
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import (
+    BOOLEAN_OPS,
+    EQUALITY_OPS,
+    NULLABLE_OPS,
+    ORDERED_OPS,
+    STRING_OPS,
+    FilterField,
+)
 
 
 class SessionFilter(ListFilter):
     """Session list filter."""
 
-    agent_id: uuid.UUID | None = None
-    agent_version_id: uuid.UUID | None = None
-    cohort_version_id: uuid.UUID | None = None
-    task_id: uuid.UUID | None = None
-    origin: SessionOrigin | None = None
-    status: SessionStatus | None = None
-    provider: str | None = None
-    external_id: str | None = None
-    name: str | None = None
-    tag: str | None = None
-    started_after: AwareDatetime | None = None
-    started_before: AwareDatetime | None = None
-    ended_after: AwareDatetime | None = None
-    ended_before: AwareDatetime | None = None
-    has_evaluation: bool | None = None
-    min_cost: Decimal | None = None
-    max_cost: Decimal | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "agent_version_id": FilterField(
+            value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
+        ),
+        "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
+        "origin": FilterField(value_type=SessionOrigin, ops=EQUALITY_OPS),
+        "status": FilterField(value_type=SessionStatus, ops=EQUALITY_OPS),
+        "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+        "framework": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+        "external_id": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+        "name": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+        "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
+        "cohort_version_id": FilterField(
+            value_type=uuid.UUID, ops=frozenset({FilterOp.EQ, FilterOp.IN})
+        ),
+        "has_evaluation": FilterField(value_type=bool, ops=BOOLEAN_OPS),
+        "started_at": FilterField(
+            value_type=AwareDatetime, ops=ORDERED_OPS | NULLABLE_OPS
+        ),
+        "ended_at": FilterField(
+            value_type=AwareDatetime, ops=ORDERED_OPS | NULLABLE_OPS
+        ),
+        "cost": FilterField(value_type=Decimal, ops=ORDERED_OPS | NULLABLE_OPS),
+        "llm_call_count": FilterField(value_type=int, ops=ORDERED_OPS),
+        "tool_call_count": FilterField(value_type=int, ops=ORDERED_OPS),
+        "created": FilterField(value_type=AwareDatetime, ops=ORDERED_OPS),
+    }
 
 
 class SessionCreate(FrozenModel):

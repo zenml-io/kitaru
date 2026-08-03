@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeTagRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -36,6 +37,7 @@ from kitaru.server.domain.tag import (
     TagLinkNotFound,
     TagNotFound,
 )
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[TagRepository, uuid.UUID]
 
@@ -99,11 +101,19 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert [tag.name for tag in tags] == ["canary", "staging", "prod"]
 
-    tags, next_cursor = await repository.query(TagFilter(name="prod"))
+    tags, next_cursor = await repository.query(
+        TagFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="prod")
+        )
+    )
     assert next_cursor is None
     assert tags[0] == prod
 
-    tags, next_cursor = await repository.query(TagFilter(name="missing"))
+    tags, next_cursor = await repository.query(
+        TagFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert tags == []
 

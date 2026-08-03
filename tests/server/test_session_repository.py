@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import func, select, text
 
 from conftest import (
     FakeCohortRepository,
@@ -30,8 +31,14 @@ from conftest import (
     postgres_available,
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.pagination import (
+    LIST_QUERY_TIMEOUT_INFO_KEY,
+    paginate,
+)
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -63,6 +70,7 @@ from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.base import QueryTimeoutError, ValidationError
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.evaluation import Evaluation
@@ -74,6 +82,12 @@ from kitaru.server.domain.session import (
     SessionRollups,
 )
 from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import (
+    AndExpression,
+    FilterCondition,
+    NotExpression,
+    OrExpression,
+)
 
 Setup = tuple[
     SessionRepository, uuid.UUID, uuid.UUID, TagRepository, EvaluationRepository
@@ -244,13 +258,19 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     )
 
     sessions, next_cursor = await repository.query(
-        SessionFilter(origin=SessionOrigin.RECORDED)
+        SessionFilter(
+            expression=FilterCondition(field="origin", op=FilterOp.EQ, value="recorded")
+        )
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [recorded.id]
 
     sessions, next_cursor = await repository.query(
-        SessionFilter(status=SessionStatus.COMPLETED)
+        SessionFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value="completed"
+            )
+        )
     )
     assert next_cursor is None
     assert len(sessions) == 1
@@ -280,14 +300,23 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
     )
 
     sessions, next_cursor = await repository.query(
-        SessionFilter(provider="langsmith", external_id="run-2")
+        SessionFilter(
+            expression=AndExpression(
+                operands=(
+                    FilterCondition(
+                        field="provider", op=FilterOp.EQ, value="langsmith"
+                    ),
+                    FilterCondition(field="external_id", op=FilterOp.EQ, value="run-2"),
+                )
+            )
+        )
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [target.id]
 
 
 async def test_query_filters_by_date_bounds(setup: Setup) -> None:
-    """Filter sessions by started_after/before and ended_after/before."""
+    """Filter sessions by started_at/ended_at ordered comparisons."""
     repository, owner_id, agent_id, _, _ = setup
     early = await repository.create(
         Session(
@@ -309,28 +338,52 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
     )
 
     sessions, _ = await repository.query(
-        SessionFilter(started_after=datetime(2026, 3, 1, tzinfo=UTC))
+        SessionFilter(
+            expression=FilterCondition(
+                field="started_at",
+                op=FilterOp.GE,
+                value=datetime(2026, 3, 1, tzinfo=UTC),
+            )
+        )
     )
     assert [s.id for s in sessions] == [late.id]
 
     sessions, _ = await repository.query(
-        SessionFilter(started_before=datetime(2026, 3, 1, tzinfo=UTC))
+        SessionFilter(
+            expression=FilterCondition(
+                field="started_at",
+                op=FilterOp.LE,
+                value=datetime(2026, 3, 1, tzinfo=UTC),
+            )
+        )
     )
     assert [s.id for s in sessions] == [early.id]
 
     sessions, _ = await repository.query(
-        SessionFilter(ended_after=datetime(2026, 3, 1, tzinfo=UTC))
+        SessionFilter(
+            expression=FilterCondition(
+                field="ended_at",
+                op=FilterOp.GE,
+                value=datetime(2026, 3, 1, tzinfo=UTC),
+            )
+        )
     )
     assert [s.id for s in sessions] == [late.id]
 
     sessions, _ = await repository.query(
-        SessionFilter(ended_before=datetime(2026, 3, 1, tzinfo=UTC))
+        SessionFilter(
+            expression=FilterCondition(
+                field="ended_at",
+                op=FilterOp.LE,
+                value=datetime(2026, 3, 1, tzinfo=UTC),
+            )
+        )
     )
     assert [s.id for s in sessions] == [early.id]
 
 
 async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
-    """Filter sessions by min_cost and max_cost."""
+    """Filter sessions by cost ordered comparisons."""
     repository, owner_id, agent_id, _, _ = setup
     cheap = await repository.create(
         Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
@@ -341,10 +394,22 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
     await repository.apply_rollups(cheap.id, SessionRollups(cost=Decimal("1.00")))
     await repository.apply_rollups(pricey.id, SessionRollups(cost=Decimal("9.00")))
 
-    sessions, _ = await repository.query(SessionFilter(min_cost=Decimal("5.00")))
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="cost", op=FilterOp.GE, value=Decimal("5.00")
+            )
+        )
+    )
     assert [s.id for s in sessions] == [pricey.id]
 
-    sessions, _ = await repository.query(SessionFilter(max_cost=Decimal("5.00")))
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="cost", op=FilterOp.LE, value=Decimal("5.00")
+            )
+        )
+    )
     assert [s.id for s in sessions] == [cheap.id]
 
 
@@ -370,10 +435,22 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
         ],
     )
 
-    sessions, _ = await repository.query(SessionFilter(has_evaluation=True))
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="has_evaluation", op=FilterOp.EQ, value=True
+            )
+        )
+    )
     assert [s.id for s in sessions] == [scored.id]
 
-    sessions, _ = await repository.query(SessionFilter(has_evaluation=False))
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="has_evaluation", op=FilterOp.EQ, value=False
+            )
+        )
+    )
     assert [s.id for s in sessions] == [unscored.id]
 
 
@@ -554,8 +631,102 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
         )
     )
 
-    sessions, _ = await repository.query(SessionFilter(tag="smoke-test"))
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+        )
+    )
     assert [s.id for s in sessions] == [tagged.id]
+
+
+async def test_query_filters_by_tag_in_unions_names(setup: Setup) -> None:
+    """Union sessions matching either of two tag names with an in condition."""
+    repository, owner_id, agent_id, tags, _ = setup
+    smoke = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    regression = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    smoke_tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
+    regression_tag = await tags.create(Tag(owner_id=owner_id, name="regression"))
+    await tags.create_link(
+        TagLink(
+            tag_id=smoke_tag.id,
+            resource_type=TagResourceType.SESSION,
+            resource_id=smoke.id,
+        )
+    )
+    await tags.create_link(
+        TagLink(
+            tag_id=regression_tag.id,
+            resource_type=TagResourceType.SESSION,
+            resource_id=regression.id,
+        )
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="tag", op=FilterOp.IN, value=["smoke-test", "regression"]
+            )
+        )
+    )
+    assert {s.id for s in sessions} == {smoke.id, regression.id}
+
+
+async def test_query_filters_by_not_tag_returns_untagged(setup: Setup) -> None:
+    """Return untagged sessions when negating a tag eq condition."""
+    repository, owner_id, agent_id, tags, _ = setup
+    tagged = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    untagged = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
+    await tags.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.SESSION,
+            resource_id=tagged.id,
+        )
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=NotExpression(
+                operand=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+            )
+        )
+    )
+    assert [s.id for s in sessions] == [untagged.id]
+
+
+async def test_query_filters_by_is_null_on_name(setup: Setup) -> None:
+    """Match only null-named sessions with is_null."""
+    repository, owner_id, agent_id, _, _ = setup
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="run-1",
+        )
+    )
+    unnamed = await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(expression=FilterCondition(field="name", op=FilterOp.IS_NULL))
+    )
+    assert [s.id for s in sessions] == [unnamed.id]
 
 
 async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> None:
@@ -575,5 +746,356 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
         [member.id],
     )
 
-    matched, _ = await sessions.query(SessionFilter(cohort_version_id=version.id))
+    matched, _ = await sessions.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="cohort_version_id", op=FilterOp.EQ, value=version.id
+            )
+        )
+    )
     assert [s.id for s in matched] == [member.id]
+
+
+async def test_query_filters_by_and_expression(setup: Setup) -> None:
+    """Narrow results by an and expression combining two conditions."""
+    repository, owner_id, agent_id, _, _ = setup
+    match = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.IMPORTED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=AndExpression(
+                operands=(
+                    FilterCondition(field="origin", op=FilterOp.EQ, value="recorded"),
+                    FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
+                )
+            )
+        )
+    )
+    assert [s.id for s in sessions] == [match.id]
+
+
+async def test_query_filters_by_or_expression(setup: Setup) -> None:
+    """Union results by an or expression combining two different fields."""
+    repository, owner_id, agent_id, _, _ = setup
+    by_status = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    by_provider = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.IMPORTED,
+            provider="langsmith",
+        )
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=OrExpression(
+                operands=(
+                    FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
+                    FilterCondition(
+                        field="provider", op=FilterOp.EQ, value="langsmith"
+                    ),
+                )
+            )
+        )
+    )
+    assert {s.id for s in sessions} == {by_status.id, by_provider.id}
+
+
+async def test_query_filters_by_not_is_null_expression(setup: Setup) -> None:
+    """Invert an is_null condition to return only rows with the field set."""
+    repository, owner_id, agent_id, _, _ = setup
+    named = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="run-1",
+        )
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=NotExpression(
+                operand=FilterCondition(field="name", op=FilterOp.IS_NULL)
+            )
+        )
+    )
+    assert [s.id for s in sessions] == [named.id]
+
+
+async def test_query_filters_by_ne_excludes_null(setup: Setup) -> None:
+    """Exclude null rows from a ne condition, proving three-valued semantics."""
+    repository, owner_id, agent_id, _, _ = setup
+    other_name = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="run-1",
+        )
+    )
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="run-2",
+        )
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(field="name", op=FilterOp.NE, value="run-2")
+        )
+    )
+    assert [s.id for s in sessions] == [other_name.id]
+
+
+async def test_query_filters_by_in_expression(setup: Setup) -> None:
+    """Match multiple values with an in expression over an enum field."""
+    repository, owner_id, agent_id, _, _ = setup
+    completed = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    failed = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.FAILED,
+        )
+    )
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.IN, value=["completed", "failed"]
+            )
+        )
+    )
+    assert {s.id for s in sessions} == {completed.id, failed.id}
+
+
+async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
+    """Match name with startswith, endswith, and contains, autoescaping SQL
+    wildcards in the contains value."""
+    repository, owner_id, agent_id, _, _ = setup
+    web_run = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="web-agent-run",
+        )
+    )
+    percent_run = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="batch-0%_day",
+        )
+    )
+    # Would spuriously match "0%_d" as an unescaped LIKE pattern (any char,
+    # then "0", then any chars, then any single char, then "d") but must not
+    # match it as a literal substring.
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="foo0Xday",
+        )
+    )
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            name="other",
+        )
+    )
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="name", op=FilterOp.STARTSWITH, value="web"
+            )
+        )
+    )
+    assert [s.id for s in sessions] == [web_run.id]
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(field="name", op=FilterOp.ENDSWITH, value="run")
+        )
+    )
+    assert [s.id for s in sessions] == [web_run.id]
+
+    sessions, _ = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(field="name", op=FilterOp.CONTAINS, value="0%_d")
+        )
+    )
+    assert [s.id for s in sessions] == [percent_run.id]
+
+
+async def test_query_where_filter_persists_across_cursor(setup: Setup) -> None:
+    """Keep a filter expression applied across every page of a cursor walk."""
+    repository, owner_id, agent_id, _, _ = setup
+    matching = [
+        await repository.create(
+            Session(
+                owner_id=owner_id,
+                agent_id=agent_id,
+                origin=SessionOrigin.RECORDED,
+                status=SessionStatus.COMPLETED,
+            )
+        )
+        for _ in range(3)
+    ]
+    await repository.create(
+        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+    )
+    expected_order = list(reversed(matching))
+
+    collected: list[Session] = []
+    cursor = None
+    while True:
+        sessions, next_cursor = await repository.query(
+            SessionFilter(
+                expression=FilterCondition(
+                    field="status", op=FilterOp.EQ, value="completed"
+                ),
+                cursor=cursor,
+                size=1,
+            )
+        )
+        collected.extend(sessions)
+        if next_cursor is None:
+            break
+        cursor = next_cursor
+
+    assert collected == expected_order
+
+
+async def test_query_cursor_expression_mismatch(setup: Setup) -> None:
+    """Raise when a cursor is replayed after the filter expression changes."""
+    repository, owner_id, agent_id, _, _ = setup
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+        )
+    )
+    _, next_cursor = await repository.query(
+        SessionFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value="completed"
+            ),
+            size=1,
+        )
+    )
+    assert next_cursor is not None
+    with pytest.raises(ValidationError):
+        await repository.query(SessionFilter(cursor=next_cursor, size=1))
+
+
+async def test_query_applies_list_query_timeout() -> None:
+    """Set the statement timeout for the transaction when the session carries one."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 3
+        repository = SQLSessionRepository(session)
+        await repository.query(SessionFilter())
+        timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
+        assert timeout == "3s"
+
+
+async def test_query_without_list_query_timeout() -> None:
+    """Leave the statement timeout untouched when the session carries none."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        repository = SQLSessionRepository(session)
+        await repository.query(SessionFilter())
+        timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
+        assert timeout == "0"
+
+
+async def test_query_translates_statement_timeout() -> None:
+    """Raise the timeout domain error when the statement is canceled."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 1
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        repository = SQLSessionRepository(session)
+        await repository.create(
+            Session(
+                owner_id=owner.id,
+                agent_id=agent.id,
+                origin=SessionOrigin.RECORDED,
+                status=SessionStatus.COMPLETED,
+            )
+        )
+        statement = select(SessionORM).where(func.pg_sleep(1.5).is_(None))
+        with pytest.raises(QueryTimeoutError):
+            await paginate(session, statement, SessionFilter(), id_column=SessionORM.id)

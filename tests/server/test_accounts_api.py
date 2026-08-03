@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the account routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -107,7 +108,10 @@ async def test_list_accounts(client: httpx.AsyncClient) -> None:
     assert body["next_cursor"] is None
     assert [item["name"] for item in body["items"]] == ["carol", "bob", "alice"]
 
-    response = await client.get("/v1/accounts", params={"name": "bob"})
+    filter_expression = {"field": "name", "op": "eq", "value": "bob"}
+    response = await client.get(
+        "/v1/accounts", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -197,7 +201,11 @@ async def test_list_accounts_cursor_filter_mismatch(client: httpx.AsyncClient) -
         response = await client.post("/v1/accounts", json={"name": name})
         assert response.status_code == 201
 
-    response = await client.get("/v1/accounts", params={"size": 1, "active": "true"})
+    filter_expression = {"field": "active", "op": "eq", "value": True}
+    response = await client.get(
+        "/v1/accounts",
+        params={"size": 1, "filter": json.dumps(filter_expression)},
+    )
     next_cursor = response.json()["next_cursor"]
     assert next_cursor is not None
 

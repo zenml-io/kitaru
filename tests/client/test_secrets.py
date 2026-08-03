@@ -20,6 +20,7 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, asgi_api_client
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.secret import (
     SecretCreateRequest,
     SecretListParams,
@@ -108,7 +109,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["s3", "smtp", "db"]
 
-    page = await api_client.secrets.list(SecretListParams(name="smtp"))
+    page = await api_client.secrets.list(
+        SecretListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="smtp")
+        )
+    )
     assert page.next_cursor is None
     assert page.items[0].name == "smtp"
 

@@ -19,11 +19,11 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
-    ListParams,
     OwnedResponseModel,
     RequestModel,
     ResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.task import WorkerScope
 
 
@@ -59,10 +59,8 @@ class WorkerCreateRequest(RequestModel):
     )
 
 
-class WorkerListParams(ListParams):
+class WorkerListParams(FilterableListParams):
     """Worker list params."""
-
-    name: str | None = Field(default=None, description="Filter on worker name.")
 
 
 class WorkerHeartbeatRequest(RequestModel):

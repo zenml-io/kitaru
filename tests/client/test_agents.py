@@ -37,6 +37,7 @@ from kitaru.api_models.v1.agent_version import (
     RunSpec,
 )
 from kitaru.api_models.v1.base import ListParams
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -117,7 +118,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["triager", "reviewer", "assistant"]
 
-    page = await api_client.agents.list(AgentListParams(name="reviewer"))
+    page = await api_client.agents.list(
+        AgentListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="reviewer")
+        )
+    )
     assert page.next_cursor is None
     assert page.items[0].name == "reviewer"
 

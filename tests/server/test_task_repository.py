@@ -30,6 +30,7 @@ from conftest import (
     pg_session_with_engine,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, TaskStatus, WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -69,6 +70,7 @@ from kitaru.server.domain.task import (
     TaskNotFound,
 )
 from kitaru.server.domain.worker import Worker
+from kitaru.server.filtering import FilterCondition
 
 
 class Setup(NamedTuple):
@@ -258,12 +260,22 @@ async def test_query_filters(setup: Setup) -> None:
     assert [t.id for t in tasks] == [task.id]
 
     tasks, _ = await setup.tasks.query(
-        TaskFilter(job_id=setup.job_id, kind=TaskKind.IMPORTER)
+        TaskFilter(
+            job_id=setup.job_id,
+            expression=FilterCondition(
+                field="kind", op=FilterOp.EQ, value=TaskKind.IMPORTER
+            ),
+        )
     )
     assert tasks == []
 
     tasks, _ = await setup.tasks.query(
-        TaskFilter(job_id=setup.job_id, status=TaskStatus.PENDING)
+        TaskFilter(
+            job_id=setup.job_id,
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=TaskStatus.PENDING
+            ),
+        )
     )
     assert [t.id for t in tasks] == [task.id]
 
@@ -291,7 +303,13 @@ async def test_claim_pending_orders_by_id_and_locks_rows(setup: Setup) -> None:
     assert claimed[0].attempt == 1
     assert claimed[0].worker_id == setup.worker_id
 
-    remaining, _ = await setup.tasks.query(TaskFilter(status=TaskStatus.PENDING))
+    remaining, _ = await setup.tasks.query(
+        TaskFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=TaskStatus.PENDING
+            )
+        )
+    )
     assert {task.id for task in remaining} == {second.id}
 
 
