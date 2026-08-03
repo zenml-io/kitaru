@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The server sweeps stale tasks on a background interval, so tasks held by dead workers are requeued or abandoned even when no worker is polling for new tasks. Configured through `KITARU_SERVER_TASK_SWEEP_INTERVAL_SECONDS`, 0 disables the loop.
 - Agents and agent versions, managed via `/v1/agents` and `/v1/agent-versions`, where a version carries a run spec and its attached secrets.
 - Sessions and session nodes, managed via `/v1/sessions`, recording an agent run and its nested LLM calls, tool calls, and sub-agent calls.
 - Blobs, managed via `/v1/blobs`, content-addressed storage for plugin payloads and task inputs.
@@ -37,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - OpenTelemetry instrumentation for the API server, enabled by setting `KITARU_SERVER_OTEL_EXPORTER_OTLP_ENDPOINT` (or the standard `OTEL_*` environment variables) with the `otel` extra installed.
 
 ### Changed
+- Starting an experiment run now writes its replays, jobs, and tasks in three batched inserts instead of row by row, so run creation stays fast for large cohorts.
 - A control plane API key configured on the client is now exchanged for a session token instead of being sent on every request. The server had to authorize each of those requests against the control plane, which is a rate-limited round trip per call. Local API keys are unaffected and still authenticate directly.
 - A control plane request no longer writes to the mirrored account unless the control plane reports a name, email, or active state the account does not already have.
 - The CSRF token is now required only when the session token arrives in the auth cookie. A token sent in the `Authorization` header no longer needs the `X-CSRF-Token` header, because a browser never attaches that header on its own. The auth cookie also honors the new `KITARU_SERVER_AUTH_COOKIE_DOMAIN` and `KITARU_SERVER_AUTH_COOKIE_SECURE` settings, so the secure attribute is no longer derived from the request scheme behind a TLS-terminating proxy.
