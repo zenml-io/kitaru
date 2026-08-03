@@ -506,10 +506,6 @@ jobs:
           done
 
       # --- Docker image ---
-      - name: Export locked server dependencies
-        run: >-
-          uv export --locked --no-dev --extra server --no-emit-project
-          --output-file dist/kitaru-server-requirements.txt
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
       - name: Log in to Docker Hub
@@ -525,6 +521,8 @@ jobs:
           file: docker/release.Dockerfile
           target: runtime
           push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          build-args: |
+            ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
             zenmldocker/kitaru:latest

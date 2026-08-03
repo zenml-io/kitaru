@@ -51,10 +51,7 @@ jobs:
           KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
       - name: Build wheel
         working-directory: kitaru
-        run: |
-          uv build --wheel
-          uv export --locked --no-dev --extra server --no-emit-project \
-            --output-file dist/kitaru-server-requirements.txt
+        run: uv build --wheel
       - name: Verify Kitaru UI in wheel
         working-directory: kitaru
         run: |
@@ -82,7 +79,7 @@ jobs:
         if: ${{ inputs.docker-smoke }}
         working-directory: kitaru
         run: >-
-          docker build -f docker/release.Dockerfile --target runtime
+          docker build -f docker/dev.Dockerfile --target runtime
           -t kitaru-ui-prerelease-smoke .
       - name: Start PostgreSQL
         if: ${{ inputs.docker-smoke }}

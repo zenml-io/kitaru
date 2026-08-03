@@ -126,14 +126,9 @@ jobs:
         run: bash scripts/download-ui.sh
         env:
           KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
-      - name: Build server distribution
-        run: |
-          uv build --wheel
-          uv export --locked --no-dev --extra server --no-emit-project \
-            --output-file dist/kitaru-server-requirements.txt
       - name: Build server image
         run: >-
-          docker build -f docker/release.Dockerfile --target runtime
+          docker build -f docker/dev.Dockerfile --target runtime
           -t kitaru-ci-server .
       - name: Start PostgreSQL
         run: |

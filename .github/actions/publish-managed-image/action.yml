@@ -16,11 +16,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Export locked server dependencies
-      shell: bash
-      run: >-
-        uv export --locked --no-dev --extra server --no-emit-project
-        --output-file dist/kitaru-server-requirements.txt
     - name: Configure AWS credentials
       if: inputs.dry-run != 'true'
       uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
@@ -40,6 +35,8 @@ runs:
         target: runtime
         load: ${{ inputs.dry-run == 'true' }}
         push: ${{ inputs.dry-run != 'true' }}
+        build-args: |
+          ${{ inputs.dry-run != 'true' && format('KITARU_VERSION={0}', inputs.version) || '' }}
         tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
         labels: |
           org.opencontainers.image.title=kitaru

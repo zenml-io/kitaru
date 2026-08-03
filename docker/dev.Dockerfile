@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# Build local source for CI and publishable development images.
 
 ARG PYTHON_VERSION=3.13
 ARG USERNAME=kitaru
