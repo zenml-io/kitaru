@@ -56,7 +56,7 @@ db_pool_timeout_seconds: {{ .Kitaru.database.poolTimeoutSeconds | quote }}
 {{- end }}
 
 {{- if .Kitaru.pro.enabled }}
-auth_scheme: cloud
+auth_scheme: control_plane
 control_plane_api_url: "{{ .Kitaru.pro.apiURL }}"
 jwt_audience: "{{ .Kitaru.pro.apiURL }}"
 jwt_issuer: "{{ .Kitaru.pro.apiURL }}"

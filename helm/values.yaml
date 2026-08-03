@@ -64,8 +64,7 @@ server:
     #
     # none - No authentication
     # local - Local authentication
-    # control_plane - Control plane authentication
-    # cloud - Cloud authentication
+    # control_plane - ZenML Pro control plane authentication
     #
     # This value is overridden if the `kitaru.pro.enabled` value is set.
     authType: local
