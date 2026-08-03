@@ -38,6 +38,7 @@ class WorkerConfig(BaseSettings):
     claim_batch_size: int | None = Field(default=None, ge=1)
     poll_interval: float = Field(default=RUN_POLL_INTERVAL_SECONDS, gt=0)
     heartbeat_interval: float = Field(default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS, gt=0)
+    request_timeout: float = Field(default=30.0, gt=0, allow_inf_nan=False)
     timeout: float | None = Field(default=None, gt=0)
     blob_cache_root: Path | None = None
     payload_cache_root: Path | None = None

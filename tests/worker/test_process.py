@@ -14,6 +14,8 @@
 """Tests for subprocess supervision and process/environment building."""
 
 import asyncio
+import os
+import shlex
 import sys
 import time
 import uuid
@@ -24,11 +26,24 @@ import pytest
 from kitaru.worker.process import (
     TailBuffer,
     TaskProcess,
+    _kill_process,
     build_process_env,
     get_python_run_command,
     parse_inline_dependencies,
     run_task_process,
 )
+
+
+def test_kill_process_uses_direct_child_fallback_off_posix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Platforms without process groups still terminate the owned child."""
+    child = Mock()
+    monkeypatch.setattr("kitaru.worker.process.os.name", "nt")
+
+    _kill_process(child)
+
+    child.kill.assert_called_once_with()
 
 
 def test_tail_buffer_keeps_only_the_most_recent_bytes() -> None:
@@ -109,6 +124,46 @@ async def test_run_task_process_killed_on_cancel() -> None:
     assert elapsed < 5
 
 
+async def test_canceling_process_supervision_kills_and_reaps_the_child() -> None:
+    """Worker failure cancellation cannot leave its task subprocess supervised."""
+    process = TaskProcess(
+        command="sh -c 'sleep 30 & wait'",
+        working_dir=None,
+        env={},
+        timeout_seconds=30,
+    )
+    run = asyncio.create_task(run_task_process(process, asyncio.Event()))
+    await asyncio.sleep(0.2)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=5)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX process groups")
+async def test_shell_exit_cleans_descendants_that_retain_output_pipes() -> None:
+    """A background descendant cannot keep pipe draining alive past supervision."""
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import os, time; pid = os.fork(); "
+            "time.sleep(30) if pid == 0 else os._exit(0)",
+        ]
+    )
+    process = TaskProcess(
+        command=command,
+        working_dir=None,
+        env={},
+        timeout_seconds=1,
+    )
+
+    result = await asyncio.wait_for(
+        run_task_process(process, asyncio.Event()), timeout=3
+    )
+
+    assert result.returncode == 0
+
+
 async def test_run_task_process_records_exit_before_a_later_cancel() -> None:
     """An exit recorded before the cancel event fires wins over the cancel."""
     canceled = asyncio.Event()
@@ -141,6 +196,7 @@ def test_build_process_env_layers_and_strips_contract_variables(
     """The env layers run/extra/secret env and re-asserts contract variables."""
     monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
     monkeypatch.setenv("KITARU_API_KEY", "worker-key")
+    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/worker/credentials.json")
     monkeypatch.setenv("SOME_INHERITED_VAR", "inherited")
     monkeypatch.setenv("KITARU_TASK_ID", "leaked-from-parent")
 
@@ -161,6 +217,7 @@ def test_build_process_env_layers_and_strips_contract_variables(
     assert env["KITARU_TASK_TOKEN"] == "task-token"
     assert env["KITARU_TASK_ID"] == str(task_id)
     assert "KITARU_API_KEY" not in env
+    assert "KITARU_CREDENTIALS_PATH" not in env
 
 
 def test_build_process_env_extras_cannot_override_contract_variables(
@@ -169,13 +226,24 @@ def test_build_process_env_extras_cannot_override_contract_variables(
     """A contract variable smuggled through a layer is cleared and reset."""
     monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
+    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/worker/credentials.json")
 
     task_id = uuid.uuid4()
     env = build_process_env(
         task_id,
-        run_env={"KITARU_API_URL": "https://evil.example.com"},
-        extra_env={"KITARU_TASK_ID": "spoofed", "KITARU_TASK_TOKEN": "spoofed-token"},
-        secret_env={"KITARU_API_KEY": "spoofed-key"},
+        run_env={
+            "KITARU_API_URL": "https://evil.example.com",
+            "KITARU_CREDENTIALS_PATH": "/evil/run.json",
+        },
+        extra_env={
+            "KITARU_TASK_ID": "spoofed",
+            "KITARU_TASK_TOKEN": "spoofed-token",
+            "KITARU_CREDENTIALS_PATH": "/evil/extra.json",
+        },
+        secret_env={
+            "KITARU_API_KEY": "spoofed-key",
+            "KITARU_CREDENTIALS_PATH": "/evil/secret.json",
+        },
         token="task-token",
     )
 
@@ -183,6 +251,7 @@ def test_build_process_env_extras_cannot_override_contract_variables(
     assert env["KITARU_TASK_ID"] == str(task_id)
     assert env["KITARU_TASK_TOKEN"] == "task-token"
     assert "KITARU_API_KEY" not in env
+    assert "KITARU_CREDENTIALS_PATH" not in env
 
 
 def test_build_process_env_never_sets_api_key(

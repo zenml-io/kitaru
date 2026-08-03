@@ -32,6 +32,7 @@ async def control_plane_login(
     api_key: str | None = None,
     open_browser: bool = True,
     prompt: Callable[[ControlPlaneDeviceAuthorization], None] | None = None,
+    timeout: float = 30.0,
 ) -> ApiToken:
     """Log in to a server that delegates identity to a control plane.
 
@@ -47,6 +48,7 @@ async def control_plane_login(
         open_browser: Whether to open the verification page.
         prompt: Called with the authorization so the caller can show the user
             code.
+        timeout: Control-plane request timeout in seconds.
 
     Raises:
         ControlPlaneLoginError: The server does not delegate to a control
@@ -61,7 +63,7 @@ async def control_plane_login(
         raise ControlPlaneLoginError(
             f"Server {base_url} does not authenticate against a control plane"
         )
-    session = ControlPlaneSession(info.control_plane_api_url, store)
+    session = ControlPlaneSession(info.control_plane_api_url, store, timeout=timeout)
     try:
         if api_key is not None:
             credential = await session.login_with_api_key(api_key)

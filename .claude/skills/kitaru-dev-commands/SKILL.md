@@ -60,7 +60,7 @@ just example-coverage-audit           # Validate example metadata and required w
 just build                            # Build wheel + sdist locally
 
 # Docs workflows (require Node 22+ and pnpm)
-just generate-docs                    # Generate CLI reference + changelog + SDK reference docs
+just generate-docs                    # Generate changelog + SDK reference docs
 just docs                             # Preview docs dev server (localhost:3000)
 just docs-build                       # Build docs static export
 just docs-validate                    # Validate the static export as served under /docs
@@ -92,7 +92,7 @@ When working with Python, invoke the relevant `/astral:<skill>` for uv, ty, and 
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `ci.yml` | Push/PR to `develop` | PRs run Python checks: lint, format, yaml, typos, typecheck, dependency audit, links, and tests across base installs (3.11 + 3.12 + 3.13) plus additional `kitaru[mcp]` test lanes. Pushes also run Docker server smoke and wheel packaging because those jobs may need trusted UI release credentials. |
-| `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Regenerate the CLI/SDK reference and build the static docs app on every run. Deploy the SDK+CLI reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`) only on `main` push or manual dispatch. PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
+| `docs.yml` | Manual dispatch; push to `main`; selected docs/script/source PR paths | Regenerate the SDK reference and build the static docs app on every run. Deploy the SDK reference site (`sdkdocs.kitaru.ai`, worker `kitaru-sdkdocs`) plus the `kitaru.ai/docs` redirect worker (`kitaru-site`) only on `main` push or manual dispatch. PRs build only and do not create preview Workers. Hand-written docs (`docs/book/`) publish separately via GitBook Git Sync. |
 | `release.yml` | Workflow dispatch or `v*` tag | Stable Kitaru UI bundling, version/changelog/lock handling for dispatch releases, PyPI publish, Docker image publish, Helm OCI chart publish, release branch/main update, GitHub Release. No live provider calls. |
 | `llm-integration.yml` | Weekly schedule; manual dispatch | Trusted live OpenAI/Anthropic provider checks outside PR CI. Manual runs can target an exact Kitaru ref/SHA and select `provider-core`, `provider-extended`, OpenAI, Anthropic, and the opt-in research bot. Uploads logs/results only and sends Discord failure alerts. Secret-bearing jobs use the GitHub Environment `live-provider-tests`; put `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and `DISCORD_WEBHOOK_SRE` in that Environment with `kitaru-admins` approval/restrictions. |
 | `ui-prerelease-smoke.yml` | Manual dispatch | Tests an explicit prerelease Kitaru UI bundle against a Kitaru ref without publishing PyPI, Docker, Helm, tags, or releases |

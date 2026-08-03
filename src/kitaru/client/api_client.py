@@ -143,10 +143,10 @@ class KitaruAPIClient:
 
     @classmethod
     def from_env(cls) -> "KitaruAPIClient":
-        """Construct a client from KITARU_API_URL and the ambient credential.
+        """Construct a client from the public SDK environment contract.
 
-        Inside a task process the credential is KITARU_TASK_TOKEN, elsewhere
-        it is KITARU_API_KEY.
+        A task-scoped token takes precedence over ``KITARU_API_KEY``. Both are
+        optional, and persisted credential lookup is not enabled implicitly.
 
         Raises:
             RuntimeError: KITARU_API_URL is not set.

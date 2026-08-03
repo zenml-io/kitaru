@@ -13,6 +13,11 @@
 #  permissions and limitations under the License.
 """Module attribute reference parsing."""
 
+import re
+
+_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
+_ATTRIBUTE_RE = re.compile(r"^[A-Za-z_]\w*$")
+
 
 def parse_source_ref(ref: str) -> tuple[str, str]:
     """Parse a module:attribute reference.
@@ -29,6 +34,26 @@ def parse_source_ref(ref: str) -> tuple[str, str]:
     """
     module, separator, attribute = ref.partition(":")
     if not separator or not module or not attribute or ":" in attribute:
+        raise ValueError(
+            f"Invalid source reference '{ref}', expected 'module:attribute'"
+        )
+    return module, attribute
+
+
+def parse_python_source_ref(ref: str) -> tuple[str, str]:
+    """Parse an importable top-level Python callable reference.
+
+    Args:
+        ref: Reference string.
+
+    Raises:
+        ValueError: The reference is malformed or contains invalid identifiers.
+
+    Returns:
+        Importable module and top-level attribute names.
+    """
+    module, attribute = parse_source_ref(ref)
+    if not _MODULE_RE.fullmatch(module) or not _ATTRIBUTE_RE.fullmatch(attribute):
         raise ValueError(
             f"Invalid source reference '{ref}', expected 'module:attribute'"
         )

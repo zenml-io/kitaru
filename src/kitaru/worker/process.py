@@ -29,6 +29,7 @@ from typing import NamedTuple
 logger = logging.getLogger(__name__)
 
 LOG_TAIL_MAX_BYTES = 8192
+PROCESS_DRAIN_TIMEOUT_SECONDS = 1.0
 
 # Contract variables the worker owns. Any inherited copy is cleared before a
 # task process starts, then reset from the worker's own state.
@@ -37,6 +38,7 @@ _CONTRACT_ENV_VARIABLES = frozenset(
         "KITARU_API_URL",
         "KITARU_API_KEY",
         "KITARU_TASK_TOKEN",
+        "KITARU_CREDENTIALS_PATH",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
         "KITARU_TASK_PLUGIN_PATH",
@@ -123,14 +125,14 @@ async def run_task_process(
         env=process.env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
+        start_new_session=os.name == "posix",
     )
     logger.debug("Task process started with pid %d.", child.pid)
     stdout_tail = TailBuffer()
     stderr_tail = TailBuffer()
     stdout_drain = asyncio.create_task(_drain(child.stdout, stdout_tail))
     stderr_drain = asyncio.create_task(_drain(child.stderr, stderr_tail))
-    wait_task = asyncio.create_task(child.wait())
+    wait_task = asyncio.create_task(_wait_for_process_exit(child))
     cancel_task = asyncio.create_task(canceled.wait())
 
     try:
@@ -141,21 +143,60 @@ async def run_task_process(
         )
         if wait_task.done():
             returncode: int | None = wait_task.result()
+            # The shell leader may exit while descendants keep its pipes open.
+            # Stop the owned group so stream draining cannot outlive supervision.
+            _kill_process(child)
         else:
             returncode = None
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(child.pid, signal.SIGKILL)
-            await wait_task
+            await _kill_and_wait(child, wait_task)
+    except asyncio.CancelledError:
+        await _kill_and_wait(child, wait_task)
+        raise
     finally:
         for task in (wait_task, cancel_task):
             if not task.done():
                 task.cancel()
-        await asyncio.gather(
-            wait_task, cancel_task, stdout_drain, stderr_drain, return_exceptions=True
-        )
+        await asyncio.gather(wait_task, cancel_task, return_exceptions=True)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(stdout_drain, stderr_drain, return_exceptions=True),
+                timeout=PROCESS_DRAIN_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            stdout_drain.cancel()
+            stderr_drain.cancel()
+            await asyncio.gather(stdout_drain, stderr_drain, return_exceptions=True)
 
     tail = _format_tail(stdout_tail.decode(), stderr_tail.decode())
     return ProcessResult(returncode=returncode, tail=tail)
+
+
+async def _kill_and_wait(
+    child: asyncio.subprocess.Process, wait_task: asyncio.Task[int]
+) -> None:
+    """Kill the owned process and bound the wait for its leader to exit."""
+    _kill_process(child)
+    try:
+        await asyncio.wait_for(wait_task, timeout=PROCESS_DRAIN_TIMEOUT_SECONDS)
+    except TimeoutError:
+        wait_task.cancel()
+        await asyncio.gather(wait_task, return_exceptions=True)
+
+
+async def _wait_for_process_exit(child: asyncio.subprocess.Process) -> int:
+    """Wait for the leader exit without waiting for inherited pipes to close."""
+    while child.returncode is None:
+        await asyncio.sleep(0.01)
+    return child.returncode
+
+
+def _kill_process(child: asyncio.subprocess.Process) -> None:
+    """Kill a child process group on POSIX or the direct child elsewhere."""
+    with contextlib.suppress(ProcessLookupError):
+        if os.name == "posix":
+            os.killpg(child.pid, signal.SIGKILL)
+        else:
+            child.kill()
 
 
 async def _drain(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
@@ -204,8 +245,8 @@ def build_process_env(
     Layers the inherited environment, the run spec env, the creator-set
     extras, and the secret env, then clears any inherited contract variable
     and resets KITARU_API_URL, KITARU_TASK_TOKEN, and KITARU_TASK_ID from the
-    worker's own state. An inherited KITARU_API_KEY is cleared and never
-    reset, since the task process authenticates with its own task token.
+    worker's own state. Inherited API keys and credential paths are cleared
+    because the task process authenticates with its own task token.
 
     Args:
         task_id: Id of the task the process runs.

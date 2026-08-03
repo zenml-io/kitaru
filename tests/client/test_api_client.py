@@ -20,7 +20,7 @@ import httpx
 import pytest
 
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.credential_store import CredentialStore
+from kitaru.client.credential_store import ENV_CREDENTIALS_PATH, CredentialStore
 from kitaru.client.exceptions import NotFoundError, ServerError
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
 
@@ -158,6 +158,62 @@ async def test_no_retry_for_streaming_request_body() -> None:
         response = await http.post("/v1/blobs", content=body())
     assert response.status_code == 503
     assert len(requests) == 1
+
+
+async def test_from_env_does_not_load_persisted_credentials(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The public environment constructor remains unauthenticated without a key."""
+    server = "http://test"
+    path = tmp_path / "credentials.json"
+    CredentialStore(path=path).set_api_key(server, "KITKEY_stored")
+    monkeypatch.setenv("KITARU_API_URL", server)
+    monkeypatch.setenv(ENV_CREDENTIALS_PATH, str(path))
+    monkeypatch.delenv("KITARU_API_KEY", raising=False)
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={})
+
+    client = KitaruAPIClient.from_env()
+    await client._http.aclose()
+    client._http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=server
+    )
+    try:
+        await client.request("GET", "/v1/workers")
+    finally:
+        await client.close()
+    assert seen == [None]
+
+
+async def test_from_env_api_key_overrides_the_stored_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The explicit worker API key retains precedence over persisted auth."""
+    server = "http://test"
+    path = tmp_path / "credentials.json"
+    CredentialStore(path=path).set_api_key(server, "KITKEY_stored")
+    monkeypatch.setenv("KITARU_API_URL", server)
+    monkeypatch.setenv(ENV_CREDENTIALS_PATH, str(path))
+    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_environment")
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("Authorization"))
+        return httpx.Response(200, json={})
+
+    client = KitaruAPIClient.from_env()
+    await client._http.aclose()
+    client._http = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=server
+    )
+    try:
+        await client.request("GET", "/v1/workers")
+    finally:
+        await client.close()
+    assert seen == ["Bearer KITKEY_environment"]
 
 
 def test_client_registers_every_resource() -> None:
