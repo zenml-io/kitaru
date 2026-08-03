@@ -19,6 +19,7 @@ from pathlib import Path
 
 import kitaru.cli
 from kitaru.cli import app as app_module
+from kitaru.client.exceptions import APIError
 
 
 def test_help_version_schema_and_scaffold_skip_bootstrap(
@@ -107,6 +108,15 @@ def test_output_context_resets_between_invocations(capsys) -> None:
     assert app_module.main(["version"]) == 0
     second = capsys.readouterr()
     assert json.loads(second.out)["command"] == "version"
+
+
+def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
+    """The shared boundary preserves the authoritative server blob rejection."""
+    error = app_module._convert_error(APIError(413, "payload exceeds configured cap"))
+
+    assert error.kind == "invalid_arguments"
+    assert error.message == "payload exceeds configured cap"
+    assert error.details == {"status_code": 413}
 
 
 def test_lazy_entry_point_reports_missing_cli_extra(monkeypatch, capsys) -> None:
