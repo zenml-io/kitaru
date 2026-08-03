@@ -33,7 +33,11 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
-from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    GrantKind,
+    TaskPrincipal,
+)
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
@@ -887,7 +891,10 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
     actor = AuthContext(
         account=job_owner,
         principal=TaskPrincipal(
-            task_id=task.id, attempt=task.attempt, worker_id=uuid.uuid4()
+            task_id=task.id,
+            attempt=task.attempt,
+            worker_id=uuid.uuid4(),
+            job_id=uuid.uuid4(),
         ),
     )
     session = await service.create_session(
@@ -899,16 +906,20 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
 
 
 def _task_principal(
-    task_id: uuid.UUID, input_session_id: uuid.UUID | None = None
+    task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
 ) -> AuthContext:
     """Build an auth context for a task principal owning the given task."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
     return AuthContext(
         account=Account(id=uuid.uuid4(), name="job-owner"),
         principal=TaskPrincipal(
             task_id=task_id,
             attempt=1,
             worker_id=uuid.uuid4(),
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants=grants,
         ),
     )
 
@@ -945,7 +956,7 @@ async def test_get_session_allows_a_task_principal_for_its_input_session(
     session = await create_session(
         repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     loaded = await service.get_session(session.id, actor=actor)
     assert loaded.id == session.id
 
@@ -986,7 +997,7 @@ async def test_update_session_denies_a_task_principal_for_its_input_session(
     session = await create_session(
         repository, uuid.uuid4(), uuid.uuid4(), task_id=uuid.uuid4()
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     with pytest.raises(SessionAccessDenied):
         await service.update_session(
             session.id, SessionUpdate(name="renamed"), actor=actor

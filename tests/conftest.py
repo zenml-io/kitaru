@@ -69,6 +69,7 @@ from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import (
+    GrantKind,
     TaskAuthContext,
     TaskPrincipal,
     WorkerAuthContext,
@@ -5260,7 +5261,8 @@ def build_task_actor(
     task_id: uuid.UUID,
     attempt: int,
     worker_id: uuid.UUID,
-    input_session_id: uuid.UUID | None = None,
+    job_id: uuid.UUID | None = None,
+    granted_session_ids: Sequence[uuid.UUID] = (),
 ) -> TaskAuthContext:
     """Build a task-principal context fenced by attempt.
 
@@ -5269,17 +5271,23 @@ def build_task_actor(
         task_id: Id of the task the principal claims to run.
         attempt: Attempt the principal is fenced by.
         worker_id: Id of the worker holding the attempt.
-        input_session_id: Id of the session the task reads without owning.
+        job_id: Id of the job the task belongs to, defaulting to an unrelated
+            job so job-scoped checks fail closed.
+        granted_session_ids: Ids of the sessions the task reads without owning.
 
     Returns:
         Context carrying a task principal.
     """
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_ids:
+        grants[GrantKind.SESSION] = frozenset(granted_session_ids)
     return TaskAuthContext(
         account=account,
         principal=TaskPrincipal(
             task_id=task_id,
             attempt=attempt,
             worker_id=worker_id,
-            input_session_id=input_session_id,
+            job_id=job_id if job_id is not None else uuid.uuid4(),
+            grants=grants,
         ),
     )

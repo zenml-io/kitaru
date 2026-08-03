@@ -11,13 +11,13 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Client process environment reading."""
+"""Environment variable reading."""
 
 import os
 
 
 def get_required_env(name: str) -> str:
-    """Read an environment variable the client or worker process requires.
+    """Read a required environment variable.
 
     Args:
         name: Environment variable name.

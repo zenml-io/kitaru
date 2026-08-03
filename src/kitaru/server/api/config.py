@@ -70,7 +70,7 @@ class APISettings(Settings):
     JWT_AUDIENCE: str = "kitaru"
     JWT_LIFETIME_SECONDS: int = 3600
     WORKER_TOKEN_LIFETIME_SECONDS: int = 3600
-    TASK_TOKEN_EXPIRY_SLACK_SECONDS: int = 300
+    TASK_TOKEN_EXPIRY_LEEWAY_SECONDS: int = 300
     AUTH_COOKIE_NAME: str = ""
     AUTH_COOKIE_DOMAIN: str = ""
     AUTH_COOKIE_SECURE: bool | None = None

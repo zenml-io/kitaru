@@ -20,7 +20,11 @@ import pytest
 from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    GrantKind,
+    TaskPrincipal,
+)
 from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
     EvaluationMerge,
@@ -235,16 +239,20 @@ async def test_merge_evaluations_accepts_any_session_status(
 
 
 def _task_principal(
-    task_id: uuid.UUID, input_session_id: uuid.UUID | None = None
+    task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
 ) -> AuthContext:
     """Build an auth context for a task principal owning the given task."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
     return AuthContext(
         account=Account(id=uuid.uuid4(), name="job-owner"),
         principal=TaskPrincipal(
             task_id=task_id,
             attempt=1,
             worker_id=uuid.uuid4(),
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants=grants,
         ),
     )
 
@@ -273,7 +281,7 @@ async def test_merge_evaluations_allows_a_task_principal_for_its_input_session(
     session = await create_session(
         session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     stored = await service.merge_evaluations(
         session.id,
         [EvaluationMerge(name="a", data_type=EvaluationDataType.FLOAT, score=1.0)],

@@ -33,7 +33,11 @@ from fakes import (
 
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import PackagePluginSpec, TaskKind, TaskStatus
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import (
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+)
 from kitaru.worker import task_runner as task_runner_module
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.context import ExecutionContext
@@ -419,9 +423,15 @@ async def test_running_transition_hard_failure_abandons_the_attempt(
     assert len(client.tasks.update_calls) == 1
 
 
-@pytest.mark.parametrize("status_code", [401, 403])
+@pytest.mark.parametrize(
+    "error",
+    [
+        AuthenticationError(401, "token rejected"),
+        AuthorizationError(403, "token rejected"),
+    ],
+)
 async def test_running_transition_token_rejection_abandons_without_running_the_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: APIError
 ) -> None:
     """A rejected token on the running transition abandons the attempt immediately."""
     called = False
@@ -437,7 +447,7 @@ async def test_running_transition_token_rejection_abandons_without_running_the_p
     client = FakeKitaruAPIClient()
     task = make_task(kind=TaskKind.AGENT, attempt=1)
     spec = make_agent_spec(task.id)
-    client.tasks.update_responses.append(APIError(status_code, "token rejected"))
+    client.tasks.update_responses.append(error)
 
     result = await TaskRunner(_ctx(tmp_path, client)).execute(
         make_claimed(task, spec), asyncio.Event()
@@ -577,9 +587,15 @@ async def test_completion_conflict_transport_failure_on_the_refetch_abandons(
     assert len(client.tasks.update_calls) == 2
 
 
-@pytest.mark.parametrize("status_code", [401, 403])
+@pytest.mark.parametrize(
+    "error",
+    [
+        AuthenticationError(401, "token rejected"),
+        AuthorizationError(403, "token rejected"),
+    ],
+)
 async def test_completion_conflict_token_rejection_on_the_refetch_abandons(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: APIError
 ) -> None:
     """A rejected token fetching the task after a completion conflict abandons."""
     _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
@@ -589,7 +605,7 @@ async def test_completion_conflict_token_rejection_on_the_refetch_abandons(
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(APIError(409, "conflict"))
-    client.tasks.get_responses.append(APIError(status_code, "token rejected"))
+    client.tasks.get_responses.append(error)
 
     result = await TaskRunner(_ctx(tmp_path, client)).execute(
         make_claimed(task, spec), asyncio.Event()
@@ -619,9 +635,15 @@ async def test_completion_hard_failure_returns_the_running_task(
     assert len(client.tasks.update_calls) == 2
 
 
-@pytest.mark.parametrize("status_code", [401, 403])
+@pytest.mark.parametrize(
+    "error",
+    [
+        AuthenticationError(401, "token rejected"),
+        AuthorizationError(403, "token rejected"),
+    ],
+)
 async def test_completion_token_rejection_returns_the_running_task(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: APIError
 ) -> None:
     """A rejected token on completion abandons, keeping the running task."""
     _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
@@ -630,7 +652,7 @@ async def test_completion_token_rejection_returns_the_running_task(
     spec = make_agent_spec(task.id)
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     client.tasks.update_responses.append(running_task)
-    client.tasks.update_responses.append(APIError(status_code, "token rejected"))
+    client.tasks.update_responses.append(error)
 
     result = await TaskRunner(_ctx(tmp_path, client)).execute(
         make_claimed(task, spec), asyncio.Event()

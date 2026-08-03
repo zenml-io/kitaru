@@ -14,11 +14,19 @@
 """Authentication and caller context for use cases."""
 
 import uuid
+from enum import StrEnum
 
 from pydantic import Field
 
 from kitaru.server.base import FrozenModel
 from kitaru.server.domain.account import Account
+
+
+class GrantKind(StrEnum):
+    """Kind of resource a grant names."""
+
+    SESSION = "session"
+    BLOB = "blob"
 
 
 class AccountPrincipal(FrozenModel):
@@ -37,7 +45,20 @@ class TaskPrincipal(FrozenModel):
     task_id: uuid.UUID
     attempt: int
     worker_id: uuid.UUID
-    input_session_id: uuid.UUID | None = None
+    job_id: uuid.UUID
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = Field(default_factory=dict)
+
+    def has_grant(self, kind: GrantKind, resource_id: uuid.UUID) -> bool:
+        """Whether the principal is granted the named resource.
+
+        Args:
+            kind: Kind of resource.
+            resource_id: Id of the resource.
+
+        Returns:
+            Whether the grant is held.
+        """
+        return resource_id in self.grants.get(kind, frozenset())
 
 
 Principal = AccountPrincipal | WorkerPrincipal | TaskPrincipal
@@ -46,8 +67,10 @@ Principal = AccountPrincipal | WorkerPrincipal | TaskPrincipal
 class AuthContext(FrozenModel):
     """Resolved caller for application use cases."""
 
-    # The registering account for a worker principal, the owner of the
-    # task's job for a task principal, and the caller itself otherwise.
+    # Depending on the principal, the account will be:
+    # - The account that registered the worker
+    # - The account that owns the task's job
+    # - The caller itself
     account: Account
     principal: Principal = Field(default_factory=AccountPrincipal)
     csrf_token: str | None = None

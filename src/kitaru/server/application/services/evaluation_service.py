@@ -27,7 +27,7 @@ from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
     EvaluationMerge,
 )
-from kitaru.server.application.services.session_access import check_task_session_read
+from kitaru.server.application.services.resource_access import check_task_session_read
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch, Evaluation
 
 

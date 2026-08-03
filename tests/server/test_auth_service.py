@@ -33,7 +33,11 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthService,
 )
 from kitaru.server.adapters.auth.jwt import JWTToken, TaskSubject
-from kitaru.server.application.models.auth import TaskPrincipal, WorkerPrincipal
+from kitaru.server.application.models.auth import (
+    GrantKind,
+    TaskPrincipal,
+    WorkerPrincipal,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import encode_api_key
 from kitaru.server.domain.keys import generate_secret
@@ -307,12 +311,14 @@ async def test_task_token_resolves_to_a_task_principal(
     account = await create_account(account_repository)
     task_id = uuid.uuid4()
     worker_id = uuid.uuid4()
+    job_id = uuid.uuid4()
     token = service.issue_task_token(
         TaskSubject(
             task_id=task_id,
             attempt=2,
             worker_id=worker_id,
             account_id=account.id,
+            job_id=job_id,
         ),
         timeout_seconds=3600,
     ).token
@@ -324,22 +330,24 @@ async def test_task_token_resolves_to_a_task_principal(
     assert context.principal.task_id == task_id
     assert context.principal.attempt == 2
     assert context.principal.worker_id == worker_id
+    assert context.principal.job_id == job_id
 
 
-async def test_task_token_carries_input_session_id(
+async def test_task_token_carries_grants(
     service: AuthService,
     account_repository: FakeAccountRepository,
 ) -> None:
-    """Resolve a task token's input_session_id claim onto its task principal."""
+    """Resolve a task token's grants claim onto its task principal."""
     account = await create_account(account_repository)
-    input_session_id = uuid.uuid4()
+    session_id = uuid.uuid4()
     token = service.issue_task_token(
         TaskSubject(
             task_id=uuid.uuid4(),
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants={GrantKind.SESSION: frozenset({session_id})},
         ),
         timeout_seconds=3600,
     ).token
@@ -347,14 +355,14 @@ async def test_task_token_carries_input_session_id(
     context = await service.resolve(token)
 
     assert isinstance(context.principal, TaskPrincipal)
-    assert context.principal.input_session_id == input_session_id
+    assert context.principal.has_grant(GrantKind.SESSION, session_id)
 
 
-async def test_task_token_input_session_id_defaults_to_none(
+async def test_task_token_grants_default_to_empty(
     service: AuthService,
     account_repository: FakeAccountRepository,
 ) -> None:
-    """Leave input_session_id unset on a task token that names none."""
+    """Leave the grants empty on a task token that names none."""
     account = await create_account(account_repository)
     token = service.issue_task_token(
         TaskSubject(
@@ -362,6 +370,7 @@ async def test_task_token_input_session_id_defaults_to_none(
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
+            job_id=uuid.uuid4(),
         ),
         timeout_seconds=3600,
     ).token
@@ -369,7 +378,7 @@ async def test_task_token_input_session_id_defaults_to_none(
     context = await service.resolve(token)
 
     assert isinstance(context.principal, TaskPrincipal)
-    assert context.principal.input_session_id is None
+    assert context.principal.grants == {}
 
 
 async def test_worker_token_rejects_a_deactivated_account(
@@ -398,6 +407,7 @@ async def test_task_token_rejects_a_deactivated_account(
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
+            job_id=uuid.uuid4(),
         ),
         timeout_seconds=3600,
     ).token
@@ -449,6 +459,7 @@ async def test_try_resolve_worker_or_task_resolves_a_task_token(
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
+            job_id=uuid.uuid4(),
         ),
         timeout_seconds=3600,
     ).token
@@ -537,6 +548,7 @@ async def test_control_plane_scheme_resolves_a_task_token_without_an_external_ac
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
+            job_id=uuid.uuid4(),
         ),
         timeout_seconds=3600,
     ).token

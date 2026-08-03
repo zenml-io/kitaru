@@ -584,11 +584,13 @@ async def _replay_bundle(services: ReplayServices):
     )
 
 
-def _task_actor_for(task_id: uuid.UUID) -> AuthContext:
-    """Build an auth context for a task principal owning the given task."""
+def _task_actor_for(task_id: uuid.UUID, job_id: uuid.UUID) -> AuthContext:
+    """Build an auth context for a task principal running a task of the given job."""
     return AuthContext(
         account=ACTOR.account,
-        principal=TaskPrincipal(task_id=task_id, attempt=1, worker_id=uuid.uuid4()),
+        principal=TaskPrincipal(
+            task_id=task_id, attempt=1, worker_id=uuid.uuid4(), job_id=job_id
+        ),
     )
 
 
@@ -601,7 +603,7 @@ async def test_get_replay_allows_a_task_principal_from_the_replays_job(
         TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
     )
     refreshed = await services.replay_service.get_replay(
-        bundle.replay.id, actor=_task_actor_for(tasks[0].id)
+        bundle.replay.id, actor=_task_actor_for(tasks[0].id, bundle.replay.job_id)
     )
     assert refreshed.replay.id == bundle.replay.id
 
@@ -611,10 +613,11 @@ async def test_get_replay_denies_a_task_principal_from_another_job(
 ) -> None:
     """Reject a task principal whose task belongs to another job."""
     bundle = await _replay_bundle(services)
-    foreign_task = await create_agent_task(services.tasks, uuid.uuid4())
+    foreign_job_id = uuid.uuid4()
+    foreign_task = await create_agent_task(services.tasks, foreign_job_id)
     with pytest.raises(ReplayAccessDenied):
         await services.replay_service.get_replay(
-            bundle.replay.id, actor=_task_actor_for(foreign_task.id)
+            bundle.replay.id, actor=_task_actor_for(foreign_task.id, foreign_job_id)
         )
 
 
@@ -623,11 +626,12 @@ async def test_tool_lookup_denies_a_task_principal_from_another_job(
 ) -> None:
     """Reject a foreign task principal before the tool config is read."""
     bundle = await _replay_bundle(services)
-    foreign_task = await create_agent_task(services.tasks, uuid.uuid4())
+    foreign_job_id = uuid.uuid4()
+    foreign_task = await create_agent_task(services.tasks, foreign_job_id)
     with pytest.raises(ReplayAccessDenied):
         await services.replay_service.tool_lookup(
             bundle.replay.id,
             "search",
             "cache-key",
-            actor=_task_actor_for(foreign_task.id),
+            actor=_task_actor_for(foreign_task.id, foreign_job_id),
         )

@@ -33,7 +33,11 @@ from kitaru.api_models.v1.task import (
     TaskWithSpec,
 )
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import (
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+)
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
 from kitaru.worker.process import run_task_process
@@ -50,7 +54,7 @@ _LABELS: dict[TaskKind, str] = {
 
 # A task token rejected with one of these means the attempt is dead, either
 # superseded by a new claim or expired, not that the worker itself lost auth.
-_STALE_TOKEN_STATUS_CODES = frozenset({401, 403})
+_STALE_TOKEN_ERRORS = (AuthenticationError, AuthorizationError)
 
 
 class TaskRunner:
@@ -292,7 +296,7 @@ class TaskRunner:
                 return await self._resolve_completion_conflict(
                     client, task, spec, attempt, label
                 )
-            if exc.status_code in _STALE_TOKEN_STATUS_CODES:
+            if isinstance(exc, _STALE_TOKEN_ERRORS):
                 logger.info(
                     "Task %s attempt %s token was rejected while completing.",
                     task.id,
@@ -330,7 +334,7 @@ class TaskRunner:
         try:
             current = await client.tasks.get(task.id)
         except APIError as exc:
-            if exc.status_code in _STALE_TOKEN_STATUS_CODES:
+            if isinstance(exc, _STALE_TOKEN_ERRORS):
                 logger.info(
                     "Task %s attempt %s token was rejected while resolving a "
                     "completion conflict.",
@@ -422,7 +426,7 @@ class TaskRunner:
                     attempt,
                     request.status,
                 )
-            elif exc.status_code in _STALE_TOKEN_STATUS_CODES:
+            elif isinstance(exc, _STALE_TOKEN_ERRORS):
                 logger.info(
                     "Task %s attempt %s token was rejected, skipping the %s "
                     "transition.",

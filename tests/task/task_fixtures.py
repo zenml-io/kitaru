@@ -119,9 +119,12 @@ async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> None:
         account=ACCOUNT, principal=WorkerPrincipal(worker_id=worker.id)
     )
     await fixture.services.task_service.claim_tasks(10, actor=worker_actor)
+    task = await fixture.services.tasks.get(task_id)
     task_actor = TaskAuthContext(
         account=ACCOUNT,
-        principal=TaskPrincipal(task_id=task_id, attempt=1, worker_id=worker.id),
+        principal=TaskPrincipal(
+            task_id=task_id, attempt=1, worker_id=worker.id, job_id=task.job_id
+        ),
     )
     await fixture.services.task_service.update_task(
         task_id, TaskUpdate(status=TaskStatus.RUNNING), actor=task_actor

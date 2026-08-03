@@ -28,7 +28,7 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
-from kitaru.server.application.services.session_access import (
+from kitaru.server.application.services.resource_access import (
     check_task_session_read,
     check_task_session_write,
 )

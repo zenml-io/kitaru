@@ -28,8 +28,8 @@ from kitaru.api_models.v1.task import TaskClaimRequest, TaskWithSpec
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth
-from kitaru.client.env import get_required_env
 from kitaru.client.exceptions import APIError
+from kitaru.env import get_required_env
 from kitaru.worker.auth import WorkerTokenSource
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig

@@ -320,7 +320,7 @@ class AuthService:
         """Issue a token scoped to a claimed task attempt.
 
         The token outlives the task's execution timeout by the configured
-        expiry slack.
+        expiry leeway.
 
         Args:
             subject: Task attempt the token is scoped to.
@@ -330,7 +330,7 @@ class AuthService:
             Issued token.
         """
         expires_at = datetime.now(UTC) + timedelta(
-            seconds=timeout_seconds + self._settings.TASK_TOKEN_EXPIRY_SLACK_SECONDS
+            seconds=timeout_seconds + self._settings.TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
         )
         token = JWTToken(subject=subject, expires_at=expires_at)
         return IssuedToken(token.encode(self._settings), expires_at)
@@ -458,7 +458,8 @@ class AuthService:
                 task_id=subject.task_id,
                 attempt=subject.attempt,
                 worker_id=subject.worker_id,
-                input_session_id=subject.input_session_id,
+                job_id=subject.job_id,
+                grants=subject.grants,
             ),
         )
 

@@ -34,7 +34,6 @@ from kitaru.client.auth import (
     TokenAuth,
 )
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.env import get_required_env
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.agent_versions import AgentVersionsResource
@@ -60,6 +59,7 @@ from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.workers import WorkersResource
+from kitaru.env import get_required_env
 from kitaru.transport import build_async_client
 
 

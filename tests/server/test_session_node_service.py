@@ -29,7 +29,11 @@ from conftest import (
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    GrantKind,
+    TaskPrincipal,
+)
 from kitaru.server.application.models.session import SessionUpdate
 from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
@@ -397,16 +401,20 @@ async def test_ingest_empty_batch_is_a_no_op(
 
 
 def _task_principal(
-    task_id: uuid.UUID, input_session_id: uuid.UUID | None = None
+    task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
 ) -> AuthContext:
     """Build an auth context for a task principal owning the given task."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
     return AuthContext(
         account=Account(id=uuid.uuid4(), name="job-owner"),
         principal=TaskPrincipal(
             task_id=task_id,
             attempt=1,
             worker_id=uuid.uuid4(),
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants=grants,
         ),
     )
 
@@ -438,7 +446,7 @@ async def test_ingest_nodes_denies_a_task_principal_for_its_input_session(
         task_id=uuid.uuid4(),
         status=SessionStatus.IN_PROGRESS,
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     with pytest.raises(SessionAccessDenied):
         await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
 
@@ -479,7 +487,7 @@ async def test_get_index_by_id_allows_a_task_principal_for_its_input_session(
     session = await create_session(
         session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     index_by_id = await service.get_index_by_id(session.id, actor=actor)
     assert index_by_id == {}
 
@@ -511,7 +519,7 @@ async def test_list_nodes_allows_a_task_principal_for_its_input_session(
     session = await create_session(
         session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
     )
-    actor = _task_principal(uuid.uuid4(), input_session_id=session.id)
+    actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     nodes, next_cursor = await service.list_nodes(
         SessionNodeFilter(session_id=session.id), actor=actor
     )

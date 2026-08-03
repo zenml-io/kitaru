@@ -31,11 +31,11 @@ from kitaru.server.application.models.session import (
 )
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
-from kitaru.server.application.services.server_analytics import ServerAnalytics
-from kitaru.server.application.services.session_access import (
+from kitaru.server.application.services.resource_access import (
     check_task_session_read,
     check_task_session_write,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,

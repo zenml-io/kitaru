@@ -50,8 +50,8 @@ from kitaru.server.application.models.auth import (
     TaskAuthContext,
     WorkerAuthContext,
 )
+from kitaru.server.application.services.resource_access import build_task_grants
 from kitaru.server.application.services.task_service import TaskService
-from kitaru.server.domain.task import EvaluationTask
 
 router = APIRouter(route_class=CommitRoute)
 
@@ -113,9 +113,8 @@ async def claim_tasks(
                 attempt=item.task.attempt,
                 worker_id=worker_id,
                 account_id=item.job_owner_id,
-                input_session_id=item.task.input_session_id
-                if isinstance(item.task, EvaluationTask)
-                else None,
+                job_id=item.task.job_id,
+                grants=build_task_grants(item.spec),
             ),
             timeout_seconds=item.spec.timeout_seconds,
         ).token

@@ -53,7 +53,7 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, GrantKind
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -815,6 +815,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
                 attempt=1,
                 worker_id=uuid.uuid4(),
                 account_id=account.id,
+                job_id=uuid.uuid4(),
             ),
             timeout_seconds=3600,
         ).token
@@ -863,16 +864,20 @@ def _build_task_scoped_app(
 def _task_token(
     auth_service: AuthService,
     account: Account,
-    input_session_id: uuid.UUID | None = None,
+    granted_session_id: uuid.UUID | None = None,
 ) -> str:
     """Mint a task token scoped to the given account for the task route tests."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
     return auth_service.issue_task_token(
         TaskSubject(
             task_id=uuid.uuid4(),
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants=grants,
         ),
         timeout_seconds=3600,
     ).token
@@ -1003,7 +1008,7 @@ async def test_get_session_allows_a_task_token_carrying_its_input_session_id(
         auth_service,
     )
     async with client:
-        token = _task_token(auth_service, account, input_session_id=session.id)
+        token = _task_token(auth_service, account, granted_session_id=session.id)
         response = await client.get(
             f"/v1/sessions/{session.id}", headers={"Authorization": f"Bearer {token}"}
         )

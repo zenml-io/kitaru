@@ -28,6 +28,7 @@ from kitaru.server.adapters.auth.jwt import (
     TokenError,
     WorkerSubject,
 )
+from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.domain.account import Account
 
 
@@ -94,10 +95,15 @@ def test_task_token_round_trips() -> None:
     task_id = uuid.uuid4()
     worker_id = uuid.uuid4()
     account_id = uuid.uuid4()
+    job_id = uuid.uuid4()
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     token = JWTToken(
         subject=TaskSubject(
-            task_id=task_id, attempt=3, worker_id=worker_id, account_id=account_id
+            task_id=task_id,
+            attempt=3,
+            worker_id=worker_id,
+            account_id=account_id,
+            job_id=job_id,
         ),
         expires_at=expires_at,
     )
@@ -109,14 +115,16 @@ def test_task_token_round_trips() -> None:
     assert decoded.subject.attempt == 3
     assert decoded.subject.worker_id == worker_id
     assert decoded.subject.account_id == account_id
-    assert decoded.subject.input_session_id is None
+    assert decoded.subject.job_id == job_id
+    assert decoded.subject.grants == {}
     assert decoded.expires_at == expires_at.replace(microsecond=0)
 
 
-def test_task_token_round_trips_input_session_id() -> None:
-    """Encoding then decoding an evaluator task token recovers its input session."""
+def test_task_token_round_trips_grants() -> None:
+    """Encoding then decoding a task token recovers its granted resource ids."""
     settings = local_settings()
-    input_session_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    blob_id = uuid.uuid4()
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     token = JWTToken(
         subject=TaskSubject(
@@ -124,7 +132,11 @@ def test_task_token_round_trips_input_session_id() -> None:
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=uuid.uuid4(),
-            input_session_id=input_session_id,
+            job_id=uuid.uuid4(),
+            grants={
+                GrantKind.SESSION: frozenset({session_id}),
+                GrantKind.BLOB: frozenset({blob_id}),
+            },
         ),
         expires_at=expires_at,
     )
@@ -132,7 +144,10 @@ def test_task_token_round_trips_input_session_id() -> None:
     decoded = JWTToken.decode(token.encode(settings), settings)
 
     assert isinstance(decoded.subject, TaskSubject)
-    assert decoded.subject.input_session_id == input_session_id
+    assert decoded.subject.grants == {
+        GrantKind.SESSION: frozenset({session_id}),
+        GrantKind.BLOB: frozenset({blob_id}),
+    }
 
 
 def test_decode_rejects_an_unrecognized_subject_kind() -> None:
@@ -198,16 +213,17 @@ def test_decode_rejects_a_task_token_with_a_non_integer_attempt() -> None:
         JWTToken.decode(token, settings)
 
 
-def test_decode_rejects_a_task_token_with_an_invalid_input_session_id() -> None:
-    """Reject a task-subject token whose input_session_id claim is not a UUID."""
+def test_decode_rejects_a_task_token_with_an_invalid_grant_id() -> None:
+    """Reject a task-subject token whose grants claim holds a non-UUID id."""
     settings = local_settings()
     token = _raw_claims(
         settings,
         sub=f"task:{uuid.uuid4()}",
         account_id=str(uuid.uuid4()),
         worker_id=str(uuid.uuid4()),
+        job_id=str(uuid.uuid4()),
         attempt=1,
-        input_session_id="not-a-uuid",
+        grants={"session": ["not-a-uuid"]},
         exp=int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
     )
     with pytest.raises(TokenError, match="Invalid session token claims"):

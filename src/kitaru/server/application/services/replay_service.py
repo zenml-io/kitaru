@@ -290,8 +290,7 @@ class ReplayService:
         """
         if not isinstance(actor.principal, TaskPrincipal):
             return
-        task = await self._tasks.get(actor.principal.task_id)
-        if task.job_id != replay.job_id:
+        if actor.principal.job_id != replay.job_id:
             raise ReplayAccessDenied(replay.id)
 
     async def _find_history_node(

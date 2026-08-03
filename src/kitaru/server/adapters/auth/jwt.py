@@ -21,6 +21,7 @@ import jwt
 from pydantic import BaseModel, Field
 
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.utils import to_tz_aware
 
 DEFAULT_JWT_ALGORITHM = "HS256"
@@ -47,6 +48,35 @@ def _optional_uuid_claim(value: object) -> uuid.UUID | None:
     if not isinstance(value, str):
         raise ValueError("claim is not a UUID string.")
     return uuid.UUID(value)
+
+
+def _grants_from_claim(value: object) -> dict[GrantKind, frozenset[uuid.UUID]]:
+    """Parse the grants claim into resource ids keyed by kind.
+
+    Args:
+        value: Claim value, None when the claim is absent.
+
+    Raises:
+        ValueError: The value is not a mapping of kinds to UUID string lists.
+
+    Returns:
+        Granted resource ids by kind, empty when the claim is absent.
+    """
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("grants claim is not an object.")
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    for kind, ids in value.items():
+        if not isinstance(ids, list):
+            raise ValueError("grants claim entry is not a list.")
+        parsed: set[uuid.UUID] = set()
+        for item in ids:
+            if not isinstance(item, str):
+                raise ValueError("grants claim entry is not a UUID string.")
+            parsed.add(uuid.UUID(item))
+        grants[GrantKind(kind)] = frozenset(parsed)
+    return grants
 
 
 # The subject classes below define the wire format of issued tokens: their
@@ -134,7 +164,8 @@ class TaskSubject(BaseModel):
     attempt: int
     worker_id: uuid.UUID
     account_id: uuid.UUID
-    input_session_id: uuid.UUID | None = None
+    job_id: uuid.UUID
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = Field(default_factory=dict)
 
     @classmethod
     def from_claims(cls, raw_id: str, claims: dict[str, Any]) -> Self:
@@ -158,7 +189,8 @@ class TaskSubject(BaseModel):
             attempt=attempt,
             worker_id=uuid.UUID(claims.pop("worker_id")),
             account_id=uuid.UUID(claims.pop("account_id")),
-            input_session_id=_optional_uuid_claim(claims.pop("input_session_id", None)),
+            job_id=uuid.UUID(claims.pop("job_id")),
+            grants=_grants_from_claim(claims.pop("grants", None)),
         )
 
     def to_claims(self) -> dict[str, object]:
@@ -172,9 +204,13 @@ class TaskSubject(BaseModel):
             "attempt": self.attempt,
             "worker_id": str(self.worker_id),
             "account_id": str(self.account_id),
+            "job_id": str(self.job_id),
         }
-        if self.input_session_id is not None:
-            claims["input_session_id"] = str(self.input_session_id)
+        if self.grants:
+            claims["grants"] = {
+                kind.value: sorted(str(item) for item in ids)
+                for kind, ids in self.grants.items()
+            }
         return claims
 
 
