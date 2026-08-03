@@ -15,6 +15,7 @@
 
 import asyncio
 import builtins
+import inspect
 import io
 import json
 import os
@@ -31,7 +32,7 @@ import pytest
 
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.api_models.v1.task import LabelSelector, TaskKind
-from kitaru.api_models.v1.worker import WorkerResponse, WorkerRuntime
+from kitaru.api_models.v1.worker import WorkerListParams, WorkerResponse, WorkerRuntime
 from kitaru.cli import app as app_module
 from kitaru.cli import workers
 from kitaru.cli.config import ResolvedTarget
@@ -44,6 +45,7 @@ from kitaru.cli.output import (
 )
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken, ApiType
+from kitaru.server.adapters.rest.mapping.workers import worker_list_params_to_filter
 from kitaru.worker.process import build_process_env
 
 
@@ -443,13 +445,41 @@ async def test_list_and_get_report_live_or_stale() -> None:
     client = SimpleNamespace(workers=resource)
 
     listed = await workers.list_workers(
-        client, size=20, cursor=None, sort="last_seen_at:desc", filter=None
+        client, size=20, cursor=None, sort="created:desc", filter=None
     )
     assert [item["status"] for item in listed.items or []] == ["live", "stale"]
 
     fetched = await workers.get_worker(client, "old")
     assert fetched.item["id"] == str(stale.id)
     assert fetched.item["status"] == "stale"
+
+
+async def test_worker_list_rejects_unsupported_sort_before_network_call() -> None:
+    """Worker list names its valid sort values without relying on server rejection."""
+    resource = StubWorkers([])
+    client = SimpleNamespace(workers=resource)
+
+    with pytest.raises(CLIError) as error:
+        await workers.list_workers(
+            client,
+            size=20,
+            cursor=None,
+            sort="last_seen_at:desc",
+            filter=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert error.value.message == "--sort must be created:asc or created:desc."
+    assert resource.list_calls == []
+
+
+def test_worker_list_default_sort_reaches_server_contract() -> None:
+    """The CLI default sort is accepted by the real server filter model."""
+    default_sort = inspect.signature(app_module.worker_list).parameters["sort"].default
+
+    list_filter = worker_list_params_to_filter(WorkerListParams(sort=default_sort))
+
+    assert list_filter.sort == "created:desc"
 
 
 async def test_exact_worker_name_conflicts_before_returning_a_record() -> None:

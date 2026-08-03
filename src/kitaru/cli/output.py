@@ -27,7 +27,11 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from rich.console import Console
+from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
+
+from kitaru.cli.presentation import HumanField, HumanView, get_human_view
 
 OutputMode = Literal["auto", "text", "json", "jsonl"]
 
@@ -45,6 +49,22 @@ ERROR_EXIT_CODES: dict[str, int] = {
     "remote_failed": 8,
     "partial_failure": 8,
     "remote_canceled": 9,
+}
+
+_ERROR_TITLES = {
+    "authentication_failed": "Authentication failed",
+    "conflict": "Conflict",
+    "interaction_required": "Interaction required",
+    "internal_error": "Internal error",
+    "interrupted": "Interrupted",
+    "invalid_arguments": "Invalid arguments",
+    "invalid_configuration": "Invalid configuration",
+    "network_error": "Network error",
+    "not_found": "Not found",
+    "partial_failure": "Partially completed",
+    "remote_canceled": "Remote work canceled",
+    "remote_failed": "Remote work failed",
+    "timeout": "Timed out",
 }
 
 _SECRET_KEY = re.compile(
@@ -100,6 +120,7 @@ class OutputContext:
     stdout: TextIO
     stderr: TextIO
     rich: bool
+    terminal_width: int | None = None
 
 
 _OUTPUT_CONTEXT: ContextVar[OutputContext | None] = ContextVar(
@@ -280,9 +301,22 @@ def emit_error(
             body["debug"] = debug
         _write_json(context.stderr, body)
     else:
-        print(f"Error: {redact(error.message)}", file=context.stderr)
-        if error.hint:
-            print(f"Hint: {redact(error.hint)}", file=context.stderr)
+        if context.rich:
+            console = _get_console(context, context.stderr)
+            title = _ERROR_TITLES.get(
+                error.kind, error.kind.replace("_", " ").capitalize()
+            )
+            console.print(f"[bold red]Error: {title}[/bold red]")
+            console.print(Text(redact(error.message)))
+            hint = error.hint or _get_human_error_hint(context.command, error.kind)
+            if hint:
+                label = Text("Try:", style="bold")
+                label.append(f" {redact(hint)}")
+                console.print(label)
+        else:
+            print(f"Error: {redact(error.message)}", file=context.stderr)
+            if error.hint:
+                print(f"Hint: {redact(error.hint)}", file=context.stderr)
         if debug:
             print(debug.rstrip(), file=context.stderr)
     return int(error.exit_code or 1)
@@ -339,20 +373,21 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
     """Render one result as rich or plain text."""
     value = result.items if result.items is not None else result.item
     if context.rich:
-        console = Console(file=context.stdout, force_terminal=True)
-        if isinstance(value, dict):
-            table = Table(show_header=False, box=None)
-            table.add_column("Field", style="bold")
-            table.add_column("Value")
-            for key, item in value.items():
-                table.add_row(str(key), _display_value(item))
-            console.print(table)
+        console = _get_console(context, context.stdout)
+        view = get_human_view(context.command)
+        if isinstance(value, dict) and view is not None:
+            _emit_human_detail(console, value, view)
+        elif isinstance(value, list) and view is not None:
+            _emit_human_list(console, value, view)
+        elif isinstance(value, dict):
+            _emit_rich_detail(console, value)
         elif isinstance(value, list):
             _emit_rich_list(console, value)
         elif value is not None:
-            console.print(_display_value(value))
+            console.print(Text(_display_value(value)))
+        _emit_human_footer(console, result)
         for warning in result.warnings:
-            Console(file=context.stderr).print(f"Warning: {warning}")
+            Console(file=context.stderr).print(Text(f"Warning: {warning}"))
         return
     if isinstance(value, dict):
         for key, item in value.items():
@@ -366,6 +401,18 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
         print(f"Warning: {warning}", file=context.stderr)
 
 
+def _get_console(context: OutputContext, stream: TextIO) -> Console:
+    """Build a Rich console using real or test-supplied terminal dimensions."""
+    return Console(
+        file=stream,
+        force_terminal=True,
+        force_jupyter=False,
+        width=context.terminal_width,
+        _environ={} if context.terminal_width is not None else None,
+        highlight=False,
+    )
+
+
 def _emit_rich_list(console: Console, values: list[Any]) -> None:
     """Render a list as a compact table when possible."""
     if values and all(isinstance(value, dict) for value in values):
@@ -376,13 +423,203 @@ def _emit_rich_list(console: Console, values: list[Any]) -> None:
                     keys.append(key)
         table = Table()
         for key in keys:
-            table.add_column(key)
+            table.add_column(Text(key))
         for value in values:
-            table.add_row(*[_display_value(value.get(key)) for key in keys])
+            table.add_row(*[Text(_display_value(value.get(key))) for key in keys])
         console.print(table)
     else:
         for value in values:
-            console.print(_display_value(value))
+            console.print(Text(_display_value(value)))
+
+
+def _emit_rich_detail(console: Console, value: dict[str, Any]) -> None:
+    """Render an unregistered mapping without turning nested data into columns."""
+    table = Table(show_header=False, box=None)
+    table.add_column("Field", style="bold")
+    table.add_column("Value")
+    for key, item in value.items():
+        table.add_row(Text(str(key)), Text(_detail_value(item)))
+    console.print(table)
+
+
+def _emit_human_list(console: Console, values: list[Any], view: HumanView) -> None:
+    """Render selected list fields for the available console width."""
+    if not values:
+        console.print(f"[dim]{view.empty_message}[/dim]")
+        return
+    if not all(isinstance(value, dict) for value in values):
+        _emit_rich_list(console, values)
+        return
+    fields = tuple(
+        field for field in view.fields if field.min_console_width <= console.width
+    )
+    if not fields:
+        _emit_rich_list(console, values)
+        return
+    table = Table(title=view.title, title_justify="left")
+    for human_field in fields:
+        table.add_column(human_field.label, no_wrap=human_field.no_wrap)
+    for value in values:
+        table.add_row(
+            *[Text(_human_field_value(value, human_field)) for human_field in fields]
+        )
+    console.print(table)
+
+
+def _emit_human_detail(
+    console: Console, value: dict[str, Any], view: HumanView
+) -> None:
+    """Render a selected detail summary in meaningful sections."""
+    if view.renderer == "doctor":
+        _emit_doctor(console, value)
+        return
+    if not view.sections:
+        fields = tuple(
+            field for field in view.fields if field.min_console_width <= console.width
+        )
+        _emit_human_section(console, view.title, value, fields)
+        return
+    for section in view.sections:
+        present = tuple(
+            field for field in section.fields if _has_human_field(value, field)
+        )
+        if present:
+            _emit_human_section(console, section.title, value, present)
+
+
+def _emit_doctor(console: Console, value: dict[str, Any]) -> None:
+    """Render diagnostic checks as an operational checklist."""
+    healthy = bool(value.get("healthy"))
+    label = "healthy" if healthy else "needs attention"
+    style = "green" if healthy else "red"
+    console.print(f"Kitaru is [{style}]{label}[/{style}].")
+    checks = value.get("checks")
+    if not isinstance(checks, list) or not checks:
+        return
+    table = Table(title="Checks", title_justify="left")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Required")
+    table.add_column("Detail")
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        table.add_row(
+            Text(_display_value(check.get("name"))),
+            Text(_display_value(check.get("status"))),
+            Text(_display_value(check.get("required"))),
+            Text(_display_value(check.get("detail"))),
+        )
+    console.print(table)
+
+
+def _emit_human_section(
+    console: Console,
+    title: str,
+    value: dict[str, Any],
+    fields: tuple[HumanField, ...],
+) -> None:
+    """Render one human detail section."""
+    console.print(Rule(title, align="left", style="dim"))
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Field", style="bold", no_wrap=True)
+    table.add_column("Value")
+    for human_field in fields:
+        table.add_row(
+            human_field.label,
+            Text(_human_field_value(value, human_field, detail=True)),
+        )
+    console.print(table)
+
+
+def _emit_human_footer(console: Console, result: CommandResult) -> None:
+    """Render pagination, links, and suggested follow-up commands."""
+    if result.items is not None and result.page is not None:
+        noun = "item" if len(result.items) == 1 else "items"
+        console.print(f"[dim]Showing {len(result.items)} {noun}.[/dim]")
+    if result.page and result.page.get("next_cursor"):
+        line = Text("Next cursor:", style="dim")
+        line.append(f" {result.page['next_cursor']}")
+        console.print(line)
+    for label, link in result.links.items():
+        line = Text(f"{label}:", style="dim")
+        line.append(f" {link}")
+        console.print(line)
+    for action in result.next_actions:
+        line = Text("Next:", style="dim")
+        line.append(f" {action}")
+        console.print(line)
+
+
+def _get_human_error_hint(command: str, kind: str) -> str | None:
+    """Return a bounded recovery hint for common interactive failures."""
+    words = command.replace(".", " ")
+    if kind == "invalid_arguments":
+        if command == "cli":
+            return "Run `kitaru --help` to inspect available commands."
+        return f"Run `kitaru {words} --help` to check valid arguments."
+    if kind == "authentication_failed":
+        return "Run `kitaru login`, then retry the command."
+    if kind == "network_error":
+        return "Run `kitaru status` to check the selected server, then retry."
+    if kind == "not_found":
+        group = command.split(".", 1)[0]
+        if group in {
+            "agent",
+            "cohort",
+            "evaluation",
+            "evaluator",
+            "experiment",
+            "importer",
+            "session",
+            "worker",
+        }:
+            return f"Run `kitaru {group} list` to inspect available records."
+    return None
+
+
+_MISSING = object()
+
+
+def _get_human_field(value: dict[str, Any], field: HumanField) -> Any:
+    """Resolve a field path, trying pipe-separated alternatives."""
+    for path in field.key.split("|"):
+        current: Any = value
+        for part in path.split("."):
+            if not isinstance(current, dict) or part not in current:
+                current = _MISSING
+                break
+            current = current[part]
+        if current is not _MISSING and current is not None:
+            return current
+    return _MISSING
+
+
+def _has_human_field(value: dict[str, Any], field: HumanField) -> bool:
+    """Return whether a selected field exists in a result mapping."""
+    return _get_human_field(value, field) is not _MISSING
+
+
+def _human_field_value(
+    value: dict[str, Any], field: HumanField, *, detail: bool = False
+) -> str:
+    """Resolve and format one selected human field."""
+    item = _get_human_field(value, field)
+    if item is _MISSING:
+        return "-"
+    if field.formatter is not None:
+        return field.formatter(redact_data(item))
+    if detail:
+        return _detail_value(item)
+    return _display_value(item)
+
+
+def _detail_value(value: Any) -> str:
+    """Format nested detail data as readable indented JSON."""
+    value = redact_data(value)
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, indent=2, sort_keys=True)
+    return _display_value(value)
 
 
 def _display_value(value: Any) -> str:
