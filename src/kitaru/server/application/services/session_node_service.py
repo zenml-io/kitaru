@@ -94,7 +94,11 @@ class SessionNodeService:
         Returns:
             Stored nodes in batch order.
         """
-        session = await self._sessions.get(session_id)
+        # Node ids are minted for indexes this read does not find, so two
+        # concurrent batches for one index would both insert and collide on
+        # the (session, index) key. The lock also stabilizes the pre-image
+        # the rollup deltas are computed against.
+        session = await self._sessions.get(session_id, exclusive=True)
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
