@@ -76,11 +76,13 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         )
         return row.to_domain()
 
-    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+    async def get(self, cohort_id: uuid.UUID, exclusive: bool = False) -> Cohort:
         """Load a cohort by id.
 
         Args:
             cohort_id: Id of the cohort.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             CohortNotFound: No cohort has this id.
@@ -88,7 +90,11 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         Returns:
             Stored cohort.
         """
-        row = await self._get_row(cohort_id)
+        row = await self._session.get(
+            self.orm_class, cohort_id, with_for_update=exclusive
+        )
+        if row is None:
+            raise CohortNotFound(cohort_id)
         return row.to_domain()
 
     async def query(

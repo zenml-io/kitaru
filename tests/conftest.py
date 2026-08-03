@@ -2534,11 +2534,12 @@ class FakeCohortRepository:
         self._cohorts[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+    async def get(self, cohort_id: uuid.UUID, exclusive: bool = False) -> Cohort:
         """Load a cohort by id.
 
         Args:
             cohort_id: Id of the cohort.
+            exclusive: Ignored, the fake holds no rows to lock.
 
         Raises:
             CohortNotFound: No cohort has this id.
