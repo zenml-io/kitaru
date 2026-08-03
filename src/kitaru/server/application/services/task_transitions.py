@@ -18,13 +18,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import EventDispatcher, JobSettled, TaskTerminal
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
+from kitaru.server.application.services import analytics_events
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.task import Task
+from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
 
 
 def _settlement_outcome(tasks: list[Task]) -> tuple[JobStatus, str | None]:
@@ -53,6 +56,7 @@ class TaskTransitions:
         task_repository: TaskRepository,
         job_repository: JobRepository,
         dispatcher: EventDispatcher,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the dispatch.
 
@@ -60,10 +64,12 @@ class TaskTransitions:
             task_repository: Task repository.
             job_repository: Job repository.
             dispatcher: Event dispatcher the transitions publish on.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._tasks = task_repository
         self._jobs = job_repository
         self._dispatcher = dispatcher
+        self._analytics = analytics
 
     async def apply_status(
         self, task: Task, transition: Callable[[Task], None]
@@ -87,7 +93,9 @@ class TaskTransitions:
             Stored task carrying its new status.
         """
         stored = await self._write_transition(task, transition)
-        await self.advance_job(stored.job_id)
+        job = await self.advance_job(stored.job_id)
+        if stored.terminal:
+            self._track_task_terminal(stored, job)
         return stored
 
     async def _write_transition(
@@ -133,7 +141,7 @@ class TaskTransitions:
         job.start(datetime.now(UTC))
         await self._jobs.update(job)
 
-    async def advance_job(self, job_id: uuid.UUID) -> None:
+    async def advance_job(self, job_id: uuid.UUID) -> Job:
         """Propagate an abort failure and settle the job once its tasks drain.
 
         Args:
@@ -141,6 +149,9 @@ class TaskTransitions:
 
         Raises:
             JobNotFound: No job has this id.
+
+        Returns:
+            Loaded job, settled if this call drained its tasks.
         """
         tasks = await self._tasks.list_by_job(job_id)
         if any(
@@ -151,13 +162,20 @@ class TaskTransitions:
             tasks = await self._tasks.list_by_job(job_id)
         job = await self._jobs.get(job_id, exclusive=True)
         if job.settled:
-            return
+            return job
         if not tasks or not all(task.terminal for task in tasks):
-            return
+            return job
         status, error = _settlement_outcome(tasks)
         job.settle(status, error, datetime.now(UTC))
+        if self._analytics is not None:
+            self._analytics.track(
+                job.owner_id,
+                AnalyticsEvent.JOB_COMPLETED,
+                analytics_events.build_job_completed_properties(job, tasks),
+            )
         settled = await self._jobs.update(job)
         await self._dispatcher.dispatch(JobSettled(job=settled))
+        return settled
 
     async def _cancel_pending_tasks(self, tasks: list[Task], now: datetime) -> None:
         """Move each still-pending task in the list straight to canceled.
@@ -201,3 +219,25 @@ class TaskTransitions:
         await self._cancel_pending_tasks(await self._tasks.list_by_job(job.id), now)
         await self.advance_job(job.id)
         return await self._jobs.get(stored.id)
+
+    def _track_task_terminal(self, task: Task, job: Job) -> None:
+        """Track a task's transition to a terminal status by kind.
+
+        Args:
+            task: Task that just transitioned to a terminal status.
+            job: Owning job of the task.
+        """
+        if self._analytics is None:
+            return
+        if isinstance(task, ImportTask):
+            self._analytics.track(
+                job.owner_id,
+                AnalyticsEvent.IMPORT_COMPLETED,
+                analytics_events.build_import_completed_properties(task),
+            )
+        elif isinstance(task, EvaluationTask):
+            self._analytics.track(
+                job.owner_id,
+                AnalyticsEvent.EVALUATION_COMPLETED,
+                analytics_events.build_evaluation_completed_properties(task),
+            )

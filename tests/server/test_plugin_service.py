@@ -14,10 +14,12 @@
 """Tests for plugin registry use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository, create_blob
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import (
     PluginFilter,
@@ -25,6 +27,7 @@ from kitaru.server.application.models.plugin import (
     PluginVersionFilter,
 )
 from kitaru.server.application.services.plugin_service import PluginService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
@@ -38,6 +41,29 @@ from kitaru.server.domain.plugin import (
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -412,3 +438,48 @@ async def test_update_version_not_found(evaluator_service: PluginService) -> Non
         await evaluator_service.update_version(
             plugin.id, 1, display_version="v1", actor=ACTOR
         )
+
+
+async def test_create_version_tracks_plugin_registered(
+    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+) -> None:
+    """Fire PLUGIN_REGISTERED with the plugin kind and source type."""
+    analytics = _RecordingAnalytics()
+    service = PluginService(
+        kind=PluginKind.EVALUATOR,
+        repository=repository,
+        blob_repository=blob_repository,
+        analytics=analytics,
+    )
+    plugin = await service.create_plugin(
+        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+    )
+
+    await service.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.PLUGIN_REGISTERED
+    assert properties == {"kind": "evaluator", "source_type": "package"}
+
+
+async def test_create_version_without_analytics_tracker(
+    evaluator_service: PluginService,
+) -> None:
+    """Register a plugin version normally when no analytics tracker is configured."""
+    plugin = await evaluator_service.create_plugin(
+        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+    )
+    version = await evaluator_service.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+        actor=ACTOR,
+    )
+    assert version.version == 1

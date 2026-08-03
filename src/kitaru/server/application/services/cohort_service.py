@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.models.auth import AuthContext
@@ -23,6 +24,7 @@ from kitaru.server.application.models.cohort import (
     CohortFilter,
     CohortUpdate,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort import Cohort
 
@@ -34,6 +36,7 @@ class CohortService:
         self,
         repository: CohortRepository,
         agent_repository: AgentRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -41,9 +44,11 @@ class CohortService:
             repository: Cohort repository.
             agent_repository: Agent repository, to validate the owning
                 agent exists.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._agents = agent_repository
+        self._analytics = analytics
 
     async def create_cohort(self, command: CohortCreate, actor: AuthContext) -> Cohort:
         """Create a cohort namespace owned by the caller.
@@ -67,7 +72,10 @@ class CohortService:
             agent_id=command.agent_id,
             metadata=command.metadata,
         )
-        return await self._repository.create(cohort)
+        cohort = await self._repository.create(cohort)
+        if self._analytics is not None:
+            self._analytics.track(actor.account.id, AnalyticsEvent.COHORT_CREATED)
+        return cohort
 
     async def get_cohort(self, cohort_id: uuid.UUID, actor: AuthContext) -> Cohort:
         """Get a cohort by id.

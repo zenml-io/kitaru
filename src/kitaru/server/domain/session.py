@@ -330,12 +330,9 @@ class Session(DomainModel):
 
         Raises:
             IllegalSessionStatusTransition: The session is terminal and
-                ``status`` moves it back to in_progress.
+                ``status`` changes it.
         """
-        if (
-            self.status != SessionStatus.IN_PROGRESS
-            and status == SessionStatus.IN_PROGRESS
-        ):
+        if status != self.status and self.status != SessionStatus.IN_PROGRESS:
             raise IllegalSessionStatusTransition(self.id, self.status, status)
         self.status = status
         self.outputs = outputs

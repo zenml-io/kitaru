@@ -54,6 +54,7 @@ from kitaru.server.application.services import (
     replay_pipeline,
     run_finalization,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 
 
 def register_subscribers(
@@ -64,6 +65,7 @@ def register_subscribers(
     experiment_repository: ExperimentRepository,
     experiment_run_repository: ExperimentRunRepository,
     evaluation_repository: EvaluationRepository,
+    analytics: ServerAnalytics | None = None,
 ) -> None:
     """Register every task-transition subscriber on a dispatcher.
 
@@ -79,6 +81,7 @@ def register_subscribers(
         experiment_repository: Experiment repository, for replay configs.
         experiment_run_repository: Experiment run repository.
         evaluation_repository: Evaluation repository.
+        analytics: Analytics tracker, None skips tracking.
     """
     dispatcher.register(
         TaskTerminal,
@@ -112,11 +115,14 @@ def register_subscribers(
             run_finalization.finalize_run_if_drained,
             replay_repository=replay_repository,
             experiment_run_repository=experiment_run_repository,
+            analytics=analytics,
         ),
     )
 
 
-def build_event_dispatcher(session: AsyncSession) -> EventDispatcher:
+def build_event_dispatcher(
+    session: AsyncSession, analytics: ServerAnalytics | None = None
+) -> EventDispatcher:
     """Build the event dispatcher every subscriber of one request shares.
 
     Subscribers are constructed here with repositories bound to the request's
@@ -125,6 +131,7 @@ def build_event_dispatcher(session: AsyncSession) -> EventDispatcher:
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker, None skips tracking.
 
     Returns:
         Dispatcher carrying the registered subscribers.
@@ -138,5 +145,6 @@ def build_event_dispatcher(session: AsyncSession) -> EventDispatcher:
         experiment_repository=SQLExperimentRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
         evaluation_repository=SQLEvaluationRepository(session),
+        analytics=analytics,
     )
     return dispatcher
