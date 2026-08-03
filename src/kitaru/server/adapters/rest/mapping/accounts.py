@@ -13,7 +13,11 @@
 #  permissions and limitations under the License.
 """Account DTO conversions."""
 
-from kitaru.api_models.v1.account import AccountListParams, AccountResponse
+from kitaru.api_models.v1.account import (
+    AccountActivationTokenResponse,
+    AccountListParams,
+    AccountResponse,
+)
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import Account
@@ -36,8 +40,27 @@ def account_to_response(account: Account) -> AccountResponse:
         email=account.email,
         is_service_account=account.is_service_account,
         active=account.active,
+        metadata=account.metadata,
         created=account.created,
         updated=account.updated,
+    )
+
+
+def account_to_activation_token_response(
+    account: Account, activation_token: str
+) -> AccountActivationTokenResponse:
+    """Convert an account entity and its new token to a response DTO.
+
+    Args:
+        account: Stored account.
+        activation_token: Plaintext token minted for the account.
+
+    Returns:
+        Account activation token response.
+    """
+    return AccountActivationTokenResponse(
+        **account_to_response(account).model_dump(),
+        activation_token=activation_token,
     )
 
 

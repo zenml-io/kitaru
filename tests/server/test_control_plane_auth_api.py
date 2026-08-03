@@ -308,7 +308,7 @@ async def test_update_account_forbidden(
 
     response = await client.patch(
         f"/v1/accounts/{uuid.uuid4()}",
-        json={"active": False},
+        json={"password": "new", "old_password": "old"},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 403
@@ -335,3 +335,24 @@ async def test_control_plane_scheme_skips_default_account_bootstrap() -> None:
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         pass
+
+
+async def test_update_own_account_metadata_allowed(
+    client: httpx.AsyncClient,
+    control_plane_client: FakeControlPlaneClient,
+    settings: APISettings,
+) -> None:
+    """Write own metadata under the control plane scheme."""
+    authenticate(control_plane_client, settings)
+    headers = {"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"}
+
+    listed = await client.get("/v1/accounts", headers=headers)
+    account_id = listed.json()["items"][0]["id"]
+
+    response = await client.patch(
+        f"/v1/accounts/{account_id}",
+        json={"metadata": {"theme": "dark"}},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["metadata"] == {"theme": "dark"}
