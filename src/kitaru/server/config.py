@@ -31,6 +31,16 @@ class DatabaseSSLMode(StrEnum):
     VERIFY_FULL = "verify-full"
 
 
+class LogLevel(StrEnum):
+    """Supported server logging levels."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
 class Settings(BaseSettings):
     """Settings shared by every Kitaru server process."""
 
@@ -41,7 +51,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: LogLevel = LogLevel.INFO
     SKIP_DB_MIGRATION: bool = False
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60

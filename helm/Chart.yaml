@@ -1,6 +1,6 @@
 apiVersion: v2
 name: kitaru
-version: "0.2.0"
+version: "0.2.0-dev1"
 description: "Kitaru: Durable execution for AI agents."
 type: application
 keywords:
