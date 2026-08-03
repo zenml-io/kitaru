@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """API server process entrypoint."""
 
+import logging
+
 import uvicorn
 
 from kitaru.server.api.app import create_app
@@ -22,6 +24,7 @@ from kitaru.server.api.config import APISettings
 def main() -> None:
     """Run the API server."""
     settings = APISettings()
+    logging.basicConfig(level=settings.LOG_LEVEL)
     uvicorn.run(create_app(settings), host=settings.HOST, port=settings.PORT)
 
 
