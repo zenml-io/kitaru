@@ -22,7 +22,7 @@ from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, TextIO, TypeVar
+from typing import Annotated, Any, Literal, TextIO, TypeVar
 
 import httpx
 from cyclopts import App, Parameter
@@ -31,7 +31,15 @@ from pydantic import ValidationError as PydanticValidationError
 
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import auth as auth_commands
-from kitaru.cli import diagnostics, jobs, registration, scaffold, workers
+from kitaru.cli import (
+    diagnostics,
+    evaluations,
+    jobs,
+    registration,
+    scaffold,
+    sessions,
+    workers,
+)
 from kitaru.cli.config import (
     CONFIG_KEYS,
     ConfigStore,
@@ -58,6 +66,7 @@ from kitaru.cli.schema import (
     ParameterSpec,
     SideEffect,
     describe_schema,
+    is_command_group,
     is_offline,
     register_spec,
 )
@@ -119,6 +128,16 @@ evaluator_version_app = App(
     help="Register and inspect evaluator versions.",
     default_parameter=Parameter(negative=False),
 )
+session_app = App(
+    name="session",
+    help=GROUP_DESCRIPTIONS["session"],
+    default_parameter=Parameter(negative=False),
+)
+evaluation_app = App(
+    name="evaluation",
+    help=GROUP_DESCRIPTIONS["evaluation"],
+    default_parameter=Parameter(negative=False),
+)
 worker_app = App(
     name="worker",
     help=GROUP_DESCRIPTIONS["worker"],
@@ -137,6 +156,8 @@ app.command(context_app, name="context")
 app.command(agent_app, name="agent")
 app.command(importer_app, name="importer")
 app.command(evaluator_app, name="evaluator")
+app.command(session_app, name="session")
+app.command(evaluation_app, name="evaluation")
 app.command(worker_app, name="worker")
 app.command(job_app, name="job")
 
@@ -911,16 +932,17 @@ def context_remove(name: str, /, *, force: bool = False) -> CommandResult:
     )
 
 
-_ASSET_READ_ERRORS = (
+_COLLECTION_READ_ERRORS = (
     "invalid_arguments",
     "invalid_configuration",
     "authentication_failed",
-    "not_found",
-    "conflict",
     "network_error",
     "internal_error",
 )
+_UUID_READ_ERRORS = (*_COLLECTION_READ_ERRORS, "not_found")
+_ASSET_READ_ERRORS = (*_UUID_READ_ERRORS, "conflict")
 _ASSET_WRITE_ERRORS = (*_ASSET_READ_ERRORS, "partial_failure")
+_JOB_WAIT_ERRORS = ("timeout", "remote_failed", "remote_canceled")
 _LIST_PARAMETERS = (
     ParameterSpec("--size", "integer", "option", False, "Items per page."),
     ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
@@ -928,6 +950,23 @@ _LIST_PARAMETERS = (
     ParameterSpec("--filter", "JSON", "option", False, "Server filter expression."),
 )
 _VERSION_LIST_PARAMETERS = _LIST_PARAMETERS[:-1]
+_WAIT_PARAMETERS = (
+    ParameterSpec("--wait", "boolean", "option", False, "Wait for job settlement."),
+    ParameterSpec(
+        "--interval",
+        "positive float",
+        "option",
+        False,
+        "Polling interval; requires --wait.",
+    ),
+    ParameterSpec(
+        "--timeout",
+        "positive float",
+        "option",
+        False,
+        "Local wait timeout; requires --wait.",
+    ),
+)
 _AGENT_SOURCE_PARAMETERS = (
     ParameterSpec("--spec", "path", "option", False, "YAML or JSON spec document."),
     ParameterSpec(
@@ -1330,7 +1369,7 @@ async def _register_plugin_version_command(
 
 
 async def _list_plugin_command(
-    kind: str,
+    kind: Literal["importer", "evaluator"],
     *,
     size: int,
     cursor: str | None,
@@ -1831,6 +1870,260 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
     return await _get_plugin_version_command("evaluator", evaluator_version)
 
 
+@_register(
+    session_app,
+    _spec(
+        ("session", "import"),
+        "Upload a local payload and create an import job.",
+        parameters=(
+            ParameterSpec("FILE", "path", "argument", True, "Local payload file."),
+            ParameterSpec(
+                "--importer",
+                "reference",
+                "option",
+                True,
+                "Exact IMPORTER@VERSION reference.",
+            ),
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Exact AGENT@VERSION reference.",
+            ),
+            ParameterSpec(
+                "--params", "JSON object", "option", False, "Importer parameters."
+            ),
+            ParameterSpec(
+                "--media-type",
+                "string",
+                "option",
+                False,
+                "Payload media type.",
+            ),
+            *_WAIT_PARAMETERS,
+        ),
+        read_only=False,
+        side_effects=("uploads_data", "creates_remote_state"),
+        idempotency="blob_content_deduped_import_job_created_per_request",
+        errors=(
+            *_ASSET_WRITE_ERRORS,
+            *_JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def session_import(
+    file: Path,
+    /,
+    *,
+    importer: str,
+    agent: str,
+    params: str | None = None,
+    media_type: str = "application/octet-stream",
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+) -> CommandResult:
+    """Upload a local payload and create one import job."""
+    async with _open_asset_client() as client:
+        return await sessions.import_sessions(
+            client,
+            file,
+            importer=importer,
+            agent=agent,
+            params=params,
+            media_type=media_type,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+        )
+
+
+@_register(
+    session_app,
+    _spec(
+        ("session", "list"),
+        "List sessions.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def session_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of sessions."""
+    async with _open_asset_client() as client:
+        return await sessions.list_sessions(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    session_app,
+    _spec(
+        ("session", "get"),
+        "Get a session by exact UUID.",
+        parameters=(ParameterSpec("SESSION", "UUID", "argument", True, "Session ID."),),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def session_get(session: uuid.UUID, /) -> CommandResult:
+    """Get one session by exact UUID."""
+    async with _open_asset_client() as client:
+        return await sessions.get_session(client, session)
+
+
+@_register(
+    session_app,
+    _spec(
+        ("session", "nodes"),
+        "List a session's nodes in index order.",
+        parameters=(
+            ParameterSpec("SESSION", "UUID", "argument", True, "Session ID."),
+            ParameterSpec("--size", "integer", "option", False, "Items per page."),
+            ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
+            ParameterSpec(
+                "--include-payloads",
+                "boolean",
+                "option",
+                False,
+                "Include node inputs, outputs, and attributes.",
+            ),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def session_nodes(
+    session: uuid.UUID,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    include_payloads: bool = False,
+) -> CommandResult:
+    """List one server page of a session's nodes."""
+    async with _open_asset_client() as client:
+        return await sessions.list_session_nodes(
+            client,
+            session,
+            size=size,
+            cursor=cursor,
+            include_payloads=include_payloads,
+        )
+
+
+@_register(
+    session_app,
+    _spec(
+        ("session", "evaluate"),
+        "Evaluate explicit sessions with exact evaluator versions.",
+        parameters=(
+            ParameterSpec(
+                "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--evaluator",
+                "reference[]",
+                "option",
+                True,
+                "Exact EVALUATOR@VERSION references.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+            *_WAIT_PARAMETERS,
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "creates_remote_state"),
+        idempotency="non_idempotent_job_created_per_request",
+        errors=(
+            *_ASSET_READ_ERRORS,
+            *_JOB_WAIT_ERRORS,
+        ),
+        streams=True,
+    ),
+)
+async def session_evaluate(
+    session: list[str] | None = None,
+    /,
+    *,
+    sessions_file: Path | None = None,
+    evaluator: list[str],
+    evaluator_params: list[str] | None = None,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+) -> CommandResult:
+    """Evaluate explicit sessions with exact evaluator versions."""
+    async with _open_asset_client() as client:
+        return await evaluations.evaluate_sessions(
+            client,
+            session,
+            sessions_file=sessions_file,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+        )
+
+
+@_register(
+    evaluation_app,
+    _spec(
+        ("evaluation", "list"),
+        "List stored evaluations.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def evaluation_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of stored evaluations."""
+    async with _open_asset_client() as client:
+        return await evaluations.list_evaluations(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    evaluation_app,
+    _spec(
+        ("evaluation", "get"),
+        "Get a stored evaluation by exact UUID.",
+        parameters=(
+            ParameterSpec("EVALUATION", "UUID", "argument", True, "Evaluation ID."),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def evaluation_get(evaluation: uuid.UUID, /) -> CommandResult:
+    """Get one stored evaluation by exact UUID."""
+    async with _open_asset_client() as client:
+        return await evaluations.get_evaluation(client, evaluation)
+
+
 _WORKER_START_PARAMETERS = (
     ParameterSpec("--name", "string", "option", False, "Ephemeral worker name."),
     ParameterSpec(
@@ -2148,7 +2441,7 @@ def _convert_error(exception: BaseException) -> CLIError:
             return CLIError("not_found", exception.detail, details=details)
         if exception.status_code == 409:
             return CLIError("conflict", exception.detail, details=details)
-        if exception.status_code in {400, 422}:
+        if exception.status_code in {400, 413, 422}:
             return CLIError("invalid_arguments", exception.detail, details=details)
         if exception.status_code >= 500:
             return CLIError(
@@ -2223,18 +2516,7 @@ def _guess_command(tokens: Sequence[str]) -> str:
         if token.startswith("-"):
             continue
         names.append(token)
-        if tuple(names) in {
-            ("config",),
-            ("context",),
-            ("agent",),
-            ("agent", "version"),
-            ("importer",),
-            ("importer", "version"),
-            ("evaluator",),
-            ("evaluator", "version"),
-            ("worker",),
-            ("job",),
-        }:
+        if is_command_group(tuple(names)):
             continue
         break
     return ".".join(names) if names else "cli"

@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
@@ -27,6 +27,7 @@ from kitaru.api_models.v1.agent_version import (
     RunSpec,
 )
 from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.evaluation import EvaluationListParams
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorListParams,
@@ -38,6 +39,7 @@ from kitaru.api_models.v1.importer import (
     ImporterVersionCreateRequest,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.client.api_client import KitaruAPIClient
@@ -568,18 +570,20 @@ def plugin_parent_request(
 
 
 def list_params(
-    kind: str,
+    kind: Literal["agent", "evaluation", "evaluator", "importer", "session"],
     *,
     size: int,
     cursor: str | None,
     sort: str,
     filter: str | None,
-) -> Any:
+) -> ListParams:
     """Build a kind-specific list request."""
     request_type = {
         "agent": AgentListParams,
-        "importer": ImporterListParams,
+        "evaluation": EvaluationListParams,
         "evaluator": EvaluatorListParams,
+        "importer": ImporterListParams,
+        "session": SessionListParams,
     }[kind]
     return request_type(size=size, cursor=cursor, sort=sort, filter=filter)
 

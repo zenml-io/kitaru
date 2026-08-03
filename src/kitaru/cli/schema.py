@@ -74,8 +74,10 @@ GROUP_DESCRIPTIONS = {
     "agent": "Register and inspect agents.",
     "config": "Manage allowlisted CLI preferences.",
     "context": "Manage named server contexts.",
+    "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
     "importer": "Develop, register, and inspect importers.",
+    "session": "Import and inspect sessions and their nodes.",
     "worker": "Run and inspect generic local workers.",
     "job": "Inspect, watch, and cancel jobs.",
 }
@@ -108,6 +110,14 @@ def get_spec(path: tuple[str, ...]) -> CommandSpec | None:
         Registered metadata, when present.
     """
     return _COMMANDS.get(path)
+
+
+def is_command_group(path: tuple[str, ...]) -> bool:
+    """Return whether a path is a registered command-group prefix."""
+    return any(
+        len(command_path) > len(path) and command_path[: len(path)] == path
+        for command_path in _COMMANDS
+    )
 
 
 def describe_schema(path: tuple[str, ...] = ()) -> list[dict[str, Any]]:

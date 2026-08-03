@@ -114,6 +114,95 @@ async def test_get_can_include_complete_task_snapshot() -> None:
     assert resource.get_calls == 1
 
 
+@pytest.mark.parametrize(
+    "status",
+    [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED],
+)
+async def test_poll_returns_every_terminal_status_without_mapping(
+    status: JobStatus,
+) -> None:
+    """The reusable poller leaves terminal outcome policy to its caller."""
+    job_id = uuid.uuid4()
+    terminal = _job(job_id, status)
+    stdout = io.StringIO()
+    token = set_output_context(_output_context("json", stdout))
+    try:
+        result = await jobs.poll_job(
+            SimpleNamespace(jobs=StubJobs([terminal])),
+            job_id,
+            interval=1,
+            timeout=None,
+        )
+    finally:
+        reset_output_context(token)
+
+    assert result is terminal
+    assert stdout.getvalue() == ""
+
+
+@pytest.mark.parametrize(
+    ("interval", "timeout", "message"),
+    [
+        (0, None, "--interval must be positive and finite."),
+        (float("inf"), None, "--interval must be positive and finite."),
+        (1, 0, "--timeout must be positive and finite."),
+        (1, float("nan"), "--timeout must be positive and finite."),
+    ],
+)
+async def test_poll_validates_interval_and_timeout(
+    interval: float, timeout: float | None, message: str
+) -> None:
+    """The reusable poller owns positive finite timing validation."""
+    job_id = uuid.uuid4()
+
+    with pytest.raises(CLIError, match=message) as error:
+        await jobs.poll_job(
+            SimpleNamespace(jobs=StubJobs([_job(job_id, JobStatus.RUNNING)])),
+            job_id,
+            interval=interval,
+            timeout=timeout,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+
+
+async def test_poll_suppresses_unchanged_created_snapshot() -> None:
+    """Create-command polling does not repeat its already-emitted job state."""
+    job_id = uuid.uuid4()
+    created = _job(job_id, JobStatus.PENDING)
+    resource = StubJobs(
+        [
+            _job(job_id, JobStatus.PENDING, updated_offset=1),
+            _job(job_id, JobStatus.RUNNING, updated_offset=2),
+            _job(job_id, JobStatus.COMPLETED, updated_offset=3),
+        ]
+    )
+
+    async def sleep(_: float) -> None:
+        return None
+
+    stdout = io.StringIO()
+    token = set_output_context(_output_context("jsonl", stdout))
+    try:
+        result = await jobs.poll_job(
+            SimpleNamespace(jobs=resource),
+            job_id,
+            interval=1,
+            timeout=None,
+            sleep=sleep,
+            initial_job=created,
+        )
+    finally:
+        reset_output_context(token)
+
+    assert result.status is JobStatus.COMPLETED
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [event["item"]["status"] for event in events] == [
+        "running",
+        "completed",
+    ]
+
+
 async def test_watch_jsonl_suppresses_updated_only_changes_and_emits_terminal() -> None:
     """JSONL contains changed snapshots and exactly one final terminal event."""
     job_id = uuid.uuid4()
