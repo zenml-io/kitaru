@@ -16,6 +16,7 @@
 import uuid
 from collections.abc import Sequence
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
@@ -27,6 +28,8 @@ from kitaru.server.application.models.cohort import (
     CohortVersionFilter,
     CohortVersionUpdate,
 )
+from kitaru.server.application.services import analytics_events
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion, apply_membership_delta
@@ -40,6 +43,7 @@ class CohortVersionService:
         repository: CohortVersionRepository,
         cohort_repository: CohortRepository,
         session_repository: SessionRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -49,10 +53,12 @@ class CohortVersionService:
                 cohort and its latest version.
             session_repository: Session repository, to validate added
                 sessions exist and belong to the cohort's agent.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._cohorts = cohort_repository
         self._sessions = session_repository
+        self._analytics = analytics
 
     async def _resolve_latest_members(self, cohort: Cohort) -> list[uuid.UUID]:
         """Read the ordered member list of a cohort's latest version.
@@ -130,7 +136,16 @@ class CohortVersionService:
             display_version=command.display_version,
             session_count=len(new_members),
         )
-        return await self._repository.create(version, new_members)
+        version = await self._repository.create(version, new_members)
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.COHORT_VERSION_CREATED,
+                analytics_events.build_cohort_version_created_properties(
+                    version.session_count
+                ),
+            )
+        return version
 
     async def get_version(
         self, cohort_version_id: uuid.UUID, actor: AuthContext

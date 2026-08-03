@@ -14,6 +14,7 @@
 """Tests for cohort version use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -28,6 +29,7 @@ from conftest import (
     create_experiment_run,
     create_session,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohort import (
     CohortVersionCreate,
@@ -37,6 +39,7 @@ from kitaru.server.application.models.cohort import (
 from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort import CohortNotFound
@@ -47,6 +50,29 @@ from kitaru.server.domain.cohort_version import (
 from kitaru.server.domain.names import InvalidName
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -540,3 +566,46 @@ async def test_delete_version_in_use(
     )
     with pytest.raises(CohortVersionInUse):
         await service.delete_version(created.id, actor=ACTOR)
+
+
+async def test_create_version_tracks_cohort_version_created(
+    repository: FakeCohortVersionRepository,
+    cohort_repository: FakeCohortRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Fire COHORT_VERSION_CREATED with the new version's session count."""
+    analytics = _RecordingAnalytics()
+    service = CohortVersionService(
+        repository=repository,
+        cohort_repository=cohort_repository,
+        session_repository=session_repository,
+        analytics=analytics,
+    )
+    session_ids = [
+        await _make_session_id(session_repository, agent_id),
+        await _make_session_id(session_repository, agent_id),
+    ]
+
+    await service.create_version(
+        cohort_id,
+        CohortVersionCreate(add_session_ids=session_ids),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.COHORT_VERSION_CREATED
+    assert properties == {"session_count": 2}
+
+
+async def test_create_version_without_analytics_tracker(
+    service: CohortVersionService, cohort_id: uuid.UUID
+) -> None:
+    """Create a cohort version normally when no analytics tracker is configured."""
+    version = await service.create_version(
+        cohort_id, CohortVersionCreate(), actor=ACTOR
+    )
+    assert version.owner_id == ACTOR.account.id

@@ -18,3 +18,14 @@ from enum import StrEnum
 
 class AnalyticsEvent(StrEnum):
     """Analytics event."""
+
+    SESSION_COMPLETED = "session_completed"
+    IMPORT_COMPLETED = "import_completed"
+    REPLAY_CREATED = "replay_created"
+    EVALUATION_COMPLETED = "evaluation_completed"
+    EXPERIMENT_CREATED = "experiment_created"
+    EXPERIMENT_RUN_COMPLETED = "experiment_run_completed"
+    COHORT_CREATED = "cohort_created"
+    COHORT_VERSION_CREATED = "cohort_version_created"
+    JOB_COMPLETED = "job_completed"
+    PLUGIN_REGISTERED = "plugin_registered"
