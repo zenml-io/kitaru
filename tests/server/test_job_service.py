@@ -20,6 +20,8 @@ import pytest
 from conftest import (
     JobAndTaskServices,
     build_job_and_task_services,
+    build_task_actor,
+    build_worker_actor,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -35,7 +37,9 @@ from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.server.application.events import Event, TaskTerminal
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+)
 from kitaru.server.application.models.job import (
     EvaluationBatchCreate,
     ImportCreate,
@@ -339,7 +343,9 @@ async def test_cancel_job_cancels_pending_tasks_and_stamps_in_flight_ones(
     )
     claimable_task = next(t for t in tasks if t.id != pending_task.id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 1, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        1, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     canceled_job = await services.job_service.cancel_job(job.id, actor=ACTOR)
     assert canceled_job.cancel_requested_at is not None
@@ -387,13 +393,15 @@ async def test_settlement_precedence_failed_over_canceled_over_completed(
         services.tasks, job.id, agent_version_id=version_id
     )
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert {item.task.id for item in claimed} == {failing.id, sibling.id}
 
     await services.task_service.update_task(
         failing.id,
-        TaskUpdate(status=TaskStatus.FAILED, attempt=1, error="boom"),
-        actor=ACTOR,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
     # Abort propagation only stamps the still-claimed sibling, it does not
     # settle the job until every task reaches a terminal status.
@@ -407,7 +415,9 @@ async def test_settlement_precedence_failed_over_canceled_over_completed(
     # The claimed sibling reaches its own terminal status the usual way,
     # through its worker, and that drains the job.
     await services.task_service.update_task(
-        sibling.id, TaskUpdate(status=TaskStatus.CANCELED, attempt=1), actor=ACTOR
+        sibling.id,
+        TaskUpdate(status=TaskStatus.CANCELED),
+        actor=build_task_actor(ACTOR.account, sibling.id, 1, worker.id),
     )
     job_after = await services.jobs.get(job.id)
     assert job_after.status is JobStatus.FAILED
@@ -430,20 +440,24 @@ async def test_ignore_failure_neither_cancels_nor_counts(
         services.tasks, job.id, agent_version_id=version_id
     )
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 2
 
     await services.task_service.update_task(
         ignored.id,
-        TaskUpdate(status=TaskStatus.FAILED, attempt=1, error="boom"),
-        actor=ACTOR,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, ignored.id, 1, worker.id),
     )
     sibling_after = await services.tasks.get(sibling.id)
     assert sibling_after.status is TaskStatus.CLAIMED
     assert sibling_after.cancel_requested_at is None
 
     await services.task_service.update_task(
-        sibling.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        sibling.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, sibling.id, 1, worker.id),
     )
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=sibling.id
@@ -455,7 +469,9 @@ async def test_ignore_failure_neither_cancels_nor_counts(
     stored_sibling.result_session_id = session.id
     await services.tasks.update(stored_sibling)
     await services.task_service.update_task(
-        sibling.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+        sibling.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, sibling.id, 1, worker.id),
     )
     job_after = await services.jobs.get(job.id)
     assert job_after.status is JobStatus.COMPLETED
@@ -478,7 +494,9 @@ async def test_appended_task_blocks_settlement(services: JobAndTaskServices) -> 
     services.task_service._transitions._dispatcher.register(TaskTerminal, append_a_task)
 
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
     )
@@ -488,11 +506,15 @@ async def test_appended_task_blocks_settlement(services: JobAndTaskServices) -> 
     stored_task.result_session_id = session.id
     await services.tasks.update(stored_task)
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
     await services.sessions.update(session)
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
 
     job_after = await services.jobs.get(job.id)

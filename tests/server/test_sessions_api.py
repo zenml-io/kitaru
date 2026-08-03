@@ -36,9 +36,16 @@ from conftest import (
     create_agent_version,
     create_cohort,
     create_cohort_version,
+    create_session,
+    local_settings,
 )
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.server.adapters.auth.auth_service import AuthService
+from kitaru.server.adapters.auth.jwt import TaskSubject
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_task,
+    get_auth_service,
     get_evaluation_service,
     get_session_node_service,
     get_session_service,
@@ -46,7 +53,7 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import AuthContext, GrantKind
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
@@ -135,7 +142,11 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed session services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     session_service = SessionService(
         repository=session_repository,
@@ -154,6 +165,7 @@ async def client(
     app.dependency_overrides[get_tag_service] = lambda: tag_service
     app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -772,3 +784,233 @@ async def test_list_sessions_filter_nested_too_deep(client: httpx.AsyncClient) -
         "/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 422
+
+
+async def test_list_sessions_rejects_worker_and_task_credentials(
+    session_repository: FakeSessionRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Observe HTTP 403 for a worker or task credential on an account-only route."""
+    app = create_app(local_settings())
+    app.dependency_overrides[get_session_service] = lambda: SessionService(
+        repository=session_repository,
+        task_repository=FakeTaskRepository(),
+        agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        worker_token = auth_service.issue_worker_token(
+            worker_id=uuid.uuid4(), account_id=account.id
+        ).token
+        response = await client.get(
+            "/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
+        )
+        assert response.status_code == 403
+
+        task_token = auth_service.issue_task_token(
+            TaskSubject(
+                task_id=uuid.uuid4(),
+                attempt=1,
+                worker_id=uuid.uuid4(),
+                account_id=account.id,
+                job_id=uuid.uuid4(),
+            ),
+            timeout_seconds=3600,
+        ).token
+        response = await client.get(
+            "/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
+        )
+        assert response.status_code == 403
+
+
+def _build_task_scoped_app(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    task_repository: FakeTaskRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    auth_service: AuthService,
+) -> httpx.AsyncClient:
+    """Build an app authenticating real task tokens, unlike the default client fixture.
+
+    Args:
+        session_repository: Fake session repository backing the app.
+        node_repository: Fake session node repository backing the app.
+        task_repository: Fake task repository backing the app.
+        evaluation_repository: Fake evaluation repository backing the app.
+        auth_service: Authentication service backing the app.
+
+    Returns:
+        HTTP client routed to the app.
+    """
+    app = create_app(local_settings())
+    app.dependency_overrides[get_session_service] = lambda: SessionService(
+        repository=session_repository,
+        task_repository=task_repository,
+        agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
+    )
+    app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
+        repository=node_repository, session_repository=session_repository
+    )
+    app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
+        repository=evaluation_repository, session_repository=session_repository
+    )
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
+    transport = httpx.ASGITransport(app=app)
+    return httpx.AsyncClient(transport=transport, base_url="http://test")
+
+
+def _task_token(
+    auth_service: AuthService,
+    account: Account,
+    granted_session_id: uuid.UUID | None = None,
+) -> str:
+    """Mint a task token scoped to the given account for the task route tests."""
+    grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
+    if granted_session_id is not None:
+        grants[GrantKind.SESSION] = frozenset({granted_session_id})
+    return auth_service.issue_task_token(
+        TaskSubject(
+            task_id=uuid.uuid4(),
+            attempt=1,
+            worker_id=uuid.uuid4(),
+            account_id=account.id,
+            job_id=uuid.uuid4(),
+            grants=grants,
+        ),
+        timeout_seconds=3600,
+    ).token
+
+
+async def test_get_session_denies_a_task_token_for_another_tasks_session(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Observe HTTP 403 when a task token reads a session it does not own."""
+    owner_task = await create_agent_task(task_repository, uuid.uuid4())
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=owner_task.id
+    )
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account)
+        response = await client.get(
+            f"/v1/sessions/{session.id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 403
+
+
+async def test_update_session_denies_a_task_token_for_another_tasks_session(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Observe HTTP 403 when a task token updates a session it does not own."""
+    owner_task = await create_agent_task(task_repository, uuid.uuid4())
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=owner_task.id
+    )
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account)
+        response = await client.patch(
+            f"/v1/sessions/{session.id}",
+            json={"name": "renamed"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+
+async def test_ingest_session_nodes_denies_a_task_token_for_another_tasks_session(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Observe HTTP 403 for a task token ingesting nodes into an unowned session."""
+    owner_task = await create_agent_task(task_repository, uuid.uuid4())
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        task_id=owner_task.id,
+        status=SessionStatus.IN_PROGRESS,
+    )
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account)
+        response = await client.post(
+            f"/v1/sessions/{session.id}/nodes",
+            json={
+                "nodes": [
+                    {
+                        "index": 0,
+                        "node_type": "llm_call",
+                        "name": "call",
+                        "status": "completed",
+                        "inputs": None,
+                        "outputs": None,
+                        "attributes": None,
+                    }
+                ]
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+
+async def test_get_session_allows_a_task_token_carrying_its_input_session_id(
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """Allow a task token to read the session named in its input_session_id claim."""
+    owner_task = await create_agent_task(task_repository, uuid.uuid4())
+    session = await create_session(
+        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=owner_task.id
+    )
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+    )
+    async with client:
+        token = _task_token(auth_service, account, granted_session_id=session.id)
+        response = await client.get(
+            f"/v1/sessions/{session.id}", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200
+        assert response.json()["id"] == str(session.id)

@@ -221,7 +221,7 @@ async def test_claim_loop_pre_set_stop_does_not_claim(tmp_path: Path) -> None:
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert client.tasks.claim_calls == []
 
@@ -237,7 +237,7 @@ async def test_lifetime_bounds_claim_error_backoff(tmp_path: Path) -> None:
     )
 
     await asyncio.wait_for(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event()),
+        worker._claim_loop(ctx, heartbeat, asyncio.Event()),
         timeout=1.0,
     )
 
@@ -264,7 +264,7 @@ async def test_lifetime_cancels_an_in_flight_claim(tmp_path: Path, monkeypatch) 
     )
 
     await asyncio.wait_for(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event()),
+        worker._claim_loop(ctx, heartbeat, asyncio.Event()),
         timeout=1.0,
     )
 
@@ -299,7 +299,7 @@ async def test_lifetime_stops_claiming_while_at_full_capacity(
         release.set()
 
     await asyncio.gather(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event()),
+        worker._claim_loop(ctx, heartbeat, asyncio.Event()),
         release_after_deadline(),
     )
 
@@ -335,7 +335,7 @@ async def test_canceling_claim_loop_cancels_tasks_during_graceful_drain(
         as_client(client), uuid.uuid4(), interval=1000
     )
     claim_loop = asyncio.create_task(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+        worker._claim_loop(ctx, heartbeat, asyncio.Event())
     )
     await started.wait()
     await asyncio.sleep(0)
@@ -381,7 +381,7 @@ async def test_claim_loop_full_claim_loops_again_without_sleeping(
     heartbeat = worker_module.WorkerHeartbeat(
         as_client(client), uuid.uuid4(), interval=1000
     )
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert len(client.tasks.claim_calls) == 2
     # max_tasks is clamped by claim_batch_size, not the full free_slots.
@@ -400,7 +400,7 @@ async def test_claim_loop_respects_the_concurrency_bound(tmp_path: Path) -> None
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert client.tasks.claim_calls[0].max_tasks == 1
 
@@ -417,7 +417,7 @@ async def test_claim_size_is_clamped_to_endpoint_limit(tmp_path: Path) -> None:
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert client.tasks.claim_calls[0].max_tasks == worker_module._MAX_CLAIM_BATCH
 
@@ -445,9 +445,7 @@ async def test_claim_loop_short_claim_checks_stop_before_sleeping(
 
     # An immediate empty claim is a "short" claim (0 < 5). A stop requested
     # while that claim is in flight ends the loop without polling again.
-    await asyncio.wait_for(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop), timeout=1.0
-    )
+    await asyncio.wait_for(worker._claim_loop(ctx, heartbeat, stop), timeout=1.0)
 
     assert len(client.tasks.claim_calls) == 1
 
@@ -483,7 +481,7 @@ async def test_claim_loop_backoff_doubles_and_resets_on_success(
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert sleeps == [1.0, 2.0, 4.0]
     assert len(client.tasks.claim_calls) == 4
@@ -517,7 +515,7 @@ async def test_claim_loop_backoff_caps_at_the_maximum(
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert sleeps == [
         50.0,
@@ -565,7 +563,7 @@ async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
     heartbeat = worker_module.WorkerHeartbeat(
         as_client(client), uuid.uuid4(), interval=1000
     )
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert len(client.tasks.claim_calls) == 4
     assert [task_id for task_id, _ in client.tasks.update_calls] == [

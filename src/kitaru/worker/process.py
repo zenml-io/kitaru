@@ -38,6 +38,7 @@ _CONTRACT_ENV_VARIABLES = frozenset(
         "KITARU_API_URL",
         "KITARU_API_KEY",
         "KITARU_CREDENTIALS_PATH",
+        "KITARU_TASK_TOKEN",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
         "KITARU_TASK_PLUGIN_PATH",
@@ -237,19 +238,22 @@ def build_process_env(
     run_env: dict[str, str],
     extra_env: dict[str, str],
     secret_env: dict[str, str],
+    token: str,
 ) -> dict[str, str]:
     """Build a task process environment from the inherited and spec layers.
 
     Layers the inherited environment, the run spec env, the creator-set
     extras, and the secret env, then clears any inherited contract variable
-    and resets KITARU_API_URL, KITARU_API_KEY, KITARU_CREDENTIALS_PATH, and
-    KITARU_TASK_ID from the worker's own state.
+    and resets KITARU_API_URL, KITARU_TASK_TOKEN, and KITARU_TASK_ID from the
+    worker's own state. Inherited API keys and credential-store paths are
+    cleared and never reset because the task process uses its own task token.
 
     Args:
         task_id: Id of the task the process runs.
         run_env: Process environment from the run spec.
         extra_env: Creator-set environment extras from the spec.
         secret_env: Secrets merged into the process environment.
+        token: Bearer token scoped to this task and attempt.
 
     Returns:
         Process environment ready to launch the task process with.
@@ -261,12 +265,7 @@ def build_process_env(
     for name in _CONTRACT_ENV_VARIABLES:
         env.pop(name, None)
     env["KITARU_API_URL"] = os.environ["KITARU_API_URL"]
-    api_key = os.environ.get("KITARU_API_KEY")
-    if api_key is not None:
-        env["KITARU_API_KEY"] = api_key
-    credentials_path = os.environ.get("KITARU_CREDENTIALS_PATH")
-    if credentials_path is not None:
-        env["KITARU_CREDENTIALS_PATH"] = credentials_path
+    env["KITARU_TASK_TOKEN"] = token
     env["KITARU_TASK_ID"] = str(task_id)
     return env
 

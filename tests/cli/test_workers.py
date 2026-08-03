@@ -190,8 +190,9 @@ def test_contract_environment_isolates_selected_credentials_and_cleans_up(
         payload = json.loads(isolated_path.read_text(encoding="utf-8"))
         assert list(payload) == [selected_server]
         assert payload[selected_server]["api_key"] == "KITKEY_selected"
-        task_env = build_process_env(uuid.uuid4(), {}, {}, {})
-        assert task_env["KITARU_CREDENTIALS_PATH"] == str(isolated_path)
+        task_env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
+        assert task_env["KITARU_TASK_TOKEN"] == "task-token"
+        assert "KITARU_CREDENTIALS_PATH" not in task_env
         if os.name == "posix":
             assert stat.S_IMODE(isolated_path.stat().st_mode) == 0o600
             assert stat.S_IMODE(isolated_path.parent.stat().st_mode) == 0o700

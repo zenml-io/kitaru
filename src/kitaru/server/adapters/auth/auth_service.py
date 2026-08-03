@@ -16,7 +16,8 @@
 import logging
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 from anyio import to_thread
 
@@ -26,7 +27,13 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneError,
 )
-from kitaru.server.adapters.auth.jwt import JWTToken, TokenError
+from kitaru.server.adapters.auth.jwt import (
+    AccountSubject,
+    JWTToken,
+    TaskSubject,
+    TokenError,
+    WorkerSubject,
+)
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
@@ -35,7 +42,14 @@ from kitaru.server.application.interfaces.api_key_repository import (
     ApiKeyRepository,
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AccountPrincipal,
+    AuthContext,
+    TaskAuthContext,
+    TaskPrincipal,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
 from kitaru.server.application.services.device_service import DeviceService
 from kitaru.server.domain.account import Account, AccountNotFound
 from kitaru.server.domain.api_key import (
@@ -58,6 +72,14 @@ LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 class AuthenticationError(Exception):
     """Raised when request authentication fails."""
+
+
+class IssuedToken(NamedTuple):
+    """Issued bearer token."""
+
+    token: str
+    expires_at: datetime
+    csrf_token: str | None = None
 
 
 class AuthService:
@@ -139,9 +161,7 @@ class AuthService:
         )
         return AuthContext(account=account)
 
-    async def login_with_password(
-        self, username: str, password: str
-    ) -> tuple[str, datetime, str | None]:
+    async def login_with_password(self, username: str, password: str) -> IssuedToken:
         """Authenticate an account by password and issue a session token.
 
         Args:
@@ -152,8 +172,8 @@ class AuthService:
             AuthenticationError: The credentials cannot be validated.
 
         Returns:
-            Encoded bearer token, its expiry time, and the CSRF token when
-            cookie authentication is configured.
+            Issued token, carrying the CSRF token when cookie authentication
+            is configured.
         """
         try:
             account = await self._account_repository.get_by_name(username)
@@ -173,7 +193,7 @@ class AuthService:
             raise AuthenticationError("Invalid username or password.")
         return self._issue_session(AuthContext(account=account))
 
-    async def login_with_api_key(self, credential: str) -> tuple[str, datetime]:
+    async def login_with_api_key(self, credential: str) -> IssuedToken:
         """Exchange an API key for a session token.
 
         Args:
@@ -183,7 +203,7 @@ class AuthService:
             AuthenticationError: The credential cannot be validated.
 
         Returns:
-            Encoded bearer token and its expiry time.
+            Issued token.
         """
         context = await self._authenticate_api_key(credential)
         # The key is only checked here. A session token carries no reference to
@@ -191,9 +211,7 @@ class AuthService:
         # tokens already issued from it valid until they expire.
         return self.issue_token(context)
 
-    async def login_with_control_plane(
-        self, credential: str
-    ) -> tuple[str, datetime, str | None]:
+    async def login_with_control_plane(self, credential: str) -> IssuedToken:
         """Exchange a control plane credential for a local session token.
 
         Args:
@@ -203,14 +221,14 @@ class AuthService:
             AuthenticationError: The credential cannot be validated.
 
         Returns:
-            Encoded bearer token, its expiry time, and the CSRF token when
-            cookie authentication is configured.
+            Issued token, carrying the CSRF token when cookie authentication
+            is configured.
         """
         return self._issue_session(await self._authenticate_control_plane(credential))
 
     async def login_with_device(
         self, device_id: uuid.UUID, device_code: str
-    ) -> tuple[str, datetime]:
+    ) -> IssuedToken:
         """Exchange a verified device code for a session token.
 
         Args:
@@ -226,7 +244,7 @@ class AuthService:
             DeviceAuthorizationPending: No account has approved the device yet.
 
         Returns:
-            Encoded bearer token and its expiry time.
+            Issued token.
         """
         if self._device_service is None:
             raise AuthenticationError("Device authentication is not configured.")
@@ -247,7 +265,7 @@ class AuthService:
         csrf_token: str | None = None,
         device_id: uuid.UUID | None = None,
         expires_at: datetime | None = None,
-    ) -> tuple[str, datetime]:
+    ) -> IssuedToken:
         """Issue a local session for an auth context.
 
         Args:
@@ -258,25 +276,70 @@ class AuthService:
                 falls before the configured lifetime.
 
         Returns:
-            Encoded bearer token and its expiry time.
+            Issued token.
         """
-        token = JWTToken.from_auth_context(
-            context,
-            csrf_token=csrf_token,
-            device_id=device_id,
+        session_expires_at = datetime.now(UTC) + timedelta(
+            seconds=self._settings.JWT_LIFETIME_SECONDS
         )
-        session_expires_at = token.expires(self._settings)
         if expires_at is not None:
             session_expires_at = min(session_expires_at, to_tz_aware(expires_at))
-        token = token.model_copy(update={"expires_at": session_expires_at})
-        return token.encode(self._settings), session_expires_at
+        token = JWTToken(
+            subject=AccountSubject(
+                account_id=context.account.id,
+                csrf_token=csrf_token,
+                device_id=device_id,
+            ),
+            expires_at=session_expires_at,
+        )
+        return IssuedToken(token.encode(self._settings), session_expires_at, csrf_token)
 
-    def _issue_session(self, context: AuthContext) -> tuple[str, datetime, str | None]:
+    def issue_worker_token(
+        self, worker_id: uuid.UUID, account_id: uuid.UUID
+    ) -> IssuedToken:
+        """Issue a token scoped to a registered worker.
+
+        Args:
+            worker_id: Id of the registered worker.
+            account_id: Id of the registering account.
+
+        Returns:
+            Issued token.
+        """
+        expires_at = datetime.now(UTC) + timedelta(
+            seconds=self._settings.WORKER_TOKEN_LIFETIME_SECONDS
+        )
+        token = JWTToken(
+            subject=WorkerSubject(worker_id=worker_id, account_id=account_id),
+            expires_at=expires_at,
+        )
+        return IssuedToken(token.encode(self._settings), expires_at)
+
+    def issue_task_token(
+        self, subject: TaskSubject, timeout_seconds: int
+    ) -> IssuedToken:
+        """Issue a token scoped to a claimed task attempt.
+
+        The token outlives the task's execution timeout by the configured
+        expiry leeway.
+
+        Args:
+            subject: Task attempt the token is scoped to.
+            timeout_seconds: Execution timeout of the claimed task.
+
+        Returns:
+            Issued token.
+        """
+        expires_at = datetime.now(UTC) + timedelta(
+            seconds=timeout_seconds + self._settings.TASK_TOKEN_EXPIRY_LEEWAY_SECONDS
+        )
+        token = JWTToken(subject=subject, expires_at=expires_at)
+        return IssuedToken(token.encode(self._settings), expires_at)
+
+    def _issue_session(self, context: AuthContext) -> IssuedToken:
         csrf_token = None
         if self._settings.AUTH_COOKIE_NAME:
             csrf_token = secrets.token_hex(16)
-        token, expires_at = self.issue_token(context, csrf_token=csrf_token)
-        return token, expires_at, csrf_token
+        return self.issue_token(context, csrf_token=csrf_token)
 
     async def _resolve_control_plane_credential(self, credential: str) -> AuthContext:
         if credential.startswith(CONTROL_PLANE_API_KEY_PREFIX):
@@ -286,11 +349,40 @@ class AuthService:
                 "Local API keys are rejected under control plane authentication."
             )
         context = await self._resolve_session_token(credential)
-        if context.account.external_id is None:
+        if (
+            isinstance(context.principal, AccountPrincipal)
+            and context.account.external_id is None
+        ):
             raise AuthenticationError(
                 "Local accounts are rejected under control plane authentication."
             )
         return context
+
+    async def try_resolve_worker_or_task(self, credential: str) -> AuthContext | None:
+        """Resolve a bearer credential as a worker or task token, when it is one.
+
+        Used under the ``none`` auth scheme, where an account-less request
+        runs as the default account but a worker or task credential still
+        resolves to its own principal.
+
+        Args:
+            credential: Bearer token supplied by the caller.
+
+        Raises:
+            AuthenticationError: The credential decodes as a worker or task
+                token but cannot be resolved.
+
+        Returns:
+            Resolved context, or None when the credential is not a worker or
+            task token.
+        """
+        try:
+            token = JWTToken.decode(credential, self._settings)
+        except TokenError:
+            return None
+        if isinstance(token.subject, AccountSubject):
+            return None
+        return await self._resolve_token(token)
 
     async def _authenticate_control_plane(self, credential: str) -> AuthContext:
         if self._control_plane is None:
@@ -335,12 +427,39 @@ class AuthService:
         await self._api_key_repository.update(api_key)
 
     async def _resolve_token(self, token: JWTToken) -> AuthContext:
+        if isinstance(token.subject, WorkerSubject):
+            return await self._resolve_worker_token(token.subject)
+        if isinstance(token.subject, TaskSubject):
+            return await self._resolve_task_token(token.subject)
         account = await self._load_active_account(
-            token.account_id, "Invalid session token."
+            token.subject.account_id, "Invalid session token."
         )
-        if token.device_id is not None:
-            await self._authorize_session_device(token.device_id, account.id)
-        return AuthContext(account=account, csrf_token=token.csrf_token)
+        if token.subject.device_id is not None:
+            await self._authorize_session_device(token.subject.device_id, account.id)
+        return AuthContext(account=account, csrf_token=token.subject.csrf_token)
+
+    async def _resolve_worker_token(self, subject: WorkerSubject) -> WorkerAuthContext:
+        account = await self._load_active_account(
+            subject.account_id, "Invalid worker token."
+        )
+        return WorkerAuthContext(
+            account=account, principal=WorkerPrincipal(worker_id=subject.worker_id)
+        )
+
+    async def _resolve_task_token(self, subject: TaskSubject) -> TaskAuthContext:
+        account = await self._load_active_account(
+            subject.account_id, "Invalid task token."
+        )
+        return TaskAuthContext(
+            account=account,
+            principal=TaskPrincipal(
+                task_id=subject.task_id,
+                attempt=subject.attempt,
+                worker_id=subject.worker_id,
+                job_id=subject.job_id,
+                grants=subject.grants,
+            ),
+        )
 
     async def _authorize_session_device(
         self, device_id: uuid.UUID, account_id: uuid.UUID

@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Task DTO conversions."""
 
+import uuid
+
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
     EvaluationTaskDetails,
@@ -207,11 +209,14 @@ def spec_to_response(spec: TaskSpec) -> TaskSpecResponse:
     )
 
 
-def claimed_tasks_to_response(claimed: list[ClaimedTask]) -> TaskClaimResponse:
+def claimed_tasks_to_response(
+    claimed: list[ClaimedTask], tokens: dict[uuid.UUID, str]
+) -> TaskClaimResponse:
     """Convert claimed tasks and their specs to the claim response DTO.
 
     Args:
         claimed: Claimed tasks paired with their execution specs.
+        tokens: Task token by task id, one per claimed task.
 
     Returns:
         Task claim response.
@@ -219,7 +224,9 @@ def claimed_tasks_to_response(claimed: list[ClaimedTask]) -> TaskClaimResponse:
     return TaskClaimResponse(
         tasks=[
             TaskWithSpec(
-                task=task_to_response(item.task), spec=spec_to_response(item.spec)
+                task=task_to_response(item.task),
+                spec=spec_to_response(item.spec),
+                token=tokens[item.task.id],
             )
             for item in claimed
         ]

@@ -207,6 +207,7 @@ def test_build_process_env_layers_and_strips_contract_variables(
         run_env={"RUN_VAR": "run"},
         extra_env={"KITARU_REPLAY_ID": "replay-1"},
         secret_env={"SECRET_VAR": "secret"},
+        token="task-token",
     )
 
     assert env["SOME_INHERITED_VAR"] == "inherited"
@@ -214,9 +215,10 @@ def test_build_process_env_layers_and_strips_contract_variables(
     assert env["KITARU_REPLAY_ID"] == "replay-1"
     assert env["SECRET_VAR"] == "secret"
     assert env["KITARU_API_URL"] == "https://api.example.com"
-    assert env["KITARU_API_KEY"] == "worker-key"
-    assert env["KITARU_CREDENTIALS_PATH"] == "/worker/credentials.json"
+    assert env["KITARU_TASK_TOKEN"] == "task-token"
     assert env["KITARU_TASK_ID"] == str(task_id)
+    assert "KITARU_API_KEY" not in env
+    assert "KITARU_CREDENTIALS_PATH" not in env
 
 
 def test_build_process_env_extras_cannot_override_contract_variables(
@@ -242,21 +244,29 @@ def test_build_process_env_extras_cannot_override_contract_variables(
             "KITARU_API_KEY": "spoofed-key",
             "KITARU_CREDENTIALS_PATH": "/evil/secret.json",
         },
+        token="task-token",
     )
 
     assert env["KITARU_API_URL"] == "https://api.example.com"
     assert env["KITARU_TASK_ID"] == str(task_id)
-    assert env["KITARU_CREDENTIALS_PATH"] == "/worker/credentials.json"
+    assert env["KITARU_TASK_TOKEN"] == "task-token"
     assert "KITARU_API_KEY" not in env
+    assert "KITARU_CREDENTIALS_PATH" not in env
 
 
-def test_build_process_env_omits_api_key_when_unset(
+def test_build_process_env_never_sets_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No KITARU_API_KEY is set when the worker's own environment lacks one."""
+    """KITARU_TASK_TOKEN is set and KITARU_API_KEY is absent, even when inherited."""
     monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
+
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
-    env = build_process_env(uuid.uuid4(), {}, {}, {})
+    env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
+    assert env["KITARU_TASK_TOKEN"] == "task-token"
+    assert "KITARU_API_KEY" not in env
+
+    monkeypatch.setenv("KITARU_API_KEY", "worker-key")
+    env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
     assert "KITARU_API_KEY" not in env
 
 

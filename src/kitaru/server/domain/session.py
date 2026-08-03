@@ -26,6 +26,7 @@ from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     ValidationError,
 )
@@ -42,6 +43,18 @@ class SessionNotFound(NotFoundError):
             session_id: Id of the missing session.
         """
         super().__init__(f"Session {session_id} was not found")
+
+
+class SessionAccessDenied(ForbiddenError):
+    """Raised when the caller's credential does not authorize this session."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} is not accessible to this caller")
 
 
 class DuplicateSessionExternalId(ConflictError):

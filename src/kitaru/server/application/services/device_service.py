@@ -117,9 +117,9 @@ class DeviceService:
         Returns:
             Verified device.
         """
-        device = await self._repository.get(device_id)
-        if device.account_id is not None and device.account_id != actor.account.id:
-            raise DeviceNotFound(device_id)
+        device = await self._get_owned_device(
+            device_id, actor.account.id, allow_unclaimed=True
+        )
         try:
             device.verify_user_code(user_code, datetime.now(UTC))
         except InvalidDeviceCode:
@@ -182,9 +182,7 @@ class DeviceService:
             Device backing the session.
         """
         now = datetime.now(UTC)
-        device = await self._repository.get(device_id)
-        if device.account_id != account_id:
-            raise DeviceNotFound(device_id)
+        device = await self._get_owned_device(device_id, account_id)
         device.check_usable(now)
         if device.status is not DeviceStatus.ACTIVE:
             raise DeviceNotVerified
@@ -204,10 +202,7 @@ class DeviceService:
         Returns:
             Stored device.
         """
-        device = await self._repository.get(device_id)
-        if device.account_id != actor.account.id:
-            raise DeviceNotFound(device_id)
-        return device
+        return await self._get_owned_device(device_id, actor.account.id)
 
     async def list_devices(
         self, device_filter: DeviceFilter, actor: AuthContext
@@ -266,6 +261,33 @@ class DeviceService:
         """
         await self.get_device(device_id, actor=actor)
         await self._repository.delete(device_id)
+
+    async def _get_owned_device(
+        self,
+        device_id: uuid.UUID,
+        account_id: uuid.UUID,
+        allow_unclaimed: bool = False,
+    ) -> Device:
+        """Get a device by id, requiring it to belong to the account.
+
+        Args:
+            device_id: Id of the device.
+            account_id: Id of the owning account.
+            allow_unclaimed: Whether a device no account approved yet passes.
+
+        Raises:
+            DeviceNotFound: No device has this id, or it belongs to another
+                account.
+
+        Returns:
+            Stored device.
+        """
+        device = await self._repository.get(device_id)
+        if device.account_id == account_id:
+            return device
+        if allow_unclaimed and device.account_id is None:
+            return device
+        raise DeviceNotFound(device_id)
 
     def _expiry(self, trusted: bool, now: datetime) -> datetime | None:
         """Return the expiry a device gets once it goes active.

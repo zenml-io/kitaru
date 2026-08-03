@@ -21,10 +21,23 @@ from pydantic import Field
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     PayloadTooLargeError,
 )
 from kitaru.server.domain.ids import uuid7
+
+
+class BlobAccessDenied(ForbiddenError):
+    """Raised when the caller's credential does not authorize this blob."""
+
+    def __init__(self, blob_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            blob_id: Id of the blob.
+        """
+        super().__init__(f"Blob {blob_id} is not accessible to this caller")
 
 
 class BlobNotFound(NotFoundError):
