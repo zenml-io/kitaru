@@ -349,12 +349,7 @@ class AuthService:
                 "Local API keys are rejected under control plane authentication."
             )
         context = await self._resolve_session_token(credential)
-        # A worker or task token is locally issued by this server rather
-        # than the control plane, so the external-account check only guards
-        # account session tokens.
-        if isinstance(context.principal, AccountPrincipal) and (
-            context.account.external_id is None
-        ):
+        if context.account.external_id is None:
             raise AuthenticationError(
                 "Local accounts are rejected under control plane authentication."
             )
