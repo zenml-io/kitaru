@@ -11,9 +11,21 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Client-side task execution worker."""
+"""Lazy exports for the optional client-side task execution worker."""
 
-from kitaru.worker.config import WorkerConfig
-from kitaru.worker.worker import Worker
+from typing import Any
 
 __all__ = ["Worker", "WorkerConfig"]
+
+
+def __getattr__(name: str) -> Any:
+    """Load worker-only dependencies when a public runtime export is requested."""
+    if name == "Worker":
+        from kitaru.worker.worker import Worker
+
+        return Worker
+    if name == "WorkerConfig":
+        from kitaru.worker.config import WorkerConfig
+
+        return WorkerConfig
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

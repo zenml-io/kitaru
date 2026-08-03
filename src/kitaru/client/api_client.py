@@ -125,7 +125,10 @@ class KitaruAPIClient:
 
     @classmethod
     def from_env(cls) -> "KitaruAPIClient":
-        """Construct a client from KITARU_API_URL and KITARU_API_KEY.
+        """Construct a client from the public SDK environment contract.
+
+        ``KITARU_API_KEY`` is optional. Persisted credential lookup is not
+        enabled implicitly when only ``KITARU_API_URL`` is set.
 
         Raises:
             RuntimeError: KITARU_API_URL is not set.

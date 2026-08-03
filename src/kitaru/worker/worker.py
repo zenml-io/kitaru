@@ -24,10 +24,13 @@ import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import httpx
+
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.task import TaskClaimRequest, TaskWithSpec
+from kitaru.api_models.v1.task import TaskClaimRequest, TaskClaimResponse, TaskWithSpec
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import APIError
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig
@@ -130,6 +133,104 @@ class Worker:
         """
         self._config = config
 
+    @staticmethod
+    async def _wait_for_stop(stop: asyncio.Event, timeout: float) -> bool:
+        """Wait up to a timeout for a graceful stop request."""
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=timeout)
+        except TimeoutError:
+            return False
+        return True
+
+    @staticmethod
+    def _get_wait_duration(timeout: float, deadline: float | None) -> float:
+        """Bound a wait by the remaining worker lifetime."""
+        if deadline is None:
+            return timeout
+        remaining = deadline - asyncio.get_running_loop().time()
+        return max(0.0, min(timeout, remaining))
+
+    @staticmethod
+    def _has_lifetime_expired(deadline: float | None) -> bool:
+        """Report whether the worker lifetime deadline has passed."""
+        return deadline is not None and asyncio.get_running_loop().time() >= deadline
+
+    @staticmethod
+    async def _wait_for_capacity(
+        running: set[asyncio.Task[None]],
+        stop: asyncio.Event,
+        deadline: float | None,
+    ) -> bool:
+        """Wait for capacity, a stop request, or the lifetime deadline.
+
+        Returns:
+            Whether claiming should stop.
+        """
+        stop_task = asyncio.create_task(stop.wait())
+        timeout = None
+        if deadline is not None:
+            timeout = max(0.0, deadline - asyncio.get_running_loop().time())
+        try:
+            done, _ = await asyncio.wait(
+                {*running, stop_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            return stop_task in done or not done
+        finally:
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+
+    @staticmethod
+    async def _claim_tasks(
+        ctx: ExecutionContext,
+        request: TaskClaimRequest,
+        stop: asyncio.Event,
+        deadline: float | None,
+    ) -> TaskClaimResponse | None:
+        """Claim tasks unless stop or the worker lifetime wins the race."""
+        claim_task = asyncio.create_task(ctx.client.tasks.claim(request))
+        stop_task = asyncio.create_task(stop.wait())
+        timeout = None
+        if deadline is not None:
+            timeout = max(0.0, deadline - asyncio.get_running_loop().time())
+        try:
+            done, _ = await asyncio.wait(
+                {claim_task, stop_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if claim_task in done:
+                return claim_task.result()
+            claim_task.cancel()
+            await asyncio.gather(claim_task, return_exceptions=True)
+            return None
+        except BaseException:
+            claim_task.cancel()
+            await asyncio.gather(claim_task, return_exceptions=True)
+            raise
+        finally:
+            stop_task.cancel()
+            await asyncio.gather(stop_task, return_exceptions=True)
+
+    def _build_client(self) -> KitaruAPIClient:
+        """Build the worker client with explicit persisted credential lookup."""
+        base_url = os.environ.get("KITARU_API_URL")
+        if not base_url:
+            raise RuntimeError("KITARU_API_URL is not set")
+        api_key = os.environ.get("KITARU_API_KEY")
+        if api_key:
+            return KitaruAPIClient(
+                base_url=base_url,
+                api_key=api_key,
+                timeout=self._config.request_timeout,
+            )
+        return KitaruAPIClient(
+            base_url=base_url,
+            credential_store=CredentialStore(),
+            timeout=self._config.request_timeout,
+        )
+
     async def run(self, stop: asyncio.Event | None = None) -> None:
         """Register, claim, and execute tasks until the scope drains or stops.
 
@@ -145,7 +246,7 @@ class Worker:
             self._config.payload_cache_root or DEFAULT_PAYLOAD_CACHE_ROOT
         )
 
-        async with KitaruAPIClient.from_env() as client:
+        async with self._build_client() as client:
             ctx = ExecutionContext(
                 client=client,
                 blob_cache=BlobCache(blob_cache_root),
@@ -199,46 +300,85 @@ class Worker:
         running: set[asyncio.Task[None]] = set()
         backoff = self._config.poll_interval
 
-        while True:
-            free_slots = self._config.concurrency - len(running)
-            if free_slots <= 0:
-                _, running = await asyncio.wait(
-                    running, return_when=asyncio.FIRST_COMPLETED
+        try:
+            while True:
+                if stop.is_set():
+                    logger.info("Stop requested, ending the claim loop.")
+                    break
+                if self._has_lifetime_expired(deadline):
+                    logger.info("Lifetime timeout reached, ending the claim loop.")
+                    break
+                free_slots = self._config.concurrency - len(running)
+                if free_slots <= 0:
+                    if await self._wait_for_capacity(running, stop, deadline):
+                        reason = (
+                            "Stop requested"
+                            if stop.is_set()
+                            else "Lifetime timeout reached"
+                        )
+                        logger.info("%s, ending the claim loop.", reason)
+                        break
+                    running = {task for task in running if not task.done()}
+                    continue
+
+                max_tasks = min(
+                    free_slots,
+                    self._config.claim_batch_size or free_slots,
+                    _MAX_CLAIM_BATCH,
                 )
-                continue
+                try:
+                    claimed = await self._claim_tasks(
+                        ctx,
+                        TaskClaimRequest(worker_id=worker_id, max_tasks=max_tasks),
+                        stop,
+                        deadline,
+                    )
+                    if claimed is None:
+                        reason = (
+                            "Stop requested"
+                            if stop.is_set()
+                            else "Lifetime timeout reached"
+                        )
+                        logger.info("%s, ending the claim loop.", reason)
+                        break
+                except (APIError, httpx.TransportError) as exc:
+                    logger.warning("Failed to claim tasks: %s", exc)
+                    wait_duration = self._get_wait_duration(backoff, deadline)
+                    if wait_duration <= 0 or await self._wait_for_stop(
+                        stop, wait_duration
+                    ):
+                        break
+                    backoff = min(backoff * 2, CLAIM_BACKOFF_MAX_SECONDS)
+                    continue
 
-            max_tasks = min(
-                free_slots,
-                self._config.claim_batch_size or free_slots,
-                _MAX_CLAIM_BATCH,
-            )
-            try:
-                claimed = await ctx.client.tasks.claim(
-                    TaskClaimRequest(worker_id=worker_id, max_tasks=max_tasks)
+                backoff = self._config.poll_interval
+                if claimed.tasks:
+                    logger.info("Claimed %d task(s).", len(claimed.tasks))
+                for item in claimed.tasks:
+                    running.add(
+                        asyncio.create_task(
+                            self._run_task(ctx, heartbeat, runner, item)
+                        )
+                    )
+
+                if len(claimed.tasks) == max_tasks:
+                    continue
+
+                if await self._should_stop(ctx, stop, deadline):
+                    break
+                wait_duration = self._get_wait_duration(
+                    self._config.poll_interval, deadline
                 )
-            except APIError as exc:
-                logger.warning("Failed to claim tasks: %s", exc)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, CLAIM_BACKOFF_MAX_SECONDS)
-                continue
+                if wait_duration <= 0 or await self._wait_for_stop(stop, wait_duration):
+                    break
 
-            backoff = self._config.poll_interval
-            if claimed.tasks:
-                logger.info("Claimed %d task(s).", len(claimed.tasks))
-            for item in claimed.tasks:
-                running.add(
-                    asyncio.create_task(self._run_task(ctx, heartbeat, runner, item))
-                )
-
-            if len(claimed.tasks) == max_tasks:
-                continue
-
-            if await self._should_stop(ctx, stop, deadline):
-                break
-            await asyncio.sleep(self._config.poll_interval)
-
-        if running:
-            await asyncio.wait(running)
+            if running:
+                await asyncio.wait(running)
+        except BaseException:
+            for task in running:
+                task.cancel()
+            await asyncio.gather(*running, return_exceptions=True)
+            raise
 
     async def _should_stop(
         self, ctx: ExecutionContext, stop: asyncio.Event, deadline: float | None
@@ -260,7 +400,7 @@ class Worker:
         if stop.is_set():
             logger.info("Stop requested, ending the claim loop.")
             return True
-        if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+        if self._has_lifetime_expired(deadline):
             logger.info("Lifetime timeout reached, ending the claim loop.")
             return True
         job_id = self._config.scope.job_id

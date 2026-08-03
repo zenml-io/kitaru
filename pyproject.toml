@@ -45,6 +45,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cli = [
+    "cyclopts>=4.22",
+    "packaging>=24.0",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
 pydantic-ai = [
     "pydantic-ai-slim[openai]>=2.14.1,<3",
 ]
@@ -73,6 +79,9 @@ otel = [
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
 ]
+
+[project.scripts]
+kitaru = "kitaru.cli:main"
 
 [project.urls]
 Homepage = "https://kitaru.ai"

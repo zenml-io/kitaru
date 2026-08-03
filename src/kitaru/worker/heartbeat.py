@@ -75,8 +75,6 @@ class WorkerHeartbeat:
         while True:
             await asyncio.sleep(self._interval)
             task_ids = list(self._registered)
-            if not task_ids:
-                continue
             try:
                 response = await self._client.workers.heartbeat(
                     self._worker_id, WorkerHeartbeatRequest(task_ids=task_ids)
@@ -84,7 +82,7 @@ class WorkerHeartbeat:
             except (APIError, httpx.TransportError) as exc:
                 logger.warning("Heartbeat failed: %s", exc)
                 continue
-            logger.debug("Heartbeat sent for %d task(s).", len(task_ids))
+            logger.debug("Heartbeat sent with %d held task(s).", len(task_ids))
             for task_id in response.cancel_task_ids:
                 event = self._registered.get(task_id)
                 if event is not None:

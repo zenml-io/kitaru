@@ -39,10 +39,11 @@ def test_register_returns_an_event_and_unregister_drops_it() -> None:
     assert task_id not in heartbeat._registered
 
 
-async def test_run_skips_the_request_when_nothing_is_registered() -> None:
-    """An interval with no registered tasks sends no heartbeat request."""
+async def test_run_heartbeats_when_nothing_is_registered() -> None:
+    """An idle worker stays live by heartbeating with an empty task list."""
     client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
+    worker_id = uuid.uuid4()
+    heartbeat = WorkerHeartbeat(as_client(client), worker_id, interval=0.01)
 
     task = asyncio.create_task(heartbeat.run())
     await asyncio.sleep(0.03)
@@ -50,7 +51,10 @@ async def test_run_skips_the_request_when_nothing_is_registered() -> None:
     with contextlib.suppress(asyncio.CancelledError):
         await task
 
-    assert client.workers.heartbeats == []
+    assert client.workers.heartbeats
+    sent_worker_id, request = client.workers.heartbeats[0]
+    assert sent_worker_id == worker_id
+    assert request.task_ids == []
 
 
 async def test_run_sends_registered_task_ids_and_sets_canceled_events() -> None:

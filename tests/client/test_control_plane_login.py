@@ -58,15 +58,19 @@ class FakeControlPlaneSession:
 
     calls: ClassVar[list[str]] = []
 
-    def __init__(self, api_url: str, store: CredentialStore) -> None:
+    def __init__(
+        self, api_url: str, store: CredentialStore, timeout: float = 30.0
+    ) -> None:
         """Initialize the session.
 
         Args:
             api_url: Control plane API base URL.
             store: Credential store the session writes to.
+            timeout: Request timeout supplied by the caller.
         """
         self._url = api_url
         self._store = store
+        self.timeout = timeout
 
     async def login_with_api_key(self, api_key: str) -> ApiToken:
         """Record the call and issue the fixed token.

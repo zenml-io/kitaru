@@ -195,9 +195,8 @@ server-dev-image:
         -t kitaru-server-dev .
     @printf 'Server dev image built: kitaru-server-dev\n'
 
-# Generate all docs content from Python source (CLI reference + changelog + SDK reference)
+# Generate changelog and SDK reference content from Python source
 generate-docs:
-    uv run python scripts/generate_cli_docs.py
     uv run python scripts/generate_changelog_docs.py
     @# fumapy is bundled in the fumadocs-python npm package, not on PyPI.
     @# Auto-install it if docs/node_modules exists (requires prior pnpm install in docs/).
