@@ -20,12 +20,11 @@ from enum import StrEnum
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
-    ListParams,
     OwnedResponseModel,
     RequestModel,
     ResponseModel,
 )
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class ExperimentRunStatus(StrEnum):
@@ -61,22 +60,12 @@ class ExperimentRunCreateRequest(RequestModel):
     )
 
 
-class ExperimentRunListParams(ListParams):
+class ExperimentRunListParams(FilterableListParams):
     """Experiment run list params."""
 
-    experiment_id: uuid.UUID | None = Field(
-        default=None, description="Filter on experiment."
-    )
-    status: ExperimentRunStatus | None = Field(
-        default=None, description="Filter on run status."
-    )
-    tag: str | None = Field(default=None, description="Filter on tag name.")
 
-
-class ExperimentRunJobsListParams(ListParams):
+class ExperimentRunJobsListParams(FilterableListParams):
     """Experiment run jobs list params."""
-
-    status: JobStatus | None = Field(default=None, description="Filter on job status.")
 
 
 class ExperimentRunResponse(OwnedResponseModel):

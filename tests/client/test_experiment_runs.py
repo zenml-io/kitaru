@@ -37,6 +37,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunListParams,
     ExperimentRunResponse,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionOrigin
@@ -188,7 +189,11 @@ async def test_list_and_iter(
     """List and iterate experiment runs through the SDK."""
     await api_client.experiments.start_run(experiment_id, run_request)
     page = await api_client.experiment_runs.list(
-        ExperimentRunListParams(experiment_id=experiment_id)
+        ExperimentRunListParams(
+            filter=FilterCondition(
+                field="experiment_id", op=FilterOp.EQ, value=experiment_id
+            )
+        )
     )
     assert len(page.items) == 1
 

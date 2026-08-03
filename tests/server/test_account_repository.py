@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeAccountRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -32,6 +33,7 @@ from kitaru.server.domain.account import (
     DuplicateAccountName,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.filtering import FilterCondition
 
 
 @pytest.fixture(params=["fake", "postgres"])
@@ -130,15 +132,27 @@ async def test_query(repository: AccountRepository) -> None:
     assert next_cursor is None
     assert [account.name for account in accounts] == ["carol", "bob", "alice"]
 
-    accounts, next_cursor = await repository.query(AccountFilter(name="alice"))
+    accounts, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="alice")
+        )
+    )
     assert next_cursor is None
     assert accounts[0] == alice
 
-    accounts, next_cursor = await repository.query(AccountFilter(active=False))
+    accounts, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(field="active", op=FilterOp.EQ, value=False)
+        )
+    )
     assert next_cursor is None
     assert accounts[0] == carol
 
-    accounts, next_cursor = await repository.query(AccountFilter(name="missing"))
+    accounts, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert accounts == []
 
@@ -187,7 +201,11 @@ async def test_query_filter_persists_across_cursor(
     cursor = None
     while True:
         accounts, next_cursor = await repository.query(
-            AccountFilter(active=True, cursor=cursor, size=1)
+            AccountFilter(
+                expression=FilterCondition(field="active", op=FilterOp.EQ, value=True),
+                cursor=cursor,
+                size=1,
+            )
         )
         collected.extend(accounts)
         if next_cursor is None:
@@ -221,7 +239,12 @@ async def test_query_cursor_filter_mismatch(repository: AccountRepository) -> No
     await repository.create(Account(name="alice"))
     await repository.create(Account(name="bob"))
     await repository.create(Account(name="carol"))
-    _, next_cursor = await repository.query(AccountFilter(active=True, size=1))
+    _, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(field="active", op=FilterOp.EQ, value=True),
+            size=1,
+        )
+    )
     assert next_cursor is not None
     with pytest.raises(ValidationError):
         await repository.query(AccountFilter(cursor=next_cursor, size=1))

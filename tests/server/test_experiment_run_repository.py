@@ -24,6 +24,7 @@ from conftest import (
     postgres_available,
 )
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -63,6 +64,7 @@ from kitaru.server.domain.replay_config import (
     ReplayConfig,
     ToolPolicy,
 )
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[
     ExperimentRunRepository,
@@ -327,15 +329,59 @@ async def test_query_filters_by_experiment_and_status(setup: Setup) -> None:
     )
 
     runs, next_cursor = await repository.query(
-        ExperimentRunFilter(experiment_id=experiment_id)
+        ExperimentRunFilter(
+            expression=FilterCondition(
+                field="experiment_id", op=FilterOp.EQ, value=experiment_id
+            )
+        )
     )
     assert next_cursor is None
     assert [run.id for run in runs] == [matching.id]
 
     runs, _ = await repository.query(
-        ExperimentRunFilter(status=ExperimentRunStatus.RUNNING)
+        ExperimentRunFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=ExperimentRunStatus.RUNNING
+            )
+        )
     )
     assert {run.id for run in runs} >= {matching.id, other_experiment.id}
+
+
+async def test_query_filters_by_cohort_version(setup: Setup) -> None:
+    """Filter runs by cohort version id."""
+    (
+        repository,
+        owner_id,
+        make_experiment_id,
+        make_cohort_version_id,
+        make_agent_version_id,
+    ) = setup
+    experiment_id = await make_experiment_id()
+    agent_version_id = await make_agent_version_id()
+    cohort_version_id = await make_cohort_version_id()
+    matching = await repository.create(
+        _run(owner_id, experiment_id, cohort_version_id, agent_version_id, number=1)
+    )
+    await repository.create(
+        _run(
+            owner_id,
+            experiment_id,
+            await make_cohort_version_id(),
+            agent_version_id,
+            number=2,
+        )
+    )
+
+    runs, next_cursor = await repository.query(
+        ExperimentRunFilter(
+            expression=FilterCondition(
+                field="cohort_version_id", op=FilterOp.EQ, value=cohort_version_id
+            )
+        )
+    )
+    assert next_cursor is None
+    assert [run.id for run in runs] == [matching.id]
 
 
 async def test_get_max_number(setup: Setup) -> None:

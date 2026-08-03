@@ -18,10 +18,11 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 - `application/models/` holds `FrozenModel` filter and command objects that services accept.
 - `application/interfaces/` holds the repository protocols the services depend on.
 - `domain/` holds the entities, value objects, enums, and domain errors.
-- Exception mapping is global in `app.py`: `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `DomainError` 500, body always `{"detail": str}`.
+- Exception mapping is global in `app.py`: `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `QueryTimeoutError` 503, `DomainError` 500, body always `{"detail": str}`.
 - Auth is one dependency, `authorize`, yielding `AuthContext(account, csrf_token)`. Credentials are an API key (`KITKEY_` prefix) or a JWT, from bearer header or cookie. Health and login/logout routes skip it. There is no separate worker auth.
 - Ownership is provenance, not authorization: the server is a trusted-team deployment, `owner_id` records who created a resource, and no service filters or rejects by owner. Every authenticated account reads and writes every resource.
 - Pagination is uniform: `cursor` (opaque, from the previous response), `size` (ge=1, le=1000, default 20), and `sort` (`created:asc` or `created:desc`, default `created:desc`) on the `ListParams` base model, response `Page[T]` with `items` and `next_cursor` (null on the last page). The keyset rides the UUIDv7 id. Cursors embed the sort and a hash of the filter fields, changing either mid-pagination is a 422, changing `size` is allowed. Sortable fields are an allowlist per filter model (`sortable_fields` ClassVar, default `created`), a field beyond that needs a `(field, id)` composite index.
+- Filtering is a `filter` query parameter holding a JSON-encoded expression tree: `and`/`or`/`not` nodes over `{field, op, value}` conditions with ops `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`, `is_null`, `startswith`, `endswith`, `contains`. `eq`/`ne` reject a null value, null checks are `is_null` (negated via `not`). Filterable fields are an allowlist per filter model (`filterable_fields` ClassVar mapping field name to value type and allowed ops), the expression is capped at 5 nesting levels, 30 conditions, and 100 `in` items, and a violation is a 422. The expression is hashed into the cursor with the other filter fields and compiles to SQL through `adapters/db/filtering.py` against a per-repository binding mapping whose values are columns or predicate factories (the tag filters on sessions, cohorts, experiments, and experiment runs compile to EXISTS probes this way). The tree replaced the flat per-field filter params, including the probe-style session filters (`tag`, `cohort_version_id`, `has_evaluation`), which bind to EXISTS predicate factories. List queries run under a transaction-local statement timeout applied in `paginate()`, configured through `KITARU_SERVER_LIST_QUERY_TIMEOUT_SECONDS` (default 10, 0 disables it), and a timed-out list query is a 503. Internal-only filter dimensions (`owner_id`, `internal`, `stale_before`, `seen_after`, `job_ids`, `account_id`, path-scoped ids) stay flat model fields set by services.
 - Commits happen before the response leaves: routers register through a custom `APIRoute` subclass that commits the request session after the handler returns and before the response is sent, so a 2xx means the write is committed and an immediate follow-up read sees it. An exception skips the commit and the session rolls back on close.
 - PATCH semantics are uniform: an omitted field is unchanged, an explicitly null field clears, a 422 where clearing is invalid (e.g. `status`). Mapping functions build update commands from the request's `model_fields_set` only, and commands preserve their own `model_fields_set`, so services distinguish omitted from null without per-resource conventions. A dict-valued field (`metadata`, `values`, `env`) is replaced whole, never merged key by key, so a PATCH carrying a dict always states the final map. Key-level merging is a dedicated endpoint where it is wanted, `POST /v1/sessions/{id}/evaluations` being the one case.
 - Paginated list endpoints take an `XListParams(ListParams)` query model from `api_models`, bound in routers via `Annotated[XListParams, Query()]` and converted to the application filter by `<x>_list_params_to_filter` in the mapping module. Lists without resource-specific params take `ListParams` directly.
@@ -51,7 +52,7 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/accounts | `AccountCreateRequest` | `AccountResponse` 201 | `AccountService.create_account` |
-| GET | /v1/accounts | query name, active | `Page[AccountResponse]` | `AccountService.list_accounts` |
+| GET | /v1/accounts | query filter | `Page[AccountResponse]` | `AccountService.list_accounts` |
 | GET | /v1/accounts/{id} | - | `AccountResponse` | `AccountService.get_account` |
 | PATCH | /v1/accounts/{id} | `AccountUpdateRequest` | `AccountResponse` | `AccountService.update_account` |
 
@@ -62,7 +63,7 @@ No DELETE for accounts.
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/agents | `AgentCreateRequest` | `AgentResponse` 201 | `AgentService.create_agent` |
-| GET | /v1/agents | query name | `Page[AgentResponse]` | `AgentService.list_agents` |
+| GET | /v1/agents | query filter | `Page[AgentResponse]` | `AgentService.list_agents` |
 | GET | /v1/agents/{id} | - | `AgentResponse` | `AgentService.get_agent` |
 | PATCH | /v1/agents/{id} | `AgentUpdateRequest` | `AgentResponse` | `AgentService.update_agent` |
 | DELETE | /v1/agents/{id} | - | 204 | `AgentService.delete_agent` |
@@ -82,7 +83,7 @@ No DELETE for accounts.
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/api-keys | `ApiKeyCreateRequest` | `ApiKeyIssuedResponse` 201 | `ApiKeyService.create_api_key` |
-| GET | /v1/api-keys | query name | `Page[ApiKeyResponse]` | `ApiKeyService.list_api_keys` |
+| GET | /v1/api-keys | query filter | `Page[ApiKeyResponse]` | `ApiKeyService.list_api_keys` |
 | GET | /v1/api-keys/{id} | - | `ApiKeyResponse` | `ApiKeyService.get_api_key` |
 | PATCH | /v1/api-keys/{id} | `ApiKeyUpdateRequest` | `ApiKeyResponse` | `ApiKeyService.update_api_key` |
 | DELETE | /v1/api-keys/{id} | - | 204 | `ApiKeyService.delete_api_key` |
@@ -103,7 +104,7 @@ Uploads are capped by a server setting (max blob size, default 100 MiB), a large
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/cohorts | `CohortCreateRequest` | `CohortResponse` 201 | `CohortService.create_cohort` |
-| GET | /v1/cohorts | query name, tag | `Page[CohortResponse]` | `CohortService.list_cohorts` |
+| GET | /v1/cohorts | query filter | `Page[CohortResponse]` | `CohortService.list_cohorts` |
 | GET | /v1/cohorts/{id} | - | `CohortResponse` | `CohortService.get_cohort` |
 | PATCH | /v1/cohorts/{id} | `CohortUpdateRequest` | `CohortResponse` | `CohortService.update_cohort` |
 | DELETE | /v1/cohorts/{id} | - | 204 | `CohortService.delete_cohort` |
@@ -125,7 +126,7 @@ A cohort is a namespace, membership lives on its versions. A version's member li
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/evaluations | `EvaluationBatchCreateRequest` | `JobResponse` 201 | `JobService.create_evaluations` |
-| GET | /v1/evaluations | query session_id, task_id, evaluator_version_id, name, data_type | `Page[EvaluationResponse]` | `EvaluationService.list_evaluations` |
+| GET | /v1/evaluations | query filter | `Page[EvaluationResponse]` | `EvaluationService.list_evaluations` |
 | GET | /v1/evaluations/{id} | - | `EvaluationResponse` | `EvaluationService.get_evaluation` |
 
 The POST is the evaluation command: it creates one job holding one evaluator task per (input session, evaluator) pair and returns the job. The tasks carry `on_failure=continue`, so one failed scoring never cancels the rest, the job settles failed only after every pair has run. Creation is atomic, an unknown session id fails the whole request. The pair count per request is capped by a server setting (default 100), a larger request is a 422. The GETs read stored evaluation rows. Rows are written by the server when an evaluator task completes and by `POST /v1/sessions/{id}/evaluations`, never created directly here.
@@ -135,7 +136,7 @@ The POST is the evaluation command: it creates one job holding one evaluator tas
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/evaluators | `EvaluatorCreateRequest` | `EvaluatorResponse` 201 | `PluginService.create_plugin` |
-| GET | /v1/evaluators | query name | `Page[EvaluatorResponse]` | `PluginService.list_plugins` |
+| GET | /v1/evaluators | query filter | `Page[EvaluatorResponse]` | `PluginService.list_plugins` |
 | GET | /v1/evaluators/{id} | - | `EvaluatorResponse` | `PluginService.get_plugin` |
 | PATCH | /v1/evaluators/{id} | `EvaluatorUpdateRequest` | `EvaluatorResponse` | `PluginService.update_plugin` |
 | DELETE | /v1/evaluators/{id} | - | 204 | `PluginService.delete_plugin` |
@@ -151,7 +152,7 @@ The importer and evaluator routers stay two thin declarative files (paths, tags,
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/experiments | `ExperimentCreateRequest` | `ExperimentResponse` 201 | `ExperimentService.create_experiment` |
-| GET | /v1/experiments | query name, tag | `Page[ExperimentResponse]` | `ExperimentService.list_experiments` |
+| GET | /v1/experiments | query filter | `Page[ExperimentResponse]` | `ExperimentService.list_experiments` |
 | GET | /v1/experiments/{id} | - | `ExperimentResponse` | `ExperimentService.get_experiment` |
 | PATCH | /v1/experiments/{id} | `ExperimentUpdateRequest` | `ExperimentResponse` | `ExperimentService.update_experiment` |
 | DELETE | /v1/experiments/{id} | - | 204 | `ExperimentService.delete_experiment` |
@@ -161,10 +162,10 @@ The importer and evaluator routers stay two thin declarative files (paths, tags,
 
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
-| GET | /v1/experiment-runs | query experiment_id, status, tag | `Page[ExperimentRunResponse]` | `ExperimentRunService.list_runs` |
+| GET | /v1/experiment-runs | query filter | `Page[ExperimentRunResponse]` | `ExperimentRunService.list_runs` |
 | GET | /v1/experiment-runs/{id} | - | `ExperimentRunResponse` | `ExperimentRunService.get_run` |
 | DELETE | /v1/experiment-runs/{id} | - | 204 | `ExperimentRunService.delete_run` |
-| GET | /v1/experiment-runs/{id}/jobs | query status | `Page[JobResponse]` | `ExperimentRunService.list_run_jobs` |
+| GET | /v1/experiment-runs/{id}/jobs | query filter | `Page[JobResponse]` | `ExperimentRunService.list_run_jobs` |
 | POST | /v1/experiment-runs/{id}/cancel | - | `ExperimentRunResponse` | `ExperimentRunService.cancel_run` |
 
 ### importers (`/v1/importers`, `PluginService` bound to `PluginKind.IMPORTER`)
@@ -172,7 +173,7 @@ The importer and evaluator routers stay two thin declarative files (paths, tags,
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/importers | `ImporterCreateRequest` | `ImporterResponse` 201 | `PluginService.create_plugin` |
-| GET | /v1/importers | query name, provider | `Page[ImporterResponse]` | `PluginService.list_plugins` |
+| GET | /v1/importers | query filter | `Page[ImporterResponse]` | `PluginService.list_plugins` |
 | GET | /v1/importers/{id} | - | `ImporterResponse` | `PluginService.get_plugin` |
 | PATCH | /v1/importers/{id} | `ImporterUpdateRequest` | `ImporterResponse` | `PluginService.update_plugin` |
 | DELETE | /v1/importers/{id} | - | 204 | `PluginService.delete_plugin` |
@@ -191,9 +192,9 @@ The importer and evaluator routers stay two thin declarative files (paths, tags,
 
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
-| GET | /v1/jobs | query status | `Page[JobResponse]` | `JobService.list_jobs` |
+| GET | /v1/jobs | query filter | `Page[JobResponse]` | `JobService.list_jobs` |
 | GET | /v1/jobs/{id} | - | `JobResponse` | `JobService.get_job` |
-| GET | /v1/jobs/{id}/tasks | query kind, status | `Page[TaskResponse]` | `JobService.list_job_tasks` |
+| GET | /v1/jobs/{id}/tasks | query filter | `Page[TaskResponse]` | `JobService.list_job_tasks` |
 | POST | /v1/jobs/{id}/cancel | - | `JobResponse` | `JobService.cancel_job` |
 | DELETE | /v1/jobs/{id} | - | 204 | `JobService.delete_job` |
 
@@ -203,7 +204,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
-| GET | /v1/tasks | query job_id, kind, status, worker_id | `Page[TaskResponse]` | `TaskService.list_tasks` |
+| GET | /v1/tasks | query filter | `Page[TaskResponse]` | `TaskService.list_tasks` |
 | POST | /v1/tasks/claim | `TaskClaimRequest` | `TaskClaimResponse` | `TaskService.claim_tasks` |
 | GET | /v1/tasks/{id} | - | `TaskResponse` | `TaskService.get_task` |
 | GET | /v1/tasks/{id}/spec | - | `TaskSpecResponse` | `TaskService.get_spec` |
@@ -216,7 +217,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/replays | `ReplayCreateRequest` | `ReplayResponse` 201 | `ReplayService.create_replay` |
-| GET | /v1/replays | query experiment_run_id, baseline_session_id, status | `Page[ReplayResponse]` | `ReplayService.list_replays` |
+| GET | /v1/replays | query filter | `Page[ReplayResponse]` | `ReplayService.list_replays` |
 | GET | /v1/replays/{id} | - | `ReplayResponse` | `ReplayService.get_replay` |
 | POST | /v1/replays/{id}/tool-lookup | `ToolLookupRequest` | `ToolLookupResponse` | `ReplayService.tool_lookup` |
 
@@ -225,7 +226,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/secrets | `SecretCreateRequest` | `SecretResponse` 201 | `SecretService.create_secret` |
-| GET | /v1/secrets | query name | `Page[SecretResponse]` | `SecretService.list_secrets` |
+| GET | /v1/secrets | query filter | `Page[SecretResponse]` | `SecretService.list_secrets` |
 | GET | /v1/secrets/{id} | query include_values | `SecretResponse` or `SecretWithValuesResponse` | `SecretService.get_secret` |
 | PATCH | /v1/secrets/{id} | `SecretUpdateRequest` | `SecretResponse` | `SecretService.update_secret` |
 | DELETE | /v1/secrets/{id} | - | 204 | `SecretService.delete_secret` |
@@ -241,7 +242,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/sessions | `SessionCreateRequest` | `SessionResponse` 201 | `SessionService.create_session` |
-| GET | /v1/sessions | query agent_id, agent_version_id, cohort_version_id, task_id, origin, status, provider, external_id, name, tag, started_after/before, ended_after/before, has_evaluation, min/max_cost | `Page[SessionResponse]` | `SessionService.list_sessions` |
+| GET | /v1/sessions | query filter | `Page[SessionResponse]` | `SessionService.list_sessions` |
 | GET | /v1/sessions/{id} | - | `SessionResponse` | `SessionService.get_session` |
 | PATCH | /v1/sessions/{id} | `SessionUpdateRequest` | `SessionResponse` | `SessionService.update_session` |
 | DELETE | /v1/sessions/{id} | - | 204 | `SessionService.delete_session` |
@@ -254,7 +255,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/tags | `TagCreateRequest` | `TagResponse` 201 | `TagService.create_tag` |
-| GET | /v1/tags | query name | `Page[TagResponse]` | `TagService.list_tags` |
+| GET | /v1/tags | query filter | `Page[TagResponse]` | `TagService.list_tags` |
 | PATCH | /v1/tags/{id} | `TagUpdateRequest` | `TagResponse` | `TagService.update_tag` |
 | DELETE | /v1/tags/{id} | - | 204 | `TagService.delete_tag` |
 | POST | /v1/tags/{id}/links | `TagLinkCreateRequest` | `TagLinkResponse` 201 | `TagService.create_tag_link` |
@@ -265,7 +266,7 @@ There is no job POST and no status field on any job write: jobs are created by t
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
 | POST | /v1/workers | `WorkerCreateRequest` | `WorkerResponse` 200, upsert by name (atomic `INSERT ... ON CONFLICT (name) DO UPDATE`, a concurrent delete cannot race a fallback lookup) | `WorkerService.register_worker` |
-| GET | /v1/workers | query name | `Page[WorkerResponse]` | `WorkerService.list_workers` |
+| GET | /v1/workers | query filter | `Page[WorkerResponse]` | `WorkerService.list_workers` |
 | GET | /v1/workers/{id} | - | `WorkerResponse` | `WorkerService.get_worker` |
 | POST | /v1/workers/{id}/heartbeat | `WorkerHeartbeatRequest` | `WorkerHeartbeatResponse` | `TaskService.heartbeat_worker` |
 | DELETE | /v1/workers/{id} | - | 204 | `WorkerService.delete_worker` |
@@ -315,14 +316,14 @@ Neither a task nor a job carries a canceling status. Cancellation is a request f
 
 - `AccountCreateRequest`: name, email?, password?
 - `AccountUpdateRequest`: active?, password?
-- `AccountListParams`: name?, active?
+- `AccountListParams`: filter?
 - `AccountResponse`: id, name, email?, is_service_account, active, created, updated
 
 ### agent.py
 
 - `AgentCreateRequest`: name, description?
 - `AgentUpdateRequest`: name?, description?
-- `AgentListParams`: name?
+- `AgentListParams`: filter?
 - `AgentResponse`: id, owner_id, name, description?, latest_version, created, updated
 
 ### agent_version.py
@@ -339,7 +340,7 @@ The version number is server-assigned, so the create request carries no version.
 
 - `ApiKeyCreateRequest`: name
 - `ApiKeyUpdateRequest`: active
-- `ApiKeyListParams`: name?
+- `ApiKeyListParams`: filter?
 - `ApiKeyResponse`: id, owner_id, name, active, last_used?, created, updated
 - `ApiKeyIssuedResponse(ApiKeyResponse)`: + key (plaintext, shown once)
 
@@ -355,7 +356,7 @@ The version number is server-assigned, so the create request carries no version.
 
 - `CohortCreateRequest`: name, description?, agent_id, metadata: dict[str, JsonValue]
 - `CohortUpdateRequest`: name?, description?, metadata?
-- `CohortListParams`: name?, tag?
+- `CohortListParams`: filter?
 - `CohortResponse`: id, owner_id, name, description?, agent_id, metadata, latest_version, created, updated
 
 ### cohort_version.py
@@ -368,14 +369,14 @@ The version number is server-assigned, so the create request carries no version.
 
 - `EvaluationResult` (RequestModel): name, score: FiniteFloat | bool?, value: str?, explanation?, passed: bool?. The name follows the `Name` rules. At least one of score and value must be set. The data type is derived, never supplied: float or bool from a lone score (bool checked before float), str from a lone value, categorical when both are set. A single positional constructor argument routes by type, bool and float to score, str to value. `passed` is an independent optional verdict, never derived from the score and never constrained by the data type. It is named `passed` rather than `pass` because `pass` is a Python keyword. One result maps to one evaluation row.
 - `EvaluationBatchCreateRequest`: input_session_ids (min 1, unique), evaluators: list[EvaluatorConfig] (min 1). Creation returns `JobResponse`, one job holding one `on_failure=continue` evaluator task per (input session, evaluator) pair.
-- `EvaluationListParams`: session_id?, task_id?, evaluator_version_id?, name?, data_type?
+- `EvaluationListParams`: filter?
 - `EvaluationResponse`: id, owner_id, evaluator_version_id?, evaluator_name?, evaluator_version?, session_id, task_id?, name, data_type, score?, value?, explanation?, passed?, created, updated. evaluator_name and evaluator_version are denormalized from the referenced evaluator version by the mapping, null on manual evaluations along with evaluator_version_id and task_id. score and value mirror the request channels: score carries the stored number, returned as a bool for bool rows, value carries the label or string.
 
 ### evaluator.py
 
 - `EvaluatorCreateRequest`: name, description?, metadata: dict[str, JsonValue]
 - `EvaluatorUpdateRequest`: description?, metadata?
-- `EvaluatorListParams`: name?
+- `EvaluatorListParams`: filter?
 - `EvaluatorResponse`: id, owner_id, name, description?, metadata, latest_version, created, updated
 - `EvaluatorVersionCreateRequest`: source: PluginSource, display_version?
 - `EvaluatorVersionUpdateRequest`: display_version?
@@ -385,15 +386,15 @@ The version number is server-assigned, so the create request carries no version.
 
 - `ExperimentCreateRequest`: name, description?, override: ReplayOverride?, tool_policy: ToolPolicy?, evaluators: list[EvaluatorConfig] (min 1)
 - `ExperimentUpdateRequest`: all of the above optional
-- `ExperimentListParams`: name?, tag?
+- `ExperimentListParams`: filter?
 - `ExperimentResponse`: id, owner_id, name, description?, override?, tool_policy, evaluators, created, updated
 
 ### experiment_run.py
 
 - `ExperimentRunProgress` (ResponseModel): pending, evaluating, completed, failed, canceled, total. Counts the run's replay rows by `ReplayStatus`, so the numbers track replays rather than the tasks inside their jobs.
 - `ExperimentRunCreateRequest`: cohort_version_id, agent_version_id, evaluate_baselines: bool
-- `ExperimentRunListParams`: experiment_id?, status?, tag?
-- `ExperimentRunJobsListParams`: status?
+- `ExperimentRunListParams`: filter?
+- `ExperimentRunJobsListParams`: filter?
 - `ExperimentRunResponse`: id, owner_id, experiment_id, number, status: ExperimentRunStatus, cohort_version_id, agent_version_id, evaluate_baselines, started_at?, ended_at?, error?, progress: ExperimentRunProgress, created, updated
 
 There is no run summary. The run's output is its replays, and per-run statistics are computed by the reader from the replay listing and `GET /v1/evaluations`.
@@ -402,7 +403,7 @@ There is no run summary. The run's output is its replays, and per-run statistics
 
 - `ImporterCreateRequest`: name, description?, provider?, metadata: dict[str, JsonValue]
 - `ImporterUpdateRequest`: description?, metadata?
-- `ImporterListParams`: name?, provider?
+- `ImporterListParams`: filter?
 - `ImporterResponse`: id, owner_id, name, description?, provider?, metadata, latest_version, created, updated
 - `ImporterVersionCreateRequest`: source: PluginSource, display_version?
 - `ImporterVersionUpdateRequest`: display_version?
@@ -417,8 +418,8 @@ There is no run summary. The run's output is its replays, and per-run statistics
 ### job.py
 
 - `JobResponse`: id, owner_id, status, cancel_requested_at?, started_at?, ended_at?, error?, created, updated. A job is a generic group of tasks: no kind, no domain references, no result. Its status is written only by settlement (see the application layer), its error is the first counted task failure's error, and its output lives on whatever domain resource owns it (the replay row, the evaluation rows, the linked sessions).
-- `JobListParams`: status?
-- `JobTasksListParams`: kind?, status?
+- `JobListParams`: filter?
+- `JobTasksListParams`: filter?
 
 ### task.py
 
@@ -429,7 +430,7 @@ Task lifecycle, claim, and spec models.
 - `cancel_requested_at` is set by job cancellation (user cancel, run cancellation) and by `on_failure=abort` propagation, never cleared. It is what the heartbeat reads to build `cancel_task_ids`, and what the sweep reads to decide whether a stale task settles to canceled instead of requeueing.
 - `on_failure`: what this task's hard failure (failed, timed_out, abandoned) does to the rest of its job. `abort` stamps `cancel_requested_at` on non-terminal siblings and counts toward the job outcome, `continue` counts without touching siblings, `ignore` neither cancels nor counts. Set at task creation, default abort.
 - `labels`: plain dict[str, str] written at task creation, matched by worker scope selectors. The one convention of the built-in creators: agent tasks carry `agent_version`.
-- `TaskListParams`: job_id?, kind?, status?, worker_id?
+- `TaskListParams`: filter?
 - `LabelSelector` (frozen): key, values (non-empty), required: bool = False. A required selector matches tasks carrying the key with a value in `values`, a non-required selector additionally matches every task lacking the key.
 - `WorkerScope` (frozen): kinds?, selectors?, job_id?. The fields combine as a conjunction. Validator: lists non-empty when set, selector keys unique.
 - `TaskClaimRequest`: worker_id, max_tasks (1..100). The scope comes from the worker row, not the request.
@@ -459,7 +460,7 @@ Shared by the evaluator and importer resources:
 ### replay.py
 
 - `ReplayCreateRequest`: baseline_session_id, agent_version_id?, override?, tool_policy?, evaluators (min 1), evaluate_baselines: bool = false. An omitted agent_version_id resolves to the baseline session's recorded agent version, rejected when the session carries none. The resolved version must have a run spec either way. With `evaluate_baselines`, the replay's job additionally scores the baseline session (see the replay pipeline).
-- `ReplayListParams`: experiment_run_id?, baseline_session_id?, status?
+- `ReplayListParams`: filter?
 - `ReplayResponse`: id, job_id, experiment_run_id?, baseline_session_id, result_session_id?, override?, tool_policy, evaluators, evaluate_baselines, status: ReplayStatus, error?, created, updated
 - `ToolLookupRequest`: tool_name, cache_key (64 chars)
 - `ToolLookupResponse`: found, result
@@ -482,7 +483,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 
 - `SecretCreateRequest`: name, type?, values: dict[str, SecretStr]
 - `SecretUpdateRequest`: type?, values?
-- `SecretListParams`: name?
+- `SecretListParams`: filter?
 - `SecretResponse`: id, owner_id, name, type?, created, updated
 - `SecretWithValuesResponse(SecretResponse)`: + values
 
@@ -492,7 +493,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 - `SessionCreateRequest`: agent_id?, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, task_id?. Both ids are optional on the wire because a task_id naming an agent or import task supplies them, see the session create rules below.
 - `SessionUpdateRequest`: status?, outputs, error?, ended_at?, name?, expected, metadata?
 - `SessionEvaluationsRequest`: evaluations: list[EvaluationResult] (min 1)
-- `SessionListParams`: agent_id?, agent_version_id?, cohort_version_id?, task_id?, origin?, status?, provider?, external_id?, name?, tag?, started_after?, started_before?, ended_after?, ended_before?, has_evaluation?, min_cost?, max_cost?
+- `SessionListParams`: filter?
 - `SessionResponse`: id, owner_id, agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, cost: Decimal?, tokens: TokenUsage?, llm_call_count, tool_call_count, created, updated. The session carries no evaluations inline, they are read via `GET /v1/evaluations?session_id=...`.
 - `provider` is a free-form string naming the source system
 
@@ -510,7 +511,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 
 - `TagCreateRequest`: name
 - `TagUpdateRequest`: name
-- `TagListParams`: name?
+- `TagListParams`: filter?
 - `TagResponse`: id, owner_id, name, created, updated
 - `TagLinkCreateRequest`: resource_type: TagResourceType, resource_id
 - `TagLinkResponse`: id, tag_id, resource_type, resource_id, created, updated
@@ -519,7 +520,7 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 
 - `WorkerRuntime`: platform: str (kubernetes, docker, bare, ...), hostname?, os?, arch?, python_version?, kitaru_version?, namespace?, pod?. Detected by the worker at registration, see worker.md.
 - `WorkerCreateRequest`: name, scope: WorkerScope, runtime: WorkerRuntime, metadata
-- `WorkerListParams`: name?
+- `WorkerListParams`: filter?
 - `WorkerHeartbeatRequest`: task_ids
 - `WorkerHeartbeatResponse`: cancel_task_ids: list[UUID]
 - `WorkerResponse`: id, owner_id, name, scope: WorkerScope, runtime: WorkerRuntime, last_seen_at, live, metadata, created, updated
@@ -593,9 +594,9 @@ Registered subscribers, each owning one aggregate: `evaluation_recording.record_
 
 ### Application models (`application/models/`, all FrozenModel)
 
-Filters: `AccountFilter`, `AgentFilter`, `AgentVersionFilter`, `ApiKeyFilter`, `CohortFilter`, `CohortVersionFilter`, `EvaluationFilter` (session_id, task_id, evaluator_version_id, name, data_type), `ExperimentFilter`, `ExperimentRunFilter`, `ExperimentRunJobsFilter`, `JobFilter` (status), `TaskFilter` (job_id, kind, status, worker_id, stale_before), `PluginFilter` (kind required), `PluginVersionFilter`, `ReplayFilter`, `SecretFilter`, `SessionFilter`, `TagFilter`, `WorkerFilter` (name, seen_after). Filters extend `ListFilter` (`server/base.py`), which carries `cursor`, `size`, `sort`, the `sortable_fields` allowlist, and the filter hash the cursors embed.
+Filters: `AccountFilter`, `AgentFilter`, `AgentVersionFilter`, `ApiKeyFilter`, `CohortFilter`, `CohortVersionFilter`, `EvaluationFilter`, `ExperimentFilter`, `ExperimentRunFilter`, `ExperimentRunJobsFilter`, `JobFilter`, `TaskFilter` (plus `JobTasksFilter` narrowing it for the nested jobs listing), `PluginFilter` (kind required, narrowed by `EvaluatorFilter` and `ImporterFilter`), `PluginVersionFilter`, `ReplayFilter`, `SecretFilter`, `SessionFilter`, `TagFilter`, `WorkerFilter`. Filters extend `ListFilter` (`server/base.py`), which carries `cursor`, `size`, `sort`, the optional `expression` filter tree validated against the `filterable_fields` allowlist, the `sortable_fields` allowlist, and the filter hash the cursors embed. Wire-facing filter dimensions live in `filterable_fields`, not flat fields.
 
-Filters are built from the `XListParams` wire models in the mapping layer. Filter fields without a params counterpart (`SecretFilter.internal`, `ApiKeyFilter.owner_id`, `TaskFilter.stale_before`, `WorkerFilter.seen_after`) are internal, set by services.
+Filters are built from the `XListParams` wire models in the mapping layer. The remaining flat filter fields are either path-scoped ids (`AgentVersionFilter.agent_id`, `CohortVersionFilter.cohort_id`, `PluginVersionFilter.plugin_id`, `SessionNodeFilter.session_id`), or internal, set by services (`SecretFilter.owner_id` and `internal`, `ApiKeyFilter.owner_id`, `DeviceFilter.account_id`, `TaskFilter.job_id` and `stale_before`, `JobFilter.job_ids`, `WorkerFilter.seen_after`).
 
 Commands: `AccountUpdate`, `AgentUpdate`, `AgentVersionUpdate`, `CohortCreate`, `CohortUpdate`, `CohortVersionCreate`, `CohortVersionUpdate`, `ExperimentCreate`, `ExperimentUpdate`, `SessionRunCreate`, `ImportCreate`, `EvaluationBatchCreate`, `TaskUpdate`, `PluginUpdate`, `ReplayCreate`, `SecretUpdate`, `SessionCreate`, `SessionUpdate`, `TagUpdate`, `SessionNodeUpsert` (index-referenced like the wire model, no id or cache_key, both server-derived).
 

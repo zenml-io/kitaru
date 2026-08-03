@@ -22,11 +22,11 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    ListParams,
     RequestModel,
     ResponseModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.base import FrozenModel
 
 
@@ -124,17 +124,8 @@ class TaskUpdateRequest(RequestModel):
     result: JsonValue | None = Field(default=None, description="New task result.")
 
 
-class TaskListParams(ListParams):
+class TaskListParams(FilterableListParams):
     """Task list params."""
-
-    job_id: uuid.UUID | None = Field(default=None, description="Filter on owning job.")
-    kind: TaskKind | None = Field(default=None, description="Filter on task kind.")
-    status: TaskStatus | None = Field(
-        default=None, description="Filter on task status."
-    )
-    worker_id: uuid.UUID | None = Field(
-        default=None, description="Filter on the claiming worker."
-    )
 
 
 class LabelSelector(FrozenModel):

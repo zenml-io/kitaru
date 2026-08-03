@@ -27,6 +27,7 @@ from conftest import (
     FakeTaskRepository,
     asgi_api_client,
 )
+from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionListParams,
@@ -158,17 +159,59 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
             )
         )
 
-    page = await api_client.sessions.list(SessionListParams(agent_id=agent_id, size=2))
+    agent_filter = FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+    page = await api_client.sessions.list(
+        SessionListParams(filter=agent_filter, size=2)
+    )
     assert len(page.items) == 2
     assert page.next_cursor is not None
 
     collected = [
         item.id
         async for item in api_client.sessions.iter(
-            SessionListParams(agent_id=agent_id, size=2)
+            SessionListParams(filter=agent_filter, size=2)
         )
     ]
     assert len(collected) == 3
+
+
+async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:
+    """List sessions filtered by a filter expression built from the DTO classes."""
+    agent_id = uuid.uuid4()
+    matching = await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            status=SessionStatus.COMPLETED,
+            inputs=None,
+            outputs=None,
+            expected=None,
+            metadata={},
+        )
+    )
+    await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            inputs=None,
+            outputs=None,
+            expected=None,
+            metadata={},
+        )
+    )
+
+    params = SessionListParams(
+        filter=AndFilter(
+            **{
+                "and": [
+                    FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id),
+                    FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
+                ]
+            }
+        ),
+    )
+    page = await api_client.sessions.list(params)
+    assert [item.id for item in page.items] == [matching.id]
 
 
 async def test_update(api_client: KitaruAPIClient) -> None:

@@ -13,11 +13,17 @@
 #  permissions and limitations under the License.
 """Account filter model."""
 
+from collections.abc import Mapping
+from typing import ClassVar
+
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import BOOLEAN_OPS, STRING_OPS, FilterField
 
 
 class AccountFilter(ListFilter):
     """Account list filter."""
 
-    name: str | None = None
-    active: bool | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "active": FilterField(value_type=bool, ops=BOOLEAN_OPS),
+    }

@@ -14,10 +14,11 @@
 """SQL plugin and plugin version repository."""
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from sqlalchemy import Select, select, update
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.evaluation import (
     EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
 )
@@ -46,6 +47,11 @@ from kitaru.server.domain.plugin import (
     PluginVersionNotFound,
     ScriptPluginSource,
 )
+
+PLUGIN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": PluginORM.name,
+    "provider": PluginORM.provider,
+}
 
 
 class SQLPluginRepository(BaseSQLRepository[PluginORM]):
@@ -135,10 +141,12 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
             Page of matching plugins and the next cursor.
         """
         statement = select(PluginORM).where(PluginORM.kind == plugin_filter.kind.value)
-        if plugin_filter.name is not None:
-            statement = statement.where(PluginORM.name == plugin_filter.name)
-        if plugin_filter.provider is not None:
-            statement = statement.where(PluginORM.provider == plugin_filter.provider)
+        if plugin_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    plugin_filter.expression, PLUGIN_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session, statement, plugin_filter, id_column=PluginORM.id
         )

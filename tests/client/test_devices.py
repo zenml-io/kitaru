@@ -27,6 +27,7 @@ from kitaru.api_models.v1.device import (
     DeviceUpdateRequest,
     DeviceVerifyRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import authorize, get_device_service
@@ -131,7 +132,10 @@ async def test_list(
     assert page.next_cursor is None
     assert [item.hostname for item in page.items] == ["desktop", "laptop", "ci"]
 
-    page = await api_client.devices.list(DeviceListParams(status=DeviceStatus.ACTIVE))
+    status_filter = FilterCondition(
+        field="status", op=FilterOp.EQ, value=DeviceStatus.ACTIVE
+    )
+    page = await api_client.devices.list(DeviceListParams(filter=status_filter))
     assert len(page.items) == 3
 
 

@@ -14,20 +14,27 @@
 """Evaluation filter and merge command models."""
 
 import uuid
+from collections.abc import Mapping
+from typing import ClassVar
 
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, STRING_OPS, FilterField
 
 
 class EvaluationFilter(ListFilter):
     """Evaluation list filter."""
 
-    session_id: uuid.UUID | None = None
-    task_id: uuid.UUID | None = None
-    evaluator_version_id: uuid.UUID | None = None
-    name: str | None = None
-    data_type: EvaluationDataType | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "session_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
+        "evaluator_version_id": FilterField(
+            value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
+        ),
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+        "data_type": FilterField(value_type=EvaluationDataType, ops=EQUALITY_OPS),
+    }
 
 
 class EvaluationMerge(FrozenModel):

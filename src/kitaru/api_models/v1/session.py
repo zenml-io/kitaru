@@ -23,11 +23,11 @@ from pydantic import AwareDatetime, Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    ListParams,
     OwnedResponseModel,
     RequestModel,
 )
 from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class SessionOrigin(StrEnum):
@@ -127,52 +127,8 @@ class SessionEvaluationsRequest(RequestModel):
     )
 
 
-class SessionListParams(ListParams):
+class SessionListParams(FilterableListParams):
     """Session list params."""
-
-    agent_id: uuid.UUID | None = Field(default=None, description="Filter on agent.")
-    agent_version_id: uuid.UUID | None = Field(
-        default=None, description="Filter on agent version."
-    )
-    cohort_version_id: uuid.UUID | None = Field(
-        default=None, description="Filter on cohort version membership."
-    )
-    task_id: uuid.UUID | None = Field(
-        default=None, description="Filter on producing task."
-    )
-    origin: SessionOrigin | None = Field(
-        default=None, description="Filter on session origin."
-    )
-    status: SessionStatus | None = Field(
-        default=None, description="Filter on session status."
-    )
-    provider: str | None = Field(default=None, description="Filter on source system.")
-    external_id: str | None = Field(
-        default=None, description="Filter on source system id."
-    )
-    name: str | None = Field(default=None, description="Filter on session name.")
-    tag: str | None = Field(default=None, description="Filter on tag name.")
-    started_after: AwareDatetime | None = Field(
-        default=None, description="Filter on sessions started at or after this time."
-    )
-    started_before: AwareDatetime | None = Field(
-        default=None, description="Filter on sessions started before this time."
-    )
-    ended_after: AwareDatetime | None = Field(
-        default=None, description="Filter on sessions ended at or after this time."
-    )
-    ended_before: AwareDatetime | None = Field(
-        default=None, description="Filter on sessions ended before this time."
-    )
-    has_evaluation: bool | None = Field(
-        default=None, description="Filter on whether the session has an evaluation."
-    )
-    min_cost: Decimal | None = Field(
-        default=None, description="Filter on minimum cost."
-    )
-    max_cost: Decimal | None = Field(
-        default=None, description="Filter on maximum cost."
-    )
 
 
 class SessionResponse(OwnedResponseModel):

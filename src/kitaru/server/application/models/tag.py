@@ -13,10 +13,16 @@
 #  permissions and limitations under the License.
 """Tag filter model."""
 
+from collections.abc import Mapping
+from typing import ClassVar
+
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import STRING_OPS, FilterField
 
 
 class TagFilter(ListFilter):
     """Tag list filter."""
 
-    name: str | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "name": FilterField(value_type=str, ops=STRING_OPS),
+    }

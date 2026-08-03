@@ -15,12 +15,14 @@
 
 import json
 import uuid
+from collections.abc import Mapping
 
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
     SecretORM,
@@ -34,6 +36,10 @@ from kitaru.server.domain.secret import (
     Secret,
     SecretNotFound,
 )
+
+SECRET_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": SecretORM.name,
+}
 
 
 class SQLSecretRepository(BaseSQLRepository[SecretORM]):
@@ -132,12 +138,16 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
             Page of matching secrets and the next cursor.
         """
         statement = select(SecretORM)
-        if secret_filter.name is not None:
-            statement = statement.where(SecretORM.name == secret_filter.name)
         if secret_filter.owner_id is not None:
             statement = statement.where(SecretORM.owner_id == secret_filter.owner_id)
         if secret_filter.internal is not None:
             statement = statement.where(SecretORM.internal == secret_filter.internal)
+        if secret_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    secret_filter.expression, SECRET_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session,
             statement,

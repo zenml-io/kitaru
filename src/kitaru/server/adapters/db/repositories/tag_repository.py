@@ -14,10 +14,12 @@
 """SQL tag repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.tag import (
     TAG_LINK_TAG_ID_FOREIGN_KEY,
     TAG_LINK_UNIQUE_CONSTRAINT,
@@ -37,6 +39,10 @@ from kitaru.server.domain.tag import (
     TagLinkNotFound,
     TagNotFound,
 )
+
+TAG_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "name": TagORM.name,
+}
 
 
 class SQLTagRepository(BaseSQLRepository[TagORM]):
@@ -98,8 +104,10 @@ class SQLTagRepository(BaseSQLRepository[TagORM]):
             Page of matching tags and the next cursor.
         """
         statement = select(TagORM)
-        if tag_filter.name is not None:
-            statement = statement.where(TagORM.name == tag_filter.name)
+        if tag_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(tag_filter.expression, TAG_FILTER_BINDINGS)
+            )
         rows, next_cursor = await paginate(
             self._session, statement, tag_filter, id_column=TagORM.id
         )

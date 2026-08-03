@@ -35,6 +35,7 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationListParams,
     EvaluationResult,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -224,8 +225,11 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
         ),
     )
 
+    session_filter = FilterCondition(
+        field="session_id", op=FilterOp.EQ, value=session_id
+    )
     page = await api_client.evaluations.list(
-        EvaluationListParams(session_id=session_id, size=2)
+        EvaluationListParams(filter=session_filter, size=2)
     )
     assert len(page.items) == 2
     assert page.next_cursor is not None
@@ -233,7 +237,7 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
     collected = [
         item.id
         async for item in api_client.evaluations.iter(
-            EvaluationListParams(session_id=session_id, size=2)
+            EvaluationListParams(filter=session_filter, size=2)
         )
     ]
     assert len(collected) == 3

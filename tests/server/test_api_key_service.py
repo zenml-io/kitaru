@@ -18,6 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeApiKeyRepository
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
@@ -29,6 +30,7 @@ from kitaru.server.domain.api_key import (
     decode_api_key,
 )
 from kitaru.server.domain.keys import hash_secret
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
@@ -100,7 +102,10 @@ async def test_list_api_keys(service: ApiKeyService) -> None:
     assert [api_key.name for api_key in api_keys] == ["local", "deploy", "ci"]
 
     api_keys, next_cursor = await service.list_api_keys(
-        ApiKeyFilter(name="deploy"), actor=ACTOR
+        ApiKeyFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="deploy")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert api_keys[0].name == "deploy"

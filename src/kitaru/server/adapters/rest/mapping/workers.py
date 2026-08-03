@@ -16,6 +16,7 @@
 from datetime import datetime
 
 from kitaru.api_models.v1.worker import WorkerListParams, WorkerResponse
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.domain.worker import Worker
 
@@ -59,7 +60,9 @@ def worker_list_params_to_filter(params: WorkerListParams) -> WorkerFilter:
         Worker filter.
     """
     return WorkerFilter(
-        name=params.name,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

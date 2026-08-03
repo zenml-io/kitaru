@@ -17,15 +17,50 @@ import uuid
 from collections.abc import Sequence
 from typing import TypeVar
 
-from sqlalchemy import Select
+from asyncpg.exceptions import QueryCanceledError
+from sqlalchemy import Select, func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 
 from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.base import ListFilter
+from kitaru.server.domain.base import QueryTimeoutError
+
+LIST_QUERY_TIMEOUT_INFO_KEY = "list_query_timeout_seconds"
 
 RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
+
+
+async def _apply_list_query_timeout(session: AsyncSession) -> None:
+    """Apply the configured statement timeout to the current transaction.
+
+    Args:
+        session: Database session for the query.
+    """
+    timeout_seconds = session.info.get(LIST_QUERY_TIMEOUT_INFO_KEY)
+    if not isinstance(timeout_seconds, int) or timeout_seconds <= 0:
+        return
+    await session.execute(
+        select(func.set_config("statement_timeout", str(timeout_seconds * 1000), True))
+    )
+
+
+def _translate_query_timeout(error: DBAPIError) -> None:
+    """Translate a statement cancellation into the timeout domain error.
+
+    Args:
+        error: Database error to inspect.
+
+    Raises:
+        QueryTimeoutError: The statement was canceled by the timeout.
+    """
+    cause: BaseException | None = error.orig
+    while cause is not None:
+        if isinstance(cause, QueryCanceledError):
+            raise QueryTimeoutError("List query timed out") from error
+        cause = cause.__cause__
 
 
 async def paginate(
@@ -60,7 +95,12 @@ async def paginate(
         )
 
     statement = statement.limit(list_filter.size + 1)
-    rows = (await session.scalars(statement)).all()
+    await _apply_list_query_timeout(session)
+    try:
+        rows = (await session.scalars(statement)).all()
+    except DBAPIError as error:
+        _translate_query_timeout(error)
+        raise
     next_cursor = None
     if len(rows) > list_filter.size:
         rows = rows[: list_filter.size]
@@ -100,7 +140,12 @@ async def paginate_by_index(
         statement = statement.where(index_column > int(cursor.id))
 
     statement = statement.limit(list_filter.size + 1)
-    rows = (await session.scalars(statement)).all()
+    await _apply_list_query_timeout(session)
+    try:
+        rows = (await session.scalars(statement)).all()
+    except DBAPIError as error:
+        _translate_query_timeout(error)
+        raise
     next_cursor = None
     if len(rows) > list_filter.size:
         rows = rows[: list_filter.size]
@@ -143,7 +188,12 @@ async def paginate_join_by_index(
         statement = statement.where(index_column > int(cursor.id))
 
     statement = statement.limit(list_filter.size + 1)
-    rows = (await session.execute(statement)).all()
+    await _apply_list_query_timeout(session)
+    try:
+        rows = (await session.execute(statement)).all()
+    except DBAPIError as error:
+        _translate_query_timeout(error)
+        raise
     next_cursor = None
     if len(rows) > list_filter.size:
         rows = rows[: list_filter.size]

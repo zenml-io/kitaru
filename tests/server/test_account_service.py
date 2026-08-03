@@ -18,6 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -26,6 +27,7 @@ from kitaru.server.domain.account import (
     AccountNotFound,
     DuplicateAccountName,
 )
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
 
@@ -98,7 +100,10 @@ async def test_list_accounts(service: AccountService) -> None:
     assert [account.name for account in accounts] == ["carol", "bob", "alice"]
 
     accounts, next_cursor = await service.list_accounts(
-        AccountFilter(name="bob"), actor=ACTOR
+        AccountFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="bob")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert accounts[0].name == "bob"

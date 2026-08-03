@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the session routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -224,13 +225,19 @@ async def test_list_sessions_filters_by_origin_and_status(
         json=_session_body(origin="imported", status="completed"),
     )
 
-    response = await client.get("/v1/sessions", params={"origin": "imported"})
+    filter_expression = {"field": "origin", "op": "eq", "value": "imported"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["origin"] == "imported"
 
-    response = await client.get("/v1/sessions", params={"status": "completed"})
+    filter_expression = {"field": "status", "op": "eq", "value": "completed"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
@@ -254,8 +261,14 @@ async def test_list_sessions_filters_by_provider_and_external_id(
         ),
     )
 
+    filter_expression = {
+        "and": [
+            {"field": "provider", "op": "eq", "value": "langsmith"},
+            {"field": "external_id", "op": "eq", "value": "run-2"},
+        ]
+    }
     response = await client.get(
-        "/v1/sessions", params={"provider": "langsmith", "external_id": "run-2"}
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -274,7 +287,10 @@ async def test_list_sessions_filters_by_tag(client: httpx.AsyncClient) -> None:
         json={"resource_type": "session", "resource_id": tagged["id"]},
     )
 
-    response = await client.get("/v1/sessions", params={"tag": "smoke-test"})
+    filter_expression = {"field": "tag", "op": "eq", "value": "smoke-test"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["id"] for item in items] == [tagged["id"]]
@@ -295,7 +311,16 @@ async def test_list_sessions_filters_by_cohort_version_id(
     )
 
     response = await client.get(
-        "/v1/sessions", params={"cohort_version_id": str(version.id)}
+        "/v1/sessions",
+        params={
+            "filter": json.dumps(
+                {
+                    "field": "cohort_version_id",
+                    "op": "eq",
+                    "value": str(version.id),
+                }
+            )
+        },
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -305,7 +330,7 @@ async def test_list_sessions_filters_by_cohort_version_id(
 async def test_list_sessions_filters_by_date_bounds(
     client: httpx.AsyncClient,
 ) -> None:
-    """Filter sessions by started_after/before and ended_after/before."""
+    """Filter sessions by started_at ordered comparisons."""
     await client.post(
         "/v1/sessions",
         json=_session_body(started_at="2026-01-01T00:00:00Z"),
@@ -315,16 +340,26 @@ async def test_list_sessions_filters_by_date_bounds(
         json=_session_body(started_at="2026-06-01T00:00:00Z"),
     )
 
+    filter_expression = {
+        "field": "started_at",
+        "op": "ge",
+        "value": "2026-03-01T00:00:00Z",
+    }
     response = await client.get(
-        "/v1/sessions", params={"started_after": "2026-03-01T00:00:00Z"}
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["started_at"].startswith("2026-06-01")
 
+    filter_expression = {
+        "field": "started_at",
+        "op": "le",
+        "value": "2026-03-01T00:00:00Z",
+    }
     response = await client.get(
-        "/v1/sessions", params={"started_before": "2026-03-01T00:00:00Z"}
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -335,7 +370,7 @@ async def test_list_sessions_filters_by_date_bounds(
 async def test_list_sessions_filters_by_cost_bounds(
     client: httpx.AsyncClient,
 ) -> None:
-    """Filter sessions by min_cost and max_cost, applied after node rollups."""
+    """Filter sessions by cost ordered comparisons, applied after node rollups."""
     cheap = (await client.post("/v1/sessions", json=_session_body())).json()
     pricey = (await client.post("/v1/sessions", json=_session_body())).json()
     await client.post(
@@ -373,12 +408,18 @@ async def test_list_sessions_filters_by_cost_bounds(
         },
     )
 
-    response = await client.get("/v1/sessions", params={"min_cost": "5.00"})
+    filter_expression = {"field": "cost", "op": "ge", "value": "5.00"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["id"] for item in items] == [pricey["id"]]
 
-    response = await client.get("/v1/sessions", params={"max_cost": "5.00"})
+    filter_expression = {"field": "cost", "op": "le", "value": "5.00"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["id"] for item in items] == [cheap["id"]]
@@ -395,11 +436,23 @@ async def test_list_sessions_filters_by_has_evaluation(
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
 
-    response = await client.get("/v1/sessions", params={"has_evaluation": "true"})
+    response = await client.get(
+        "/v1/sessions",
+        params={
+            "filter": json.dumps({"field": "has_evaluation", "op": "eq", "value": True})
+        },
+    )
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["items"]] == [scored["id"]]
 
-    response = await client.get("/v1/sessions", params={"has_evaluation": "false"})
+    response = await client.get(
+        "/v1/sessions",
+        params={
+            "filter": json.dumps(
+                {"field": "has_evaluation", "op": "eq", "value": False}
+            )
+        },
+    )
     assert response.status_code == 200
     assert [item["id"] for item in response.json()["items"]] == [unscored["id"]]
 
@@ -609,3 +662,113 @@ async def test_create_session_links_the_agent_task_result_session(
     assert str(stored_task.result_session_id) == body["id"]
     assert body["agent_id"] == str(agent.id)
     assert body["agent_version_id"] == str(version.id)
+
+
+async def test_list_sessions_filters_by_filter_query_param(
+    client: httpx.AsyncClient,
+) -> None:
+    """Filter sessions with a nested and/or filter expression."""
+    by_cost = (await client.post("/v1/sessions", json=_session_body())).json()
+    ingest = await client.post(
+        f"/v1/sessions/{by_cost['id']}/nodes",
+        json={
+            "nodes": [
+                {
+                    "index": 0,
+                    "node_type": "llm_call",
+                    "name": "call",
+                    "status": "completed",
+                    "cost": "2.00",
+                    "inputs": None,
+                    "outputs": None,
+                    "attributes": None,
+                }
+            ]
+        },
+    )
+    assert ingest.status_code == 200
+    await client.patch(f"/v1/sessions/{by_cost['id']}", json={"status": "completed"})
+
+    by_name = (
+        await client.post("/v1/sessions", json=_session_body(name="web-two"))
+    ).json()
+    await client.patch(f"/v1/sessions/{by_name['id']}", json={"status": "completed"})
+
+    non_match = (
+        await client.post("/v1/sessions", json=_session_body(name="other"))
+    ).json()
+    await client.patch(f"/v1/sessions/{non_match['id']}", json={"status": "completed"})
+
+    # Matches the or branch by name, but excluded because status is not
+    # completed, proving the outer and short-circuits the match.
+    await client.post("/v1/sessions", json=_session_body(name="web-three"))
+
+    filter_expression = {
+        "and": [
+            {"field": "status", "op": "eq", "value": "completed"},
+            {
+                "or": [
+                    {"field": "cost", "op": "ge", "value": 1.5},
+                    {"field": "name", "op": "startswith", "value": "web"},
+                ]
+            },
+        ]
+    }
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    ids = {item["id"] for item in response.json()["items"]}
+    assert ids == {by_cost["id"], by_name["id"]}
+
+
+async def test_list_sessions_malformed_filter_json(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a filter query param that fails to parse as JSON."""
+    response = await client.get("/v1/sessions", params={"filter": "{not-json"})
+    assert response.status_code == 422
+
+
+async def test_list_sessions_filter_unknown_field(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a filter naming a field outside the allowlist."""
+    filter_expression = {"field": "bogus", "op": "eq", "value": "x"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 422
+
+
+async def test_list_sessions_filter_unsupported_operator(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for an operator not allowed on the field."""
+    filter_expression = {"field": "status", "op": "startswith", "value": "completed"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 422
+
+
+async def test_list_sessions_filter_eq_with_null_value(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for eq with a null value."""
+    filter_expression = {"field": "name", "op": "eq", "value": None}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 422
+
+
+async def test_list_sessions_filter_nested_too_deep(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a filter nested deeper than 5 levels."""
+    filter_expression: dict[str, object] = {
+        "field": "status",
+        "op": "eq",
+        "value": "completed",
+    }
+    for _ in range(5):
+        filter_expression = {"and": [filter_expression]}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 422

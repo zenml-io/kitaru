@@ -14,15 +14,21 @@
 """SQL job repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import select
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.job import Job, JobNotFound
+
+JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "status": JobORM.status,
+}
 
 
 class SQLJobRepository(BaseSQLRepository[JobORM]):
@@ -83,8 +89,10 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
             Page of matching jobs and the next cursor.
         """
         statement = select(JobORM)
-        if job_filter.status is not None:
-            statement = statement.where(JobORM.status == job_filter.status.value)
+        if job_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(job_filter.expression, JOB_FILTER_BINDINGS)
+            )
         rows, next_cursor = await paginate(
             self._session, statement, job_filter, id_column=JobORM.id
         )

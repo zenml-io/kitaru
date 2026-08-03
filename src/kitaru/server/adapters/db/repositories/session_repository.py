@@ -14,12 +14,18 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, select, update
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_tag_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY,
     CohortVersionSessionORM,
@@ -29,7 +35,6 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
-from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.orm.task import (
     TASK_INPUT_SESSION_ID_FOREIGN_KEY,
     TASK_RESULT_SESSION_ID_FOREIGN_KEY,
@@ -46,6 +51,72 @@ from kitaru.server.domain.session import (
     SessionNotFound,
     SessionRollups,
 )
+from kitaru.server.filtering import FilterCondition
+
+
+def _compile_cohort_version_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile a cohort version condition into an EXISTS predicate.
+
+    Args:
+        condition: Validated cohort version condition.
+
+    Returns:
+        SQL predicate.
+    """
+    ids = condition.value if condition.op is FilterOp.IN else (condition.value,)
+    membership_exists = (
+        select(CohortVersionSessionORM.session_id)
+        .where(
+            CohortVersionSessionORM.session_id == SessionORM.id,
+            CohortVersionSessionORM.cohort_version_id.in_(ids),
+        )
+        .correlate(SessionORM)
+    )
+    return membership_exists.exists()
+
+
+def _compile_has_evaluation_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile a has-evaluation condition into an EXISTS predicate.
+
+    Args:
+        condition: Validated has-evaluation condition.
+
+    Returns:
+        SQL predicate.
+    """
+    expected = condition.value if condition.op is FilterOp.EQ else not condition.value
+    evaluation_exists = (
+        select(EvaluationORM.id)
+        .where(EvaluationORM.session_id == SessionORM.id)
+        .correlate(SessionORM)
+    )
+    return evaluation_exists.exists() if expected else ~evaluation_exists.exists()
+
+
+SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "agent_id": SessionORM.agent_id,
+    "agent_version_id": SessionORM.agent_version_id,
+    "task_id": SessionORM.task_id,
+    "origin": SessionORM.origin,
+    "status": SessionORM.status,
+    "provider": SessionORM.provider,
+    "framework": SessionORM.framework,
+    "external_id": SessionORM.external_id,
+    "name": SessionORM.name,
+    "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
+    "cohort_version_id": _compile_cohort_version_condition,
+    "has_evaluation": _compile_has_evaluation_condition,
+    "started_at": SessionORM.started_at,
+    "ended_at": SessionORM.ended_at,
+    "cost": SessionORM.cost,
+    "llm_call_count": SessionORM.llm_call_count,
+    "tool_call_count": SessionORM.tool_call_count,
+    "created": SessionORM.created,
+}
 
 
 class SQLSessionRepository(BaseSQLRepository[SessionORM]):
@@ -125,9 +196,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
-        ``has_evaluation`` filters on whether the session has at least one
-        stored evaluation.
-
         Args:
             session_filter: Filter and pagination parameters.
 
@@ -135,83 +203,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Page of matching sessions and the next cursor.
         """
         statement = select(SessionORM)
-        if session_filter.agent_id is not None:
-            statement = statement.where(SessionORM.agent_id == session_filter.agent_id)
-        if session_filter.agent_version_id is not None:
+        if session_filter.expression is not None:
             statement = statement.where(
-                SessionORM.agent_version_id == session_filter.agent_version_id
-            )
-        if session_filter.cohort_version_id is not None:
-            cohort_version_session_exists = (
-                select(CohortVersionSessionORM.session_id)
-                .where(
-                    CohortVersionSessionORM.session_id == SessionORM.id,
-                    CohortVersionSessionORM.cohort_version_id
-                    == session_filter.cohort_version_id,
+                compile_filter_expression(
+                    session_filter.expression, SESSION_FILTER_BINDINGS
                 )
-                .correlate(SessionORM)
             )
-            statement = statement.where(cohort_version_session_exists.exists())
-        if session_filter.task_id is not None:
-            statement = statement.where(SessionORM.task_id == session_filter.task_id)
-        if session_filter.origin is not None:
-            statement = statement.where(
-                SessionORM.origin == session_filter.origin.value
-            )
-        if session_filter.status is not None:
-            statement = statement.where(
-                SessionORM.status == session_filter.status.value
-            )
-        if session_filter.provider is not None:
-            statement = statement.where(SessionORM.provider == session_filter.provider)
-        if session_filter.external_id is not None:
-            statement = statement.where(
-                SessionORM.external_id == session_filter.external_id
-            )
-        if session_filter.name is not None:
-            statement = statement.where(SessionORM.name == session_filter.name)
-        if session_filter.tag is not None:
-            tag_exists = (
-                select(TagLinkORM.id)
-                .join(TagORM, TagORM.id == TagLinkORM.tag_id)
-                .where(
-                    TagLinkORM.resource_type == TagResourceType.SESSION.value,
-                    TagLinkORM.resource_id == SessionORM.id,
-                    TagORM.name == session_filter.tag,
-                )
-                .correlate(SessionORM)
-            )
-            statement = statement.where(tag_exists.exists())
-        if session_filter.has_evaluation is not None:
-            evaluation_exists = (
-                select(EvaluationORM.id)
-                .where(EvaluationORM.session_id == SessionORM.id)
-                .correlate(SessionORM)
-            )
-            if session_filter.has_evaluation:
-                statement = statement.where(evaluation_exists.exists())
-            else:
-                statement = statement.where(~evaluation_exists.exists())
-        if session_filter.started_after is not None:
-            statement = statement.where(
-                SessionORM.started_at >= session_filter.started_after
-            )
-        if session_filter.started_before is not None:
-            statement = statement.where(
-                SessionORM.started_at <= session_filter.started_before
-            )
-        if session_filter.ended_after is not None:
-            statement = statement.where(
-                SessionORM.ended_at >= session_filter.ended_after
-            )
-        if session_filter.ended_before is not None:
-            statement = statement.where(
-                SessionORM.ended_at <= session_filter.ended_before
-            )
-        if session_filter.min_cost is not None:
-            statement = statement.where(SessionORM.cost >= session_filter.min_cost)
-        if session_filter.max_cost is not None:
-            statement = statement.where(SessionORM.cost <= session_filter.max_cost)
 
         rows, next_cursor = await paginate(
             self._session, statement, session_filter, id_column=SessionORM.id

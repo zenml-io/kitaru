@@ -14,15 +14,20 @@
 """SQL experiment run repository."""
 
 import uuid
+from collections.abc import Mapping
 
 from sqlalchemy import func, select
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_tag_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
 )
-from kitaru.server.adapters.db.orm.tag import TagLinkORM, TagORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
@@ -32,6 +37,15 @@ from kitaru.server.domain.experiment_run import (
     ExperimentRun,
     ExperimentRunNotFound,
 )
+
+EXPERIMENT_RUN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "experiment_id": ExperimentRunORM.experiment_id,
+    "cohort_version_id": ExperimentRunORM.cohort_version_id,
+    "status": ExperimentRunORM.status,
+    "tag": build_tag_condition_binding(
+        TagResourceType.EXPERIMENT_RUN, ExperimentRunORM.id
+    ),
+}
 
 
 class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
@@ -109,24 +123,11 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
             Page of matching runs and the next cursor.
         """
         statement = select(ExperimentRunORM)
-        if run_filter.experiment_id is not None:
+        if run_filter.expression is not None:
             statement = statement.where(
-                ExperimentRunORM.experiment_id == run_filter.experiment_id
-            )
-        if run_filter.status is not None:
-            statement = statement.where(
-                ExperimentRunORM.status == run_filter.status.value
-            )
-        if run_filter.tag is not None:
-            statement = statement.where(
-                select(TagLinkORM.id)
-                .join(TagORM, TagORM.id == TagLinkORM.tag_id)
-                .where(
-                    TagLinkORM.resource_type == TagResourceType.EXPERIMENT_RUN.value,
-                    TagLinkORM.resource_id == ExperimentRunORM.id,
-                    TagORM.name == run_filter.tag,
+                compile_filter_expression(
+                    run_filter.expression, EXPERIMENT_RUN_FILTER_BINDINGS
                 )
-                .exists()
             )
         rows, next_cursor = await paginate(
             self._session, statement, run_filter, id_column=ExperimentRunORM.id

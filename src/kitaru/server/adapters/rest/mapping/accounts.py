@@ -14,6 +14,7 @@
 """Account DTO conversions."""
 
 from kitaru.api_models.v1.account import AccountListParams, AccountResponse
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.domain.account import Account
 
@@ -50,8 +51,9 @@ def account_list_params_to_filter(params: AccountListParams) -> AccountFilter:
         Account filter.
     """
     return AccountFilter(
-        name=params.name,
-        active=params.active,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeJobRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -28,6 +29,7 @@ from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.job import Job, JobNotFound
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[JobRepository, uuid.UUID]
 
@@ -119,7 +121,13 @@ async def test_query_filters_by_status(setup: Setup) -> None:
     await repository.create(_job(owner_id, status=JobStatus.PENDING))
     completed = await repository.create(_job(owner_id, status=JobStatus.COMPLETED))
 
-    jobs, next_cursor = await repository.query(JobFilter(status=JobStatus.COMPLETED))
+    jobs, next_cursor = await repository.query(
+        JobFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=JobStatus.COMPLETED
+            )
+        )
+    )
     assert next_cursor is None
     assert [job.id for job in jobs] == [completed.id]
 

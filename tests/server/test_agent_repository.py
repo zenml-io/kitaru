@@ -24,6 +24,7 @@ from conftest import (
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -44,6 +45,7 @@ from kitaru.server.domain.agent import (
     DuplicateAgentName,
 )
 from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
 
@@ -129,11 +131,19 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert [agent.name for agent in agents] == ["triager", "reviewer", "assistant"]
 
-    agents, next_cursor = await repository.query(AgentFilter(name="assistant"))
+    agents, next_cursor = await repository.query(
+        AgentFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="assistant")
+        )
+    )
     assert next_cursor is None
     assert agents[0] == assistant
 
-    agents, next_cursor = await repository.query(AgentFilter(name="missing"))
+    agents, next_cursor = await repository.query(
+        AgentFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert agents == []
 

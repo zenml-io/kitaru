@@ -14,8 +14,9 @@
 """Job DTO conversions."""
 
 from kitaru.api_models.v1.job import JobListParams, JobResponse, JobTasksListParams
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.job import JobFilter
-from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.task import JobTasksFilter
 from kitaru.server.domain.job import Job
 
 
@@ -53,14 +54,16 @@ def job_list_params_to_filter(params: JobListParams) -> JobFilter:
         Job filter.
     """
     return JobFilter(
-        status=params.status,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,
     )
 
 
-def job_tasks_list_params_to_filter(params: JobTasksListParams) -> TaskFilter:
+def job_tasks_list_params_to_filter(params: JobTasksListParams) -> JobTasksFilter:
     """Convert job task list params to the application filter.
 
     Args:
@@ -69,9 +72,10 @@ def job_tasks_list_params_to_filter(params: JobTasksListParams) -> TaskFilter:
     Returns:
         Task filter without the owning job, which the service pins.
     """
-    return TaskFilter(
-        kind=params.kind,
-        status=params.status,
+    return JobTasksFilter(
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

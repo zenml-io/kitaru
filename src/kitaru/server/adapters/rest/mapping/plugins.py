@@ -30,11 +30,18 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorUpdateRequest,
     EvaluatorVersionResponse,
 )
+from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import ImporterUpdateRequest, ImporterVersionResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource as WirePackagePluginSource
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.api_models.v1.plugin import ScriptPluginSource as WireScriptPluginSource
-from kitaru.server.application.models.plugin import PluginFilter, PluginUpdate
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.application.models.plugin import (
+    EvaluatorFilter,
+    ImporterFilter,
+    PluginFilter,
+    PluginUpdate,
+)
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
 )
@@ -152,24 +159,23 @@ def plugin_version_to_response(
 def plugin_list_params_to_filter(
     params: ListParams,
     kind: PluginKind,
-    name: str | None,
-    provider: str | None,
+    filter_: Filter | None,
 ) -> PluginFilter:
     """Convert list params to the application plugin filter.
 
     Args:
         params: List params carrying pagination.
         kind: Plugin kind this listing is scoped to.
-        name: Name filter, when present on the wire params.
-        provider: Provider filter, when present on the wire params.
+        filter_: Filter expression, when present on the wire params.
 
     Returns:
-        Plugin filter.
+        Evaluator or importer filter, scoped to the given kind.
     """
-    return PluginFilter(
+    expression = filter_to_expression(filter_) if filter_ is not None else None
+    filter_class = EvaluatorFilter if kind is PluginKind.EVALUATOR else ImporterFilter
+    return filter_class(
         kind=kind,
-        name=name,
-        provider=provider,
+        expression=expression,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

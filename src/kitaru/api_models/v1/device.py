@@ -20,10 +20,10 @@ from enum import StrEnum
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
-    ListParams,
     RequestModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class DeviceStatus(StrEnum):
@@ -54,12 +54,8 @@ class DeviceUpdateRequest(RequestModel):
     )
 
 
-class DeviceListParams(ListParams):
+class DeviceListParams(FilterableListParams):
     """Device list params."""
-
-    status: DeviceStatus | None = Field(
-        default=None, description="Filter on device status."
-    )
 
 
 class DeviceResponse(TimestampedResponseModel):

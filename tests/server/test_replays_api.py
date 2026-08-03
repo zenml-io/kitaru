@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the replay routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -158,16 +159,26 @@ async def test_list_replays_filters_by_baseline_session(
             "evaluators": [{"evaluator": "accuracy"}],
         },
     )
+    matching_filter = {
+        "field": "baseline_session_id",
+        "op": "eq",
+        "value": str(baseline_session_id),
+    }
     response = await client.get(
-        "/v1/replays", params={"baseline_session_id": str(baseline_session_id)}
+        "/v1/replays", params={"filter": json.dumps(matching_filter)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["baseline_session_id"] == str(baseline_session_id)
 
+    other_filter = {
+        "field": "baseline_session_id",
+        "op": "eq",
+        "value": str(uuid.uuid4()),
+    }
     response = await client.get(
-        "/v1/replays", params={"baseline_session_id": str(uuid.uuid4())}
+        "/v1/replays", params={"filter": json.dumps(other_filter)}
     )
     assert response.json()["items"] == []
 

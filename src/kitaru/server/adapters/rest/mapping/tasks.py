@@ -30,6 +30,7 @@ from kitaru.api_models.v1.task import (
     TaskUpdateRequest,
     TaskWithSpec,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
 from kitaru.server.domain.task import (
     AgentTask,
@@ -235,10 +236,9 @@ def task_list_params_to_filter(params: TaskListParams) -> TaskFilter:
         Task filter.
     """
     return TaskFilter(
-        job_id=params.job_id,
-        kind=params.kind,
-        status=params.status,
-        worker_id=params.worker_id,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

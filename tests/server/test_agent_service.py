@@ -23,12 +23,14 @@ from conftest import (
     create_agent,
     create_agent_version,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentInUse, AgentNotFound, DuplicateAgentName
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
@@ -103,7 +105,10 @@ async def test_list_agents(service: AgentService) -> None:
     assert [agent.name for agent in agents] == ["triager", "reviewer", "assistant"]
 
     agents, next_cursor = await service.list_agents(
-        AgentFilter(name="reviewer"), actor=ACTOR
+        AgentFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="reviewer")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert agents[0].name == "reviewer"

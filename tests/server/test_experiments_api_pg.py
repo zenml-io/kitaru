@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end experiment tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -160,7 +161,10 @@ async def test_query_by_tag(client: httpx.AsyncClient) -> None:
         json={"resource_type": "experiment", "resource_id": tagged["id"]},
     )
 
-    response = await client.get("/v1/experiments", params={"tag": "smoke"})
+    filter_expression = {"field": "tag", "op": "eq", "value": "smoke"}
+    response = await client.get(
+        "/v1/experiments", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert [item["id"] for item in body["items"]] == [tagged["id"]]

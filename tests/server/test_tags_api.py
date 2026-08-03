@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the tag routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -91,7 +92,10 @@ async def test_list_tags(client: httpx.AsyncClient) -> None:
     assert body["next_cursor"] is None
     assert [item["name"] for item in body["items"]] == ["canary", "staging", "prod"]
 
-    response = await client.get("/v1/tags", params={"name": "staging"})
+    filter_expression = {"field": "name", "op": "eq", "value": "staging"}
+    response = await client.get(
+        "/v1/tags", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["items"][0]["name"] == "staging"
