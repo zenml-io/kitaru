@@ -188,10 +188,10 @@ class JobService:
             Job carrying the cancel request.
         """
         _ = actor
-        job = await self._repository.get(job_id, exclusive=True)
+        job = await self._repository.get(job_id)
         if job.settled:
             raise JobAlreadySettled(job_id)
-        return await self._transitions.cancel_job(job)
+        return await self._transitions.cancel_job(job_id)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a job, cascading its tasks.

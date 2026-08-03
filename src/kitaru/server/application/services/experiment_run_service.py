@@ -160,10 +160,7 @@ class ExperimentRunService:
         for replay in await self._replays.list_by_experiment_run(experiment_run_id):
             if replay.settled:
                 continue
-            job = await self._jobs.get(replay.job_id, exclusive=True)
-            if job.settled:
-                continue
-            await self._transitions.cancel_job(job)
+            await self._transitions.cancel_job(replay.job_id)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts
