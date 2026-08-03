@@ -42,8 +42,6 @@ jobs:
         with:
           enable-cache: false
       - run: uv sync --frozen
-      - name: Generate CLI reference
-        run: uv run python scripts/generate_cli_docs.py
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
         with:
           version: 10.33.0

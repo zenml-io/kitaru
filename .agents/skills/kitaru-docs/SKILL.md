@@ -16,9 +16,9 @@ Kitaru docs live on three surfaces:
    `docs.zenml.io/kitaru` via GitBook Git Sync. Edit these `.md` files directly.
    Navigation is `docs/book/toc.md`, config is `docs/book/.gitbook.yaml`, and
    authoring conventions live in `docs/book/AGENTS.md`.
-2. Generated SDK + CLI reference docs live in the FumaDocs app under `docs/`.
-   Generated output is `docs/content/docs/cli/` and
-   `docs/content/docs/reference/python/`, served from `sdkdocs.kitaru.ai`.
+2. Generated SDK reference docs live in the FumaDocs app under `docs/`.
+   Generated output is `docs/content/docs/reference/python/`, served from
+   `sdkdocs.kitaru.ai`.
 3. `kitaru.ai/docs/*` redirects are handled by `docs/worker/redirect.mjs` and
    `wrangler.redirect.toml`.
 
@@ -40,7 +40,7 @@ to that repository instead of adding that code here.
   orchestrator, artifact store, pipeline, and step in user docs.
 - Inside `docs/book/`, link to sibling pages with relative `.md` paths, such as
   `../concepts/checkpoints.md` or `flows.md#runtime-options`.
-- Link to SDK/CLI reference with `https://sdkdocs.kitaru.ai`.
+- Link to SDK reference with `https://sdkdocs.kitaru.ai`.
 - Link to other ZenML docs with absolute `https://docs.zenml.io/...` URLs.
 - Link to diagrams with
   `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
@@ -50,9 +50,7 @@ to that repository instead of adding that code here.
 - Only `kitaru.llm()` auto-resolves alias-linked secrets today. If documenting
   non-LLM secret access, label it as the current low-level pattern instead of
   implying there is a dedicated Kitaru secret getter.
-- If generated CLI reference syntax is wrong, fix `scripts/generate_cli_docs.py`
-  and/or the relevant `src/kitaru/_cli/_*.py` module. Use `src/kitaru/cli.py`
-  only for facade/bootstrap issues.
+- CLI command contracts live under `src/kitaru/cli/` and are available offline through `kitaru schema`; CLI reference publishing is deferred.
 - Current shipped stack-create types on CLI/MCP are `local`, `kubernetes`,
   `vertex`, `sagemaker`, and `azureml`.
 - Advanced CLI/MCP stack creation supports `--extra` / structured `extra` plus
