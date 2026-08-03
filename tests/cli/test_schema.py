@@ -24,11 +24,13 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     roots = {item["name"] for item in describe_schema()}
     assert roots == {
         "agent",
+        "cohort",
         "config",
         "context",
         "doctor",
         "evaluation",
         "evaluator",
+        "experiment",
         "importer",
         "info",
         "job",
@@ -42,7 +44,15 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
+    assert (
+        descriptions["cohort"]
+        == "Manage cohort namespaces and immutable membership versions."
+    )
     assert descriptions["evaluation"] == "Inspect stored evaluations."
+    assert (
+        descriptions["experiment"]
+        == "Configure experiments and manage asynchronous runs."
+    )
     assert descriptions["importer"] == "Develop, register, and inspect importers."
     assert descriptions["evaluator"] == "Develop, register, and inspect evaluators."
     assert descriptions["session"] == "Import and inspect sessions and their nodes."
@@ -166,6 +176,171 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert all(
         not command["side_effects"]["mutates_remote_state"]
         for command in evaluation_commands.values()
+    )
+
+
+def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
+    """Cohort discovery exposes only the implemented SDK-backed surface."""
+    commands = {item["command"]: item for item in describe_schema(("cohort",))}
+    assert set(commands) == {
+        "cohort.create",
+        "cohort.delete",
+        "cohort.get",
+        "cohort.list",
+        "cohort.update",
+        "cohort.version.create",
+        "cohort.version.delete",
+        "cohort.version.get",
+        "cohort.version.list",
+        "cohort.version.update",
+    }
+
+    assert commands["cohort.create"]["idempotency"] == ("non_idempotent_remote_create")
+    assert commands["cohort.version.create"]["idempotency"] == (
+        "non_idempotent_server_assigned_version"
+    )
+    assert commands["cohort.update"]["idempotency"] == "idempotent replacement"
+    assert commands["cohort.version.update"]["idempotency"] == (
+        "idempotent replacement"
+    )
+    for command_name in ("cohort.delete", "cohort.version.delete"):
+        command = commands[command_name]
+        assert command["read_only"] is False
+        assert command["side_effects"]["deletes_remote_state"] is True
+        assert command["side_effects"]["mutates_remote_state"] is True
+        assert command["idempotency"] == "not_found after first removal"
+        force = {parameter["name"]: parameter for parameter in command["parameters"]}[
+            "--force"
+        ]
+        assert force["type"] == "boolean"
+
+    cohort_delete = commands["cohort.delete"]
+    assert "all of its versions" in cohort_delete["description"]
+    version_list_parameters = {
+        parameter["name"] for parameter in commands["cohort.version.list"]["parameters"]
+    }
+    assert "--filter" not in version_list_parameters
+    assert {"--size", "--cursor", "--sort"} <= version_list_parameters
+    version_reference = {
+        parameter["name"]: parameter
+        for parameter in commands["cohort.version.get"]["parameters"]
+    }["VERSION"]
+    assert version_reference["type"] == "UUID|COHORT@VERSION"
+    assert all(command["streams"] is False for command in commands.values())
+    assert all(
+        command["output_modes"] == ["auto", "text", "json"]
+        for command in commands.values()
+    )
+    assert not any(
+        deferred in command_name
+        for command_name in commands
+        for deferred in ("members", "membership", "open", "experiment", "run")
+    )
+
+
+def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
+    """Experiment discovery exposes exact CRUD and SDK-backed run commands."""
+    commands = {item["command"]: item for item in describe_schema(("experiment",))}
+    assert set(commands) == {
+        "experiment.create",
+        "experiment.delete",
+        "experiment.get",
+        "experiment.list",
+        "experiment.run.cancel",
+        "experiment.run.delete",
+        "experiment.run.get",
+        "experiment.run.jobs",
+        "experiment.run.list",
+        "experiment.run.start",
+        "experiment.run.watch",
+        "experiment.update",
+    }
+
+    create = commands["experiment.create"]
+    assert create["read_only"] is False
+    assert create["side_effects"]["creates_remote_state"] is True
+    assert create["idempotency"] == "non_idempotent_remote_create"
+    create_parameters = {
+        parameter["name"]: parameter for parameter in create["parameters"]
+    }
+    assert create_parameters["--evaluator"]["required"] is True
+    assert create_parameters["--evaluator"]["type"] == "reference[]"
+    assert create_parameters["--evaluator-params"]["required"] is False
+    assert {"--override", "--tool-policy"} <= set(create_parameters)
+
+    update = commands["experiment.update"]
+    assert update["read_only"] is False
+    assert update["side_effects"]["mutates_remote_state"] is True
+    assert update["idempotency"] == "idempotent replacement"
+    update_parameters = {
+        parameter["name"]: parameter for parameter in update["parameters"]
+    }
+    assert {
+        "--clear-description",
+        "--clear-override",
+        "--evaluator",
+        "--evaluator-params",
+        "--tool-policy",
+    } <= set(update_parameters)
+    assert "--clear-tool-policy" not in update_parameters
+    assert update_parameters["--evaluator"]["required"] is False
+
+    delete = commands["experiment.delete"]
+    assert delete["read_only"] is False
+    assert delete["side_effects"]["mutates_remote_state"] is True
+    assert delete["side_effects"]["deletes_remote_state"] is True
+    assert delete["idempotency"] == "not_found after first removal"
+    force = {parameter["name"]: parameter for parameter in delete["parameters"]}[
+        "--force"
+    ]
+    assert force["type"] == "boolean"
+
+    start = commands["experiment.run.start"]
+    assert start["read_only"] is False
+    assert start["streams"] is True
+    assert start["side_effects"]["creates_remote_state"] is True
+    assert start["idempotency"] == "non_idempotent_run_created_per_request"
+    assert start["output_modes"] == ["auto", "text", "json", "jsonl"]
+    start_parameters = {
+        parameter["name"]: parameter for parameter in start["parameters"]
+    }
+    assert start_parameters["--cohort-version"]["required"] is True
+    assert start_parameters["--agent"]["required"] is True
+    assert (
+        start_parameters["--wait"]["description"] == "Wait for remote work settlement."
+    )
+    start_errors = {error["kind"]: error["exit_code"] for error in start["errors"]}
+    assert start_errors["timeout"] == 7
+    assert start_errors["remote_failed"] == 8
+    assert start_errors["remote_canceled"] == 9
+
+    watch = commands["experiment.run.watch"]
+    assert watch["read_only"] is True
+    assert watch["streams"] is True
+    assert watch["output_modes"] == ["auto", "text", "json", "jsonl"]
+
+    cancel = commands["experiment.run.cancel"]
+    assert cancel["idempotency"] == "server_rejects_settled_runs"
+    assert cancel["side_effects"]["mutates_remote_state"] is True
+
+    run_delete = commands["experiment.run.delete"]
+    assert run_delete["side_effects"]["deletes_remote_state"] is True
+    assert "jobs and tasks" in run_delete["description"]
+    assert run_delete["idempotency"] == "not_found after first removal"
+
+    finite_commands = set(commands) - {
+        "experiment.run.start",
+        "experiment.run.watch",
+    }
+    assert all(commands[name]["streams"] is False for name in finite_commands)
+    assert all(
+        commands[name]["output_modes"] == ["auto", "text", "json"]
+        for name in finite_commands
+    )
+    assert not any(
+        deferred in command_name
+        for command_name in commands
+        for deferred in ("compare", "ci", "review", "open")
     )
 
 
