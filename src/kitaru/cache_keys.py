@@ -29,9 +29,8 @@ def compute_tool_cache_key(tool_name: str, inputs: Any) -> str | None:
         SHA-256 hex digest over the tool name and canonical JSON inputs, or
         None when the inputs cannot be canonicalized.
     """
-    # Why: absent inputs are indistinguishable from inputs that were never
-    # recorded, so a key over them would match unrelated calls of the tool.
     if inputs is None:
+        # We cannot compute a useful cache key in this case
         return None
     try:
         canonical = json.dumps(
