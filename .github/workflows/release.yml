@@ -220,7 +220,7 @@ jobs:
         run: uv run pytest --ignore=tests/mcp
       - name: Check migration consistency
         run: |
-          uv sync --frozen --extra server
+          uv sync --frozen --extra server --extra otel
           uv run python scripts/check_migrations.py
 
       # --- Bundle Kitaru UI ---

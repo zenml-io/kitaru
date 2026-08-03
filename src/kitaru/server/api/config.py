@@ -16,7 +16,8 @@
 import uuid
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import AliasChoices, Field, model_validator
+from pydantic_settings import SettingsConfigDict
 
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.config import Settings
@@ -25,8 +26,27 @@ from kitaru.server.config import Settings
 UNSET_SERVER_ID = uuid.UUID(int=0)
 
 
+def _get_otel_alias(name: str) -> AliasChoices:
+    """Get the alias choices for an OTEL settings field.
+
+    Args:
+        name: Field name in lowercase.
+
+    Returns:
+        The prefixed and the standard environment variable name, with the
+        prefixed one taking precedence.
+    """
+    return AliasChoices(f"kitaru_server_{name}", name)
+
+
 class APISettings(Settings):
     """API server settings."""
+
+    # The OTEL_* fields below set validation_alias to also accept the
+    # unprefixed environment variables, which otherwise disables population
+    # by field name. populate_by_name restores constructing these fields
+    # directly by keyword, like every other field on this settings class.
+    model_config = SettingsConfigDict(populate_by_name=True)
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -67,6 +87,30 @@ class APISettings(Settings):
     SECRET_ENCRYPTION_KEY: str = ""
 
     ANALYTICS_OPT_IN: bool = True
+
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = Field(
+        default=None,
+        validation_alias=_get_otel_alias("otel_exporter_otlp_endpoint"),
+    )
+    OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: str | None = Field(
+        default=None,
+        validation_alias=_get_otel_alias("otel_exporter_otlp_traces_endpoint"),
+    )
+    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: str | None = Field(
+        default=None,
+        validation_alias=_get_otel_alias("otel_exporter_otlp_metrics_endpoint"),
+    )
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: str | None = Field(
+        default=None,
+        validation_alias=_get_otel_alias("otel_exporter_otlp_logs_endpoint"),
+    )
+    OTEL_SERVICE_NAME: str = Field(
+        default="kitaru-server",
+        validation_alias=_get_otel_alias("otel_service_name"),
+    )
+    OTEL_TRACES_ENABLED: bool = True
+    OTEL_METRICS_ENABLED: bool = True
+    OTEL_LOGS_ENABLED: bool = True
 
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:

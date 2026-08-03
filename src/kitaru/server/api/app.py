@@ -62,6 +62,7 @@ from kitaru.server.adapters.rest.routers import (
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -171,6 +172,7 @@ def create_app(settings: APISettings) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         database = DatabaseService(settings)
+        instrument_engine(database.engine)
         if not settings.SKIP_DB_MIGRATION:
             await database.create_db_and_tables()
         app.state.database = database
@@ -195,6 +197,9 @@ def create_app(settings: APISettings) -> FastAPI:
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()
             await database.cleanup()
+            # Last, so telemetry produced during the steps above still
+            # gets exported and flushed.
+            shutdown_otel()
 
     app = FastAPI(
         title="Kitaru",
@@ -208,6 +213,10 @@ def create_app(settings: APISettings) -> FastAPI:
     _register_domain_exception_handlers(app)
     _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_source)
+    # FastAPIInstrumentor registers its middleware last, which makes the
+    # OTel span the outermost layer, so this call must come after every
+    # other middleware registration.
+    configure_otel(settings, app)
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(info.router, prefix="/v1/info", tags=["info"])
     app.include_router(auth.router, prefix="/v1", tags=["auth"])
