@@ -23,14 +23,22 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
 from kitaru.api_models.v1.worker import WorkerListParams
 from kitaru.cli.config import ResolvedTarget, resolve_credential
-from kitaru.cli.output import CLIError, CommandResult, emit_event
+from kitaru.cli.output import (
+    CLIError,
+    CommandResult,
+    OutputContext,
+    emit_event,
+    get_output_context,
+    reset_output_context,
+    set_output_context,
+)
 from kitaru.cli.registration import resolve_asset
 from kitaru.client.credential_store import DIRECTORY_MODE, FILE_MODE, CredentialStore
 
@@ -40,6 +48,12 @@ _WORKER_CONTRACT_ENV = (
     "KITARU_API_KEY",
     "KITARU_CREDENTIALS_PATH",
 )
+_TerminationReason = Literal["completed", "sigint", "sigterm"]
+_TERMINATION_EXIT_CODES: dict[_TerminationReason, int] = {
+    "completed": 0,
+    "sigint": 130,
+    "sigterm": 143,
+}
 
 
 class WorkerRunner(Protocol):
@@ -232,42 +246,63 @@ class ForegroundWorkerProcess:
         self._immediate_exit = immediate_exit
         self._emergency_cleanup = emergency_cleanup
         self.stop = asyncio.Event()
-        self.interrupted = False
+        self._stop_reason: _TerminationReason | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._output_context: OutputContext | None = None
         self._signal_handlers: dict[int, Any] = {}
 
     async def run(self) -> CommandResult:
         """Run the worker until natural completion or a graceful drain."""
+        self._loop = asyncio.get_running_loop()
+        self._output_context = get_output_context()
         emit_event("starting", self._summary)
         with self._installed_signal_handlers():
             await self._worker.run(self.stop)
+        stop_reason: _TerminationReason = self._stop_reason or "completed"
         item = {
             **self._summary,
             "status": "stopped",
             "server_record": "retained_until_stale",
+            "stop_reason": stop_reason,
         }
         return CommandResult(
             item=item,
             event="stopped",
-            exit_code=130 if self.interrupted else 0,
+            exit_code=_TERMINATION_EXIT_CODES[stop_reason],
         )
 
     def handle_sigint(self, *_: Any) -> None:
-        """Drain on the first SIGINT and exit without cleanup on the second."""
-        if self.interrupted:
+        """Drain on the first signal and exit on a later SIGINT."""
+        if self._stop_reason is not None:
             if self._emergency_cleanup is not None:
                 self._emergency_cleanup()
-            self._immediate_exit(130)
+            self._immediate_exit(_TERMINATION_EXIT_CODES["sigint"])
             return
-        self.interrupted = True
-        if not self.stop.is_set():
-            self.stop.set()
-            emit_event("draining", {"reason": "sigint"})
+        self._request_stop("sigint")
 
     def handle_sigterm(self, *_: Any) -> None:
-        """Request the same graceful drain for SIGTERM."""
-        if not self.stop.is_set():
-            self.stop.set()
-            emit_event("draining", {"reason": "sigterm"})
+        """Request a graceful drain on the first SIGTERM."""
+        if self._stop_reason is None:
+            self._request_stop("sigterm")
+
+    def _request_stop(self, reason: _TerminationReason) -> None:
+        """Record the first signal and request a best-effort graceful drain."""
+        self._stop_reason = reason
+        self.stop.set()
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self.stop.set)
+        token = (
+            set_output_context(self._output_context)
+            if self._output_context is not None
+            else None
+        )
+        try:
+            emit_event("draining", {"reason": reason})
+        except (OSError, ValueError):
+            pass
+        finally:
+            if token is not None:
+                reset_output_context(token)
 
     @contextmanager
     def _installed_signal_handlers(self) -> Iterator[None]:

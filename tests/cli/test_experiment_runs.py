@@ -806,5 +806,5 @@ def test_watch_ctrl_c_does_not_cancel_remote_run(
     )
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == "Interrupted.\n"
+    assert json.loads(captured.err)["error"]["message"] == "Interrupted."
     assert client.cancel_calls == 0

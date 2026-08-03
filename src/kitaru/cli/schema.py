@@ -209,4 +209,5 @@ def _describe_command(spec: CommandSpec) -> dict[str, Any]:
         "idempotency": spec.idempotency,
         "interaction": spec.interaction,
         "streams": spec.streams,
+        "offline": spec.offline,
     }
