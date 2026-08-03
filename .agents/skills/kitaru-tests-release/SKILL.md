@@ -137,7 +137,7 @@ touching docs/reference-related inputs such as `docs/**`, docs generation
 scripts, SDK source, `CHANGELOG.md`, `pyproject.toml`, `uv.lock`, or Wrangler
 config.
 
-It regenerates CLI/SDK reference docs and builds the FumaDocs static export on
+It regenerates SDK reference docs and builds the FumaDocs static export on
 all runs. It deploys `sdkdocs.kitaru.ai` and the `kitaru.ai/docs` redirect
 worker only on `main` push or manual dispatch. PRs build only and do not create
 preview Workers. Hand-written docs publish separately through GitBook Git Sync.

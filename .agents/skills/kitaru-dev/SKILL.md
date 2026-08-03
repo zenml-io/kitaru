@@ -44,48 +44,26 @@ package was intentionally bumped, and run `just audit` before pushing.
 
 These require Node 22+ and pnpm.
 
-- `just generate-docs`: generate CLI reference, changelog, and SDK reference docs
+- `just generate-docs`: generate changelog and SDK reference docs
 - `just docs`: preview docs locally at `localhost:3000`
 - `just docs-build`: build docs static export
 - `just docs-validate`: validate the static export as served under `/docs`
 
 ## CLI Structure
 
-The `kitaru` console script is defined in `pyproject.toml` under
-`[project.scripts]`. `src/kitaru/cli.py` is the thin facade / entrypoint.
-Command implementations live in `src/kitaru/_cli/`.
+The `kitaru` console script is defined in `pyproject.toml` under `[project.scripts]`. `src/kitaru/cli/__init__.py` is the lazy entry point, and command implementations live in ordinary modules under `src/kitaru/cli/`.
 
-Add new subcommands in the appropriate `src/kitaru/_cli/_*.py` module and
-register them on the shared Cyclopts app there. When testing CLI commands,
-always pass an explicit arg list, such as `app(["--help"])`, not bare `app()`.
-Successful invocations raise `SystemExit(0)`.
+Add new subcommands in the appropriate `src/kitaru/cli/*.py` module and register them on the shared Cyclopts app. When testing CLI commands, always pass an explicit argument list to `main([...])`; successful invocations return exit code 0.
 
 ## JSON Output Contract
 
-Agent-facing commands should keep the shared `--output json` / `-o json`
-contract consistent:
+Agent-facing commands use the version-1 structured contract. Success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` for one result or `items`, `count`, and `page` for a list. Structured errors are one JSON object on stderr with a stable error kind and exit code.
 
-- single-item commands emit `{command, item}`
-- list commands emit `{command, items, count}`
-- `kitaru executions logs --follow --output json` emits JSONL event objects
-  instead of one final document
-
-Document login consistently: bare `kitaru login` starts the local server, while
-`kitaru login <server>` is the remote-login path. Local server support requires
-the `kitaru[local]` extra.
+Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` targets an already-running server at `http://localhost:8000`; it never starts a local server.
 
 ## Diagnostics and Cleanup
 
-`kitaru info` shows a multi-section diagnostic overview: connection, config
-provenance, connection sources, and system info. Use `--all` for a full dump
-including installed packages and environment type. Use `--file debug.json` or
-`.yaml` to export diagnostics to a file. Environment variable secrets are masked.
-
-`kitaru clean project|global|all` resets Kitaru state. `project` removes
-`.kitaru/`, `global` removes the global config directory with auto-backup and
-local server teardown, and `all` does both. Use `--dry-run` to preview and
-`--force` when model registry aliases exist for `global` or `all`. The `clean`
-command is bootstrap-safe: it works even when the store is broken.
+`kitaru status` shows the selected server, provenance, credential state, compatibility, and live-worker count. `kitaru info` adds local package, Python, and platform details. `kitaru doctor` runs independent local, server, authentication, and tooling checks without stopping after the first failure. These commands never print secret values.
 
 ## Analytics
 
@@ -97,7 +75,7 @@ be tracked.
 - Track only non-sensitive metadata: event names, boolean flags, enum values,
   and counts.
 - Never include user content, file paths, prompts, or secret values.
-- CLI feature events use `track()` in subcommand handlers under `src/kitaru/_cli/`.
+- CLI feature events use `track()` in subcommand handlers under `src/kitaru/cli/`.
 - MCP feature events use `@tracked_mcp_tool` in `src/kitaru/mcp/server.py`.
 - Core SDK lifecycle events use `track(AnalyticsEvent.X, {...})` in the relevant module.
 - All `track()` calls must fail silently.
