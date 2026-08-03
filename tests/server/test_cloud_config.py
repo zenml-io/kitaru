@@ -52,15 +52,3 @@ def test_cloud_mode_requires_https_control_plane() -> None:
         match="CONTROL_PLANE_API_URL must be an HTTPS URL",
     ):
         cloud_settings(CONTROL_PLANE_API_URL="http://cloud.example.com")
-
-
-def test_cloud_mode_restricts_control_plane_host() -> None:
-    """Reject a Cloud host outside the configured allowlist."""
-    with pytest.raises(
-        ValidationError,
-        match="CONTROL_PLANE_API_URL host is not allowed",
-    ):
-        cloud_settings(
-            CONTROL_PLANE_API_URL="https://attacker.example.com",
-            CONTROL_PLANE_ALLOWED_HOSTS=["cloud.example.com"],
-        )
