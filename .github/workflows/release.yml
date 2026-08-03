@@ -549,8 +549,7 @@ jobs:
       - name: Set Chart.yaml version
         run: |
           sed -i "s/^version: .*/version: \"$VERSION\"/" helm/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"$VERSION\"/" helm/Chart.yaml
-          grep -E '^(version|appVersion):' helm/Chart.yaml
+          grep -E '^version:' helm/Chart.yaml
       - name: Helm lint
         run: helm lint ./helm
       - name: Configure AWS credentials (Helm / ECR)
