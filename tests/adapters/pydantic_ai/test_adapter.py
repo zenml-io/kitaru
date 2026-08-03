@@ -669,6 +669,38 @@ async def test_tool_policies(
         assert lookup.cache_key == compute_tool_cache_key("lookup", arguments)
 
 
+async def test_history_policy_without_cache_key_uses_miss_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip lookup when tool arguments cannot produce a cache key."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "kitaru.adapters.pydantic_ai.capability.compute_tool_cache_key",
+        lambda *_: None,
+    )
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+        api_url="http://kitaru.test",
+    )
+
+    result = await agent.run("weather")
+
+    assert result.output == "finished"
+    assert len(real_calls) == 1
+    assert _FakeClient.instances[0].replays.lookups == []
+
+
 @pytest.mark.parametrize(
     ("on_miss", "error_type", "expected_tool_status"),
     [
