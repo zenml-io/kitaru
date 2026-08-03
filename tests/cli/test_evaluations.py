@@ -133,7 +133,7 @@ def test_evaluation_list_argv_uses_shared_list_options(
                 "--size",
                 "4",
                 "--sort",
-                "name:asc",
+                "created:asc",
                 "--filter",
                 '{"field":"name","op":"eq","value":"quality"}',
             ]
@@ -145,7 +145,7 @@ def test_evaluation_list_argv_uses_shared_list_options(
     assert payload["count"] == 1
     params = resource.list_calls[0]
     assert params.size == 4
-    assert params.sort == "name:asc"
+    assert params.sort == "created:asc"
 
 
 def test_evaluation_get_argv_uses_exact_uuid(

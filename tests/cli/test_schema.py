@@ -390,5 +390,12 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "NAME --name" not in help_text
     assert "--no-force" not in help_text
 
+    assert app_module.main(["session", "list", "--help"]) == 0
+    help_text = capsys.readouterr().out
+    assert "Items per page" in help_text
+    assert "Cursor from the previous page" in help_text
+    assert "created:asc or created:desc" in help_text
+    assert "JSON filter expression" in help_text
+
     [job_get] = describe_schema(("job", "get"))
     assert job_get["side_effects"]["reads_local_file"] is True

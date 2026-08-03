@@ -26,7 +26,11 @@ from typing import Any
 import pytest
 
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.session import SessionListParams
+from kitaru.api_models.v1.session import (
+    SessionListParams,
+    SessionOrigin,
+    SessionStatus,
+)
 from kitaru.api_models.v1.session_node import SessionNodeListParams
 from kitaru.api_models.v1.task import (
     TaskKind,
@@ -192,6 +196,20 @@ class StubSessions:
         return SimpleNamespace(items=[self.node], next_cursor="next-node")
 
 
+class StubAgents:
+    """Agent resource fake supporting exact-name session filtering."""
+
+    def __init__(self) -> None:
+        self.agent = SimpleNamespace(id=uuid.uuid4(), name="assistant")
+        self.list_calls: list[Any] = []
+
+    async def list(self, params: Any) -> Any:
+        """Return the one exact-name match."""
+        assert params.size == 2
+        self.list_calls.append(params)
+        return SimpleNamespace(items=[self.agent], next_cursor=None)
+
+
 async def test_session_list_and_get_return_standard_envelopes() -> None:
     """Session reads preserve complete records and server pagination metadata."""
     resource = StubSessions()
@@ -201,7 +219,7 @@ async def test_session_list_and_get_return_standard_envelopes() -> None:
         client,
         size=7,
         cursor="cursor",
-        sort="started_at:asc",
+        sort="created:asc",
         filter='{"field":"status","op":"eq","value":"completed"}',
     )
     params = resource.list_calls[0]
@@ -210,7 +228,7 @@ async def test_session_list_and_get_return_standard_envelopes() -> None:
     assert {key: dumped_params[key] for key in ("cursor", "size", "sort")} == {
         "cursor": "cursor",
         "size": 7,
-        "sort": "started_at:asc",
+        "sort": "created:asc",
     }
     assert json.loads(dumped_params["filter"]) == {
         "field": "status",
@@ -227,6 +245,82 @@ async def test_session_list_and_get_return_standard_envelopes() -> None:
     fetched = await sessions.get_session(client, resource.session_id)
     assert resource.get_calls == [resource.session_id]
     assert fetched.item == {"id": str(resource.session_id), "name": "demo"}
+
+
+async def test_session_list_combines_typed_and_raw_filters() -> None:
+    """Friendly session filters compose with the complete raw filter escape hatch."""
+    resource = StubSessions()
+    agents = StubAgents()
+    client = SimpleNamespace(sessions=resource, agents=agents)
+    started_after = datetime(2026, 8, 1, tzinfo=UTC)
+
+    await sessions.list_sessions(
+        client,
+        size=20,
+        cursor=None,
+        sort="created:desc",
+        filter='{"field":"name","op":"contains","value":"demo"}',
+        status=SessionStatus.COMPLETED,
+        agent="assistant",
+        origin=SessionOrigin.IMPORTED,
+        provider="langfuse",
+        started_after=started_after,
+        started_before=None,
+    )
+
+    encoded = resource.list_calls[0].model_dump(mode="json")["filter"]
+    combined = json.loads(encoded)
+    conditions = combined["and"]
+    assert conditions == [
+        {"field": "name", "op": "contains", "value": "demo"},
+        {"field": "status", "op": "eq", "value": "completed"},
+        {"field": "agent_id", "op": "eq", "value": str(agents.agent.id)},
+        {"field": "origin", "op": "eq", "value": "imported"},
+        {"field": "provider", "op": "eq", "value": "langfuse"},
+        {
+            "field": "started_at",
+            "op": "ge",
+            "value": "2026-08-01T00:00:00Z",
+        },
+    ]
+    assert len(agents.list_calls) == 1
+
+
+async def test_session_agent_uuid_filter_needs_no_agent_lookup() -> None:
+    """Exact agent UUID filters go directly to the session list request."""
+    resource = StubSessions()
+    agent_id = uuid.uuid4()
+    agents = StubAgents()
+    client = SimpleNamespace(sessions=resource, agents=agents)
+
+    await sessions.list_sessions(
+        client,
+        size=20,
+        cursor=None,
+        sort="created:desc",
+        filter=None,
+        agent=str(agent_id),
+    )
+
+    assert agents.list_calls == []
+    encoded = resource.list_calls[0].model_dump(mode="json")["filter"]
+    assert json.loads(encoded) == {
+        "field": "agent_id",
+        "op": "eq",
+        "value": str(agent_id),
+    }
+
+
+def test_invalid_list_values_are_concise_and_option_named(capsys) -> None:
+    """Local list validation avoids raw Pydantic diagnostics and documentation URLs."""
+    assert app_module.main(["session", "list", "--filter", "nope"]) == 2
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["kind"] == "invalid_arguments"
+    assert (
+        payload["error"]["message"]
+        == "--filter must be a valid JSON filter expression."
+    )
+    assert "errors.pydantic.dev" not in payload["error"]["message"]
 
 
 async def test_session_nodes_controls_payload_flag_only() -> None:
@@ -281,7 +375,7 @@ def test_session_list_and_get_argv_use_bounded_resource_calls(
                 "--cursor",
                 "current",
                 "--sort",
-                "name:asc",
+                "created:asc",
             ]
         )
         == 0
@@ -294,7 +388,7 @@ def test_session_list_and_get_argv_use_bounded_resource_calls(
         "truncated": True,
     }
     assert resource.list_calls[0].cursor == "current"
-    assert resource.list_calls[0].sort == "name:asc"
+    assert resource.list_calls[0].sort == "created:asc"
 
     assert app_module.main(["session", "get", str(resource.session_id)]) == 0
     fetched = json.loads(capsys.readouterr().out)

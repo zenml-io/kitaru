@@ -21,14 +21,16 @@ import uuid
 from collections.abc import Callable, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, TextIO, TypeVar
+from typing import Annotated, Any, Literal, TextIO, TypeVar, get_args, get_origin
 
 import httpx
 from cyclopts import App, Parameter
 from cyclopts.exceptions import CycloptsError
 from pydantic import ValidationError as PydanticValidationError
 
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import auth as auth_commands
 from kitaru.cli import (
@@ -69,6 +71,7 @@ from kitaru.cli.schema import (
     ParameterSpec,
     SideEffect,
     describe_schema,
+    get_spec,
     is_command_group,
     is_offline,
     register_spec,
@@ -479,11 +482,48 @@ def _register(target: App, spec: CommandSpec) -> Callable[[F], F]:
     register_spec(spec)
 
     def decorator(function: F) -> F:
+        _add_parameter_help(function, spec)
         _FUNCTION_SPECS[function] = spec
         target.command(function, name=spec.path[-1], help=spec.description)
         return function
 
     return decorator
+
+
+def _add_parameter_help(function: F, spec: CommandSpec) -> None:
+    """Attach registered parameter descriptions to Cyclopts annotations."""
+    signature = inspect.signature(function)
+    command_parameters = spec.parameters[len(_GLOBAL_PARAMETERS) :]
+    positional_specs = iter(
+        parameter for parameter in command_parameters if parameter.kind == "argument"
+    )
+    option_specs = {
+        parameter.name.split("/")[0].removeprefix("--").replace("-", "_"): parameter
+        for parameter in command_parameters
+        if parameter.kind == "option"
+    }
+    for name, parameter in signature.parameters.items():
+        parameter_spec = option_specs.get(name)
+        if parameter_spec is None and parameter.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.VAR_POSITIONAL,
+        }:
+            parameter_spec = next(positional_specs, None)
+        if parameter_spec is None:
+            continue
+        annotation = parameter.annotation
+        if annotation is inspect.Parameter.empty:
+            annotation = str
+        if get_origin(annotation) is Annotated:
+            base, *metadata = get_args(annotation)
+            annotation = Annotated[
+                base, *metadata, Parameter(help=parameter_spec.description)
+            ]
+        else:
+            annotation = Annotated[
+                annotation, Parameter(help=parameter_spec.description)
+            ]
+        function.__annotations__[name] = annotation
 
 
 @_register(
@@ -972,10 +1012,20 @@ _ASSET_READ_ERRORS = (*_UUID_READ_ERRORS, "conflict")
 _ASSET_WRITE_ERRORS = (*_ASSET_READ_ERRORS, "partial_failure")
 _JOB_WAIT_ERRORS = ("timeout", "remote_failed", "remote_canceled")
 _LIST_PARAMETERS = (
-    ParameterSpec("--size", "integer", "option", False, "Items per page."),
-    ParameterSpec("--cursor", "string", "option", False, "Page cursor."),
-    ParameterSpec("--sort", "field:direction", "option", False, "Server sort order."),
-    ParameterSpec("--filter", "JSON", "option", False, "Server filter expression."),
+    ParameterSpec("--size", "integer", "option", False, "Items per page (1-1000)."),
+    ParameterSpec(
+        "--cursor", "string", "option", False, "Cursor from the previous page."
+    ),
+    ParameterSpec(
+        "--sort",
+        "field:direction",
+        "option",
+        False,
+        "Sort by created:asc or created:desc.",
+    ),
+    ParameterSpec(
+        "--filter", "JSON", "option", False, "Advanced JSON filter expression."
+    ),
 )
 _VERSION_LIST_PARAMETERS = _LIST_PARAMETERS[:-1]
 _WAIT_PARAMETERS = (
@@ -2795,7 +2845,51 @@ async def session_import(
     _spec(
         ("session", "list"),
         "List sessions.",
-        parameters=_LIST_PARAMETERS,
+        parameters=(
+            *_LIST_PARAMETERS,
+            ParameterSpec(
+                "--status",
+                "in_progress|completed|failed",
+                "option",
+                False,
+                "Only sessions with this status.",
+            ),
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                False,
+                "Only sessions for this exact agent UUID or name.",
+            ),
+            ParameterSpec(
+                "--origin",
+                "imported|recorded|replay",
+                "option",
+                False,
+                "Only sessions with this origin.",
+            ),
+            ParameterSpec(
+                "--provider",
+                "string",
+                "option",
+                False,
+                "Only sessions from this exact provider.",
+            ),
+            ParameterSpec(
+                "--started-after",
+                "timestamp",
+                "option",
+                False,
+                "Only sessions started at or after this ISO 8601 timestamp.",
+            ),
+            ParameterSpec(
+                "--started-before",
+                "timestamp",
+                "option",
+                False,
+                "Only sessions started before this ISO 8601 timestamp.",
+            ),
+        ),
         errors=_COLLECTION_READ_ERRORS,
     ),
 )
@@ -2805,11 +2899,27 @@ async def session_list(
     cursor: str | None = None,
     sort: str = "created:desc",
     filter: str | None = None,
+    status: SessionStatus | None = None,
+    agent: str | None = None,
+    origin: SessionOrigin | None = None,
+    provider: str | None = None,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
 ) -> CommandResult:
     """List one server page of sessions."""
     async with _open_asset_client() as client:
         return await sessions.list_sessions(
-            client, size=size, cursor=cursor, sort=sort, filter=filter
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            status=status,
+            agent=agent,
+            origin=origin,
+            provider=provider,
+            started_after=started_after,
+            started_before=started_before,
         )
 
 
@@ -3090,7 +3200,7 @@ async def worker_list(
     *,
     size: int = 20,
     cursor: str | None = None,
-    sort: str = "last_seen_at:desc",
+    sort: str = "created:desc",
     filter: str | None = None,
 ) -> CommandResult:
     """List one server page of worker records."""
@@ -3285,7 +3395,7 @@ def _emit_early_error(
         traceback=traceback or debug,
         stdout=sys.stdout,
         stderr=sys.stderr,
-        rich=False,
+        rich=(mode == "text" and sys.stderr.isatty() and not machine),
     )
     token = set_output_context(context)
     try:
@@ -3302,7 +3412,13 @@ def _convert_error(exception: BaseException) -> CLIError:
     """Map SDK, validation, and transport failures to stable CLI errors."""
     if isinstance(exception, CLIError):
         return exception
-    if isinstance(exception, (CycloptsError, PydanticValidationError, ValueError)):
+    if isinstance(exception, PydanticValidationError):
+        issue = exception.errors(include_url=False)[0]
+        location = ".".join(str(part) for part in issue["loc"])
+        message = str(issue["msg"]).removeprefix("Value error, ")
+        prefix = f"Invalid {location}: " if location else "Invalid value: "
+        return CLIError("invalid_arguments", f"{prefix}{message}.")
+    if isinstance(exception, (CycloptsError, ValueError)):
         return CLIError("invalid_arguments", str(exception))
     if isinstance(exception, (DeviceLoginError, ControlPlaneLoginError)):
         return CLIError("authentication_failed", str(exception))
@@ -3323,11 +3439,17 @@ def _convert_error(exception: BaseException) -> CLIError:
         return CLIError("internal_error", str(exception), details=details)
     if isinstance(exception, httpx.TimeoutException):
         return CLIError(
-            "network_error", "The server request timed out.", retryable=True
+            "network_error",
+            "The server request timed out.",
+            retryable=True,
+            hint="Check the selected server with `kitaru status`, then retry.",
         )
     if isinstance(exception, httpx.TransportError):
         return CLIError(
-            "network_error", f"The server is unavailable: {exception}", retryable=True
+            "network_error",
+            f"The server is unavailable: {exception}",
+            retryable=True,
+            hint="Check the selected server with `kitaru status`, then retry.",
         )
     return CLIError("internal_error", str(exception) or type(exception).__name__)
 
@@ -3392,4 +3514,5 @@ def _guess_command(tokens: Sequence[str]) -> str:
         if is_command_group(tuple(names)):
             continue
         break
-    return ".".join(names) if names else "cli"
+    candidate = tuple(names)
+    return ".".join(names) if candidate and get_spec(candidate) is not None else "cli"
