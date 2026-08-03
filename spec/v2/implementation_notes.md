@@ -14,7 +14,11 @@ required solving beyond what the documents describe.
 - `compute_tool_cache_key` hashes the tool name and the canonical JSON dump
   of the inputs (sorted keys, compact separators) with a NUL byte between
   the two, so a tool name that is a prefix of another cannot collide with
-  shifted input bytes.
+  shifted input bytes. It returns None for absent inputs and for inputs
+  that json refuses to dump canonically (unserializable values, non-finite
+  floats), so a node ingested without usable inputs keeps a null cache_key
+  and the replaying adapter skips the lookup instead of matching on a key
+  every unrecorded call would share.
 - `packaging` added to the server extra for plugin requirement validation.
 
 ## API models
