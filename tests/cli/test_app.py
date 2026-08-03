@@ -14,11 +14,17 @@
 """CLI bootstrap, invocation, and lazy-extra behavior."""
 
 import builtins
+import io
 import json
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 import kitaru.cli
 from kitaru.cli import app as app_module
+from kitaru.cli.output import CommandResult, OutputMode, emit_event, get_output_context
 from kitaru.client.exceptions import APIError
 
 
@@ -108,6 +114,137 @@ def test_output_context_resets_between_invocations(capsys) -> None:
     assert app_module.main(["version"]) == 0
     second = capsys.readouterr()
     assert json.loads(second.out)["command"] == "version"
+
+
+@pytest.mark.parametrize("output", ["text", "json", "jsonl"])
+async def test_active_interrupt_uses_resolved_output_context(
+    output: OutputMode, monkeypatch, capsys
+) -> None:
+    """Interrupts after bootstrap use one stable error without debug output."""
+
+    def interrupt() -> CommandResult:
+        raise KeyboardInterrupt
+
+    spec = replace(
+        app_module._FUNCTION_SPECS[app_module.version],
+        streams=output == "jsonl",
+    )
+    monkeypatch.setitem(app_module._FUNCTION_SPECS, interrupt, spec)
+    monkeypatch.setattr(
+        type(app_module.app),
+        "parse_args",
+        lambda self, tokens: (
+            interrupt,
+            SimpleNamespace(args=(), kwargs={}),
+            None,
+        ),
+    )
+
+    assert (
+        await app_module._launch("version", output=output, debug=True, traceback=True)
+        == 130
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    if output == "text":
+        assert captured.err == "Error: Interrupted.\n"
+    else:
+        assert json.loads(captured.err) == {
+            "schema_version": "1",
+            "command": "version",
+            "ok": False,
+            "error": {
+                "kind": "interrupted",
+                "message": "Interrupted.",
+                "retryable": False,
+            },
+        }
+    with pytest.raises(RuntimeError, match="No CLI output context"):
+        get_output_context()
+    assert app_module._INVOCATION.get() is None
+
+
+@pytest.mark.parametrize("output", ["text", "json", "jsonl"])
+def test_early_interrupt_uses_requested_output(
+    output: str, monkeypatch, capsys
+) -> None:
+    """Interrupts before bootstrap retain the requested serialization mode."""
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(app_module, "app", SimpleNamespace(meta=interrupt))
+
+    assert (
+        app_module.main(["version", "--output", output, "--debug", "--traceback"])
+        == 130
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    if output == "text":
+        assert captured.err == "Error: Interrupted.\n"
+    else:
+        payload = json.loads(captured.err)
+        assert payload["command"] == "version"
+        assert payload["error"] == {
+            "kind": "interrupted",
+            "message": "Interrupted.",
+            "retryable": False,
+        }
+        assert "debug" not in payload
+
+
+class _BrokenFlushWriter(io.StringIO):
+    """Structured writer whose consumer closes at flush time."""
+
+    def flush(self) -> None:
+        """Simulate a closed downstream consumer."""
+        raise BrokenPipeError
+
+
+def test_result_and_error_broken_pipes_exit_zero(monkeypatch, capsys) -> None:
+    """Closed structured success and error streams do not emit a second error."""
+    stdout = _BrokenFlushWriter()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(app_module.sys, "stdout", stdout)
+        assert app_module.main(["version", "--output", "json"]) == 0
+    assert capsys.readouterr().err == ""
+
+    stderr = _BrokenFlushWriter()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(app_module.sys, "stderr", stderr)
+        assert app_module.main(["not-a-command", "--output", "json"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+async def test_event_broken_pipe_exits_zero(monkeypatch, capsys) -> None:
+    """A closed JSONL event stream is handled by the active invocation."""
+
+    def stream() -> CommandResult:
+        emit_event("starting")
+        return CommandResult(item={"status": "stopped"})
+
+    spec = replace(app_module._FUNCTION_SPECS[app_module.version], streams=True)
+    monkeypatch.setitem(app_module._FUNCTION_SPECS, stream, spec)
+    monkeypatch.setattr(
+        type(app_module.app),
+        "parse_args",
+        lambda self, tokens: (
+            stream,
+            SimpleNamespace(args=(), kwargs={}),
+            None,
+        ),
+    )
+    stdout = _BrokenFlushWriter()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(app_module.sys, "stdout", stdout)
+        assert await app_module._launch("version", output="jsonl") == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_commands_advertise_interrupted_error() -> None:
+    """Executable leaves include the shared invocation-level interrupt outcome."""
+    assert "interrupted" in app_module._FUNCTION_SPECS[app_module.version].error_kinds
 
 
 def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:

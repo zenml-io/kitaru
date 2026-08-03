@@ -105,6 +105,10 @@ async def status(
             warnings.append(
                 "The server requires authentication but no credential is available."
             )
+        compatibility = _compatibility(info.version)
+        compatibility_warning = _compatibility_warning(compatibility)
+        if compatibility_warning is not None:
+            warnings.append(compatibility_warning)
         item = {
             "server_url": target.server_url,
             "server_source": target.source,
@@ -113,7 +117,7 @@ async def status(
             "authentication": authentication,
             "server": info.model_dump(mode="json"),
             "dashboard_url": info.dashboard_url,
-            "compatibility": _compatibility(info.version),
+            "compatibility": compatibility,
             "live_worker_count": live_workers,
         }
         return CommandResult(item=item, warnings=warnings)
@@ -143,9 +147,12 @@ async def info(
         server = await client.info.get()
     finally:
         await client.close()
+    client_version = package_version()
+    compatibility = _compatibility(server.version, client_version=client_version)
+    compatibility_warning = _compatibility_warning(compatibility)
     return CommandResult(
         item={
-            "kitaru_version": package_version(),
+            "kitaru_version": client_version,
             "python_version": platform.python_version(),
             "python_implementation": platform.python_implementation(),
             "platform": platform.platform(),
@@ -154,8 +161,9 @@ async def info(
             "server_source": target.source,
             "context": target.context_name,
             "server": server.model_dump(mode="json"),
-            "compatibility": _compatibility(server.version),
-        }
+            "compatibility": compatibility,
+        },
+        warnings=[compatibility_warning] if compatibility_warning is not None else [],
     )
 
 
@@ -198,12 +206,25 @@ async def doctor(
         failure_categories.add("configuration")
         checks.append(_check("config", "fail", True, str(error)))
 
+    credentials_valid = True
     try:
         _validate_credentials_file(credential_store.path)
         checks.append(_check("credentials", "pass", True, str(credential_store.path)))
-    except (OSError, ValueError, ValidationError) as error:
+    except OSError as error:
+        credentials_valid = False
         failure_categories.add("configuration")
         checks.append(_check("credentials", "fail", True, str(error)))
+    except (ValueError, ValidationError):
+        credentials_valid = False
+        failure_categories.add("configuration")
+        checks.append(
+            _check(
+                "credentials",
+                "fail",
+                True,
+                f"Credential document at {credential_store.path} is invalid.",
+            )
+        )
 
     target: ResolvedTarget | None = None
     try:
@@ -227,8 +248,10 @@ async def doctor(
     server_info: ServerInfoResponse | None = None
     credential: ResolvedCredential | None = None
     if target is None:
-        for name in ("liveness", "readiness", "server_info", "authentication"):
+        for name in ("liveness", "readiness", "server_info"):
             checks.append(_check(name, "skip", True, "No server resolved."))
+        checks.append(_check("compatibility", "skip", False, "No server resolved."))
+        checks.append(_check("authentication", "skip", True, "No server resolved."))
     else:
         health_checks = (("liveness", "/health/live"), ("readiness", "/health"))
         async with httpx.AsyncClient(timeout=timeout) as health_client:
@@ -255,7 +278,11 @@ async def doctor(
                 failure_categories.add("server")
                 checks.append(_check(name, "fail", True, str(error)))
 
-        credential = resolve_credential(target.server_url, credential_store)
+        credential = (
+            resolve_credential(target.server_url, credential_store)
+            if credentials_valid
+            else ResolvedCredential("none")
+        )
         client = build_api_client(
             target.server_url, credential, credential_store, timeout
         )
@@ -274,6 +301,23 @@ async def doctor(
             except (APIError, httpx.HTTPError, TimeoutError) as error:
                 failure_categories.add("server")
                 checks.append(_check("server_info", "fail", True, str(error)))
+
+            if server_info is None:
+                checks.append(
+                    _check("compatibility", "skip", False, "Server info unavailable.")
+                )
+            else:
+                compatibility = _compatibility(server_info.version)
+                compatibility_warning = _compatibility_warning(compatibility)
+                checks.append(
+                    _check(
+                        "compatibility",
+                        "warn" if compatibility_warning is not None else "pass",
+                        False,
+                        compatibility_warning
+                        or "Client and server major versions match.",
+                    )
+                )
 
             if server_info is None:
                 checks.append(
@@ -317,7 +361,9 @@ async def doctor(
             "worker_extra",
             "pass" if worker_extra else "warn",
             False,
-            "available" if worker_extra else "Install kitaru[worker] to run workers.",
+            "available"
+            if worker_extra
+            else "Install kitaru[cli,worker] to run workers.",
         )
     )
     uv_path = shutil.which("uv")
@@ -381,9 +427,25 @@ def _credential_summary(credential: ResolvedCredential) -> dict[str, Any]:
     return summary
 
 
-def _compatibility(server_version: str) -> dict[str, str | bool]:
+def _compatibility_warning(compatibility: dict[str, str | bool]) -> str | None:
+    """Return a non-blocking warning for uncertain or incompatible versions."""
+    status = compatibility["status"]
+    if status == "major_version_mismatch":
+        return "The client and server major versions differ; commands are not blocked."
+    if status == "unknown":
+        return (
+            "Client/server compatibility could not be determined; commands are not "
+            "blocked."
+        )
+    return None
+
+
+def _compatibility(
+    server_version: str, *, client_version: str | None = None
+) -> dict[str, str | bool]:
     """Compare installed and server major versions conservatively."""
-    client_version = package_version()
+    if client_version is None:
+        client_version = package_version()
     try:
         compatible = Version(client_version).major == Version(server_version).major
         status = "compatible" if compatible else "major_version_mismatch"

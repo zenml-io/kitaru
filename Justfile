@@ -91,6 +91,10 @@ migration-check:
 build:
     uv build
 
+# Verify CLI optional dependencies from isolated wheel and sdist installations
+cli-artifact-smoke:
+    uv run --no-sync python scripts/smoke_cli_artifacts.py
+
 # Download/extract a local Kitaru UI bundle for manual login/smoke testing.
 # Defaults to the latest stable kitaru-ui-v* release.
 # Pass UI_TAG=kitaru-ui-v0.2.0 to pin a stable release.
