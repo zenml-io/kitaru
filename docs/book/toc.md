@@ -5,64 +5,43 @@
 * [Welcome to Kitaru](README.md)
 * [Installation](getting-started/installation.md)
 * [Quickstart](getting-started/quickstart.md)
-* [Examples](getting-started/examples.md)
+* [Import your traces](getting-started/import-your-traces.md)
 * [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Core Concepts
 
 * [Overview](concepts/README.md)
-* [Executions — the recording](concepts/executions.md)
-* [Flows](concepts/flows.md)
-* [Checkpoints](concepts/checkpoints.md)
-* [Deployments](concepts/deployments.md)
-* [Wait, Input & Resume](concepts/wait-and-input.md)
-* [Logging & Metadata](concepts/logging.md)
+* [Agents & Sessions](concepts/agents-and-sessions.md)
+* [Replay](concepts/replay.md)
+* [Evaluators & Evaluations](concepts/evaluators.md)
+* [Cohorts](concepts/cohorts.md)
+* [Experiments](concepts/experiments.md)
+* [Workers](concepts/workers.md)
 * [Under the Hood](concepts/under-the-hood.md)
 
 ## Guides
 
-* [Debug and test on real runs](guides/replay-and-overrides.md)
+* [Replay a failure and fork it](guides/replay-and-overrides.md)
 * [Build a regression suite from production](guides/regression-suite.md)
-* [Import Langfuse Traces](guides/import-langfuse-traces.md)
-* [Scoring Executions](guides/scoring.md)
-* [Pause for a human approval](guides/wait-and-resume.md)
+* [Write an evaluator](guides/write-an-evaluator.md)
+* [Import Langfuse traces](guides/import-langfuse-traces.md)
+* [Tool policies](guides/tool-policies.md)
 * [Track cost and model usage](guides/llm-calls.md)
 * [Drive it from your coding agent](agent-native/mcp-server.md)
 
 ## Adapters
 
 * [Overview](adapters/README.md)
-* [Choose an Adapter](guides/choose-an-adapter.md)
 * [Pydantic AI](adapters/pydantic-ai.md)
-* [OpenAI Agents](adapters/openai-agents.md)
-* [Claude Agent SDK](adapters/claude-agent-sdk.md)
-* [Gemini Interactions](adapters/gemini-interactions.md)
-* [Google ADK](adapters/google-adk.md)
-* [LangGraph](adapters/langgraph.md)
 
-## Running in Production
+## Running the Server
 
-* [Deploy & Invoke](guides/deployments.md)
-  * [Containerization](guides/containerization.md)
 * [Run the Server](deploy/README.md)
   * [Docker](deploy/docker.md)
-  * [Helm](deploy/helm.md)
-* [Stacks](stacks/README.md)
-  * [Kubernetes Stacks](stacks/kubernetes-stacks.md)
-  * [Modal Stacks](stacks/modal-stacks.md)
-  * [Vertex Stacks](stacks/vertex-stacks.md)
-  * [SageMaker Stacks](stacks/sagemaker-stacks.md)
-  * [AzureML Stacks](stacks/azureml-stacks.md)
-  * [Log Store](stacks/log-store.md)
-* [Inspect & Manage Executions](guides/execution-management.md)
-  * [Persistent Artifacts](guides/artifacts.md)
-  * [Execution Logs](guides/execution-logs.md)
-  * [Live Events](guides/checkpoint-streaming.md)
-  * [Error Handling](guides/error-handling.md)
-* [Configuration](guides/configuration.md)
-  * [Authentication](guides/authentication.md)
-  * [Secrets](guides/secrets.md)
-  * [Agents](guides/agents.md)
+* [Workers in production](deploy/workers.md)
+* [Authentication & API keys](deploy/authentication.md)
+* [Secrets](deploy/secrets.md)
+* [Configuration](deploy/configuration.md)
 
 ## Project
 

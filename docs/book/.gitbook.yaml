@@ -9,24 +9,54 @@ structure:
   readme: README.md
   summary: toc.md
 
-# Old URLs → current file locations. Adapter pages moved out of the former
-# `guides/<x>-adapter` location into the dedicated `adapters/` section; keep
-# these so existing inbound links resolve. Most other slugs are unchanged from
-# the previous FumaDocs site.
+# Old URLs → current file locations. Keep every removed or moved page here so
+# existing inbound links resolve.
 redirects:
-  guides/projects: guides/agents.md
+  guides/projects: concepts/agents-and-sessions.md
   guides/pydantic-ai-adapter: adapters/pydantic-ai.md
-  guides/openai-agents-adapter: adapters/openai-agents.md
-  guides/claude-agent-sdk-adapter: adapters/claude-agent-sdk.md
-  guides/gemini-interactions-adapter: adapters/gemini-interactions.md
-  guides/langgraph-adapter: adapters/langgraph.md
+  guides/openai-agents-adapter: adapters/README.md
+  guides/claude-agent-sdk-adapter: adapters/README.md
+  guides/gemini-interactions-adapter: adapters/README.md
+  guides/langgraph-adapter: adapters/README.md
   concepts: concepts/README.md
   adapters: adapters/README.md
-  stacks: stacks/README.md
-  # Vision restructure: merged and moved pages.
+  stacks: deploy/README.md
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md
-  getting-started/deploy: guides/deployments.md
+  getting-started/deploy: deploy/README.md
   agent-native/claude-code-skill: agent-native/mcp-server.md
-  guides/secrets-and-model-registration: guides/secrets.md
-
+  guides/secrets-and-model-registration: deploy/secrets.md
+  # v2 restructure: retired v1 runtime pages and moved operations pages.
+  getting-started/examples: getting-started/quickstart.md
+  concepts/executions: concepts/agents-and-sessions.md
+  concepts/flows: concepts/agents-and-sessions.md
+  concepts/checkpoints: concepts/agents-and-sessions.md
+  concepts/deployments: concepts/README.md
+  concepts/wait-and-input: concepts/README.md
+  concepts/logging: concepts/agents-and-sessions.md
+  guides/scoring: guides/write-an-evaluator.md
+  guides/wait-and-resume: concepts/README.md
+  guides/deployments: deploy/README.md
+  guides/containerization: deploy/README.md
+  guides/checkpoint-streaming: concepts/agents-and-sessions.md
+  guides/execution-management: concepts/agents-and-sessions.md
+  guides/artifacts: concepts/agents-and-sessions.md
+  guides/execution-logs: getting-started/troubleshooting.md
+  guides/error-handling: guides/replay-and-overrides.md
+  guides/choose-an-adapter: adapters/README.md
+  guides/agents: concepts/agents-and-sessions.md
+  guides/configuration: deploy/configuration.md
+  guides/authentication: deploy/authentication.md
+  guides/secrets: deploy/secrets.md
+  adapters/openai-agents: adapters/README.md
+  adapters/claude-agent-sdk: adapters/README.md
+  adapters/gemini-interactions: adapters/README.md
+  adapters/google-adk: adapters/README.md
+  adapters/langgraph: adapters/README.md
+  stacks/kubernetes-stacks: deploy/README.md
+  stacks/modal-stacks: deploy/README.md
+  stacks/vertex-stacks: deploy/README.md
+  stacks/sagemaker-stacks: deploy/README.md
+  stacks/azureml-stacks: deploy/README.md
+  stacks/log-store: deploy/README.md
+  deploy/helm: deploy/README.md

@@ -1,289 +1,86 @@
 ---
-description: How a run is recorded — server, runner, execution targets — and where Kitaru sits in an agent stack.
+description: The machinery behind the loop — a FastAPI server on Postgres, workers claiming tasks, and where Kitaru sits beside your observability stack.
 icon: gears
 ---
 
 # Under the Hood
 
-An [execution](executions.md) is a faithful recording because of how a run is
-wired: a **Kitaru flow is a dynamic ZenML pipeline**, a **checkpoint is like a
-step**, and the machinery that records and replays them is the same machinery
-that runs your ZenML pipelines. There is no separate agent runtime to operate.
-
-The difference from a classical pipeline is that a flow's shape is decided at
-runtime by the agent, not fixed in advance. Each `@checkpoint` you cross records
-its inputs and output as a durable unit. That recording is what the rest of
-Kitaru is built on — replay, resume, wait, and diff all read it back.
-
-## Components
-
-When you call `.run()` on a flow, three things work together to make it durable:
-the **Kitaru server** (shared metadata, auth, deployment registry), the
-**runner** (per-run durable control flow), and one or more **execution targets**
-(where each checkpoint's code actually executes). During local development all
-three collapse into a single Python process. In production they separate across
-your infrastructure.
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/components.png" alt="The Kitaru server, runner, and execution targets and how they relate."><figcaption></figcaption></figure>
-
-Kitaru separates **durable control flow** from **code execution**:
-
-* The **Kitaru server** stores shared metadata, deployment snapshots, checkpoint
-  state, execution logs, and control-plane data.
-* For each run, a **runner** (the durable brain of an execution) executes the
-  selected flow snapshot, manages checkpoint order, persists state, and handles
-  retry, replay, resume, and wait.
-* Individual checkpoints can run **inline** in the runner or in an **isolated**
-  runtime (a separate container, Kubernetes job, or cloud job on the configured
-  stack). The runner/target split is also where sandboxes, external tools, and
-  custom compute backends conceptually plug in — the two shipped execution
-  targets today are `inline` and `isolated`.
-
-{% hint style="info" %}
-**Key idea.** The runner owns the durable run: checkpoint order, state, retry,
-replay, resume, and wait. Execution targets do the work. **Checkpoints are the
-contract between the two.**
-{% endhint %}
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/execution-architecture.png" alt="Execution architecture: the runner delegates checkpoint work to inline or isolated execution targets."><figcaption></figcaption></figure>
-
-## Control / orchestration / execution
-
-Kitaru splits runtime responsibilities into three planes.
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/three-planes.png" alt="The control, orchestration, and execution planes of a Kitaru run."><figcaption></figcaption></figure>
-
-| Plane | What lives here | Responsibility |
-|---|---|---|
-| **Control plane** | Kitaru server, UI, metadata DB, deployment registry, CLI/SDK/MCP APIs, auth and credential brokering | Knows what exists and who can call what |
-| **Orchestration plane** | The runner for a single execution | Owns durable control flow for one run |
-| **Execution plane** | Inline process or isolated container (shipped today); sandboxes, external tools, and custom backends are conceptual extensions of the same contract | Performs work |
-
-The control plane is long-lived and shared. The orchestration plane is per-run
-and durable. The execution plane is where your code (and your agent's code)
-actually executes.
-
-## What runs where?
-
-The most common confusion is which component runs user code. This table makes it
-explicit.
-
-| Component | What it does | Runs user code? |
-|---|---|---|
-| Kitaru server (control plane) | Stores deployment registry, execution metadata, checkpoint state, log metadata, auth and session state | **No** |
-| Runner (orchestration plane) | Runs the selected flow snapshot, controls checkpoint order, persists durable state, handles retry / replay / resume / wait | **Yes**, for inline checkpoints |
-| Inline execution | Runs a checkpoint inside the runner process/pod | Yes |
-| Isolated runtime | Runs a checkpoint in a separate container, job, pod, or remote compute backend | Yes |
-| Sandbox (conceptual) | The same contract as isolated, tightened with stronger isolation or restricted egress. Not a shipped Kitaru execution target today — provided via adapters / your platform. | Yes, where integrated |
-| External tool / MCP server | Performs work through a remote API or capability | Outside Kitaru |
-| Metadata store | Stores runs, versions, checkpoint statuses, replay lineage | No |
-| Artifact / state store | Stores checkpoint outputs, files, logs, replay lineage | No |
-
-## The run, step by step
-
-Here is what actually happens when a consumer invokes a flow.
-
-{% stepper %}
-{% step %}
-**Request arrives.** A user, service, or upstream agent calls the Kitaru
-invocation API (via CLI, SDK, MCP, or HTTP).
-{% endstep %}
-
-{% step %}
-**Server resolves the flow.** The server authenticates the caller, resolves the
-target flow (and optionally a version or tag), validates the input schema, and
-creates a run record plus a `FlowHandle`.
-{% endstep %}
-
-{% step %}
-**Runner starts.** The control plane schedules a runner on your configured stack
-— a Kubernetes pod, a cloud job, or the local process in dev. The runner loads
-the selected flow snapshot.
-{% endstep %}
-
-{% step %}
-**Runner executes checkpoints in order.** For each checkpoint, the runner either
-executes inline or delegates to an isolated target. It waits for the result,
-persists the output to the artifact/state store, and advances.
-{% endstep %}
-
-{% step %}
-**State is durable the entire time.** If a checkpoint fails, if the runner dies,
-or if a `kitaru.wait()` suspends the run, the server retains everything needed to
-retry, replay, or resume later.
-{% endstep %}
-
-{% step %}
-**Consumer observes results.** The caller uses the returned `FlowHandle` (or the
-UI / CLI / SDK / MCP) to tail logs, inspect checkpoints, provide human input,
-replay, or cancel.
-{% endstep %}
-{% endstepper %}
-
-## Runner vs sandbox
-
-This is the idea that tends to click last and matter most.
-
-> The runner is the durable brain of a run.<br>
-> The sandbox (or isolated runtime) is the hands that perform work.
-
-If a sandbox dies mid-execution — a container evicted, a network partition, a pod
-OOM — **the runner still holds durable checkpoint state** and can retry that
-single checkpoint, resume from the last known boundary, or replay the run with a
-modified input or code version. The sandbox's failure is localized to the
-checkpoint that was executing, not the whole agent.
-
-This is why platform teams should not confuse "I have a sandbox provider" with "I
-have durable execution". A sandbox is a bounded execution environment. Durable
-execution is a property of the surrounding runner — and of the checkpoints it
-persists.
-
-## Inline vs isolated checkpoints
-
-Every checkpoint picks an execution target. Two are built in today: `inline`
-(same process as the runner) and `isolated` (a separate container or job on the
-configured stack). Code examples, decision rules for when to reach for
-`isolated`, and the interaction with `.submit()` live on the
-[Checkpoints page](checkpoints.md#isolated-runtime).
-
-## A failed checkpoint is durable context
-
-In classical pipelines, a failed step is a crash. In Kitaru, a failed checkpoint
-is **durable context** — something the runner, the agent loop, a human, or a
-retry policy can reason about.
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/failed-checkpoint.png" alt="A failed checkpoint is persisted as a typed artifact the runner, agent, or human can act on."><figcaption></figcaption></figure>
-
-Because a failing checkpoint's error is persisted as a typed artifact, a
-downstream consumer has several real options:
-
-* Retry the same checkpoint with the same input
-* [Replay](../guides/replay-and-overrides.md) the run from a checkpoint with one
-  input overridden (e.g. a corrected document id or a different model)
-* Replay with modified code (e.g. a new retrieval strategy)
-* Feed the error artifact back into the agent loop so it can self-correct
-* Wait for a human to provide a correction via `kitaru.wait()`, then resume
-
-This is what "agent-native error handling" means in practice: failures become
-data, durable state survives them, and the same recorded run can be re-executed
-with one thing changed.
-
-## Where Kitaru sits in an agent stack
-
-Agent tooling spans four layers, and Kitaru is one of them — the **runtime**.
-Knowing which layer is which answers most "is Kitaru a competitor to X?"
-questions.
-
-<figure><img src="https://assets.kitaru.ai/docs/diagrams/harness-runtime-platform.png" alt="The four layers of an agent stack: model, harness, runtime, and platform."><figcaption></figcaption></figure>
-
-* **Model layer** — the LLM itself, picked per-call or per-agent.
-* **Harness layer** — the loop around the model: prompts, tools, context
-  management, structured outputs. Picked per-agent or per-team (PydanticAI,
-  OpenAI Agents SDK, LangGraph, Claude Agent SDK, raw Python).
-* **Runtime layer** — how the agent survives, executes, and improves over time:
-  durable checkpoints, faithful replay, cross-run diff, resume, wait states,
-  versioned deployments, artifact and state handling, execution placement. This
-  is Kitaru.
-* **Platform layer** — how your organization governs: auth, entitlements,
-  interceptors, observability, product UI, policy. Usually your existing stack.
-
-Kitaru gives platform teams the durable execution primitives — record, replay,
-diff — that attach to the harness their app teams picked and the platform their
-org already runs. It is not a harness, and it is not a packaged platform.
-
-### What Kitaru owns vs integrates with
-
-| Concern | Kitaru owns? | Kitaru's stance |
-|---|---|---|
-| Checkpoint / faithful replay / cross-run diff / resume | Yes | Core product — the run/replay/improve loop |
-| Flow versioning and invocation routing | Yes | Core product |
-| Execution placement per checkpoint | Yes, as config | `@checkpoint(runtime="isolated")` today; richer policy evolving |
-| Sandbox implementation | No | Provide adapters; don't mandate a vendor |
-| Secrets storage | Partly | Alias-linked secret resolution for `kitaru.llm()`; integrate with your secret manager |
-| Auth to invoke flows | Yes | Workspace keys / service accounts; no per-deployment tokens |
-| Enterprise entitlements / RBAC | No | Integrate with your platform |
-| Network egress policy | No | Determined by the execution target your stack provides |
-| Interceptors / guardrails | No | Harness or your platform owns this |
-| Observability | Partly | Runtime metadata, logs, artifact lineage; integrate with your tracing |
-
-The line to remember: durability without execution policy is not enough for
-production agents — but Kitaru makes policy **attachable** to execution
-boundaries rather than mandating the policy itself.
-
-### The split in code
-
-A Python research agent, with each layer doing its part:
-
-```python
-from kitaru import flow, checkpoint, wait
-
-@checkpoint
-def plan(question: str) -> dict:
-    # Harness (Pydantic AI / raw LLM / whatever) lives INSIDE the checkpoint.
-    return pydantic_agent.run_sync(question).output
-
-@checkpoint
-def retrieve(plan: dict) -> list[dict]:
-    return search_docs(plan)
-
-@checkpoint
-def synthesize(docs: list[dict]) -> str:
-    return claude_agent.answer(docs)
-
-@flow
-def research_agent(question: str) -> str:
-    p = plan(question)
-    docs = retrieve(p)
-    approved = wait(name="approve", question="Looks right?", schema=bool)
-    return synthesize(docs) if approved else "rejected"
-```
-
-* **Harness** decides how `plan`, `retrieve`, and `synthesize` reason.
-* **Kitaru runtime** decides what is durable, what waits, and where each
-  checkpoint runs — so you can replay a real run from any checkpoint with one
-  input changed and diff it against the baseline.
-* **Your platform** decides who can invoke `research_agent`, which stack it runs
-  on, and what gets logged where.
-
-Kitaru can be used directly through its invocation API, or placed **behind** your
-existing platform/gateway: you keep your auth, entitlements, interceptors,
-observability, and UI, and Kitaru handles the durable execution layer underneath.
-
-## Local development
-
-When you are developing locally, all three components run inside a single Python
-process on your machine. The server is embedded — no separate service to start,
-no database to configure. Checkpoint outputs are written to your local
-filesystem.
-
-This means you can install Kitaru, run `kitaru init`, and have a fully working
-durable execution environment in under a minute. Your flows behave exactly the
-same as they will in production — same checkpointing, same replay, same
-observability — just without the cloud infrastructure underneath.
-
-Optionally, you can run a
-[local server and UI](../getting-started/installation.md#local-ui) to browse
-executions in a web UI.
-
-## Production
-
-In production, the three components separate across your infrastructure:
-
-* The **server** runs as a long-lived Kubernetes pod (deployed via
-  [Helm](../deploy/helm.md)). It stores execution state in a database and serves
-  the UI. Your whole team connects to it.
-* The **runner** runs on the compute backend defined by your
-  [stack](../stacks/README.md) — Kubernetes, Vertex AI, SageMaker, AzureML. When
-  you call `.run()`, the client fetches short-lived credentials from the server
-  and dispatches the execution directly to the compute backend. The runner
-  executes your checkpoints and writes outputs to cloud storage. If the execution
-  crashes, replay picks up from the last completed checkpoint.
-* **Artifacts and state** live in your own S3 / GCS / Azure Blob bucket. The
-  server tracks metadata but does not access storage directly; when a client
-  needs to read files, it fetches temporary credentials brokered by the server.
-
-There is no mandatory SaaS control plane in the path of your agent's data.
-
-## Related
-
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Executions — the recording</strong></td><td>What a finished run leaves behind.</td><td><a href="executions.md">executions.md</a></td></tr><tr><td><strong>Flows</strong></td><td>The boundary that produces an execution.</td><td><a href="flows.md">flows.md</a></td></tr><tr><td><strong>Checkpoints</strong></td><td>The contract between the runner and execution targets.</td><td><a href="checkpoints.md">checkpoints.md</a></td></tr><tr><td><strong>Wait, Input &#x26; Resume</strong></td><td>Pause a run, release compute, resume when input arrives.</td><td><a href="wait-and-input.md">wait-and-input.md</a></td></tr></tbody></table>
+You can use Kitaru without reading this page. Read it when you want to know
+what actually happens between "start a replay" and "read the diff" — or
+when you're deciding where Kitaru sits in your stack.
+
+## Two processes, one contract
+
+Kitaru is a **server** and your **workers**.
+
+The server is a single FastAPI service backed by Postgres. It stores every
+resource — agents, sessions and their nodes, cohorts, evaluators,
+experiments, replays, secrets, tags — and exposes them over a plain
+versioned REST API (`/v1/...`). It coordinates work but executes none of
+it: there is no code execution on the server, ever.
+
+[Workers](workers.md) run in your environment and pull work from the
+server. Everything that executes — a replayed agent, an evaluator, an
+importer parsing a trace export — runs as a subprocess of a worker, next
+to your credentials, packages, and network. The server never needs access
+to your model providers or your tools.
+
+Between them sits the **job/task** layer. Commands like "replay this
+session," "import this export," or "score these sessions" create a job
+holding one or more tasks. Workers claim tasks (scoped by kind or label),
+heartbeat while running them, and report results. Crashed workers lose
+their claim; the server requeues or fails the task, so no replay is ever
+silently stranded. `kitaru job watch <id>` follows any of it live.
+
+## How a replay actually works
+
+1. `POST /v1/replays` stores the replay — baseline session, agent version,
+   override, tool policy, evaluators — and creates its job with one agent
+   task.
+2. A worker claims the task and starts your agent from the agent version's
+   run spec command, with the baseline's inputs (rewritten by the override,
+   if any) and `KITARU_REPLAY_ID` in the environment.
+3. Your agent runs for real. The adapter sees `KITARU_REPLAY_ID`, fetches
+   the override and tool policy, applies model swaps at the model-call
+   boundary, and answers tool calls per policy — a `history` policy looks
+   up the recorded result by a hash of the tool name and arguments.
+4. The re-run records a fresh session, node by node, `origin: replay`.
+5. When the agent task completes, the server appends one evaluator task per
+   configured evaluator; workers score the result session (and, with
+   `evaluate_baselines`, the baseline).
+6. The job settles, the replay settles, and — inside an experiment run —
+   the run's progress advances. Results are stored rows: the result
+   session, its nodes, its evaluations.
+
+An [experiment run](experiments.md) is this pipeline fanned out once per
+session in a cohort version. Nothing about scale changes the mechanics.
+
+## Storage and blobs
+
+Session payloads (inputs, outputs, node payloads) live in Postgres.
+Uploaded artifacts — trace exports to import, script plugin code — are
+**blobs**: content-addressed by SHA-256, deduplicated, capped by a server
+setting. Workers cache blobs locally by hash, so a hundred evaluator runs
+fetch the evaluator's code once.
+
+Auth is deliberately simple: [API keys](../deploy/authentication.md)
+(`KITKEY_` prefix) or a login token, one trusted team per deployment.
+Ownership records who created a resource; it does not gate access.
+
+## Where Kitaru sits in your stack
+
+Kitaru is a debugger with a memory, sitting **beside** your observability
+stack, not replacing it. Langfuse, LangSmith, or Braintrust remain your
+system of record for traces; Kitaru holds runnable copies of the runs you
+care about and the machinery to re-execute and score them. The
+[import path](../getting-started/import-your-traces.md) is exactly that
+bridge.
+
+On the other side, Kitaru deliberately does **not** run your production
+agent. Your agent runs wherever it runs today; the adapter records it.
+Durable execution of agents in production is [ZenML](https://docs.zenml.io)'s
+job — ZenML runs agents durably; Kitaru replays and improves them.
+
+Everything here is open source (Apache 2.0) and
+[self-hosted](../deploy/README.md): your server, your Postgres, your
+workers, your data.

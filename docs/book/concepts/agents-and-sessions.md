@@ -1,0 +1,119 @@
+---
+description: The agent is the identity, the session is the recording — every model call, tool call, and decision a run left behind.
+icon: film
+---
+
+# Agents & Sessions
+
+Most traces are transcripts: you read them. A Kitaru **session** is a
+recording you can run. It holds everything one agent run did — every model
+call, tool call, and decision, in order, with inputs and outputs — and that
+is exactly what [replay](replay.md) needs to re-execute the run against your
+real code.
+
+Two nouns carry the whole data model:
+
+* An **agent** is the stable identity your runs attach to. You register it
+  once, and every session, cohort, and experiment references it.
+* A **session** is one recorded run of that agent. Sessions arrive three
+  ways — recorded live by an adapter, [imported](../getting-started/import-your-traces.md)
+  from your existing traces, or produced by a replay — and all three are the
+  same object with a different `origin` (`recorded`, `imported`, `replay`).
+
+## Agents and agent versions
+
+Register an agent with the CLI:
+
+```bash
+kitaru agent register support-agent \
+  --command "python support.py" \
+  --description "Resolves support tickets"
+```
+
+This creates the agent and its first **agent version** in one step. A version
+pins what "the agent" meant at a point in time: a run spec (the command that
+starts your agent, its working directory, environment, secrets, and timeout)
+plus optional capability metadata (tools, MCP servers, skills). The run spec
+is what a [worker](workers.md) executes when a replay or experiment re-runs
+the agent in your environment.
+
+Versions are server-numbered (1, 2, 3, …); `--display-version` attaches your
+own label — a semver, a git SHA, a branch name:
+
+```bash
+kitaru agent version register support-agent \
+  --command "python support.py" \
+  --display-version "pr-1284"
+```
+
+Register a new version when the code changes; an
+[experiment](experiments.md) is precisely "replay this cohort on that agent
+version and see what moved."
+
+## What a session records
+
+A session carries its top-level `inputs`, `outputs`, `status`
+(`in_progress` / `completed` / `failed`), timing, and rolled-up totals:
+`cost`, `tokens` (input / output / cached / reasoning), `llm_call_count`,
+and `tool_call_count`. An optional `expected` field holds a reference answer
+for evaluators to compare against.
+
+The step-by-step recording lives in the session's **nodes** — an ordered
+tree with one node per event:
+
+| Node type | What it records |
+|---|---|
+| `llm_call` | Requested and resolved model, inputs and outputs, token usage, cost, model params |
+| `tool_call` | Tool name, arguments, result — plus the cache key replay uses to answer the same call from the recording |
+| `subagent_call` | A delegated run by a sub-agent |
+| `span` | Any other grouping the adapter or importer wants to preserve |
+
+Adapters record nodes automatically. The
+[PydanticAI adapter](../adapters/pydantic-ai.md) batches them to the server
+as the run progresses; importers write the same structure from your existing
+traces. There is one shape, so replay and evaluators never care where a
+session came from.
+
+## Reading sessions back
+
+The Python client is async; every resource follows the same
+`list` / `iter` / `get` pattern:
+
+```python
+import asyncio
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.session import SessionListParams
+
+async def main() -> None:
+    client = KitaruAPIClient.from_env()  # KITARU_API_URL, KITARU_API_KEY
+    page = await client.sessions.list(SessionListParams())
+    for session in page.items:
+        print(session.id, session.origin, session.status, session.cost)
+
+    nodes = await client.sessions.list_nodes(page.items[0].id, include_payloads=True)
+    for node in nodes.items:
+        print(node.index, node.node_type, node.name)
+
+asyncio.run(main())
+```
+
+Node payloads (inputs, outputs) are returned only when you ask
+(`include_payloads=True`); listings stay cheap by default.
+
+Sessions attach to the rest of the system by reference: a
+[cohort version](cohorts.md) pins a set of session ids, an
+[evaluation](evaluators.md) row scores one session, and a
+[replay](replay.md) points at its baseline session and produces a result
+session. Tags (`kitaru`'s generic labels) group sessions ad hoc before they
+graduate into a cohort.
+
+## Where sessions come from
+
+* **Recorded** — wrap your agent with an adapter and run it as usual. See
+  the [Quickstart](../getting-started/quickstart.md).
+* **Imported** — bring the traces you already collect. Langfuse stays your
+  system of record; Kitaru gets a runnable copy. See
+  [Import your traces](../getting-started/import-your-traces.md).
+* **Replay** — every replay produces a new session with `origin: replay`,
+  scored by the same evaluators as any other session. See
+  [Replay](replay.md).

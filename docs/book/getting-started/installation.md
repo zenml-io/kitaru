@@ -1,103 +1,88 @@
 ---
-description: Install Kitaru with uv or pip
+description: Install the Kitaru SDK and CLI, start a local server, and log in.
 icon: download
 ---
 
 # Installation
 
-Install Kitaru to run, replay, and improve agents from your own environment. One package gives you the SDK, the CLI, and an optional local server and UI, all running on the same stacks and dashboard as ZenML pipelines.
+Kitaru is three installable pieces: the **SDK + CLI** in your project, a
+**server** your team shares (self-hosted, one per team), and **workers**
+that execute replays and evaluations in your environment. For a first
+session on one machine, all three run locally.
 
 Kitaru requires **Python 3.11 or newer**.
 
-You can verify your interpreter with:
-
-```bash
-python --version
-```
+## Install the SDK and CLI
 
 {% tabs %}
 {% tab title="uv (recommended)" %}
 ```bash
-uv add kitaru
+uv add "kitaru[cli,pydantic-ai]"
 ```
 {% endtab %}
 
 {% tab title="pip" %}
 ```bash
-pip install kitaru
+pip install "kitaru[cli,pydantic-ai]"
 ```
 {% endtab %}
 {% endtabs %}
-
-This gives you the full SDK, CLI, and everything you need to run flows locally.
-
-## Optional extras
 
 | Extra | What it adds |
 |---|---|
-| `local` | Local server and UI for browsing executions in a local web UI |
-| `mcp` | MCP server for querying executions from AI assistants |
-| `modal` | Python dependencies needed to create and validate Modal-backed stacks |
-| `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
-| `openai` | OpenAI SDK for `kitaru.llm()` calls to OpenAI models |
-| `anthropic` | Anthropic SDK for `kitaru.llm()` calls to Claude models |
-| `llm` | Both `openai` and `anthropic` provider packages in one install |
+| `cli` | The `kitaru` command — login, registration, workers, jobs |
+| `pydantic-ai` | The PydanticAI adapter that records your agent's runs |
+| `worker` | Run a worker in this environment (`kitaru worker start`) |
+| `server` | Run the Kitaru server itself from this package |
+
+The plain `kitaru` package is the SDK alone — the async client and the
+API models — which is all a production service needs to record sessions.
+
+## Start a local server
+
+The server is FastAPI + Postgres. For local use, the repository ships a
+Docker Compose file:
 
 ```bash
-uv add "kitaru[mcp,pydantic-ai,local]"
-# or: pip install "kitaru[mcp,pydantic-ai,local]"
-
-# Modal stacks: uv add "kitaru[modal]"
-# or: pip install "kitaru[modal]"
-
-# Provider extras: uv add "kitaru[openai]"
-# or: pip install "kitaru[openai]"
+git clone https://github.com/zenml-io/kitaru.git
+cd kitaru
+docker compose up -d
 ```
 
-The `modal` extra does not create Modal tokens, Docker registry logins, cloud
-credentials, buckets, or registries. It only installs the Python packages Kitaru
-needs to validate and create Modal stack components.
+The server listens on `http://localhost:8000`. For a shared deployment —
+your own Postgres, real auth, TLS — see
+[Run the Server](../deploy/README.md).
 
-If you use Claude Code or another MCP-capable assistant, install
-`kitaru[mcp]` so your assistant can query executions, inspect logs and
-artifacts, provide input to waiting runs, and drive replays and diffs through
-structured tool calls. This is what lets a coding agent hill-climb on your
-runs. See [MCP Server](../agent-native/mcp-server.md) for setup.
-
-## Verify Installation
-
-{% tabs %}
-{% tab title="uv project" %}
-```bash
-uv run kitaru --version
-uv run kitaru --help
-```
-{% endtab %}
-
-{% tab title="pip environment" %}
-```bash
-kitaru --version
-kitaru --help
-```
-{% endtab %}
-{% endtabs %}
-
-## Local UI
-
-If you installed the `local` extra, you can start a local server with a web
-UI for browsing executions:
+## Log in
 
 ```bash
-kitaru login
+kitaru login --local          # http://localhost:8000
+kitaru status
 ```
 
-This launches the Kitaru server on your machine and opens the UI in your
-browser. You can inspect flows, checkpoints, logs, and artifacts from any
-execution you have run locally.
+`kitaru login <url>` connects to a shared server instead. For
+non-interactive use (CI, production services), create an API key and set
+two environment variables — the SDK, the CLI, and workers all read them:
 
-## Next Steps
+```bash
+export KITARU_API_URL="http://localhost:8000"
+export KITARU_API_KEY="KITKEY_..."
+```
 
-Head to the [Quickstart](quickstart.md) to explore what's
-available, see [Execution management](../guides/execution-management.md)
-for lifecycle operations, or open [MCP Server](../agent-native/mcp-server.md)
-for assistant-native querying.
+See [Authentication & API keys](../deploy/authentication.md) for how keys
+are issued and managed.
+
+## Verify
+
+```bash
+kitaru version
+kitaru doctor
+```
+
+`kitaru doctor` checks the connection and reports what it finds.
+
+## Next steps
+
+Head to the [Quickstart](quickstart.md) to record and replay your first
+run — or, if you already collect traces elsewhere, start with
+[Import your traces](import-your-traces.md).

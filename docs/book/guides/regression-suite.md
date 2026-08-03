@@ -1,175 +1,168 @@
 ---
-description: Replay a cohort of recent executions against your working tree, tag the batch, and rank the results.
+description: Freeze a cohort of real runs, replay it against every change, and gate your CI on what production already taught you.
 icon: vials
 ---
 
 # Build a regression suite from production
 
-One replay tells you about one run. A hundred replays tell you whether a change is
-safe to ship. Because every [execution](../concepts/executions.md) is a
-reproducible test case, a slice of production traffic is the eval suite you never
-had to write: replay last week's real runs against the code in your working tree,
-tag the batch, and see what moved. **The cohort is a regression test.**
+One replay tells you about one run. A hundred replays tell you whether a
+change is safe to ship. The insight this guide operationalizes: **your
+production traces are your test suite** — every recorded or imported
+session is a test case with real inputs, a real decision path, and a
+known outcome. You never have to write synthetic fixtures again; you have
+to *select* well.
 
-This guide assumes you already know the single-run loop from
-[Debug and test on real runs](replay-and-overrides.md). Here you widen it.
+The loop: select a cohort → freeze it → make the change an experiment →
+replay and score → keep the winner → gate on it.
 
-## 1. Pick a cohort
+## 1. Select the population
 
-The simplest cohort is a recent slice of one flow:
+Pick the sessions that represent what you can't afford to break. List and
+filter by agent, status, or time; or start from the sessions a specific
+failure taught you about:
 
 ```python
-from kitaru import KitaruClient
+import asyncio
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.session import SessionListParams
 
-client = KitaruClient()
-
-recent = client.executions.list(flow="support_agent", status="completed", limit=50)
-exec_ids = [e.exec_id for e in recent]
+async def main() -> None:
+    client = KitaruAPIClient.from_env()
+    refund_runs = [
+        s.id
+        async for s in client.sessions.iter(SessionListParams(
+            filter=FilterCondition(field="agent_id", op=FilterOp.EQ, value=AGENT_ID),
+            size=100,
+        ))
+    ][:50]
 ```
 
-When you want only the runs that actually contain the checkpoint you plan to
-replay from, let Kitaru resolve the cohort for you. `executions.cohort(...)`
-filters to original executions that reached a given cut point, newest first:
+A good starting population is one week of traffic plus every session that
+ever triggered an incident. [Imported sessions](import-langfuse-traces.md)
+qualify exactly like recorded ones — your Langfuse history from before
+Kitaru existed is admissible evidence.
+
+## 2. Freeze it into a cohort version
 
 ```python
-cohort = client.executions.cohort(
-    flow="support_agent",
-    at="support-agent_model_request",
-    order_by="-started_at",
-    limit=50,
-).resolve()
+from kitaru.api_models.v1.cohort import CohortCreateRequest
+from kitaru.api_models.v1.cohort_version import CohortVersionCreateRequest
 
-print(len(cohort), "executions")
-```
-
-Cohort selection stays separate from replay: resolve the set, inspect it, then
-replay it.
-
-## 2. Replay the whole cohort with one change
-
-Pass the cohort straight to `replay` with the override you want to test and a
-`tag` that names the batch. A multi-execution replay submits without blocking and
-collects errors instead of stopping at the first one:
-
-```python
-submission = client.executions.replay(
-    cohort,
-    at="support-agent_model_request",
-    flow_overrides={"model": "openai/gpt-5-nano"},
-    tag="pr-1284-cheaper-model",
-    on_error="collect",
+cohort = await client.cohorts.create(
+    CohortCreateRequest(name="refund-regression", agent_id=AGENT_ID)
 )
-
-for row in submission.results:
-    print(row.original_exec_id, "->", row.replay_exec_id, row.status)
-
-for row in submission.skipped:
-    print("skipped", row.original_exec_ref, row.reason)
-```
-
-`on_error="collect"` records any source run that doesn't contain the `at`
-checkpoint in `submission.skipped` and keeps submitting the rest. The `tag` lets
-you find every replay in this experiment later, from the CLI, the dashboard, or
-execution statistics.
-
-{% hint style="info" %}
-`flow_overrides={"model": ...}` only swaps the model when your flow exposes
-`model` as a top-level input its checkpoints read. If the model is chosen inside
-a checkpoint or by an adapter, target the model request with a
-`checkpoint_overrides` or `invocation_overrides` entry instead. See
-[the override levels](replay-and-overrides.md#the-three-override-levels).
-{% endhint %}
-
-## 3. Diff and rank the results
-
-Diff every original against its discovered replays in one call:
-
-```python
-import kitaru
-
-matrix = kitaru.diff_cohort([row.original_exec_id for row in submission.results])
-for row in matrix.rows:
-    print(row.original_exec_id, row.urls)
-```
-
-`diff_cohort` (and its alias `diff_matrix`) returns a `CohortDiff` whose rows each
-compare one original against its replays, with per-checkpoint token and cost
-deltas measured as **replay minus original**. A negative cost delta across the
-cohort is your cheaper model paying off; a changed checkpoint status is where
-behavior moved.
-
-For an aggregate view of the tagged batch — total incurred cost, token volume,
-failure mix — use execution statistics rather than fetching every run:
-
-```python
-client.executions.statistics(
-    group_by=["status"],
-    metrics=["llm_display_cost", "llm_total_tokens"],
+version = await client.cohorts.create_version(
+    cohort.id,
+    CohortVersionCreateRequest(add_session_ids=refund_runs, display_version="week-32"),
 )
 ```
 
-{% hint style="info" %}
-Ranking by a quality judge is a pattern you build on top of replay, not a
-separate API: replay the cohort with your override, then score the replay outputs
-with whatever judge you already trust and aggregate the metrics yourself. Kitaru
-gives you the faithful reruns and the cost/latency deltas; the quality bar is
-yours to define.
-{% endhint %}
+[Cohort versions are immutable](../concepts/cohorts.md). That's what makes
+week-over-week numbers comparable: version 1 is always the same 50
+sessions, and "the suite got harder" is an explicit new version, not a
+silent drift.
 
-## 4. Gate CI on a frozen suite
+## 3. Make the change an experiment
 
-A batch that passed once should not depend on someone remembering to re-run
-it. When the replay was submitted through a registered Agent with a name, it
-persists as a durable experiment — the target set, the fork point, the
-scorers, the protections, and the [verdict](replay-and-overrides.md#verdicts-and-protections)
-are all frozen in the attempt. Rerunning it by name makes the current
-checkout the candidate while everything else stays constant, so the
-difference between attempts is your change and nothing else:
+The experiment holds everything about the change *except* the population:
 
 ```python
-import os
-
-from kitaru import RegressionLimits
-
-result = agent.replay(
-    experiment="support-refund-regression",     # the frozen suite, by name
-    idempotency_key=f"ci-{os.environ['GITHUB_SHA'][:12]}",
-    repeats=1,
-    scorers=[support_resolution],               # the objective, as a live callable
-    limits=RegressionLimits(max_trials=25, max_cost_usd=1.00),
+from kitaru.api_models.v1.experiment import ExperimentCreateRequest
+from kitaru.api_models.v1.replay_config import (
+    EvaluatorConfig, HistoryConfig, ReplayOverride, ToolPolicy,
 )
-result.assert_pass()                            # raises unless the verdict is PASS
+
+experiment = await client.experiments.create(
+    ExperimentCreateRequest(
+        name="cheaper-model",
+        override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
+        tool_policy=ToolPolicy(
+            default=HistoryConfig(scope="cohort_version", on_miss="fail")
+        ),
+        evaluators=[
+            EvaluatorConfig(evaluator="refund-check"),
+            EvaluatorConfig(evaluator="tone-judge"),
+        ],
+    )
+)
 ```
 
-Drop that in a pytest module and the suite is a merge gate: a change that
-reintroduces the old behavior fails a protection, the verdict refuses to
-pass, and the pull request is blocked. Two properties make this safe to wire
-into a pipeline. `RegressionLimits` is a hard spend ceiling — trials stop
-when the budget would be exceeded, and every verdict prints what it spent.
-And the commit-derived idempotency key makes retries free: a re-triggered CI
-job returns the stored attempt instead of paying for the model calls again.
-The cheap shape (one repeat, tight budget) runs per pull request; a wider
-sweep of the same suite can run nightly under a larger budget with the same
-four lines.
+Testing a **code** change instead? Leave `override` out entirely and
+register your branch as a new agent version — the run supplies it next.
+The `history` policy scoped to `cohort_version` answers tool calls from
+any recording in the cohort, and `on_miss="fail"` keeps 50 replays from
+touching a single live system.
 
-This works for imported suites too: a batch of Langfuse traces imported as
-executions and replayed through a registered adapter Agent freezes into the
-same kind of experiment, so production incidents collected in another tool
-end their life as merge gates here. See
-[Import Langfuse Traces](import-langfuse-traces.md) for that path.
+## 4. Run it and read it
 
-## The shape of the workflow
+```python
+from kitaru.api_models.v1.experiment_run import ExperimentRunCreateRequest
 
-1. **Select** a cohort — `executions.list(...)` for a raw slice, or
-   `executions.cohort(...).resolve()` to pre-filter to runs that reached your cut
-   point.
-2. **Replay** it with one override and a `tag`, `on_error="collect"`.
-3. **Diff** with `diff_cohort` for per-run deltas, and `executions.statistics` for
-   the aggregate.
-4. **Keep the winner** — promote the change if the cohort held, using
-   [Deploy & Invoke](deployments.md), and **pin the suite in CI** so the
-   regression can never quietly return.
+run = await client.experiments.start_run(
+    experiment.id,
+    ExperimentRunCreateRequest(
+        cohort_version_id=version.id,
+        agent_version_id=AGENT_VERSION_ID,   # e.g. your PR's registered version
+        evaluate_baselines=True,
+    ),
+)
+```
 
-## Related
+Workers fan out one replay per session; `run.progress` counts them
+through. When the run settles, every replay has a result session and both
+sides carry evaluations. Aggregate them the way the data types suggest —
+numbers average, booleans count into pass rates, labels diff as
+transitions:
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Debug and test on real runs</strong></td><td>The single-run loop, every override level, and reading a diff.</td><td><a href="replay-and-overrides.md">replay-and-overrides.md</a></td></tr><tr><td><strong>Inspect &#x26; Manage Executions</strong></td><td>Listing, statistics, and lifecycle actions in depth.</td><td><a href="execution-management.md">execution-management.md</a></td></tr><tr><td><strong>Track cost and model usage</strong></td><td>What each model call records, and how totals roll up.</td><td><a href="llm-calls.md">llm-calls.md</a></td></tr></tbody></table>
+```python
+from kitaru.api_models.v1.evaluation import EvaluationListParams
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.replay import ReplayListParams
+
+replays = [
+    r
+    async for r in client.replays.iter(ReplayListParams(
+        filter=FilterCondition(field="experiment_run_id", op=FilterOp.EQ, value=run.id)
+    ))
+]
+
+async def passed(session_id, name="refund_issued"):
+    async for e in client.evaluations.iter(EvaluationListParams(
+        filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
+    )):
+        if e.name == name:
+            return e.passed
+    return None
+
+baseline_pass = [await passed(r.baseline_session_id) for r in replays]
+fork_pass = [await passed(r.result_session_id) for r in replays]
+print(f"baseline: {sum(filter(None, baseline_pass))}/{len(replays)}")
+print(f"fork:     {sum(filter(None, fork_pass))}/{len(replays)}")
+```
+
+Add cost from the result sessions' rollups and the headline writes
+itself: *"gpt-5-nano held on 47 of 50 refund tickets and cut cost 41%; the
+3 misses are sessions #…, #…, #… — read those."* The misses are the
+point: each one is a concrete recorded run you can
+[replay and step through](replay-and-overrides.md), not a percentage.
+
+## 5. Gate on it
+
+The cohort that caught a failure becomes the gate that keeps it caught.
+In CI: register the PR's code as an agent version, start a run against
+the frozen cohort version, wait for it, and fail the build if the pass
+rate drops below the baseline's. A worker with
+`kitaru worker start --job-id ...` (or a long-running worker pool
+scoped to `--kinds evaluator` plus your agents' environment) executes the
+suite; `kitaru job watch` gives CI its exit code per job.
+
+<!-- TODO(v2-launch): a first-class `kitaru experiment run --wait` CLI verb
+     for CI gating is planned but not in the current CLI — verify before
+     publish and update this section to the shipped form. -->
+
+Keep two shapes: a small cohort per PR (the incidents plus a dozen
+representative runs), and the wide week-of-traffic sweep nightly. When a
+new failure ships anyway, the postmortem's last step is one line: add its
+session to the cohort — that's a new version — and it can never ship
+again unnoticed.

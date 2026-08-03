@@ -1,0 +1,83 @@
+---
+description: Accounts, logins, and KITKEY_ API keys — how people and processes authenticate to your Kitaru server.
+icon: key
+---
+
+# Authentication & API keys
+
+A Kitaru server is a **trusted-team deployment**: everyone authenticated
+can read and write everything, and ownership records who created a
+resource without gating access. Authentication decides who gets in, not
+who sees what — keep one server per trust boundary.
+
+Two schemes, set by `KITARU_SERVER_AUTH_SCHEME`:
+
+* `none` — no authentication. For local development only.
+* `local` — accounts with passwords and API keys, issued and checked by
+  the server itself. This is the mode for a shared deployment.
+
+## Logging in
+
+```bash
+kitaru login https://kitaru.internal.example.com
+```
+
+Interactive login uses a device flow — the CLI shows a short `XXXX-XXXX`
+code and opens your browser — or a password prompt. Credentials are
+stored per server **context**, so `kitaru context use` switches between
+servers cleanly. Non-interactive variants:
+
+```bash
+kitaru login https://... --username you --password-stdin
+kitaru login https://... --api-key-stdin
+kitaru logout            # this server; --all for every context
+```
+
+## API keys for processes
+
+Workers, CI, and production services authenticate with API keys — the
+`KITKEY_` prefix — passed through the environment everything reads:
+
+```bash
+export KITARU_API_URL="https://kitaru.internal.example.com"
+export KITARU_API_KEY="KITKEY_..."
+```
+
+Create a key with the Python client (the plaintext is returned exactly
+once, at creation):
+
+```python
+from kitaru.api_models.v1.api_key import ApiKeyCreateRequest
+
+issued = await client.api_keys.create(ApiKeyCreateRequest(name="ci-runner"))
+print(issued.key)        # shown once — store it in your secret manager
+```
+
+<!-- TODO(v2-launch): `kitaru api-key create` / `kitaru account` CLI verbs
+     are not in the current CLI — update to CLI commands if they land
+     before launch. -->
+
+Keys can be deactivated (`update` with `active=False`) and deleted;
+`last_used` on the key tells you which ones are dead. Give each consumer
+its own named key so revocation is surgical.
+
+## Accounts for the team
+
+Accounts are created through the API. An account created without a
+password returns a one-time **activation token**; hand it to the teammate
+and they set their own password:
+
+```python
+from kitaru.api_models.v1.account import AccountCreateRequest
+
+account = await client.accounts.create(AccountCreateRequest(name="dana"))
+print(account.activation_token)   # share once, out of band
+```
+
+Deactivating an account (`POST /v1/accounts/{id}/deactivate`) locks it
+out and mints a fresh activation token for later reinstatement. There is
+no account deletion — provenance on resources stays intact.
+
+The server bootstraps a `default` account on first start;
+`KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD` sets its initial password so
+your first `kitaru login` works.

@@ -64,6 +64,14 @@ regenerate.
 
 ## Style
 
-- Keep **Kitaru product terminology** (flow, checkpoint, stack, deployment) — do
-  not rewrite into ZenML internals (pipeline, step, orchestrator).
-- US English. Only document shipped features.
+- Keep **Kitaru v2 product terminology**: agent, agent version, session,
+  session node, replay, evaluator, evaluation, cohort, cohort version,
+  experiment, experiment run, worker, importer. The eval objects are
+  **evaluators/evaluations — never "scorers"/"scores" as nouns**. Traces are
+  **recorded** or **imported** — never "captured". Do not describe the retired
+  v1 runtime vocabulary (flow, checkpoint, stack, deployment, wait/HITL) as
+  current — durable execution belongs to ZenML, not Kitaru.
+- Langfuse, LangSmith, and Braintrust are complements, never competitors, in
+  docs copy ("Langfuse stays your system of record").
+- US English. Only document shipped features; mark anything ahead of the
+  launch build with a roadmap callout or a `<!-- TODO(v2-launch) -->` comment.
