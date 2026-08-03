@@ -117,6 +117,22 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         return row.to_domain()
 
+    async def create_many(self, tasks: list[Task]) -> list[Task]:
+        """Persist many new tasks in one round trip.
+
+        Args:
+            tasks: Tasks to store.
+
+        Returns:
+            Stored tasks with timestamps set, in the same order.
+        """
+        if not tasks:
+            return []
+        rows = [TaskORM.from_domain(task) for task in tasks]
+        self._session.add_all(rows)
+        await self._flush()
+        return [row.to_domain() for row in rows]
+
     async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:
         """Load a task by id.
 
@@ -351,6 +367,31 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         rows = (await self._session.scalars(statement)).all()
         return {row for row in rows if row is not None}
+
+    async def get_scored_evaluator_version_ids_many(
+        self, input_session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """Read the evaluator versions that already completed against each session.
+
+        Args:
+            input_session_ids: Ids of the scored sessions.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session, keyed by session id, sessions without one omitted.
+        """
+        if not input_session_ids:
+            return {}
+        statement = select(TaskORM.input_session_id, TaskORM.plugin_version_id).where(
+            TaskORM.input_session_id.in_(input_session_ids),
+            TaskORM.status == TaskStatus.COMPLETED.value,
+            TaskORM.plugin_version_id.is_not(None),
+        )
+        rows = (await self._session.execute(statement)).all()
+        scored: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for session_id, plugin_version_id in rows:
+            scored.setdefault(session_id, set()).add(plugin_version_id)
+        return scored
 
     async def get_agent_tasks_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]

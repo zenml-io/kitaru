@@ -427,6 +427,147 @@ async def test_start_run_creates_one_replay_per_cohort_session(
         assert bundle.replay.experiment_run_id == run.id
 
 
+async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
+    services: ReplayServices,
+) -> None:
+    """The batched fan-out gives each replay its own job holding one agent task."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id for session in sessions]
+    )
+
+    run, _ = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert len({bundle.replay.job_id for bundle in bundles}) == len(bundles)
+
+    baselines_by_id = {session.id: session for session in sessions}
+    for bundle in bundles:
+        baseline = baselines_by_id[bundle.replay.baseline_session_id]
+        tasks, _ = await services.task_service.list_tasks(
+            TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+        )
+        assert len(tasks) == 1
+        agent_task = tasks[0]
+        assert isinstance(agent_task, AgentTask)
+        assert agent_task.inputs == baseline.inputs
+        assert agent_task.env == {"KITARU_REPLAY_ID": str(bundle.replay.id)}
+        assert agent_task.labels == {"agent_version": str(agent_version.id)}
+        assert agent_task.on_failure is TaskOnFailure.ABORT
+
+
+async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
+    services: ReplayServices,
+) -> None:
+    """The batched fan-out skips baseline evaluator tasks per already-scored session."""
+    agent_version = await _agent_version_with_run_spec(services)
+    evaluator_a = await _evaluator_version(services, "accuracy")
+    evaluator_b = await _evaluator_version(services, "tone")
+    experiment, _ = await services.experiment_service.create_experiment(
+        ExperimentCreate(
+            name="exp1",
+            evaluators=[
+                EvaluatorConfigInput(evaluator="accuracy"),
+                EvaluatorConfigInput(evaluator="tone"),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    scored_session = await _baseline_session(services, agent_version)
+    unscored_session = await _baseline_session(services, agent_version)
+
+    prior_job = await create_job(services.jobs, ACTOR.account.id)
+    prior_task = await create_evaluation_task(
+        services.tasks,
+        prior_job.id,
+        plugin_version_id=evaluator_a.id,
+        input_session_id=scored_session.id,
+        on_failure=TaskOnFailure.CONTINUE,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.update_task(
+        prior_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            attempt=1,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=ACTOR,
+    )
+
+    cohort_version = await _cohort_version(
+        services,
+        agent_version.agent_id,
+        [scored_session.id, unscored_session.id],
+    )
+    run, _ = await services.experiment_service.start_run(
+        experiment.id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            evaluate_baselines=True,
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    bundles_by_baseline = {
+        bundle.replay.baseline_session_id: bundle for bundle in bundles
+    }
+
+    scored_tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundles_by_baseline[scored_session.id].replay.job_id),
+        actor=ACTOR,
+    )
+    scored_baseline_tasks = [
+        task
+        for task in scored_tasks
+        if isinstance(task, EvaluationTask)
+        and task.input_session_id == scored_session.id
+    ]
+    assert len(scored_baseline_tasks) == 1
+    assert scored_baseline_tasks[0].plugin_version_id == evaluator_b.id
+
+    unscored_tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundles_by_baseline[unscored_session.id].replay.job_id),
+        actor=ACTOR,
+    )
+    unscored_baseline_tasks = [
+        task
+        for task in unscored_tasks
+        if isinstance(task, EvaluationTask)
+        and task.input_session_id == unscored_session.id
+    ]
+    assert {task.plugin_version_id for task in unscored_baseline_tasks} == {
+        evaluator_a.id,
+        evaluator_b.id,
+    }
+
+
 async def test_start_run_rejects_an_empty_cohort_version(
     services: ReplayServices,
 ) -> None:

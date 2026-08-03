@@ -126,7 +126,7 @@ class TaskService:
         worker = await self._workers.get(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
-        await self._sweep_stale_tasks(now)
+        await self.sweep_stale_tasks(now)
         claimed = await self._repository.claim_pending(
             worker.scope, worker_id, max_tasks, now
         )
@@ -269,6 +269,31 @@ class TaskService:
             raise IllegalTaskStatusTransition(task_id, task.status, command.status)
         return await self._apply_status(task, transition)
 
+    async def sweep_stale_tasks(self, now: datetime) -> None:
+        """Settle or requeue in-flight tasks that stopped heartbeating.
+
+        Args:
+            now: Current time.
+        """
+        cutoff = now - timedelta(seconds=self._policy.heartbeat_timeout_seconds)
+        stale = await self._repository.claim_stale(
+            cutoff, self._policy.sweep_batch_limit
+        )
+        for task in stale:
+            if task.cancel_requested_at is not None:
+                await self._apply_status(task, partial(Task.cancel, now=now))
+            elif task.attempt < self._policy.retry_limit:
+                await self._unlink_result_session(task)
+                await self._apply_status(task, Task.requeue)
+            else:
+                error = (
+                    f"Task stopped reporting after {task.attempt} attempts "
+                    "and was abandoned"
+                )
+                await self._apply_status(
+                    task, partial(Task.abandon, error=error, now=now)
+                )
+
     async def _apply_status(
         self, task: Task, transition: Callable[[Task], None]
     ) -> Task:
@@ -334,31 +359,6 @@ class TaskService:
         session = await self._sessions.get(task.result_session_id)
         if session.status is not SessionStatus.COMPLETED:
             raise TaskResultSessionNotCompleted(task.id, session.id)
-
-    async def _sweep_stale_tasks(self, now: datetime) -> None:
-        """Settle or requeue in-flight tasks that stopped heartbeating.
-
-        Args:
-            now: Current time.
-        """
-        cutoff = now - timedelta(seconds=self._policy.heartbeat_timeout_seconds)
-        stale = await self._repository.claim_stale(
-            cutoff, self._policy.sweep_batch_limit
-        )
-        for task in stale:
-            if task.cancel_requested_at is not None:
-                await self._apply_status(task, partial(Task.cancel, now=now))
-            elif task.attempt < self._policy.retry_limit:
-                await self._unlink_result_session(task)
-                await self._apply_status(task, Task.requeue)
-            else:
-                error = (
-                    f"Task stopped reporting after {task.attempt} attempts "
-                    "and was abandoned"
-                )
-                await self._apply_status(
-                    task, partial(Task.abandon, error=error, now=now)
-                )
 
     async def _unlink_result_session(self, task: Task) -> None:
         """Free the result session slot a requeued attempt left behind.
