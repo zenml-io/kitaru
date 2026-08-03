@@ -78,6 +78,8 @@ When you work under `tests/`, also read `tests/AGENTS.md`.
 
 ## Docs
 
+- Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
+
 Kitaru docs live on three different surfaces:
 
 - Hand-written docs are GitBook Markdown in `docs/book/`, published to

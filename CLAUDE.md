@@ -142,6 +142,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 
 ## Conventions
 
+- Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
 - Python 3.11+
 - Type hint all function parameters and return values
 - Use modern type annotations: `list[str]` not `List[str]`, `str | None` not `Optional[str]`, `dict[str, int]` not `Dict[str, int]` — no `from typing import` for these
