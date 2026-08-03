@@ -13,13 +13,11 @@
 #  permissions and limitations under the License.
 """Control plane API client and the authentication it backs."""
 
-import asyncio
 import logging
-import random
 import uuid
 from collections.abc import Mapping
 from importlib.metadata import version
-from typing import Any, ClassVar
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -35,6 +33,7 @@ from kitaru.server.domain.account import (
     DuplicateAccountName,
 )
 from kitaru.server.domain.names import InvalidName, validate_account_name
+from kitaru.transport import RetryTransport
 
 logger = logging.getLogger(__name__)
 
@@ -46,27 +45,6 @@ SERVER_URL_HEADER = "zenml-server-url"
 
 class ControlPlaneError(Exception):
     """Raised when the control plane API cannot authorize a request."""
-
-
-class ControlPlaneAuthorizationError(ControlPlaneError):
-    """Raised when the control plane rejects the supplied credential."""
-
-
-class ControlPlaneUnavailableError(ControlPlaneError):
-    """Raised when the control plane cannot produce an authorization decision."""
-
-
-class ControlPlaneHTTPError(Exception):
-    """Internal HTTP status error used for retry decisions."""
-
-    def __init__(self, status_code: int) -> None:
-        """Create an HTTP status error.
-
-        Args:
-            status_code: HTTP response status code.
-        """
-        self.status_code = status_code
-        super().__init__(f"Control plane API returned HTTP {status_code}.")
 
 
 def _get_server_headers(settings: APISettings) -> dict[str, str]:
@@ -98,24 +76,11 @@ class ControlPlaneUser(BaseModel):
     id: uuid.UUID
     username: str | None = None
     email: str | None = None
-    is_active: bool = True
     is_service_account: bool = False
-    is_superuser: bool = False
 
 
 class ControlPlaneClient:
     """Call control plane API endpoints needed by a Kitaru server."""
-
-    _RETRY_STATUS_CODES: ClassVar[set[int]] = {408, 429, 502, 503, 504}
-    _RETRY_METHODS: ClassVar[set[str]] = {
-        "HEAD",
-        "GET",
-        "POST",
-        "PUT",
-        "PATCH",
-        "DELETE",
-        "OPTIONS",
-    }
 
     def __init__(self, settings: APISettings) -> None:
         """Create a control plane API client from server settings.
@@ -129,9 +94,17 @@ class ControlPlaneClient:
             max_connections=settings.CONTROL_PLANE_CONNECTION_POOL_SIZE,
             max_keepalive_connections=(settings.CONTROL_PLANE_CONNECTION_POOL_SIZE),
         )
-        transport = httpx.AsyncHTTPTransport(
-            limits=limits,
-            retries=settings.CONTROL_PLANE_RETRY_CONNECT,
+        transport = RetryTransport(
+            httpx.AsyncHTTPTransport(
+                limits=limits,
+                retries=settings.CONTROL_PLANE_RETRY_CONNECT,
+            ),
+            retries=(
+                settings.CONTROL_PLANE_RETRY_READ
+                + settings.CONTROL_PLANE_RETRY_STATUS
+                + settings.CONTROL_PLANE_RETRY_OTHER
+            ),
+            backoff=settings.CONTROL_PLANE_RETRY_BACKOFF_SECONDS,
         )
         self._client = httpx.AsyncClient(
             base_url=settings.CONTROL_PLANE_API_URL.rstrip("/"),
@@ -184,6 +157,8 @@ class ControlPlaneClient:
     ) -> Any:
         """Run one control plane API request and decode its JSON response.
 
+        Retryable statuses and transport errors are retried by the transport.
+
         Args:
             method: HTTP method.
             path: Absolute API path.
@@ -193,54 +168,22 @@ class ControlPlaneClient:
             form_body: Optional form request body.
 
         Raises:
-            ControlPlaneAuthorizationError: The control plane rejects the
-                credential.
-            ControlPlaneUnavailableError: The request fails, returns an
-                unexpected status, or contains invalid JSON.
+            ControlPlaneError: The request fails or returns invalid JSON.
 
         Returns:
             Decoded JSON response, or an empty object for empty responses.
         """
-        method = method.upper()
-        if method not in self._RETRY_METHODS:
-            raise ControlPlaneUnavailableError(
-                f"Unsupported control plane API method: {method}."
+        response = await self._send(method, path, token, query, json_body, form_body)
+        if response.status_code >= 400:
+            raise ControlPlaneError(
+                f"Control plane API returned HTTP {response.status_code}."
             )
-        attempts = max(
-            1,
-            self._settings.CONTROL_PLANE_RETRY_READ
-            + self._settings.CONTROL_PLANE_RETRY_STATUS
-            + self._settings.CONTROL_PLANE_RETRY_OTHER
-            + 1,
-        )
-        for index in range(attempts):
-            try:
-                return await self._send(
-                    method,
-                    path,
-                    token,
-                    query,
-                    json_body,
-                    form_body,
-                )
-            except ControlPlaneHTTPError as exc:
-                if exc.status_code in {401, 403}:
-                    raise ControlPlaneAuthorizationError(
-                        f"Control plane API returned HTTP {exc.status_code}."
-                    ) from exc
-                if exc.status_code not in self._RETRY_STATUS_CODES:
-                    raise ControlPlaneUnavailableError(
-                        f"Control plane API returned HTTP {exc.status_code}."
-                    ) from exc
-                last_exc: Exception = exc
-            except (httpx.TimeoutException, httpx.TransportError) as exc:
-                last_exc = exc
-            if index == attempts - 1:
-                raise ControlPlaneUnavailableError(
-                    "Control plane API request failed."
-                ) from last_exc
-            await self._backoff(index)
-        raise ControlPlaneUnavailableError("Control plane API request failed.")
+        if not response.content:
+            return {}
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise ControlPlaneError("Control plane API returned invalid JSON.") from exc
 
     async def _send(
         self,
@@ -250,7 +193,7 @@ class ControlPlaneClient:
         query: Mapping[str, str | list[str]] | None,
         json_body: object | None,
         form_body: dict[str, str] | None,
-    ) -> Any:
+    ) -> httpx.Response:
         """Send one control plane API request.
 
         Args:
@@ -262,50 +205,23 @@ class ControlPlaneClient:
             form_body: Optional form request body.
 
         Raises:
-            ControlPlaneHTTPError: The control plane returns an error status.
-            ControlPlaneUnavailableError: The response contains invalid JSON.
+            ControlPlaneError: The request could not be delivered.
 
         Returns:
-            Decoded response body.
+            HTTP response, including error statuses.
         """
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
-        if json_body is not None:
-            response = await self._client.request(
-                method,
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        try:
+            return await self._client.request(
+                method.upper(),
                 path,
                 params=query,
                 headers=headers,
                 json=json_body,
-            )
-        elif form_body is not None:
-            response = await self._client.request(
-                method,
-                path,
-                params=query,
-                headers=headers,
                 data=form_body,
             )
-        else:
-            response = await self._client.request(
-                method,
-                path,
-                params=query,
-                headers=headers,
-            )
-        if response.status_code >= 400:
-            raise ControlPlaneHTTPError(response.status_code)
-        if not response.content:
-            return {}
-        try:
-            return response.json()
-        except ValueError as exc:
-            raise ControlPlaneUnavailableError(
-                "Control plane API returned invalid JSON."
-            ) from exc
-
-    async def _backoff(self, index: int) -> None:
-        base = self._settings.CONTROL_PLANE_RETRY_BACKOFF_SECONDS
-        await asyncio.sleep(float(base * (2**index) + random.uniform(0, base)))
+        except httpx.HTTPError as exc:
+            raise ControlPlaneError("Control plane API request failed.") from exc
 
 
 class ControlPlaneAuthenticator:
@@ -342,10 +258,6 @@ class ControlPlaneAuthenticator:
             Request context for the mirrored account.
         """
         user = await self._client.authorize_user(credential, self._server_id)
-        if not user.is_active:
-            raise ControlPlaneAuthorizationError(
-                f"Control plane user {user.id} is inactive."
-            )
         account = await self._mirror_account(user)
         return AuthContext(account=account)
 

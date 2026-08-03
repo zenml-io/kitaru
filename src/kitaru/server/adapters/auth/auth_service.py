@@ -25,7 +25,6 @@ from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneError,
-    ControlPlaneUnavailableError,
 )
 from kitaru.server.adapters.auth.jwt import JWTToken, TokenError
 from kitaru.server.api.config import APISettings
@@ -59,10 +58,6 @@ LAST_USED_UPDATE_INTERVAL_SECONDS = 60
 
 class AuthenticationError(Exception):
     """Raised when request authentication fails."""
-
-
-class AuthenticationServiceUnavailableError(Exception):
-    """Raised when an authentication dependency is unavailable."""
 
 
 class AuthService:
@@ -302,11 +297,6 @@ class AuthService:
             raise AuthenticationError("Control plane authentication is not configured.")
         try:
             return await self._control_plane.authenticate(credential)
-        except ControlPlaneUnavailableError as exc:
-            logger.warning("Control plane authorization is unavailable: %s", exc)
-            raise AuthenticationServiceUnavailableError(
-                "Control plane authorization is temporarily unavailable."
-            ) from exc
         except ControlPlaneError as exc:
             # The caller only learns the credential was rejected, so the reason
             # is only ever visible here.

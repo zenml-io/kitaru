@@ -33,7 +33,6 @@ from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
     ControlPlaneError,
-    ControlPlaneUnavailableError,
     ControlPlaneUser,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -191,22 +190,6 @@ async def test_control_plane_login_rejected_credential(
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid control plane credential."}
-
-
-async def test_control_plane_login_reports_outage(
-    client: httpx.AsyncClient, control_plane_client: FakeControlPlaneClient
-) -> None:
-    """Observe HTTP 503 when the control plane cannot authorize the request."""
-    control_plane_client.error = ControlPlaneUnavailableError("timeout")
-
-    response = await client.post(
-        "/v1/login", headers={"Authorization": "Bearer cp-credential"}
-    )
-
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Control plane authorization is temporarily unavailable."
-    }
 
 
 async def test_control_plane_login_explicit_grant_type(

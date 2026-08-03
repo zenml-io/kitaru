@@ -24,7 +24,6 @@ from kitaru.analytics.client import AnalyticsClient
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
-    AuthenticationServiceUnavailableError,
     AuthService,
 )
 from kitaru.server.adapters.auth.control_plane import (
@@ -688,7 +687,7 @@ def get_auth_service(
     account_repository = SQLAccountRepository(session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
-    if client is not None and settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+    if client is not None:
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
@@ -791,11 +790,6 @@ async def authorize(
             csrf_token=credential.csrf_token,
             from_cookie=credential.from_cookie,
         )
-    except AuthenticationServiceUnavailableError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
-        ) from exc
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

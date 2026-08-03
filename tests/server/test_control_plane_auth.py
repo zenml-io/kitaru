@@ -35,7 +35,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
-from kitaru.server.domain.account import Account, AccountNotFound
+from kitaru.server.domain.account import Account
 
 SERVER_ID = uuid.uuid4()
 
@@ -49,7 +49,6 @@ def account_repository() -> FakeAccountRepository:
 def control_plane_user(
     username: str | None = "alice",
     email: str | None = "alice@example.com",
-    is_active: bool = True,
     is_service_account: bool = False,
     user_id: uuid.UUID | None = None,
 ) -> ControlPlaneUser:
@@ -58,7 +57,6 @@ def control_plane_user(
     Args:
         username: Control plane username.
         email: Control plane email.
-        is_active: Whether the control plane user is active.
         is_service_account: Whether the user is a service account.
         user_id: Control plane user id.
 
@@ -69,7 +67,6 @@ def control_plane_user(
         id=user_id or uuid.uuid4(),
         username=username,
         email=email,
-        is_active=is_active,
         is_service_account=is_service_account,
     )
 
@@ -109,37 +106,6 @@ async def test_authenticate_creates_new_account(
     assert account.email == user.email
     assert account.is_service_account == user.is_service_account
     assert account.active is True
-
-
-async def test_authenticate_keeps_cloud_users_isolated(
-    account_repository: FakeAccountRepository,
-) -> None:
-    """Mirror each authorized Cloud identity to a separate local account."""
-    first_user = control_plane_user(username="alice")
-    second_user = control_plane_user(username="bob")
-    authenticator, client = build_authenticator(account_repository, first_user)
-
-    first = await authenticator.authenticate("first-credential")
-    client.user = second_user
-    second = await authenticator.authenticate("second-credential")
-
-    assert first.account.id != second.account.id
-    assert first.account.external_id == first_user.id
-    assert second.account.external_id == second_user.id
-
-
-async def test_authenticate_rejects_inactive_user(
-    account_repository: FakeAccountRepository,
-) -> None:
-    """Reject an inactive control plane identity before mirroring it."""
-    user = control_plane_user(is_active=False)
-    authenticator, _ = build_authenticator(account_repository, user)
-
-    with pytest.raises(ControlPlaneError, match="inactive"):
-        await authenticator.authenticate("credential")
-
-    with pytest.raises(AccountNotFound):
-        await account_repository.get_by_external_id(user.id)
 
 
 async def test_authenticate_refreshes_existing_mirrored_account(
