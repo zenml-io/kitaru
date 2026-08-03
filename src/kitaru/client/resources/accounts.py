@@ -18,6 +18,8 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.account import (
+    AccountActivateRequest,
+    AccountActivationTokenResponse,
     AccountCreateRequest,
     AccountListParams,
     AccountResponse,
@@ -137,3 +139,43 @@ class AccountsResource:
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AccountResponse.model_validate(response.json())
+
+    async def activate(
+        self, account_id: uuid.UUID, request: AccountActivateRequest
+    ) -> AccountResponse:
+        """Activate an account with its activation token and a new password.
+
+        Args:
+            account_id: Id of the account.
+            request: Account activate request.
+
+        Raises:
+            APIError: The request failed, including 403 for a token mismatch.
+
+        Returns:
+            Activated account.
+        """
+        response = await self._client.request(
+            "POST",
+            f"/v1/accounts/{account_id}/activate",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return AccountResponse.model_validate(response.json())
+
+    async def deactivate(self, account_id: uuid.UUID) -> AccountActivationTokenResponse:
+        """Deactivate an account and read back its activation token.
+
+        Args:
+            account_id: Id of the account.
+
+        Raises:
+            APIError: The request failed, including 403 for the calling
+                account and 404 for a missing account.
+
+        Returns:
+            Deactivated account carrying its activation token.
+        """
+        response = await self._client.request(
+            "POST", f"/v1/accounts/{account_id}/deactivate"
+        )
+        return AccountActivationTokenResponse.model_validate(response.json())

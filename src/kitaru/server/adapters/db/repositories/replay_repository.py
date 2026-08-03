@@ -89,6 +89,26 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         )
         return row.to_domain()
 
+    async def create_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist many new replays in one round trip, skipping constraint translation.
+
+        Args:
+            replays: Replays to store.
+
+        Raises:
+            IntegrityError: The batch collides on (job_id) or
+                (experiment_run_id, baseline_session_id).
+
+        Returns:
+            Stored replays with timestamps set, in the same order.
+        """
+        if not replays:
+            return []
+        rows = [ReplayORM.from_domain(replay) for replay in replays]
+        self._session.add_all(rows)
+        await self._flush()
+        return [row.to_domain() for row in rows]
+
     async def get(self, replay_id: uuid.UUID) -> Replay:
         """Load a replay by id.
 

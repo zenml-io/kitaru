@@ -14,6 +14,7 @@
 """Tests for replay use cases: creation validation, reads, and tool lookup."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -30,6 +31,7 @@ from conftest import (
     create_session,
     create_worker,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -37,6 +39,8 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay import ReplayCreate
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
@@ -50,6 +54,7 @@ from kitaru.server.domain.replay_config import (
     HistoryConfig,
     PassthroughConfig,
     ReplayConfig,
+    ReplayOverride,
     ToolPolicy,
 )
 from kitaru.server.domain.session import Session
@@ -57,6 +62,29 @@ from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.task import AgentTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -463,3 +491,67 @@ async def test_get_replay_result_session_id_appears_after_agent_task_links_it(
 
     refreshed = await services.replay_service.get_replay(bundle.replay.id, actor=ACTOR)
     assert refreshed.result_session_id == stored_task.result_session_id
+
+
+def _replay_service_with_analytics(
+    services: ReplayServices, analytics: ServerAnalytics
+) -> ReplayService:
+    return ReplayService(
+        repository=services.replays,
+        experiment_repository=services.experiments,
+        experiment_run_repository=services.experiment_runs,
+        job_repository=services.jobs,
+        task_repository=services.tasks,
+        session_repository=services.sessions,
+        session_node_repository=services.session_nodes,
+        agent_version_repository=services.agent_versions,
+        plugin_repository=services.plugins,
+        analytics=analytics,
+    )
+
+
+async def test_create_replay_tracks_replay_created(services: ReplayServices) -> None:
+    """Fire REPLAY_CREATED with booleans naming the set override kinds."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+    analytics = _RecordingAnalytics()
+    service = _replay_service_with_analytics(services, analytics)
+
+    await service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            override=ReplayOverride(prompt="hi"),
+        ),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.REPLAY_CREATED
+    assert properties == {
+        "model_override": False,
+        "system_prompt_override": False,
+        "prompt_override": True,
+        "model_params_override": False,
+    }
+
+
+async def test_create_replay_without_analytics_tracker(
+    services: ReplayServices,
+) -> None:
+    """Create a replay normally when no analytics tracker is configured."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    assert bundle.replay.owner_id == ACTOR.account.id

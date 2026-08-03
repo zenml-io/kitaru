@@ -150,6 +150,23 @@ async def test_ingest_cache_key_null_when_tool_name_missing(
     assert stored[0].cache_key is None
 
 
+async def test_ingest_cache_key_null_when_inputs_missing(
+    service: SessionNodeService, session_id: uuid.UUID
+) -> None:
+    """Leave cache_key null on a tool call node without recorded inputs."""
+    batch = [
+        SessionNodeUpsert(
+            index=0,
+            node_type=NodeType.TOOL_CALL,
+            name="search",
+            status=NodeStatus.COMPLETED,
+            tool_name="search",
+        )
+    ]
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+    assert stored[0].cache_key is None
+
+
 async def test_ingest_secondary_parents_resolve(
     service: SessionNodeService, session_id: uuid.UUID
 ) -> None:

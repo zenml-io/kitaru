@@ -63,11 +63,13 @@ from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
+from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
     DomainError,
+    ForbiddenError,
     NotFoundError,
     PayloadTooLargeError,
     QueryTimeoutError,
@@ -78,14 +80,19 @@ from kitaru.server.domain.base import (
 def _register_domain_exception_handlers(app: FastAPI) -> None:
     """Register JSON error responses for domain exceptions raised by routes.
 
-    Clients receive HTTP 404 for ``NotFoundError``, 409 for ``ConflictError``,
-    413 for ``PayloadTooLargeError``, 422 for ``ValidationError``, 503 for
-    ``QueryTimeoutError``, and 500 for other ``DomainError`` subclasses. Each
-    body is ``{"detail": "<message>"}``.
+    Clients receive HTTP 403 for ``ForbiddenError``, 404 for ``NotFoundError``,
+    409 for ``ConflictError``, 413 for ``PayloadTooLargeError``, 422 for
+    ``ValidationError``, 503 for ``QueryTimeoutError``, and 500 for other
+    ``DomainError`` subclasses. Each body is ``{"detail": "<message>"}``.
 
     Args:
         app: FastAPI application that will serve the v1 API.
     """
+
+    @app.exception_handler(ForbiddenError)
+    async def forbidden(request: Request, exc: ForbiddenError) -> JSONResponse:
+        _ = request
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(NotFoundError)
     async def not_found(request: Request, exc: NotFoundError) -> JSONResponse:
@@ -167,7 +174,9 @@ def create_app(settings: APISettings) -> FastAPI:
     Returns:
         Application instance.
     """
-    analytics = AnalyticsClient(enabled=settings.ANALYTICS_OPT_IN)
+    analytics = AnalyticsClient(
+        enabled=settings.ANALYTICS_OPT_IN, debug=settings.ANALYTICS_DEBUG
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -190,9 +199,11 @@ def create_app(settings: APISettings) -> FastAPI:
                     settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
                 )
                 await session.commit()
+        sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
         finally:
+            await stop_task_sweeper(sweep_task)
             await analytics.aclose()
             if app.state.control_plane_client is not None:
                 await app.state.control_plane_client.close()

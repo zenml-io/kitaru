@@ -14,7 +14,8 @@
 """Tests for session use cases."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -29,14 +30,16 @@ from conftest import (
     create_import_task,
     create_session,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
@@ -61,6 +64,29 @@ from kitaru.server.domain.task import (
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the recorder."""
+        self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -328,6 +354,178 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
         await service.update_session(
             created.id, SessionUpdate(status=SessionStatus.IN_PROGRESS), actor=ACTOR
         )
+
+
+async def test_update_session_rejects_terminal_to_other_terminal(
+    service: SessionService,
+) -> None:
+    """Reject moving a terminal session to another terminal status."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await service.update_session(
+        created.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    with pytest.raises(IllegalSessionStatusTransition):
+        await service.update_session(
+            created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
+        )
+
+
+async def test_update_session_transition_to_terminal_tracks_analytics_event(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Track a session_completed event when a session turns terminal."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        analytics=analytics,
+    )
+    started_at = datetime.now(UTC)
+    created = await create_session(
+        repository,
+        owner_id=ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.RECORDED,
+        started_at=started_at,
+        tokens=TokenUsage(input_tokens=100, output_tokens=50),
+    )
+    ended_at = started_at + timedelta(seconds=30)
+    await service.update_session(
+        created.id,
+        SessionUpdate(status=SessionStatus.COMPLETED, ended_at=ended_at),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.SESSION_COMPLETED
+    assert tracked_properties == {
+        "origin": "recorded",
+        "status": "completed",
+        "duration_seconds": 30.0,
+        "input_tokens": 100,
+        "output_tokens": 50,
+    }
+
+
+async def test_update_session_non_status_update_tracks_nothing(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Skip tracking when the update touches no status-related field."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        analytics=analytics,
+    )
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await service.update_session(created.id, SessionUpdate(name="renamed"), actor=ACTOR)
+
+    assert analytics.tracked == []
+
+
+async def test_update_session_already_terminal_tracks_nothing(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Skip tracking when a finished update reaches a session already terminal."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        analytics=analytics,
+    )
+    created = await create_session(
+        repository,
+        owner_id=ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+    )
+    await service.update_session(
+        created.id, SessionUpdate(outputs={"answer": 42}), actor=ACTOR
+    )
+
+    assert analytics.tracked == []
+
+
+async def test_create_session_with_terminal_status_tracks_analytics_event(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Track a session_completed event when a session is created terminal."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        analytics=analytics,
+    )
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.IMPORTED,
+            status=SessionStatus.FAILED,
+        ),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == created.owner_id
+    assert tracked_event == AnalyticsEvent.SESSION_COMPLETED
+    assert tracked_properties == {"origin": "imported", "status": "failed"}
+
+
+async def test_create_session_in_progress_tracks_nothing(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Skip tracking when a session is created in progress."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        analytics=analytics,
+    )
+    await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+
+    assert analytics.tracked == []
+
+
+async def test_update_session_transition_with_analytics_none_is_safe(
+    service: SessionService,
+) -> None:
+    """Transition a session to terminal without an analytics tracker configured."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    updated = await service.update_session(
+        created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
+    )
+    assert updated.status == SessionStatus.FAILED
 
 
 async def test_update_session_not_found(service: SessionService) -> None:

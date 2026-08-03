@@ -3637,6 +3637,17 @@ class FakeReplayRepository:
         self._replays[stored.id] = stored
         return stored.model_copy()
 
+    async def create_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist many new replays in one round trip, skipping constraint translation.
+
+        Args:
+            replays: Replays to store.
+
+        Returns:
+            Stored replays with timestamps set, in the same order.
+        """
+        return [await self.create(replay) for replay in replays]
+
     async def get(self, replay_id: uuid.UUID) -> Replay:
         """Load a replay by id.
 
@@ -4263,6 +4274,17 @@ class FakeJobRepository:
         self._jobs[stored.id] = stored
         return stored.model_copy()
 
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist many new jobs in one round trip.
+
+        Args:
+            jobs: Jobs to store.
+
+        Returns:
+            Stored jobs with timestamps set, in the same order.
+        """
+        return [await self.create(job) for job in jobs]
+
     async def get(self, job_id: uuid.UUID, exclusive: bool = False) -> Job:
         """Load a job by id.
 
@@ -4395,6 +4417,17 @@ class FakeTaskRepository:
         stored = task.model_copy(update={"created": now, "updated": now})
         self._tasks[stored.id] = stored
         return stored.model_copy()
+
+    async def create_many(self, tasks: list[Task]) -> list[Task]:
+        """Persist many new tasks in one round trip.
+
+        Args:
+            tasks: Tasks to store.
+
+        Returns:
+            Stored tasks with timestamps set, in the same order.
+        """
+        return [await self.create(task) for task in tasks]
 
     async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:
         """Load a task by id.
@@ -4646,6 +4679,31 @@ class FakeTaskRepository:
             and task.input_session_id == input_session_id
             and task.status is TaskStatus.COMPLETED
         }
+
+    async def get_scored_evaluator_version_ids_many(
+        self, input_session_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """Read the evaluator versions that already completed against each session.
+
+        Args:
+            input_session_ids: Ids of the scored sessions.
+
+        Returns:
+            Plugin version ids of every completed evaluator task scoring the
+            session, keyed by session id, sessions without one omitted.
+        """
+        session_id_set = set(input_session_ids)
+        scored: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for task in self._tasks.values():
+            if (
+                isinstance(task, EvaluationTask)
+                and task.input_session_id in session_id_set
+                and task.status is TaskStatus.COMPLETED
+            ):
+                scored.setdefault(task.input_session_id, set()).add(
+                    task.plugin_version_id
+                )
+        return scored
 
     async def get_agent_tasks_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]

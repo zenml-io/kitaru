@@ -1,0 +1,182 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""End-to-end tests for the background stale-task sweep loop against PostgreSQL."""
+
+import asyncio
+from collections.abc import AsyncGenerator
+
+import httpx
+import pytest
+
+from conftest import db_settings, lifespan_client
+
+RUNTIME = {"platform": "bare"}
+
+
+async def _wait_until(
+    poll: httpx.AsyncClient, url: str, field: str, value: str, timeout: float = 10.0
+) -> dict[str, object]:
+    """Poll a resource until a field reaches a value, or fail after a timeout.
+
+    Args:
+        poll: HTTP client to poll with.
+        url: Resource URL.
+        field: Response field to check.
+        value: Expected value.
+        timeout: Seconds to poll before failing.
+
+    Returns:
+        The resource body once the field matches.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    body: dict[str, object] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        body = (await poll.get(url)).json()
+        if body[field] == value:
+            return body
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"{url} never reached {field}={value!r}, last body: {body}")
+
+
+@pytest.fixture
+async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app running its lifespan with a fast sweeper."""
+    settings = db_settings(
+        TASK_SWEEP_INTERVAL_SECONDS=1,
+        TASK_HEARTBEAT_TIMEOUT_SECONDS=1,
+        TASK_RETRY_LIMIT=1,
+    )
+    async with lifespan_client(settings) as client:
+        yield client
+
+
+async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
+    client: httpx.AsyncClient,
+) -> None:
+    """A worker that stops reporting has its task abandoned by the sweep loop alone.
+
+    No claim or heartbeat request runs after the initial claim, so the only
+    thing that can move the task and job forward is the background sweeper
+    started from the app lifespan.
+    """
+    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    version = (
+        await client.post(
+            f"/v1/agents/{agent['id']}/versions",
+            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+        )
+    ).json()
+    job = (
+        await client.post(
+            "/v1/session-runs",
+            json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
+        )
+    ).json()
+    worker = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    claimed = (
+        await client.post(
+            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+        )
+    ).json()
+    task = claimed["tasks"][0]["task"]
+    assert task["status"] == "claimed"
+
+    task_after = await _wait_until(
+        client, f"/v1/tasks/{task['id']}", "status", "abandoned"
+    )
+    assert task_after["attempt"] == 1
+
+    job_after = await _wait_until(client, f"/v1/jobs/{job['id']}", "status", "failed")
+    assert job_after["error"] is not None
+
+
+async def test_background_sweep_reaches_replay_settlement_subscribers(
+    client: httpx.AsyncClient,
+) -> None:
+    """A replay's job settling through the sweep still settles the replay.
+
+    The sweep abandons the stale agent task exactly like the claim path
+    would, and the resulting JobSettled event must still reach the same
+    replay-settlement subscriber a request wires, proving the background
+    tick shares the request's event dispatcher composition rather than
+    running the transition without it.
+    """
+    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    version = (
+        await client.post(
+            f"/v1/agents/{agent['id']}/versions",
+            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+        )
+    ).json()
+    baseline = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": agent["id"],
+                "agent_version_id": version["id"],
+                "origin": "recorded",
+                "inputs": {"q": "hi"},
+                "outputs": None,
+                "expected": None,
+            },
+        )
+    ).json()
+    blob = (
+        await client.post(
+            "/v1/blobs",
+            files={"file": ("score.py", b"def score(): pass", "text/plain")},
+        )
+    ).json()
+    evaluator = (
+        await client.post("/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+    ).json()
+    await client.post(
+        f"/v1/evaluators/{evaluator['id']}/versions",
+        json={
+            "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
+        },
+    )
+    replay = (
+        await client.post(
+            "/v1/replays",
+            json={
+                "baseline_session_id": baseline["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    assert replay["status"] == "pending"
+
+    worker = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    claimed = (
+        await client.post(
+            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+        )
+    ).json()
+    assert claimed["tasks"][0]["task"]["kind"] == "agent"
+
+    replay_after = await _wait_until(
+        client, f"/v1/replays/{replay['id']}", "status", "failed"
+    )
+    assert replay_after["status"] == "failed"

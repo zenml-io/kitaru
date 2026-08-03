@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
@@ -28,7 +29,9 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,
@@ -53,6 +56,7 @@ class SessionService:
         repository: SessionRepository,
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -61,10 +65,12 @@ class SessionService:
             task_repository: Task repository, for the create-time task link.
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
+        self._analytics = analytics
 
     async def create_session(
         self, command: SessionCreate, actor: AuthContext
@@ -133,6 +139,12 @@ class SessionService:
         if isinstance(task, AgentTask):
             task.link_result_session(stored.id)
             await self._tasks.update(task)
+        if self._analytics is not None and stored.status != SessionStatus.IN_PROGRESS:
+            self._analytics.track(
+                stored.owner_id,
+                AnalyticsEvent.SESSION_COMPLETED,
+                analytics_events.build_session_completed_properties(stored),
+            )
         return stored
 
     async def _resolve_agent(
@@ -247,6 +259,7 @@ class SessionService:
         session = await self._repository.get(session_id, exclusive=True)
         fields = command.model_fields_set
         if {"status", "outputs", "error", "ended_at"} & fields:
+            previous_status = session.status
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
@@ -258,6 +271,16 @@ class SessionService:
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
+            if (
+                self._analytics is not None
+                and previous_status == SessionStatus.IN_PROGRESS
+                and session.status != SessionStatus.IN_PROGRESS
+            ):
+                self._analytics.track(
+                    session.owner_id,
+                    AnalyticsEvent.SESSION_COMPLETED,
+                    analytics_events.build_session_completed_properties(session),
+                )
         if "name" in fields:
             session.update_name(command.name)
         if "expected" in fields:

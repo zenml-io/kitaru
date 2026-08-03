@@ -14,6 +14,7 @@
 """FastAPI dependency providers."""
 
 from collections.abc import AsyncGenerator
+from importlib.metadata import version
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
@@ -85,7 +86,7 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
-from kitaru.server.api.config import APISettings
+from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.models.task import TaskPolicy
@@ -110,6 +111,7 @@ from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -123,6 +125,7 @@ from kitaru.server.domain.account import AccountNotFound
 from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
+KITARU_VERSION = version("kitaru")
 
 
 class RequestCredential(NamedTuple):
@@ -176,6 +179,27 @@ def get_analytics_client(request: Request) -> AnalyticsClient:
     """
     analytics: AnalyticsClient = request.app.state.analytics
     return analytics
+
+
+def get_server_analytics(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    client: Annotated[AnalyticsClient, Depends(get_analytics_client)],
+) -> ServerAnalytics:
+    """Return a server analytics tracker for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+        client: Analytics client for this process.
+
+    Returns:
+        Tracker buffering track calls until the request session commits.
+    """
+    server_id = None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID
+    return ServerAnalytics(
+        client=client, session=session, server_id=server_id, version=KITARU_VERSION
+    )
 
 
 def get_account_service(
@@ -278,11 +302,13 @@ def get_blob_service(
 
 def get_evaluator_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> PluginService:
     """Return a plugin service bound to the evaluator kind.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Plugin service bound to the SQL repositories.
@@ -291,16 +317,19 @@ def get_evaluator_service(
         kind=PluginKind.EVALUATOR,
         repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
+        analytics=analytics,
     )
 
 
 def get_importer_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> PluginService:
     """Return a plugin service bound to the importer kind.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Plugin service bound to the SQL repositories.
@@ -309,16 +338,19 @@ def get_importer_service(
         kind=PluginKind.IMPORTER,
         repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
+        analytics=analytics,
     )
 
 
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> SessionService:
     """Return a session service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Session service bound to the SQL repositories.
@@ -327,6 +359,7 @@ def get_session_service(
         repository=SQLSessionRepository(session),
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
+        analytics=analytics,
     )
 
 
@@ -350,11 +383,14 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
     )
 
 
-def _build_task_transitions(session: AsyncSession) -> TaskTransitions:
+def _build_task_transitions(
+    session: AsyncSession, analytics: ServerAnalytics
+) -> TaskTransitions:
     """Build the request-scoped task transition dispatch.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Transition dispatch publishing on the request's event dispatcher.
@@ -362,19 +398,22 @@ def _build_task_transitions(session: AsyncSession) -> TaskTransitions:
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
-        dispatcher=build_event_dispatcher(session),
+        dispatcher=build_event_dispatcher(session, analytics),
+        analytics=analytics,
     )
 
 
 def get_job_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> JobService:
     """Return a job service for the current request.
 
     Args:
         session: Request-scoped database session.
         settings: API settings for this process.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Job service bound to the SQL repositories.
@@ -387,7 +426,7 @@ def get_job_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
-        transitions=_build_task_transitions(session),
+        transitions=_build_task_transitions(session, analytics),
         policy=get_task_policy(settings),
     )
 
@@ -395,12 +434,14 @@ def get_job_service(
 def get_task_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> TaskService:
     """Return a task service for the current request.
 
     Args:
         session: Request-scoped database session.
         settings: API settings for this process.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Task service bound to the SQL repositories.
@@ -415,7 +456,7 @@ def get_task_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
-        transitions=_build_task_transitions(session),
+        transitions=_build_task_transitions(session, analytics),
         policy=get_task_policy(settings),
     )
 
@@ -439,11 +480,13 @@ def get_session_node_service(
 
 def get_experiment_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentService:
     """Return an experiment service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Experiment service bound to the SQL repositories.
@@ -458,16 +501,19 @@ def get_experiment_service(
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
+        analytics=analytics,
     )
 
 
 def get_replay_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ReplayService:
     """Return a replay service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Replay service bound to the SQL repositories.
@@ -482,16 +528,19 @@ def get_replay_service(
         session_node_repository=SQLSessionNodeRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        analytics=analytics,
     )
 
 
 def get_experiment_run_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentRunService:
     """Return an experiment run service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Experiment run service bound to the SQL repositories.
@@ -500,17 +549,20 @@ def get_experiment_run_service(
         repository=SQLExperimentRunRepository(session),
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
-        transitions=_build_task_transitions(session),
+        transitions=_build_task_transitions(session, analytics),
+        analytics=analytics,
     )
 
 
 def get_cohort_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> CohortService:
     """Return a cohort service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Cohort service bound to the SQL repositories.
@@ -518,16 +570,19 @@ def get_cohort_service(
     return CohortService(
         repository=SQLCohortRepository(session),
         agent_repository=SQLAgentRepository(session),
+        analytics=analytics,
     )
 
 
 def get_cohort_version_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> CohortVersionService:
     """Return a cohort version service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Cohort version service bound to the SQL repositories.
@@ -536,6 +591,7 @@ def get_cohort_version_service(
         repository=SQLCohortVersionRepository(session),
         cohort_repository=SQLCohortRepository(session),
         session_repository=SQLSessionRepository(session),
+        analytics=analytics,
     )
 
 

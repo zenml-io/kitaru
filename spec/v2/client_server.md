@@ -18,9 +18,9 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 - `application/models/` holds `FrozenModel` filter and command objects that services accept.
 - `application/interfaces/` holds the repository protocols the services depend on.
 - `domain/` holds the entities, value objects, enums, and domain errors.
-- Exception mapping is global in `app.py`: `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `QueryTimeoutError` 503, `DomainError` 500, body always `{"detail": str}`.
-- Auth is one dependency, `authorize`, yielding `AuthContext(account, csrf_token)`. Credentials are an API key (`KITKEY_` prefix) or a JWT, from bearer header or cookie. Health and login/logout routes skip it. There is no separate worker auth.
-- Ownership is provenance, not authorization: the server is a trusted-team deployment, `owner_id` records who created a resource, and no service filters or rejects by owner. Every authenticated account reads and writes every resource.
+- Exception mapping is global in `app.py`: `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `QueryTimeoutError` 503, `DomainError` 500, body always `{"detail": str}`.
+- Auth is one dependency, `authorize`, yielding `AuthContext(account, csrf_token)`. Credentials are an API key (`KITKEY_` prefix) or a JWT, from bearer header or cookie. Health, login/logout, and account activation routes skip it. There is no separate worker auth.
+- Ownership is provenance, not authorization: the server is a trusted-team deployment, `owner_id` records who created a resource, and no service filters or rejects by owner. Every authenticated account reads and writes every resource. The exceptions are `account.metadata` and `account.password`, which the accounts router rejects with a 403 unless the path id is the caller's own account.
 - Pagination is uniform: `cursor` (opaque, from the previous response), `size` (ge=1, le=1000, default 20), and `sort` (`created:asc` or `created:desc`, default `created:desc`) on the `ListParams` base model, response `Page[T]` with `items` and `next_cursor` (null on the last page). The keyset rides the UUIDv7 id. Cursors embed the sort and a hash of the filter fields, changing either mid-pagination is a 422, changing `size` is allowed. Sortable fields are an allowlist per filter model (`sortable_fields` ClassVar, default `created`), a field beyond that needs a `(field, id)` composite index.
 - Filtering is a `filter` query parameter holding a JSON-encoded expression tree: `and`/`or`/`not` nodes over `{field, op, value}` conditions with ops `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`, `is_null`, `startswith`, `endswith`, `contains`. `eq`/`ne` reject a null value, null checks are `is_null` (negated via `not`). Filterable fields are an allowlist per filter model (`filterable_fields` ClassVar mapping field name to value type and allowed ops), the expression is capped at 5 nesting levels, 30 conditions, and 100 `in` items, and a violation is a 422. The expression is hashed into the cursor with the other filter fields and compiles to SQL through `adapters/db/filtering.py` against a per-repository binding mapping whose values are columns or predicate factories (the tag filters on sessions, cohorts, experiments, and experiment runs compile to EXISTS probes this way). The tree replaced the flat per-field filter params, including the probe-style session filters (`tag`, `cohort_version_id`, `has_evaluation`), which bind to EXISTS predicate factories. List queries run under a transaction-local statement timeout applied in `paginate()`, configured through `KITARU_SERVER_LIST_QUERY_TIMEOUT_SECONDS` (default 10, 0 disables it), and a timed-out list query is a 503. Internal-only filter dimensions (`owner_id`, `internal`, `stale_before`, `seen_after`, `job_ids`, `account_id`, path-scoped ids) stay flat model fields set by services.
 - Commits happen before the response leaves: routers register through a custom `APIRoute` subclass that commits the request session after the handler returns and before the response is sent, so a 2xx means the write is committed and an immediate follow-up read sees it. An exception skips the commit and the session rolls back on close.
@@ -51,12 +51,14 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
-| POST | /v1/accounts | `AccountCreateRequest` | `AccountResponse` 201 | `AccountService.create_account` |
+| POST | /v1/accounts | `AccountCreateRequest` | `AccountResponse` or `AccountActivationTokenResponse` 201 | `AccountService.create_account` |
 | GET | /v1/accounts | query filter | `Page[AccountResponse]` | `AccountService.list_accounts` |
 | GET | /v1/accounts/{id} | - | `AccountResponse` | `AccountService.get_account` |
 | PATCH | /v1/accounts/{id} | `AccountUpdateRequest` | `AccountResponse` | `AccountService.update_account` |
+| POST | /v1/accounts/{id}/activate | `AccountActivateRequest` | `AccountResponse` | `AccountService.activate_account` |
+| POST | /v1/accounts/{id}/deactivate | - | `AccountActivationTokenResponse` | `AccountService.deactivate_account` |
 
-No DELETE for accounts.
+No DELETE for accounts. Active state is not writable through PATCH: an account leaves the active set through `POST /v1/accounts/{id}/deactivate` and returns through `POST /v1/accounts/{id}/activate`.
 
 ### agents (`/v1/agents`)
 
@@ -315,9 +317,11 @@ Neither a task nor a job carries a canceling status. Cancellation is a request f
 ### account.py
 
 - `AccountCreateRequest`: name, email?, password?
-- `AccountUpdateRequest`: active?, password?
+- `AccountActivateRequest`: activation_token, password
+- `AccountUpdateRequest`: password?, old_password?, metadata?
 - `AccountListParams`: filter?
-- `AccountResponse`: id, name, email?, is_service_account, active, created, updated
+- `AccountResponse`: id, name, email?, is_service_account, active, metadata, created, updated
+- `AccountActivationTokenResponse`: `AccountResponse` plus activation_token, returned once when a token is minted
 
 ### agent.py
 
@@ -612,7 +616,7 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 
 | Entity | Fields beyond id/owner_id/created/updated | Methods |
 |---|---|---|
-| `Account` | is_service_account, name, email?, password_hash?, active | update_active, update_password_hash |
+| `Account` | is_service_account, name, email?, password_hash?, activation_token_hash?, active, metadata: dict | update_active, update_activation_token_hash, update_metadata, update_password_hash |
 | `Agent` | name, description?, latest_version | update_name, update_description |
 | `AgentVersion` | agent_id, version: int, display_version?, description?, run_spec: RunSpec?, capabilities: AgentCapabilities | update_display_version, update_description, update_run_spec, update_capabilities |
 | `ApiKey` | name, key_hash, active, last_used? | update_active, mark_used |
@@ -671,7 +675,7 @@ Repository `get_many` methods load id lists through `_load_by_ids` on the base S
 
 | Table | ORM class | Domain model | Columns beyond id/created/updated |
 |---|---|---|---|
-| account | `AccountORM` | `Account` | is_service_account, name, email?, password_hash?, active. Unique (name, is_service_account). |
+| account | `AccountORM` | `Account` | is_service_account, name, email?, password_hash?, activation_token_hash?, active, metadata JSONB. Unique (name, is_service_account). |
 | agent | `AgentORM` | `Agent` | owner_id FK account, name unique, description?, latest_version |
 | agent_version | `AgentVersionORM` | `AgentVersion` | owner_id, agent_id FK, version, display_version?, description?, run_command?, run_working_dir?, run_env JSONB?, run_timeout_seconds?, capabilities JSONB. Unique (agent_id, version). The version number comes from an `UPDATE ... RETURNING` bump of agent.latest_version in the same transaction as the insert, matching plugin_version. RunSpec is flattened into run_* columns, secret_ids live in the link table. |
 | agent_version_secret | `AgentVersionSecretORM` | none (repository-managed) | Composite pk (agent_version_id FK CASCADE, secret_id FK), index with unique (agent_version_id, index) preserving secret order. |
@@ -721,6 +725,7 @@ Claim query (`claim_pending`): scope conditions + status = pending, ordered by i
 | task.result | list of `EvaluationResult` dumps (evaluator), `ImportStats` dump (importer) |
 | task.labels | plain `dict[str, str]` |
 | task.env | plain `dict[str, str]` |
+| account.metadata | plain dict |
 | plugin.metadata | plain dict |
 | replay_config.override | `ReplayOverride` dump |
 | replay_config.tool_policy | `ToolPolicy` dump |
@@ -825,7 +830,7 @@ erDiagram
 - `heartbeat_worker` updates worker.last_seen_at, stamps heartbeat_at only on reported tasks whose worker_id matches the caller, and returns the rest in cancel_task_ids (cancel-requested, reassigned, or no longer owned). The staleness sweep runs at claim time, before the claim query, capped to a bounded row count per claim (a server setting, default 100, overflow rolls to the next claim), selecting with `FOR UPDATE SKIP LOCKED` so concurrent claims never block on each other's sweep. It applies to tasks whose coalesce(heartbeat_at, claimed_at) is older than the heartbeat timeout (a server setting, default 60 seconds, kept a comfortable multiple of the worker heartbeat interval so one dropped heartbeat never requeues a live task): a stale task with `cancel_requested_at` set settles to canceled, otherwise it is requeued while attempt is under the retry cap (a server setting, default 3) and abandoned at the cap. A requeue unlinks the stale attempt's result session (`session.task_id` and the task's `result_session_id` to null), freeing the one-session-per-task slot so the next attempt can link its own. The sweep routes its writes through the same `_apply_status` dispatch as `update_task`, so an abandoned or canceled last task settles its job, its replay, and its run without any worker transition arriving. `abandoned` is written only by the sweep, `timed_out` only by the worker's process timeout. With no worker polling, nothing sweeps, stale rows surface through effective-status reads until the next claim.
 - `ExperimentRunService.cancel_run` writes the run's `canceling` status and propagates in the same transaction, canceling each non-settled replay's job the way `cancel_job` does: claimed and running tasks get `cancel_requested_at` stamped in one bulk UPDATE and keep their status, pending tasks move to `canceled` through `_apply_status` one by one, so drained jobs settle, their replay rows cancel, and the run can finalize. Claimed and running tasks then reach a terminal status the usual way, through their worker's next heartbeat or through the sweep, so run cancellation adds no second terminal writer. The run settles to `canceled` when it drains.
 - Run progress counts, run job listing, and run finalization read the run's replay rows and their 1:1 jobs through `replay.job_id`, never the task table.
-- `tool_lookup` resolves the replay by id, looks up the tool's config in the tool policy from the replay config (rejecting tools not under a history config), and searches recorded tool-call nodes by cache_key within the config's history scope (baseline, the run's cohort version, or agent). Config and scope resolution is server-side: the adapter sends only the tool name and cache_key, never a scope, so the policy is interpreted in one place. The cache_key is `compute_tool_cache_key(tool_name, inputs)` in the top-level `src/kitaru/cache_keys.py` (pure, stdlib-only, sha256 hex over the tool name and canonical JSON inputs): node ingest derives it for recorded tool-call nodes, the replaying adapter derives it for the lookup, so the format is defined once. The adapter receives the replay id through `KITARU_REPLAY_ID`, set by the replay pipeline in the agent task's env extras, and fetches the override and tool policy from `GET /v1/replays/{id}`.
+- `tool_lookup` resolves the replay by id, looks up the tool's config in the tool policy from the replay config (rejecting tools not under a history config), and searches recorded tool-call nodes by cache_key within the config's history scope (baseline, the run's cohort version, or agent). Config and scope resolution is server-side: the adapter sends only the tool name and cache_key, never a scope, so the policy is interpreted in one place. The cache_key is `compute_tool_cache_key(tool_name, inputs)` in the top-level `src/kitaru/cache_keys.py` (pure, stdlib-only, sha256 hex over the tool name and canonical JSON inputs): node ingest derives it for recorded tool-call nodes, the replaying adapter derives it for the lookup, so the format is defined once. The key is null when the inputs are absent or cannot be canonicalized, since a key over those would match unrelated calls of the same tool: an ingested node then stores a null cache_key, which no lookup can match, and the adapter skips the lookup and goes straight to the config's on_miss behavior. `ToolLookupRequest.cache_key` stays required and 64 characters, so a null key can never reach the search. The adapter receives the replay id through `KITARU_REPLAY_ID`, set by the replay pipeline in the agent task's env extras, and fetches the override and tool policy from `GET /v1/replays/{id}`.
 
 ## Task status transitions
 

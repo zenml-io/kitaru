@@ -14,10 +14,12 @@
 """Tests for cohort use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
 from conftest import FakeAgentRepository, FakeCohortRepository, create_agent
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohort import (
@@ -26,6 +28,7 @@ from kitaru.server.application.models.cohort import (
     CohortUpdate,
 )
 from kitaru.server.application.services.cohort_service import CohortService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
@@ -33,6 +36,29 @@ from kitaru.server.domain.cohort import CohortNotFound, DuplicateCohortName
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -243,3 +269,37 @@ async def test_delete_cohort_not_found(service: CohortService) -> None:
     """Raise for an unknown cohort id."""
     with pytest.raises(CohortNotFound):
         await service.delete_cohort(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_create_cohort_tracks_cohort_created(
+    cohort_repository: FakeCohortRepository,
+    agent_repository: FakeAgentRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Fire COHORT_CREATED with no properties beyond the commons."""
+    analytics = _RecordingAnalytics()
+    service = CohortService(
+        repository=cohort_repository,
+        agent_repository=agent_repository,
+        analytics=analytics,
+    )
+
+    await service.create_cohort(
+        CohortCreate(name="cohort", agent_id=agent_id), actor=ACTOR
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.COHORT_CREATED
+    assert properties == {}
+
+
+async def test_create_cohort_without_analytics_tracker(
+    service: CohortService, agent_id: uuid.UUID
+) -> None:
+    """Create a cohort normally when no analytics tracker is configured."""
+    cohort = await service.create_cohort(
+        CohortCreate(name="cohort", agent_id=agent_id), actor=ACTOR
+    )
+    assert cohort.owner_id == ACTOR.account.id

@@ -1,6 +1,102 @@
 {
   "components": {
     "schemas": {
+      "AccountActivateRequest": {
+        "additionalProperties": false,
+        "description": "Account activate request.",
+        "properties": {
+          "activation_token": {
+            "description": "Activation token.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "password": {
+            "description": "Login password to set.",
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activation_token",
+          "password"
+        ],
+        "title": "AccountActivateRequest",
+        "type": "object"
+      },
+      "AccountActivationTokenResponse": {
+        "description": "Account response carrying a newly minted activation token.",
+        "properties": {
+          "activation_token": {
+            "description": "Plaintext token, shown once.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "active": {
+            "description": "Whether the account can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "id": {
+            "description": "Account id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_service_account": {
+            "description": "Whether this is a service account.",
+            "title": "Is Service Account",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "name",
+          "email",
+          "is_service_account",
+          "active",
+          "metadata",
+          "activation_token"
+        ],
+        "title": "AccountActivationTokenResponse",
+        "type": "object"
+      },
       "AccountCreateRequest": {
         "additionalProperties": false,
         "description": "Account create request.",
@@ -78,6 +174,12 @@
             "title": "Is Service Account",
             "type": "boolean"
           },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
           "name": {
             "description": "Account name.",
             "title": "Name",
@@ -97,7 +199,8 @@
           "name",
           "email",
           "is_service_account",
-          "active"
+          "active",
+          "metadata"
         ],
         "title": "AccountResponse",
         "type": "object"
@@ -106,17 +209,30 @@
         "additionalProperties": false,
         "description": "Account update request.",
         "properties": {
-          "active": {
+          "metadata": {
             "anyOf": [
               {
-                "type": "boolean"
+                "additionalProperties": true,
+                "type": "object"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "New active state.",
-            "title": "Active"
+            "description": "New metadata.",
+            "title": "Metadata"
+          },
+          "old_password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current login password.",
+            "title": "Old Password"
           },
           "password": {
             "anyOf": [
@@ -7229,7 +7345,7 @@
         ]
       },
       "post": {
-        "description": "Create an account.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "description": "Create an account.\n\nAn account created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
         "operationId": "create_account_v1_accounts_post",
         "requestBody": {
           "content": {
@@ -7246,7 +7362,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccountActivationTokenResponse"
+                    }
+                  ],
+                  "title": "Response Create Account V1 Accounts Post"
                 }
               }
             },
@@ -7313,7 +7437,7 @@
         ]
       },
       "patch": {
-        "description": "Partially update an account.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth\nscheme, 404 when the account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
+        "description": "Partially update an account.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password outside\nthe ``local`` auth scheme, when writing another account's password or\nmetadata, and when the supplied current password is missing or wrong, 404\nwhen the account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nRaises:\n    HTTPException: The caller is not the account whose password or\n        metadata it writes.\n\nReturns:\n    Updated account.",
         "operationId": "update_account_v1_accounts__account_id__patch",
         "parameters": [
           {
@@ -7360,6 +7484,104 @@
           }
         },
         "summary": "Update Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/activate": {
+      "post": {
+        "description": "Activate an account with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the account does not exist,\nand 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
+        "operationId": "activate_account_v1_accounts__account_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate Account",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/deactivate": {
+      "post": {
+        "description": "Deactivate an account and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the account does\nnot exist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nRaises:\n    HTTPException: The caller is deactivating itself.\n\nReturns:\n    Deactivated account carrying its activation token.",
+        "operationId": "deactivate_account_v1_accounts__account_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountActivationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deactivate Account",
         "tags": [
           "accounts"
         ]
