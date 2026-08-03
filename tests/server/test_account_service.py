@@ -27,6 +27,8 @@ from kitaru.server.domain.account import (
     AccountNotFound,
     DuplicateAccountName,
 )
+from kitaru.server.domain.base import ForbiddenError
+from kitaru.server.domain.keys import hash_secret
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
@@ -43,21 +45,86 @@ def service() -> AccountService:
 
 async def test_create_account(service: AccountService) -> None:
     """Create an account with all fields."""
-    account = await service.create_account(
-        name="alice", email="alice@example.com", password=None, actor=ACTOR
+    account, _ = await service.create_account(
+        name="alice", email="alice@example.com", password="secret", actor=ACTOR
     )
     assert account.name == "alice"
     assert account.email == "alice@example.com"
-    assert account.password_hash is None
+    assert account.password_hash == "hashed:secret"
     assert account.active is True
     assert account.is_service_account is False
     assert account.created is not None
     assert account.updated is not None
 
 
+async def test_create_account_without_password_pends_activation(
+    service: AccountService,
+) -> None:
+    """Start a password-less account inactive with an activation token."""
+    account, activation_token = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    assert account.password_hash is None
+    assert account.active is False
+    assert activation_token is not None
+    assert account.activation_token_hash == hash_secret(activation_token)
+
+
+async def test_activate_account(service: AccountService) -> None:
+    """Activate a pending account and clear its token."""
+    created, activation_token = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    assert activation_token is not None
+    activated = await service.activate_account(
+        created.id, activation_token=activation_token, password="secret"
+    )
+    assert activated.active is True
+    assert activated.password_hash == "hashed:secret"
+    assert activated.activation_token_hash is None
+
+
+async def test_activate_account_wrong_token(service: AccountService) -> None:
+    """Reject activation with a token that does not match."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.activate_account(
+            created.id, activation_token="wrong", password="secret"
+        )
+
+
+async def test_activate_account_without_pending_token(
+    service: AccountService,
+) -> None:
+    """Reject activation of an account that has no pending token."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="secret", actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.activate_account(
+            created.id, activation_token="anything", password="new"
+        )
+
+
+async def test_deactivate_account_mints_activation_token(
+    service: AccountService,
+) -> None:
+    """Mint a fresh activation token when an account is deactivated."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="secret", actor=ACTOR
+    )
+    updated, activation_token = await service.deactivate_account(
+        created.id, actor=ACTOR
+    )
+    assert updated.active is False
+    assert updated.activation_token_hash == hash_secret(activation_token)
+
+
 async def test_create_account_hashes_password(service: AccountService) -> None:
     """Store the hash of a given password, never the plaintext."""
-    account = await service.create_account(
+    account, _ = await service.create_account(
         name="alice", email=None, password="secret", actor=ACTOR
     )
     assert account.password_hash == "hashed:secret"
@@ -76,7 +143,7 @@ async def test_create_account_duplicate_name(service: AccountService) -> None:
 
 async def test_get_account(service: AccountService) -> None:
     """Load a stored account by id."""
-    created = await service.create_account(
+    created, _ = await service.create_account(
         name="alice", email=None, password=None, actor=ACTOR
     )
     loaded = await service.get_account(created.id, actor=ACTOR)
@@ -128,31 +195,35 @@ async def test_list_accounts_walks_pages(service: AccountService) -> None:
     assert collected == ["carol", "bob", "alice"]
 
 
-async def test_update_account_active(service: AccountService) -> None:
-    """Deactivate and reactivate an account."""
-    created = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+async def test_deactivate_then_activate_account(service: AccountService) -> None:
+    """Deactivate an account and bring it back with its fresh token."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="secret", actor=ACTOR
     )
-    updated = await service.update_account(
-        created.id, active=False, password=None, actor=ACTOR
+    deactivated, activation_token = await service.deactivate_account(
+        created.id, actor=ACTOR
     )
-    assert updated.active is False
-    assert updated.updated is not None
+    assert deactivated.active is False
+    assert deactivated.updated is not None
     assert created.updated is not None
-    assert updated.updated > created.updated
-    updated = await service.update_account(
-        created.id, active=True, password=None, actor=ACTOR
+    assert deactivated.updated > created.updated
+    activated = await service.activate_account(
+        created.id, activation_token=activation_token, password="new"
     )
-    assert updated.active is True
+    assert activated.active is True
 
 
 async def test_update_account_password(service: AccountService) -> None:
     """Replace the stored password hash."""
-    created = await service.create_account(
+    created, _ = await service.create_account(
         name="alice", email=None, password="old", actor=ACTOR
     )
     updated = await service.update_account(
-        created.id, active=None, password="new", actor=ACTOR
+        created.id,
+        password="new",
+        old_password="old",
+        metadata=None,
+        actor=ACTOR,
     )
     assert updated.password_hash == "hashed:new"
     assert updated.active is True
@@ -162,5 +233,84 @@ async def test_update_account_not_found(service: AccountService) -> None:
     """Raise for an unknown account id."""
     with pytest.raises(AccountNotFound):
         await service.update_account(
-            uuid.uuid4(), active=False, password=None, actor=ACTOR
+            uuid.uuid4(),
+            password=None,
+            old_password=None,
+            metadata=None,
+            actor=ACTOR,
+        )
+
+
+async def test_update_account_metadata(service: AccountService) -> None:
+    """Replace account metadata whole."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    assert created.metadata == {}
+    updated = await service.update_account(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata={"theme": "dark"},
+        actor=ACTOR,
+    )
+    assert updated.metadata == {"theme": "dark"}
+    updated = await service.update_account(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata={"locale": "de"},
+        actor=ACTOR,
+    )
+    assert updated.metadata == {"locale": "de"}
+
+
+async def test_update_account_password_without_old_password(
+    service: AccountService,
+) -> None:
+    """Reject a password change that omits the current password."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="old", actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.update_account(
+            created.id,
+            password="new",
+            old_password=None,
+            metadata=None,
+            actor=ACTOR,
+        )
+
+
+async def test_update_account_password_wrong_old_password(
+    service: AccountService,
+) -> None:
+    """Reject a password change whose current password does not match."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="old", actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.update_account(
+            created.id,
+            password="new",
+            old_password="wrong",
+            metadata=None,
+            actor=ACTOR,
+        )
+
+
+async def test_update_account_password_without_stored_password(
+    service: AccountService,
+) -> None:
+    """Reject a password change on an account that has no password set."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password=None, actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.update_account(
+            created.id,
+            password="new",
+            old_password="anything",
+            metadata=None,
+            actor=ACTOR,
         )

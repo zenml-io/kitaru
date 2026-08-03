@@ -18,9 +18,9 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 - `application/models/` holds `FrozenModel` filter and command objects that services accept.
 - `application/interfaces/` holds the repository protocols the services depend on.
 - `domain/` holds the entities, value objects, enums, and domain errors.
-- Exception mapping is global in `app.py`: `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `QueryTimeoutError` 503, `DomainError` 500, body always `{"detail": str}`.
-- Auth is one dependency, `authorize`, yielding `AuthContext(account, csrf_token)`. Credentials are an API key (`KITKEY_` prefix) or a JWT, from bearer header or cookie. Health and login/logout routes skip it. There is no separate worker auth.
-- Ownership is provenance, not authorization: the server is a trusted-team deployment, `owner_id` records who created a resource, and no service filters or rejects by owner. Every authenticated account reads and writes every resource.
+- Exception mapping is global in `app.py`: `ForbiddenError` 403, `NotFoundError` 404, `ConflictError` 409, `PayloadTooLargeError` 413, `ValidationError` 422, `QueryTimeoutError` 503, `DomainError` 500, body always `{"detail": str}`.
+- Auth is one dependency, `authorize`, yielding `AuthContext(account, csrf_token)`. Credentials are an API key (`KITKEY_` prefix) or a JWT, from bearer header or cookie. Health, login/logout, and account activation routes skip it. There is no separate worker auth.
+- Ownership is provenance, not authorization: the server is a trusted-team deployment, `owner_id` records who created a resource, and no service filters or rejects by owner. Every authenticated account reads and writes every resource. The exceptions are `account.metadata` and `account.password`, which the accounts router rejects with a 403 unless the path id is the caller's own account.
 - Pagination is uniform: `cursor` (opaque, from the previous response), `size` (ge=1, le=1000, default 20), and `sort` (`created:asc` or `created:desc`, default `created:desc`) on the `ListParams` base model, response `Page[T]` with `items` and `next_cursor` (null on the last page). The keyset rides the UUIDv7 id. Cursors embed the sort and a hash of the filter fields, changing either mid-pagination is a 422, changing `size` is allowed. Sortable fields are an allowlist per filter model (`sortable_fields` ClassVar, default `created`), a field beyond that needs a `(field, id)` composite index.
 - Filtering is a `filter` query parameter holding a JSON-encoded expression tree: `and`/`or`/`not` nodes over `{field, op, value}` conditions with ops `eq`, `ne`, `lt`, `le`, `gt`, `ge`, `in`, `is_null`, `startswith`, `endswith`, `contains`. `eq`/`ne` reject a null value, null checks are `is_null` (negated via `not`). Filterable fields are an allowlist per filter model (`filterable_fields` ClassVar mapping field name to value type and allowed ops), the expression is capped at 5 nesting levels, 30 conditions, and 100 `in` items, and a violation is a 422. The expression is hashed into the cursor with the other filter fields and compiles to SQL through `adapters/db/filtering.py` against a per-repository binding mapping whose values are columns or predicate factories (the tag filters on sessions, cohorts, experiments, and experiment runs compile to EXISTS probes this way). The tree replaced the flat per-field filter params, including the probe-style session filters (`tag`, `cohort_version_id`, `has_evaluation`), which bind to EXISTS predicate factories. List queries run under a transaction-local statement timeout applied in `paginate()`, configured through `KITARU_SERVER_LIST_QUERY_TIMEOUT_SECONDS` (default 10, 0 disables it), and a timed-out list query is a 503. Internal-only filter dimensions (`owner_id`, `internal`, `stale_before`, `seen_after`, `job_ids`, `account_id`, path-scoped ids) stay flat model fields set by services.
 - Commits happen before the response leaves: routers register through a custom `APIRoute` subclass that commits the request session after the handler returns and before the response is sent, so a 2xx means the write is committed and an immediate follow-up read sees it. An exception skips the commit and the session rolls back on close.
@@ -51,12 +51,14 @@ routers (adapters/rest/routers)          FastAPI handlers, api_models in and out
 
 | Method | Path | Request | Response | Service |
 |---|---|---|---|---|
-| POST | /v1/accounts | `AccountCreateRequest` | `AccountResponse` 201 | `AccountService.create_account` |
+| POST | /v1/accounts | `AccountCreateRequest` | `AccountResponse` or `AccountActivationTokenResponse` 201 | `AccountService.create_account` |
 | GET | /v1/accounts | query filter | `Page[AccountResponse]` | `AccountService.list_accounts` |
 | GET | /v1/accounts/{id} | - | `AccountResponse` | `AccountService.get_account` |
 | PATCH | /v1/accounts/{id} | `AccountUpdateRequest` | `AccountResponse` | `AccountService.update_account` |
+| POST | /v1/accounts/{id}/activate | `AccountActivateRequest` | `AccountResponse` | `AccountService.activate_account` |
+| POST | /v1/accounts/{id}/deactivate | - | `AccountActivationTokenResponse` | `AccountService.deactivate_account` |
 
-No DELETE for accounts.
+No DELETE for accounts. Active state is not writable through PATCH: an account leaves the active set through `POST /v1/accounts/{id}/deactivate` and returns through `POST /v1/accounts/{id}/activate`.
 
 ### agents (`/v1/agents`)
 
@@ -315,9 +317,11 @@ Neither a task nor a job carries a canceling status. Cancellation is a request f
 ### account.py
 
 - `AccountCreateRequest`: name, email?, password?
-- `AccountUpdateRequest`: active?, password?
+- `AccountActivateRequest`: activation_token, password
+- `AccountUpdateRequest`: password?, old_password?, metadata?
 - `AccountListParams`: filter?
-- `AccountResponse`: id, name, email?, is_service_account, active, created, updated
+- `AccountResponse`: id, name, email?, is_service_account, active, metadata, created, updated
+- `AccountActivationTokenResponse`: `AccountResponse` plus activation_token, returned once when a token is minted
 
 ### agent.py
 
@@ -612,7 +616,7 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 
 | Entity | Fields beyond id/owner_id/created/updated | Methods |
 |---|---|---|
-| `Account` | is_service_account, name, email?, password_hash?, active | update_active, update_password_hash |
+| `Account` | is_service_account, name, email?, password_hash?, activation_token_hash?, active, metadata: dict | update_active, update_activation_token_hash, update_metadata, update_password_hash |
 | `Agent` | name, description?, latest_version | update_name, update_description |
 | `AgentVersion` | agent_id, version: int, display_version?, description?, run_spec: RunSpec?, capabilities: AgentCapabilities | update_display_version, update_description, update_run_spec, update_capabilities |
 | `ApiKey` | name, key_hash, active, last_used? | update_active, mark_used |
@@ -671,7 +675,7 @@ Repository `get_many` methods load id lists through `_load_by_ids` on the base S
 
 | Table | ORM class | Domain model | Columns beyond id/created/updated |
 |---|---|---|---|
-| account | `AccountORM` | `Account` | is_service_account, name, email?, password_hash?, active. Unique (name, is_service_account). |
+| account | `AccountORM` | `Account` | is_service_account, name, email?, password_hash?, activation_token_hash?, active, metadata JSONB. Unique (name, is_service_account). |
 | agent | `AgentORM` | `Agent` | owner_id FK account, name unique, description?, latest_version |
 | agent_version | `AgentVersionORM` | `AgentVersion` | owner_id, agent_id FK, version, display_version?, description?, run_command?, run_working_dir?, run_env JSONB?, run_timeout_seconds?, capabilities JSONB. Unique (agent_id, version). The version number comes from an `UPDATE ... RETURNING` bump of agent.latest_version in the same transaction as the insert, matching plugin_version. RunSpec is flattened into run_* columns, secret_ids live in the link table. |
 | agent_version_secret | `AgentVersionSecretORM` | none (repository-managed) | Composite pk (agent_version_id FK CASCADE, secret_id FK), index with unique (agent_version_id, index) preserving secret order. |
@@ -721,6 +725,7 @@ Claim query (`claim_pending`): scope conditions + status = pending, ordered by i
 | task.result | list of `EvaluationResult` dumps (evaluator), `ImportStats` dump (importer) |
 | task.labels | plain `dict[str, str]` |
 | task.env | plain `dict[str, str]` |
+| account.metadata | plain dict |
 | plugin.metadata | plain dict |
 | replay_config.override | `ReplayOverride` dump |
 | replay_config.tool_policy | `ToolPolicy` dump |

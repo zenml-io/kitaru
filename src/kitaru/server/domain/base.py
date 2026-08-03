@@ -30,6 +30,10 @@ class NotFoundError(DomainError):
     """Raised when a lookup does not resolve in the caller's scope."""
 
 
+class ForbiddenError(DomainError):
+    """Raised when the caller may not perform an operation."""
+
+
 class ConflictError(DomainError):
     """Raised when an operation conflicts with existing state."""
 

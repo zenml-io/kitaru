@@ -16,9 +16,11 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from kitaru.api_models.v1.account import (
+    AccountActivateRequest,
+    AccountActivationTokenResponse,
     AccountCreateRequest,
     AccountListParams,
     AccountResponse,
@@ -29,12 +31,15 @@ from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
+    get_app_settings,
     require_local_account_management,
 )
 from kitaru.server.adapters.rest.mapping.accounts import (
     account_list_params_to_filter,
+    account_to_activation_token_response,
     account_to_response,
 )
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 
@@ -50,8 +55,11 @@ async def create_account(
     body: AccountCreateRequest,
     service: Annotated[AccountService, Depends(get_account_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-) -> AccountResponse:
+) -> AccountResponse | AccountActivationTokenResponse:
     """Create an account.
+
+    An account created without a password starts inactive and its response
+    carries the activation token once.
 
     Clients observe HTTP 201 on success, 403 outside the ``local`` auth
     scheme, 409 when the name is already registered, and 422 on invalid input.
@@ -64,12 +72,14 @@ async def create_account(
     Returns:
         Created account.
     """
-    account = await service.create_account(
+    account, activation_token = await service.create_account(
         name=body.name,
         email=body.email,
         password=body.password,
         actor=actor,
     )
+    if activation_token is not None:
+        return account_to_activation_token_response(account, activation_token)
     return account_to_response(account)
 
 
@@ -123,34 +133,123 @@ async def get_account(
     return account_to_response(account)
 
 
-@router.patch(
-    "/{account_id}",
-    dependencies=[Depends(require_local_account_management)],
-)
+@router.patch("/{account_id}")
 async def update_account(
     account_id: uuid.UUID,
     body: AccountUpdateRequest,
     service: Annotated[AccountService, Depends(get_account_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> AccountResponse:
     """Partially update an account.
 
-    Clients observe HTTP 200 on success, 403 outside the ``local`` auth
-    scheme, 404 when the account does not exist, and 422 on invalid input.
+    A password write carries the current password in ``old_password``.
+
+    Clients observe HTTP 200 on success, 403 when writing a password outside
+    the ``local`` auth scheme, when writing another account's password or
+    metadata, and when the supplied current password is missing or wrong, 404
+    when the account does not exist, and 422 on invalid input.
 
     Args:
         account_id: Id of the account.
         body: Account update request.
         service: Account service.
         actor: Caller context.
+        settings: API settings for this process.
+
+    Raises:
+        HTTPException: The caller is not the account whose password or
+            metadata it writes.
 
     Returns:
         Updated account.
     """
+    if body.password is not None:
+        require_local_account_management(settings)
+    if account_id != actor.account.id:
+        if body.password is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Accounts cannot change the password of other accounts.",
+            )
+        if body.metadata is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Accounts can only update their own metadata.",
+            )
     account = await service.update_account(
         account_id,
-        active=body.active,
         password=body.password,
+        old_password=body.old_password,
+        metadata=body.metadata,
         actor=actor,
+    )
+    return account_to_response(account)
+
+
+@router.post(
+    "/{account_id}/deactivate",
+    dependencies=[Depends(require_local_account_management)],
+)
+async def deactivate_account(
+    account_id: uuid.UUID,
+    service: Annotated[AccountService, Depends(get_account_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> AccountActivationTokenResponse:
+    """Deactivate an account and return its fresh activation token once.
+
+    Clients observe HTTP 200 on success, 403 outside the ``local`` auth scheme
+    and when deactivating the calling account, and 404 when the account does
+    not exist.
+
+    Args:
+        account_id: Id of the account.
+        service: Account service.
+        actor: Caller context.
+
+    Raises:
+        HTTPException: The caller is deactivating itself.
+
+    Returns:
+        Deactivated account carrying its activation token.
+    """
+    if account_id == actor.account.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accounts cannot deactivate themselves.",
+        )
+    account, activation_token = await service.deactivate_account(
+        account_id, actor=actor
+    )
+    return account_to_activation_token_response(account, activation_token)
+
+
+@router.post("/{account_id}/activate")
+async def activate_account(
+    account_id: uuid.UUID,
+    body: AccountActivateRequest,
+    service: Annotated[AccountService, Depends(get_account_service)],
+) -> AccountResponse:
+    """Activate an account with its activation token and a new password.
+
+    The route is unauthenticated, because the account it activates cannot log
+    in until it holds a password.
+
+    Clients observe HTTP 200 on success, 403 when the account has no pending
+    token or the token does not match, 404 when the account does not exist,
+    and 422 on invalid input.
+
+    Args:
+        account_id: Id of the account.
+        body: Account activate request.
+        service: Account service.
+
+    Returns:
+        Activated account.
+    """
+    account = await service.activate_account(
+        account_id,
+        activation_token=body.activation_token,
+        password=body.password,
     )
     return account_to_response(account)

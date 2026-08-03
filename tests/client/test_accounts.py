@@ -28,7 +28,6 @@ from kitaru.api_models.v1.account import (
     AccountCreateRequest,
     AccountListParams,
     AccountResponse,
-    AccountUpdateRequest,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
@@ -79,7 +78,9 @@ async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:
 
 async def test_get(api_client: KitaruAPIClient) -> None:
     """Get an account by id through the SDK."""
-    created = await api_client.accounts.create(AccountCreateRequest(name="alice"))
+    created = await api_client.accounts.create(
+        AccountCreateRequest(name="alice", password="secret")
+    )
     loaded = await api_client.accounts.get(created.id)
     assert loaded == created
 
@@ -140,11 +141,6 @@ async def test_iter(api_client: KitaruAPIClient) -> None:
 async def test_update(api_client: KitaruAPIClient) -> None:
     """Update an account through the SDK."""
     created = await api_client.accounts.create(AccountCreateRequest(name="alice"))
-    updated = await api_client.accounts.update(
-        created.id, AccountUpdateRequest(active=False)
-    )
-    assert updated.active is False
-    updated = await api_client.accounts.update(
-        created.id, AccountUpdateRequest(password="new")
-    )
-    assert updated.active is False
+    deactivated = await api_client.accounts.deactivate(created.id)
+    assert deactivated.active is False
+    assert deactivated.activation_token
