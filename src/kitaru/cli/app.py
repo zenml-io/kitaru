@@ -32,8 +32,11 @@ from pydantic import ValidationError as PydanticValidationError
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import auth as auth_commands
 from kitaru.cli import (
+    cohorts,
     diagnostics,
     evaluations,
+    experiment_runs,
+    experiments,
     jobs,
     registration,
     scaffold,
@@ -108,6 +111,26 @@ agent_version_app = App(
     help="Register and inspect agent versions.",
     default_parameter=Parameter(negative=False),
 )
+cohort_app = App(
+    name="cohort",
+    help=GROUP_DESCRIPTIONS["cohort"],
+    default_parameter=Parameter(negative=False),
+)
+cohort_version_app = App(
+    name="version",
+    help="Create and manage immutable cohort membership versions.",
+    default_parameter=Parameter(negative=False),
+)
+experiment_app = App(
+    name="experiment",
+    help=GROUP_DESCRIPTIONS["experiment"],
+    default_parameter=Parameter(negative=False),
+)
+experiment_run_app = App(
+    name="run",
+    help="Start, inspect, watch, cancel, and delete experiment runs.",
+    default_parameter=Parameter(negative=False),
+)
 importer_app = App(
     name="importer",
     help=GROUP_DESCRIPTIONS["importer"],
@@ -149,11 +172,15 @@ job_app = App(
     default_parameter=Parameter(negative=False),
 )
 agent_app.command(agent_version_app, name="version")
+cohort_app.command(cohort_version_app, name="version")
+experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
 app.command(config_app, name="config")
 app.command(context_app, name="context")
 app.command(agent_app, name="agent")
+app.command(cohort_app, name="cohort")
+app.command(experiment_app, name="experiment")
 app.command(importer_app, name="importer")
 app.command(evaluator_app, name="evaluator")
 app.command(session_app, name="session")
@@ -951,7 +978,9 @@ _LIST_PARAMETERS = (
 )
 _VERSION_LIST_PARAMETERS = _LIST_PARAMETERS[:-1]
 _WAIT_PARAMETERS = (
-    ParameterSpec("--wait", "boolean", "option", False, "Wait for job settlement."),
+    ParameterSpec(
+        "--wait", "boolean", "option", False, "Wait for remote work settlement."
+    ),
     ParameterSpec(
         "--interval",
         "positive float",
@@ -1294,6 +1323,826 @@ async def agent_version_get(agent_version: str, /) -> CommandResult:
     async with _open_asset_client() as client:
         _, version = await registration.get_agent_version(client, agent_version)
         return CommandResult(item=version.model_dump(mode="json"))
+
+
+@_register(
+    cohort_app,
+    _spec(
+        ("cohort", "create"),
+        "Create a cohort bound to one exact agent.",
+        parameters=(
+            ParameterSpec("NAME", "string", "argument", True, "New cohort name."),
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Exact agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
+                "--description", "string", "option", False, "Cohort description."
+            ),
+            ParameterSpec(
+                "--metadata", "JSON object", "option", False, "Cohort metadata."
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_create(
+    name: str,
+    /,
+    *,
+    agent: str,
+    description: str | None = None,
+    metadata: str | None = None,
+) -> CommandResult:
+    """Create a cohort bound to one exact agent."""
+    async with _open_asset_client() as client:
+        return await cohorts.create_cohort(
+            client,
+            name,
+            agent=agent,
+            description=description,
+            metadata=metadata,
+        )
+
+
+@_register(
+    cohort_app,
+    _spec(
+        ("cohort", "list"),
+        "List cohorts.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def cohort_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of cohorts."""
+    async with _open_asset_client() as client:
+        return await cohorts.list_cohorts(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    cohort_app,
+    _spec(
+        ("cohort", "get"),
+        "Get a cohort by exact UUID or case-sensitive name.",
+        parameters=(
+            ParameterSpec(
+                "COHORT", "reference", "argument", True, "Cohort UUID or name."
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def cohort_get(cohort: str, /) -> CommandResult:
+    """Get one exact cohort."""
+    async with _open_asset_client() as client:
+        return await cohorts.get_cohort(client, cohort)
+
+
+@_register(
+    cohort_app,
+    _spec(
+        ("cohort", "update"),
+        "Update selected fields on an exact cohort.",
+        parameters=(
+            ParameterSpec(
+                "COHORT", "reference", "argument", True, "Cohort UUID or name."
+            ),
+            ParameterSpec("--name", "string", "option", False, "New cohort name."),
+            ParameterSpec(
+                "--description", "string", "option", False, "New description."
+            ),
+            ParameterSpec(
+                "--clear-description",
+                "boolean",
+                "option",
+                False,
+                "Clear the description.",
+            ),
+            ParameterSpec(
+                "--metadata",
+                "JSON object",
+                "option",
+                False,
+                "Replacement metadata; {} clears it.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_update(
+    cohort: str,
+    /,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    clear_description: bool = False,
+    metadata: str | None = None,
+) -> CommandResult:
+    """Update selected fields on one exact cohort."""
+    async with _open_asset_client() as client:
+        return await cohorts.update_cohort(
+            client,
+            cohort,
+            name=name,
+            description=description,
+            clear_description=clear_description,
+            metadata=metadata,
+        )
+
+
+@_register(
+    cohort_app,
+    _spec(
+        ("cohort", "delete"),
+        "Delete a cohort and all of its versions.",
+        parameters=(
+            ParameterSpec(
+                "COHORT", "reference", "argument", True, "Cohort UUID or name."
+            ),
+            ParameterSpec(
+                "--force",
+                "boolean",
+                "option",
+                False,
+                "Confirm cascading remote deletion.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult:
+    """Delete one cohort and all of its versions."""
+    async with _open_asset_client() as client:
+        return await cohorts.delete_cohort(client, cohort, force=force)
+
+
+@_register(
+    cohort_version_app,
+    _spec(
+        ("cohort", "version", "create"),
+        "Create the next immutable version from a membership delta.",
+        parameters=(
+            ParameterSpec(
+                "COHORT", "reference", "argument", True, "Cohort UUID or name."
+            ),
+            ParameterSpec(
+                "--add-session",
+                "UUID[]",
+                "option",
+                False,
+                "Ordered session IDs to add.",
+            ),
+            ParameterSpec(
+                "--remove-session",
+                "UUID[]",
+                "option",
+                False,
+                "Ordered session IDs to remove.",
+            ),
+            ParameterSpec(
+                "--display-version",
+                "string",
+                "option",
+                False,
+                "Human-readable version.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_server_assigned_version",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_version_create(
+    cohort: str,
+    /,
+    *,
+    add_session: list[uuid.UUID] | None = None,
+    remove_session: list[uuid.UUID] | None = None,
+    display_version: str | None = None,
+) -> CommandResult:
+    """Create an immutable version from an ordered membership delta."""
+    async with _open_asset_client() as client:
+        return await cohorts.create_cohort_version(
+            client,
+            cohort,
+            add_session_ids=add_session,
+            remove_session_ids=remove_session,
+            display_version=display_version,
+        )
+
+
+@_register(
+    cohort_version_app,
+    _spec(
+        ("cohort", "version", "list"),
+        "List immutable versions of an exact cohort.",
+        parameters=(
+            ParameterSpec(
+                "COHORT", "reference", "argument", True, "Cohort UUID or name."
+            ),
+            *_VERSION_LIST_PARAMETERS,
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def cohort_version_list(
+    cohort: str,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+) -> CommandResult:
+    """List one server page of immutable cohort versions."""
+    async with _open_asset_client() as client:
+        return await cohorts.list_cohort_versions(
+            client, cohort, size=size, cursor=cursor, sort=sort
+        )
+
+
+@_register(
+    cohort_version_app,
+    _spec(
+        ("cohort", "version", "get"),
+        "Get a version by UUID or exact COHORT@VERSION reference.",
+        parameters=(
+            ParameterSpec(
+                "VERSION",
+                "UUID|COHORT@VERSION",
+                "argument",
+                True,
+                "Cohort-version UUID or exact server-assigned version.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def cohort_version_get(version: str, /) -> CommandResult:
+    """Get one exact immutable cohort version."""
+    async with _open_asset_client() as client:
+        return await cohorts.get_cohort_version_result(client, version)
+
+
+@_register(
+    cohort_version_app,
+    _spec(
+        ("cohort", "version", "update"),
+        "Update a cohort version's display version.",
+        parameters=(
+            ParameterSpec(
+                "VERSION",
+                "UUID|COHORT@VERSION",
+                "argument",
+                True,
+                "Cohort-version UUID or exact server-assigned version.",
+            ),
+            ParameterSpec(
+                "--display-version",
+                "string",
+                "option",
+                False,
+                "New human-readable version.",
+            ),
+            ParameterSpec(
+                "--clear-display-version",
+                "boolean",
+                "option",
+                False,
+                "Clear the human-readable version.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_version_update(
+    version: str,
+    /,
+    *,
+    display_version: str | None = None,
+    clear_display_version: bool = False,
+) -> CommandResult:
+    """Update one cohort version's display version."""
+    async with _open_asset_client() as client:
+        return await cohorts.update_cohort_version(
+            client,
+            version,
+            display_version=display_version,
+            clear_display_version=clear_display_version,
+        )
+
+
+@_register(
+    cohort_version_app,
+    _spec(
+        ("cohort", "version", "delete"),
+        "Delete one immutable cohort version without reusing its number.",
+        parameters=(
+            ParameterSpec(
+                "VERSION",
+                "UUID|COHORT@VERSION",
+                "argument",
+                True,
+                "Cohort-version UUID or exact server-assigned version.",
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def cohort_version_delete(
+    version: str, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one exact immutable cohort version."""
+    async with _open_asset_client() as client:
+        return await cohorts.delete_cohort_version(client, version, force=force)
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "create"),
+        "Create an experiment with exact evaluator versions.",
+        parameters=(
+            ParameterSpec("NAME", "string", "argument", True, "New experiment name."),
+            ParameterSpec(
+                "--description", "string", "option", False, "Experiment description."
+            ),
+            ParameterSpec(
+                "--override",
+                "JSON object",
+                "option",
+                False,
+                "Replay override applied to every run.",
+            ),
+            ParameterSpec(
+                "--tool-policy",
+                "JSON object",
+                "option",
+                False,
+                "Tool policy applied to every run; omitted uses the server default.",
+            ),
+            ParameterSpec(
+                "--evaluator",
+                "reference[]",
+                "option",
+                True,
+                "Exact EVALUATOR@VERSION references.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def experiment_create(
+    name: str,
+    /,
+    *,
+    evaluator: list[str],
+    description: str | None = None,
+    override: str | None = None,
+    tool_policy: str | None = None,
+    evaluator_params: list[str] | None = None,
+) -> CommandResult:
+    """Create an experiment with exact evaluator versions."""
+    async with _open_asset_client() as client:
+        return await experiments.create_experiment(
+            client,
+            name,
+            description=description,
+            override=override,
+            tool_policy=tool_policy,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+        )
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "list"),
+        "List experiments.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def experiment_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of experiments."""
+    async with _open_asset_client() as client:
+        return await experiments.list_experiments(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "get"),
+        "Get an experiment by exact UUID or case-sensitive name.",
+        parameters=(
+            ParameterSpec(
+                "EXPERIMENT",
+                "reference",
+                "argument",
+                True,
+                "Experiment UUID or name.",
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def experiment_get(experiment: str, /) -> CommandResult:
+    """Get one exact experiment."""
+    async with _open_asset_client() as client:
+        return await experiments.get_experiment(client, experiment)
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "update"),
+        "Update selected fields on an exact experiment.",
+        parameters=(
+            ParameterSpec(
+                "EXPERIMENT",
+                "reference",
+                "argument",
+                True,
+                "Experiment UUID or name.",
+            ),
+            ParameterSpec("--name", "string", "option", False, "New experiment name."),
+            ParameterSpec(
+                "--description", "string", "option", False, "New description."
+            ),
+            ParameterSpec(
+                "--clear-description",
+                "boolean",
+                "option",
+                False,
+                "Clear the description.",
+            ),
+            ParameterSpec(
+                "--override",
+                "JSON object",
+                "option",
+                False,
+                "Replacement replay override.",
+            ),
+            ParameterSpec(
+                "--clear-override",
+                "boolean",
+                "option",
+                False,
+                "Clear the replay override.",
+            ),
+            ParameterSpec(
+                "--tool-policy",
+                "JSON object",
+                "option",
+                False,
+                "Replacement tool policy; cannot be cleared.",
+            ),
+            ParameterSpec(
+                "--evaluator",
+                "reference[]",
+                "option",
+                False,
+                "Exact evaluator versions replacing the complete list.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def experiment_update(
+    experiment: str,
+    /,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    clear_description: bool = False,
+    override: str | None = None,
+    clear_override: bool = False,
+    tool_policy: str | None = None,
+    evaluator: list[str] | None = None,
+    evaluator_params: list[str] | None = None,
+) -> CommandResult:
+    """Update selected fields on one exact experiment."""
+    async with _open_asset_client() as client:
+        return await experiments.update_experiment(
+            client,
+            experiment,
+            name=name,
+            description=description,
+            clear_description=clear_description,
+            override=override,
+            clear_override=clear_override,
+            tool_policy=tool_policy,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+        )
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "delete"),
+        "Delete an experiment and preserve server conflict behavior.",
+        parameters=(
+            ParameterSpec(
+                "EXPERIMENT",
+                "reference",
+                "argument",
+                True,
+                "Experiment UUID or name.",
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def experiment_delete(
+    experiment: str, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one exact experiment."""
+    async with _open_asset_client() as client:
+        return await experiments.delete_experiment(client, experiment, force=force)
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "start"),
+        "Start an experiment run and optionally wait for terminal settlement.",
+        parameters=(
+            ParameterSpec(
+                "EXPERIMENT",
+                "reference",
+                "argument",
+                True,
+                "Experiment UUID or name.",
+            ),
+            ParameterSpec(
+                "--cohort-version",
+                "UUID",
+                "option",
+                True,
+                "Exact cohort-version ID.",
+            ),
+            ParameterSpec(
+                "--agent",
+                "AGENT@VERSION",
+                "option",
+                True,
+                "Exact agent version reference.",
+            ),
+            ParameterSpec(
+                "--evaluate-baselines",
+                "boolean",
+                "option",
+                False,
+                "Also score each baseline session.",
+            ),
+            *_WAIT_PARAMETERS,
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_run_created_per_request",
+        errors=(*_ASSET_WRITE_ERRORS, *_JOB_WAIT_ERRORS),
+        streams=True,
+    ),
+)
+async def experiment_run_start(
+    experiment: str,
+    /,
+    *,
+    cohort_version: uuid.UUID,
+    agent: str,
+    evaluate_baselines: bool = False,
+    wait: bool = False,
+    interval: float | None = None,
+    timeout: float | None = None,
+) -> CommandResult:
+    """Start one exact experiment run and optionally wait for it."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.start_run(
+            client,
+            experiment,
+            cohort_version_id=cohort_version,
+            agent_reference=agent,
+            evaluate_baselines=evaluate_baselines,
+            wait=wait,
+            interval=interval,
+            timeout=timeout,
+        )
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "list"),
+        "List experiment runs without deriving state from their jobs.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def experiment_run_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of experiment runs."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.list_runs(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "get"),
+        "Get an experiment run and its aggregate progress by exact UUID.",
+        parameters=(
+            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def experiment_run_get(run: uuid.UUID, /) -> CommandResult:
+    """Get one experiment run without mapping terminal status to an error."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.get_run(client, run)
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "jobs"),
+        "List one page of replay jobs backing an experiment run.",
+        parameters=(
+            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+            *_LIST_PARAMETERS,
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def experiment_run_jobs(
+    run: uuid.UUID,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of replay jobs for a run."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.list_run_jobs(
+            client,
+            run,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+        )
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "watch"),
+        "Poll a run until it completes, fails, or is canceled without changing it.",
+        parameters=(
+            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+            ParameterSpec(
+                "--interval", "positive float", "option", False, "Run polling interval."
+            ),
+            ParameterSpec(
+                "--timeout", "positive float", "option", False, "Local wait timeout."
+            ),
+        ),
+        errors=(*_ASSET_READ_ERRORS, *_JOB_WAIT_ERRORS),
+        streams=True,
+    ),
+)
+async def experiment_run_watch(
+    run: uuid.UUID,
+    /,
+    *,
+    interval: float = 2.0,
+    timeout: float | None = None,
+) -> CommandResult:
+    """Watch one run locally without changing remote work."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.watch_run(
+            client, run, interval=interval, timeout=timeout
+        )
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "cancel"),
+        "Request run cancellation once without waiting for settlement.",
+        parameters=(
+            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="server_rejects_settled_runs",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def experiment_run_cancel(run: uuid.UUID, /) -> CommandResult:
+    """Request run cancellation and return after server acceptance."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.cancel_run(client, run)
+
+
+@_register(
+    experiment_run_app,
+    _spec(
+        ("experiment", "run", "delete"),
+        "Delete a run and immediately delete all of its replay jobs and tasks.",
+        parameters=(
+            ParameterSpec("RUN", "UUID", "argument", True, "Experiment-run ID."),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def experiment_run_delete(
+    run: uuid.UUID, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one run and its replay jobs and tasks immediately."""
+    async with _open_asset_client() as client:
+        return await experiment_runs.delete_run(client, run, force=force)
 
 
 def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
