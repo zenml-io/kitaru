@@ -47,6 +47,7 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_task,
     get_session_node_service,
     get_session_service,
 )
@@ -66,7 +67,11 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
@@ -81,6 +86,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

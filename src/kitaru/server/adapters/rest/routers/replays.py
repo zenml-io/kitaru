@@ -27,7 +27,11 @@ from kitaru.api_models.v1.replay import (
     ToolLookupResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_replay_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_task,
+    get_replay_service,
+)
 from kitaru.server.adapters.rest.mapping.replays import (
     replay_create_to_command,
     replay_list_params_to_filter,
@@ -101,11 +105,12 @@ async def list_replays(
 async def get_replay(
     replay_id: uuid.UUID,
     service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> ReplayResponse:
     """Get a replay by id.
 
-    Clients observe HTTP 200 on success and 404 when no replay has this id.
+    Clients observe HTTP 200 on success, 403 when a task token names a task
+    outside this replay's job, and 404 when no replay has this id.
 
     Args:
         replay_id: Id of the replay.
@@ -124,12 +129,13 @@ async def tool_lookup(
     replay_id: uuid.UUID,
     body: ToolLookupRequest,
     service: Annotated[ReplayService, Depends(get_replay_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> ToolLookupResponse:
     """Search recorded tool-call history for a cached result.
 
-    Clients observe HTTP 200 on success, 404 when no replay has this id, and
-    422 when the tool is not configured for history.
+    Clients observe HTTP 200 on success, 403 when a task token names a task
+    outside this replay's job, 404 when no replay has this id, and 422 when
+    the tool is not configured for history.
 
     Args:
         replay_id: Id of the replay.

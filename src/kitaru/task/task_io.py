@@ -14,29 +14,12 @@
 """Task process env reading and result-file writing."""
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
-
-def get_required_env(name: str) -> str:
-    """Read a task process contract variable.
-
-    Args:
-        name: Environment variable name.
-
-    Raises:
-        RuntimeError: The variable is missing or empty.
-
-    Returns:
-        Variable value.
-    """
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"{name} is not set")
-    return value
+from kitaru.env import get_required_env
 
 
 def write_task_result(value: Any) -> None:

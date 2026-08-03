@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Kitaru API client."""
 
+import copy
 import os
 from collections.abc import AsyncIterable
 from types import TracebackType
@@ -26,7 +27,12 @@ from kitaru.analytics.source import (
     format_client_header,
 )
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
-from kitaru.client.auth import TokenProvider
+from kitaru.client.auth import (
+    CredentialStoreTokenSource,
+    RenewingTokenAuth,
+    StaticTokenAuth,
+    TokenAuth,
+)
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
@@ -53,6 +59,7 @@ from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.workers import WorkersResource
+from kitaru.env import get_required_env
 from kitaru.transport import build_async_client
 
 
@@ -74,27 +81,41 @@ class KitaruAPIClient:
             base_url: Server base URL.
             api_key: API key authenticating this client. A server key is sent
                 as a bearer token, a control plane key is exchanged for a
-                session token held in memory. Ignored when a credential store
-                is supplied.
+                session token held in memory.
             credential_store: Store holding the credentials this client
                 authenticates with, renewing its token as it expires.
             timeout: Request timeout in seconds.
             retries: Retry count for failed requests.
             pool_size: Connection pool size.
+
+        Raises:
+            ValueError: Both an API key and a credential store were supplied.
         """
+        if api_key is not None and credential_store is not None:
+            raise ValueError("api_key and credential_store are mutually exclusive")
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
-        if api_key and credential_store is None:
+        self._auth: TokenAuth | None = None
+        if api_key:
             if api_key.startswith(CONTROL_PLANE_API_KEY_PREFIX):
                 # Control plane API keys are exchanged for a session token, so
                 # we need an in-memory credential store to hold it.
                 credential_store = CredentialStore(persist=False)
                 credential_store.set_api_key(base_url, api_key)
             else:
-                headers["Authorization"] = f"Bearer {api_key}"
+                self._auth = StaticTokenAuth(api_key)
         self._http = build_async_client(
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
+        self._owns_transport = True
+        self._bind_resources()
+        if credential_store is not None:
+            self._auth = RenewingTokenAuth(
+                CredentialStoreTokenSource(base_url, credential_store, self.auth)
+            )
+
+    def _bind_resources(self) -> None:
+        """Bind every API resource to this client."""
         self.accounts = AccountsResource(self)
         self.agents = AgentsResource(self)
         self.agent_versions = AgentVersionsResource(self)
@@ -119,13 +140,13 @@ class KitaruAPIClient:
         self.tags = TagsResource(self)
         self.tasks = TasksResource(self)
         self.workers = WorkersResource(self)
-        self._auth: TokenProvider | None = None
-        if credential_store is not None:
-            self._auth = TokenProvider(base_url, credential_store, self.auth)
 
     @classmethod
     def from_env(cls) -> "KitaruAPIClient":
-        """Construct a client from KITARU_API_URL and KITARU_API_KEY.
+        """Construct a client from KITARU_API_URL and the ambient credential.
+
+        Inside a task process the credential is KITARU_TASK_TOKEN, elsewhere
+        it is KITARU_API_KEY.
 
         Raises:
             RuntimeError: KITARU_API_URL is not set.
@@ -133,10 +154,42 @@ class KitaruAPIClient:
         Returns:
             Client.
         """
-        base_url = os.environ.get("KITARU_API_URL")
-        if not base_url:
-            raise RuntimeError("KITARU_API_URL is not set")
-        return cls(base_url=base_url, api_key=os.environ.get("KITARU_API_KEY"))
+        base_url = get_required_env("KITARU_API_URL")
+        credential = os.environ.get("KITARU_TASK_TOKEN") or os.environ.get(
+            "KITARU_API_KEY"
+        )
+        return cls(base_url=base_url, api_key=credential)
+
+    def with_token(self, token: str) -> "KitaruAPIClient":
+        """Return a view of this client authenticating with a fixed bearer token.
+
+        Args:
+            token: Bearer token attached to every request sent through the
+                view.
+
+        Returns:
+            Client view authenticating with the given token.
+        """
+        return self.with_auth(StaticTokenAuth(token))
+
+    def with_auth(self, auth: TokenAuth) -> "KitaruAPIClient":
+        """Return a view of this client authenticating with the given auth flow.
+
+        The view shares this client's HTTP transport instead of opening a new
+        connection pool. Closing the view closes only its auth flow, and
+        closing this client also invalidates the view.
+
+        Args:
+            auth: Auth flow attached to every request sent through the view.
+
+        Returns:
+            Client view authenticating with the given auth flow.
+        """
+        view = copy.copy(self)
+        view._auth = auth
+        view._owns_transport = False
+        view._bind_resources()
+        return view
 
     async def request(
         self,
@@ -152,10 +205,6 @@ class KitaruAPIClient:
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
-        A request rejected with HTTP 401 is retried once with a renewed token,
-        unless another caller renewed it first, in which case the retry uses
-        theirs.
-
         Args:
             method: HTTP method.
             path: Request path relative to the base URL.
@@ -166,8 +215,8 @@ class KitaruAPIClient:
                 field.
             content: Raw or streaming request body.
             headers: Additional request headers.
-            authenticate: Whether to attach a bearer token from the credential
-                store. The login endpoints send their own credential.
+            authenticate: Whether to send the request through this client's
+                auth flow. The login endpoints send their own credential.
 
         Raises:
             APIError: The response has an error status code.
@@ -175,45 +224,30 @@ class KitaruAPIClient:
         Returns:
             HTTP response.
         """
-        provider = self._auth if authenticate else None
-        generation = provider.generation if provider is not None else 0
-        request_headers = dict(headers or {})
         if params is not None:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
-
-        async def send() -> httpx.Response:
-            return await self._http.request(
-                method,
-                path,
-                params=params,
-                json=json,
-                data=data,
-                files=files,
-                content=content,
-                headers=request_headers or None,
-            )
-
-        if provider is not None:
-            token = await provider.get_token()
-            if token is not None:
-                request_headers["Authorization"] = f"Bearer {token}"
-        response = await send()
-        if response.status_code == httpx.codes.UNAUTHORIZED and provider is not None:
-            await response.aclose()
-            token = await provider.renew(generation)
-            if token is not None:
-                request_headers["Authorization"] = f"Bearer {token}"
-                response = await send()
+        response = await self._http.request(
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            content=content,
+            headers=headers,
+            auth=self._auth if authenticate else None,
+        )
         raise_for_response(response)
         return response
 
     async def close(self) -> None:
-        """Close the underlying HTTP clients."""
+        """Close the auth flow, and the HTTP transport when this client owns it."""
         if self._auth is not None:
             await self._auth.close()
-        await self._http.aclose()
+        if self._owns_transport:
+            await self._http.aclose()
 
     async def __aenter__(self) -> "KitaruAPIClient":
         """Enter the context manager.

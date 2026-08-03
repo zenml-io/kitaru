@@ -55,9 +55,9 @@ def get_task_inputs() -> Any:
 
     base_url = get_required_env("KITARU_API_URL")
     headers = {}
-    api_key = os.environ.get("KITARU_API_KEY")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+    token = os.environ.get("KITARU_TASK_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     response = httpx.get(f"{base_url}/v1/tasks/{task_id}/spec", headers=headers)
     response.raise_for_status()
     spec = TaskSpecResponse.model_validate(response.json())

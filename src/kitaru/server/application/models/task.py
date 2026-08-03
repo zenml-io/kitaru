@@ -27,10 +27,11 @@ from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
 
 
 class ClaimedTask(NamedTuple):
-    """Claimed task paired with its execution spec."""
+    """Claimed task paired with its execution spec and job owner."""
 
     task: Task
     spec: TaskSpec
+    job_owner_id: uuid.UUID
 
 
 class TaskFilter(ListFilter):
@@ -60,7 +61,6 @@ class TaskUpdate(FrozenModel):
     """Task update command."""
 
     status: TaskStatus | None = None
-    attempt: int | None = None
     error: str | None = None
     result: Any = None
 

@@ -30,7 +30,11 @@ from conftest import (
     create_session,
 )
 from kitaru.api_models.v1.session import SessionOrigin
-from kitaru.server.adapters.rest.dependencies import authorize, get_replay_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_task,
+    get_replay_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -51,10 +55,15 @@ def services() -> ReplayServices:
 async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed replay services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_replay_service] = lambda: services.replay_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

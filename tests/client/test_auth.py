@@ -31,6 +31,7 @@ from kitaru.api_models.v1.auth import (
     TokenResponse,
 )
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.auth import RenewingTokenAuth, StaticTokenAuth
 from kitaru.client.exceptions import AuthenticationError
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import get_auth_service
@@ -117,24 +118,24 @@ async def test_exchange_invalid_api_key(api_client: KitaruAPIClient) -> None:
     assert exc_info.value.detail == "Invalid API key."
 
 
-async def test_control_plane_api_key_is_not_pinned_as_a_header() -> None:
+async def test_control_plane_api_key_is_exchanged_through_a_renewing_flow() -> None:
     """Exchange a control plane API key rather than sending it on every request."""
     client = KitaruAPIClient(
         base_url="http://test", api_key=f"{CONTROL_PLANE_API_KEY_PREFIX}secret"
     )
     try:
         assert "Authorization" not in client._http.headers
-        assert client._auth is not None
+        assert isinstance(client._auth, RenewingTokenAuth)
     finally:
         await client.close()
 
 
-async def test_server_api_key_is_pinned_as_a_header() -> None:
-    """Send a server API key as a bearer token without a token provider."""
+async def test_server_api_key_is_sent_as_a_static_bearer_token() -> None:
+    """Send a server API key as a fixed bearer token without exchanging it."""
     key = f"{API_KEY_PREFIX}secret"
     client = KitaruAPIClient(base_url="http://test", api_key=key)
     try:
-        assert client._http.headers["Authorization"] == f"Bearer {key}"
-        assert client._auth is None
+        assert "Authorization" not in client._http.headers
+        assert isinstance(client._auth, StaticTokenAuth)
     finally:
         await client.close()

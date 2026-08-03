@@ -19,6 +19,7 @@ from collections.abc import AsyncIterator
 
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.resource_access import check_task_blob_read
 from kitaru.server.domain.blob import Blob, BlobTooLarge
 
 
@@ -84,12 +85,13 @@ class BlobService:
             actor: Caller context.
 
         Raises:
+            BlobAccessDenied: A task principal holds no grant for the blob.
             BlobNotFound: No blob has this id.
 
         Returns:
             Stored blob.
         """
-        _ = actor
+        check_task_blob_read(blob_id, actor)
         return await self._repository.get(blob_id)
 
     async def download_blob(self, blob_id: uuid.UUID, actor: AuthContext) -> Blob:
@@ -100,12 +102,13 @@ class BlobService:
             actor: Caller context.
 
         Raises:
+            BlobAccessDenied: A task principal holds no grant for the blob.
             BlobNotFound: No blob has this id.
 
         Returns:
             Stored blob.
         """
-        _ = actor
+        check_task_blob_read(blob_id, actor)
         return await self._repository.get(blob_id)
 
     async def delete_blob(self, blob_id: uuid.UUID, actor: AuthContext) -> None:
