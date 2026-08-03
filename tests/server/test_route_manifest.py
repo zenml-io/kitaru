@@ -28,6 +28,8 @@ def test_route_manifest_is_registered() -> None:
         "/health/live",
         "/v1/accounts",
         "/v1/accounts/{account_id}",
+        "/v1/accounts/{account_id}/activate",
+        "/v1/accounts/{account_id}/deactivate",
         "/v1/agent-versions/{agent_version_id}",
         "/v1/agents",
         "/v1/agents/{agent_id}",

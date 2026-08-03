@@ -184,7 +184,9 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
         row.name = account.name
         row.email = account.email
         row.password_hash = account.password_hash
+        row.activation_token_hash = account.activation_token_hash
         row.active = account.active
+        row.metadata_ = account.metadata
         await self._flush(
             {ACCOUNT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateAccountName(account.name)}
         )

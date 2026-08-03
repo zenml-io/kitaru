@@ -15,6 +15,7 @@
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import Field
 
@@ -56,7 +57,9 @@ class Account(DomainModel):
     name: AccountName
     email: str | None = None
     password_hash: str | None = None
+    activation_token_hash: str | None = None
     active: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -77,6 +80,22 @@ class Account(DomainModel):
         """
         self.name = name
         self.email = email
+
+    def update_metadata(self, metadata: dict[str, Any]) -> None:
+        """Set new account metadata.
+
+        Args:
+            metadata: New metadata.
+        """
+        self.metadata = metadata
+
+    def update_activation_token_hash(self, activation_token_hash: str | None) -> None:
+        """Set the hash of the activation token.
+
+        Args:
+            activation_token_hash: Hash of the new token, ``None`` clears it.
+        """
+        self.activation_token_hash = activation_token_hash
 
     def update_password_hash(self, password_hash: str) -> None:
         """Set a new password hash.

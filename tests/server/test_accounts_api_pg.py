@@ -69,9 +69,7 @@ async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a partial update across requests."""
     created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
-    response = await client.patch(
-        f"/v1/accounts/{created['id']}", json={"active": False}
-    )
+    response = await client.post(f"/v1/accounts/{created['id']}/deactivate")
     assert response.status_code == 200
 
     response = await client.get(f"/v1/accounts/{created['id']}")

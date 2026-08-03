@@ -68,6 +68,7 @@ from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
     DomainError,
+    ForbiddenError,
     NotFoundError,
     PayloadTooLargeError,
     QueryTimeoutError,
@@ -78,14 +79,19 @@ from kitaru.server.domain.base import (
 def _register_domain_exception_handlers(app: FastAPI) -> None:
     """Register JSON error responses for domain exceptions raised by routes.
 
-    Clients receive HTTP 404 for ``NotFoundError``, 409 for ``ConflictError``,
-    413 for ``PayloadTooLargeError``, 422 for ``ValidationError``, 503 for
-    ``QueryTimeoutError``, and 500 for other ``DomainError`` subclasses. Each
-    body is ``{"detail": "<message>"}``.
+    Clients receive HTTP 403 for ``ForbiddenError``, 404 for ``NotFoundError``,
+    409 for ``ConflictError``, 413 for ``PayloadTooLargeError``, 422 for
+    ``ValidationError``, 503 for ``QueryTimeoutError``, and 500 for other
+    ``DomainError`` subclasses. Each body is ``{"detail": "<message>"}``.
 
     Args:
         app: FastAPI application that will serve the v1 API.
     """
+
+    @app.exception_handler(ForbiddenError)
+    async def forbidden(request: Request, exc: ForbiddenError) -> JSONResponse:
+        _ = request
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
 
     @app.exception_handler(NotFoundError)
     async def not_found(request: Request, exc: NotFoundError) -> JSONResponse:
