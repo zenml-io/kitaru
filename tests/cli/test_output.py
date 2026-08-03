@@ -17,6 +17,7 @@ import io
 import json
 
 import pytest
+from rich.text import Text
 
 from kitaru.cli.output import (
     ERROR_EXIT_CODES,
@@ -31,6 +32,39 @@ from kitaru.cli.output import (
     resolve_output_mode,
     set_output_context,
 )
+
+
+def _render_text(
+    command: str,
+    result: CommandResult,
+    *,
+    rich: bool,
+    columns: int = 120,
+) -> tuple[str, str]:
+    """Render one text result with a deterministic terminal width."""
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command=command,
+            mode="text",
+            machine=not rich,
+            non_interactive=True,
+            debug=False,
+            traceback=False,
+            stdout=stdout,
+            stderr=stderr,
+            rich=rich,
+            terminal_width=columns,
+        )
+    )
+    try:
+        emit_result(result)
+    finally:
+        reset_output_context(token)
+    return Text.from_ansi(stdout.getvalue()).plain, Text.from_ansi(
+        stderr.getvalue()
+    ).plain
 
 
 def test_auto_mode_and_finite_jsonl_contract() -> None:
@@ -214,3 +248,249 @@ def test_redaction_masks_secret_fields_and_recognizable_values() -> None:
         "renewable": True,
     }
     assert "token-value" not in redacted["message"]
+
+
+@pytest.mark.parametrize(
+    ("columns", "shown", "hidden"),
+    [
+        (
+            80,
+            ("Status", "Name", "ID"),
+            ("Origin", "Provider", "LLM calls", "Tool calls", "Cost"),
+        ),
+        (
+            120,
+            ("Status", "Name", "ID", "Origin"),
+            ("Provider", "LLM calls", "Tool calls", "Cost"),
+        ),
+        (
+            200,
+            (
+                "Status",
+                "Name",
+                "ID",
+                "Origin",
+                "Provider",
+                "LLM calls",
+                "Tool calls",
+                "Cost",
+            ),
+            (),
+        ),
+    ],
+)
+def test_human_session_list_selects_columns_for_terminal_width(
+    columns: int, shown: tuple[str, ...], hidden: tuple[str, ...]
+) -> None:
+    """Human tables remain useful at common widths and never shorten IDs."""
+    session_id = "019f0000-1111-7222-8333-444444444444"
+    stdout, _ = _render_text(
+        "session.list",
+        CommandResult(
+            items=[
+                {
+                    "id": session_id,
+                    "status": "completed",
+                    "name": "Example",
+                    "origin": "imported",
+                    "provider": "langfuse",
+                    "llm_call_count": 2,
+                    "tool_call_count": 3,
+                    "cost": "0.012",
+                    "created": "2026-08-03T12:00:00Z",
+                    "inputs": {"large": "payload that must not become a column"},
+                }
+            ],
+            page={"limit": 20, "next_cursor": None, "truncated": False},
+        ),
+        rich=True,
+        columns=columns,
+    )
+
+    assert session_id in stdout.replace("\n", "")
+    for heading in shown:
+        assert heading in stdout
+    for heading in hidden:
+        assert heading not in stdout
+    assert "large" not in stdout
+
+
+def test_human_values_preserve_literal_rich_markup_characters() -> None:
+    """Server values display literally instead of being interpreted as Rich markup."""
+    stdout, _ = _render_text(
+        "session.list",
+        CommandResult(
+            items=[
+                {
+                    "id": "019f0000-1111-7222-8333-444444444444",
+                    "status": "completed",
+                    "name": "[bold red]literal[/bold red]",
+                }
+            ],
+            page={"limit": 20, "next_cursor": None, "truncated": False},
+        ),
+        rich=True,
+        columns=100,
+    )
+
+    assert "[bold red]literal[/bold red]" in stdout
+
+
+def test_human_list_renders_empty_state_pagination_and_next_actions() -> None:
+    """Human lists explain empty pages and expose exact continuation data."""
+    stdout, _ = _render_text(
+        "worker.list",
+        CommandResult(
+            items=[],
+            page={"limit": 20, "next_cursor": "cursor-token", "truncated": True},
+            links={"dashboard": "https://example.test/workers"},
+            next_actions=["kitaru worker start"],
+        ),
+        rich=True,
+    )
+
+    assert "No workers found." in stdout
+    assert "Next cursor: cursor-token" in stdout
+    assert "Showing 0 items." in stdout
+    assert "dashboard: https://example.test/workers" in stdout
+    assert "Next: kitaru worker start" in stdout
+
+
+def test_human_detail_uses_sections_and_pretty_prints_nested_values() -> None:
+    """Human detail views separate summary fields from nested payloads."""
+    stdout, _ = _render_text(
+        "session.get",
+        CommandResult(
+            item={
+                "id": "019f0000-1111-7222-8333-444444444444",
+                "status": "completed",
+                "name": "Example",
+                "origin": "native",
+                "inputs": {"prompt": "Hello"},
+                "outputs": {"answer": "Hi"},
+                "metadata": {"team": "cli"},
+                "llm_call_count": 1,
+                "tool_call_count": 0,
+            }
+        ),
+        rich=True,
+    )
+
+    assert "Summary" in stdout
+    assert "Usage" in stdout
+    assert "Payload" in stdout
+    assert '"prompt": "Hello"' in stdout
+    assert '{"prompt": "Hello"}' not in stdout
+
+
+def test_machine_text_ignores_human_view_metadata() -> None:
+    """Plain machine text retains the existing complete line representation."""
+    item = {
+        "id": "019f0000-1111-7222-8333-444444444444",
+        "status": "completed",
+        "inputs": {"prompt": "Hello"},
+    }
+    stdout, _ = _render_text("session.list", CommandResult(items=[item]), rich=False)
+
+    assert stdout == json.dumps(item, sort_keys=True) + "\n"
+
+
+def test_human_error_uses_a_clear_headline_and_recovery_hint() -> None:
+    """Interactive errors separate the failure kind, cause, and next step."""
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command="session.list",
+            mode="text",
+            machine=False,
+            non_interactive=False,
+            debug=False,
+            traceback=False,
+            stdout=stdout,
+            stderr=stderr,
+            rich=True,
+            terminal_width=100,
+        )
+    )
+    try:
+        emit_error(
+            CLIError(
+                "invalid_arguments",
+                "--sort must use a supported field.",
+                hint="Run `kitaru session list --help` for valid values.",
+            )
+        )
+    finally:
+        reset_output_context(token)
+
+    rendered = Text.from_ansi(stderr.getvalue()).plain
+    assert "Invalid arguments" in rendered
+    assert "--sort must use a supported field." in rendered
+    assert "Run `kitaru session list --help` for valid values." in rendered
+    assert stdout.getvalue() == ""
+
+
+def test_human_doctor_renders_checks_as_an_operational_table() -> None:
+    """Doctor output is readable without decoding a nested JSON array."""
+    stdout, _ = _render_text(
+        "doctor",
+        CommandResult(
+            item={
+                "healthy": False,
+                "checks": [
+                    {
+                        "name": "server_info",
+                        "status": "fail",
+                        "required": True,
+                        "detail": "Connection refused",
+                    },
+                    {
+                        "name": "uv",
+                        "status": "pass",
+                        "required": False,
+                        "detail": "/opt/homebrew/bin/uv",
+                    },
+                ],
+            },
+            exit_code=6,
+        ),
+        rich=True,
+    )
+
+    assert "needs attention" in stdout
+    assert "Check" in stdout
+    assert "Status" in stdout
+    assert "server_info" in stdout
+    assert "Connection refused" in stdout
+    assert '"checks"' not in stdout
+
+
+def test_human_registration_receipt_keeps_parent_and_version_identity() -> None:
+    """Successful multi-phase registrations never render an empty human result."""
+    stdout, _ = _render_text(
+        "agent.register",
+        CommandResult(
+            item={
+                "agent": {
+                    "id": "019f0000-1111-7222-8333-444444444444",
+                    "name": "assistant",
+                },
+                "version": {
+                    "id": "019f0000-1111-7222-8333-555555555555",
+                    "version": 3,
+                },
+                "phases": {
+                    "parent": {"completed": True},
+                    "version": {"completed": True},
+                },
+            }
+        ),
+        rich=True,
+    )
+
+    assert "Registered" in stdout
+    assert "assistant" in stdout
+    assert "019f0000-1111-7222-8333-444444444444" in stdout
+    assert "019f0000-1111-7222-8333-555555555555" in stdout
+    assert "Phases" in stdout

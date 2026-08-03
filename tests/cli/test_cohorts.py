@@ -210,14 +210,14 @@ async def test_cohort_create_list_and_get_map_to_existing_sdk() -> None:
         client,
         size=7,
         cursor="cursor",
-        sort="name:asc",
+        sort="created:asc",
         filter='{"field":"name","op":"eq","value":"regression"}',
     )
     [params] = client.list_calls
     assert isinstance(params, CohortListParams)
     assert params.size == 7
     assert params.cursor == "cursor"
-    assert params.sort == "name:asc"
+    assert params.sort == "created:asc"
     dumped_params = params.model_dump(mode="json")
     assert json.loads(dumped_params["filter"]) == {
         "field": "name",

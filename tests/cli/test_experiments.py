@@ -301,14 +301,14 @@ async def test_list_and_get_map_to_existing_sdk() -> None:
         client,
         size=6,
         cursor="cursor",
-        sort="name:asc",
+        sort="created:asc",
         filter='{"field":"name","op":"eq","value":"regression"}',
     )
     [params] = client.list_calls
     assert isinstance(params, ExperimentListParams)
     assert params.size == 6
     assert params.cursor == "cursor"
-    assert params.sort == "name:asc"
+    assert params.sort == "created:asc"
     assert json.loads(params.model_dump(mode="json")["filter"]) == {
         "field": "name",
         "op": "eq",

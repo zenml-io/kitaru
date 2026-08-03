@@ -29,6 +29,7 @@ from kitaru.api_models.v1.experiment_run import (
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.receipts import get_wait_settings
 from kitaru.cli.registration import (
+    build_list_params,
     get_agent_version,
     list_params,
     page_result,
@@ -260,8 +261,12 @@ async def list_run_jobs(
     filter: str | None,
 ) -> CommandResult:
     """List one page of jobs backing an experiment run."""
-    params = ExperimentRunJobsListParams(
-        size=size, cursor=cursor, sort=sort, filter=filter
+    params = build_list_params(
+        ExperimentRunJobsListParams,
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
     )
     return page_result(
         await client.experiment_runs.list_jobs(run_id, params), size=size
