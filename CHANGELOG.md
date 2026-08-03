@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Stage 4 CLI hardening adds client/server compatibility diagnostics, structured interrupt handling, graceful SIGINT/SIGTERM worker draining, and isolated wheel/sdist artifact smoke coverage.
 - CLI commands to create, inspect, update, and delete experiments with exact evaluator versions, inline replay configuration, sparse updates, and explicit destructive-delete confirmation.
 - CLI commands to create, inspect, update, and delete cohorts and immutable cohort versions, including exact version references and explicit destructive-delete confirmation.
 - CLI commands to import and inspect sessions and nodes, run bounded session evaluations with optional job waiting, and inspect stored evaluations.

@@ -18,6 +18,7 @@ import builtins
 import io
 import json
 import os
+import signal
 import stat
 import uuid
 from dataclasses import dataclass, field
@@ -239,6 +240,39 @@ def test_contract_environment_keeps_required_control_plane_credential(
         assert unrelated_server not in payload
 
 
+async def test_natural_completion_reports_completed_and_restores_signals() -> None:
+    """Natural completion reports its reason and restores process handlers."""
+
+    class CompletedWorker:
+        async def run(self, stop: asyncio.Event | None = None) -> None:
+            assert stop is not None
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    token = set_output_context(_output_context(stdout, stderr))
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    previous_sigterm = (
+        signal.getsignal(signal.SIGTERM) if hasattr(signal, "SIGTERM") else None
+    )
+    try:
+        result = await workers.ForegroundWorkerProcess(
+            CompletedWorker(), {"name": "local"}
+        ).run()
+    finally:
+        reset_output_context(token)
+
+    assert result.exit_code == 0
+    assert result.item == {
+        "name": "local",
+        "status": "stopped",
+        "server_record": "retained_until_stale",
+        "stop_reason": "completed",
+    }
+    assert signal.getsignal(signal.SIGINT) is previous_sigint
+    if hasattr(signal, "SIGTERM"):
+        assert signal.getsignal(signal.SIGTERM) is previous_sigterm
+
+
 async def test_first_sigint_drains_and_second_uses_immediate_exit() -> None:
     """The first interrupt waits for held work; the second skips that wait."""
     stdout = io.StringIO()
@@ -271,12 +305,113 @@ async def test_first_sigint_drains_and_second_uses_immediate_exit() -> None:
         result = await run
         assert result.exit_code == 130
         assert result.event == "stopped"
+        assert result.item is not None
+        assert result.item["stop_reason"] == "sigint"
+        assert result.item["server_record"] == "retained_until_stale"
     finally:
         reset_output_context(token)
 
-    events = [json.loads(line)["event"] for line in stdout.getvalue().splitlines()]
-    assert events == ["starting", "draining"]
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [event["event"] for event in events] == ["starting", "draining"]
+    assert events[1]["item"] == {"reason": "sigint"}
     assert stderr.getvalue() == ""
+
+
+async def test_sigterm_drains_and_later_sigint_is_emergency() -> None:
+    """SIGTERM exits 143 while a later SIGINT retains emergency behavior."""
+    if not hasattr(signal, "SIGTERM"):
+        pytest.skip("SIGTERM is not available")
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    token = set_output_context(_output_context(stdout, stderr))
+    exits: list[int] = []
+    cleanups: list[bool] = []
+    try:
+        worker = DrainWorker()
+        process = workers.ForegroundWorkerProcess(
+            worker,
+            {"name": "local"},
+            immediate_exit=exits.append,
+            emergency_cleanup=lambda: cleanups.append(True),
+        )
+        run = asyncio.create_task(process.run())
+        await worker.started.wait()
+
+        process.handle_sigterm()
+        process.handle_sigterm()
+        await asyncio.sleep(0)
+        assert process.stop.is_set()
+        assert not run.done()
+        assert exits == []
+
+        process.handle_sigint()
+        assert cleanups == [True]
+        assert exits == [130]
+
+        worker.release.set()
+        result = await run
+        assert result.exit_code == 143
+        assert result.item is not None
+        assert result.item["stop_reason"] == "sigterm"
+        assert result.item["server_record"] == "retained_until_stale"
+    finally:
+        reset_output_context(token)
+
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [event["event"] for event in events] == ["starting", "draining"]
+    assert events[1]["item"] == {"reason": "sigterm"}
+    assert stderr.getvalue() == ""
+
+
+class _FailedFlushWriter(io.StringIO):
+    """Structured writer whose consumer closes during flush."""
+
+    def __init__(self, error_type: type[Exception]) -> None:
+        super().__init__()
+        self._error_type = error_type
+
+    def flush(self) -> None:
+        """Simulate a closed downstream consumer."""
+        raise self._error_type("output stream is closed")
+
+
+def test_signal_sets_stop_before_emitting_drain(monkeypatch) -> None:
+    """Signal handling requests the drain before writing its lifecycle event."""
+    process = workers.ForegroundWorkerProcess(DrainWorker(), {"name": "local"})
+    stop_states: list[bool] = []
+    monkeypatch.setattr(
+        workers,
+        "emit_event",
+        lambda *args: stop_states.append(process.stop.is_set()),
+    )
+
+    process.handle_sigint()
+
+    assert stop_states == [True]
+
+
+@pytest.mark.parametrize("error_type", [BrokenPipeError, ValueError])
+def test_closed_output_cannot_prevent_signal_drain(
+    error_type: type[Exception],
+) -> None:
+    """A failed drain event write still records the signal and sets stop."""
+    stdout = _FailedFlushWriter(error_type)
+    token = set_output_context(_output_context(stdout, io.StringIO()))
+    try:
+        process = workers.ForegroundWorkerProcess(DrainWorker(), {"name": "local"})
+        process.handle_sigint()
+    finally:
+        reset_output_context(token)
+
+    assert process.stop.is_set()
+
+
+def test_worker_start_schema_describes_graceful_and_emergency_signals() -> None:
+    """Offline discovery documents both graceful signals and emergency SIGINT."""
+    description = app_module._FUNCTION_SPECS[app_module.worker_start].description
+    assert "first SIGINT or SIGTERM drains" in description
+    assert "SIGINT after either signal exits immediately" in description
 
 
 async def test_worker_failure_propagates_without_a_false_stopped_event() -> None:
