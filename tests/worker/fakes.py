@@ -39,6 +39,7 @@ from kitaru.api_models.v1.task import (
 )
 from kitaru.api_models.v1.worker import (
     WorkerHeartbeatResponse,
+    WorkerRegistrationResponse,
     WorkerResponse,
     WorkerRuntime,
 )
@@ -226,6 +227,28 @@ def make_worker_response(**overrides: Any) -> WorkerResponse:
     return WorkerResponse.model_validate(fields)
 
 
+def make_worker_registration_response(
+    worker: WorkerResponse | None = None, token: str = "worker-token", **overrides: Any
+) -> WorkerRegistrationResponse:
+    """Build a worker registration response with sane defaults.
+
+    Args:
+        worker: Registered worker, a fresh default worker response when omitted.
+        token: Bearer token scoped to the worker.
+        overrides: Additional fields to override on the response.
+
+    Returns:
+        Worker registration response.
+    """
+    fields = {
+        "worker": worker or make_worker_response(),
+        "token": token,
+        "token_expires_at": _now(),
+    }
+    fields.update(overrides)
+    return WorkerRegistrationResponse.model_validate(fields)
+
+
 def make_job_response(
     status: JobStatus = JobStatus.RUNNING, **overrides: Any
 ) -> JobResponse:
@@ -280,17 +303,20 @@ def make_session_response(
     return SessionResponse.model_validate(fields)
 
 
-def make_claimed(task: TaskResponse, spec: TaskSpecResponse) -> TaskWithSpec:
+def make_claimed(
+    task: TaskResponse, spec: TaskSpecResponse, token: str = "task-token"
+) -> TaskWithSpec:
     """Pair a task and its spec as a claim response entry.
 
     Args:
         task: Task.
         spec: Task spec.
+        token: Bearer token scoped to this task and attempt.
 
     Returns:
         Task with spec.
     """
-    return TaskWithSpec(task=task, spec=spec)
+    return TaskWithSpec(task=task, spec=spec, token=token)
 
 
 class FakeWorkersResource:
@@ -299,11 +325,11 @@ class FakeWorkersResource:
     def __init__(self) -> None:
         """Initialize the resource with an empty call log."""
         self.created: list[Any] = []
-        self.create_response = make_worker_response()
+        self.create_response = make_worker_registration_response()
         self.heartbeats: list[tuple[uuid.UUID, Any]] = []
         self.heartbeat_responses: deque[Any] = deque()
 
-    async def create(self, request: Any) -> WorkerResponse:
+    async def create(self, request: Any) -> WorkerRegistrationResponse:
         """Record the request and return the scripted worker."""
         self.created.append(request)
         return self.create_response
@@ -431,6 +457,14 @@ class FakeKitaruAPIClient:
     async def __aexit__(self, *exc_info: object) -> None:
         """Exit the context manager, marking the client closed."""
         self.closed = True
+
+    def with_token(self, token: str) -> "FakeKitaruAPIClient":
+        """Return this fake, since it has no separate transport to view."""
+        return self
+
+    def with_auth(self, auth: object) -> "FakeKitaruAPIClient":
+        """Return this fake, since it has no separate transport to view."""
+        return self
 
 
 def as_client(fake: FakeKitaruAPIClient) -> KitaruAPIClient:

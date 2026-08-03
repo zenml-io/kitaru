@@ -59,28 +59,31 @@ async def test_session_run_lifecycle_completes_the_job(
     ).json()
     assert job["status"] == "pending"
 
-    worker = (
+    registration = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
 
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     assert len(claimed["tasks"]) == 1
-    task = claimed["tasks"][0]["task"]
+    entry = claimed["tasks"][0]
+    task = entry["task"]
     assert task["job_id"] == job["id"]
     assert task["status"] == "claimed"
+    task_headers = {"Authorization": f"Bearer {entry['token']}"}
 
     response = await client.get(f"/v1/jobs/{job['id']}")
     assert response.json()["status"] == "running"
 
     response = await client.patch(
-        f"/v1/tasks/{task['id']}", json={"status": "running", "attempt": 1}
+        f"/v1/tasks/{task['id']}", json={"status": "running"}, headers=task_headers
     )
     assert response.status_code == 200
 
@@ -104,7 +107,7 @@ async def test_session_run_lifecycle_completes_the_job(
     assert response.status_code == 200
 
     response = await client.patch(
-        f"/v1/tasks/{task['id']}", json={"status": "completed", "attempt": 1}
+        f"/v1/tasks/{task['id']}", json={"status": "completed"}, headers=task_headers
     )
     assert response.status_code == 200
 
@@ -182,15 +185,17 @@ async def test_heartbeat_reports_cancel_requested_tasks(
             json={"agent_version_id": version_id, "inputs": None},
         )
     ).json()
-    worker = (
+    registration = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
+    worker = registration["worker"]
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     task_id = claimed["tasks"][0]["task"]["id"]
@@ -198,7 +203,9 @@ async def test_heartbeat_reports_cancel_requested_tasks(
     await client.post(f"/v1/jobs/{job['id']}/cancel")
 
     response = await client.post(
-        f"/v1/workers/{worker['id']}/heartbeat", json={"task_ids": [task_id]}
+        f"/v1/workers/{worker['id']}/heartbeat",
+        json={"task_ids": [task_id]},
+        headers=worker_headers,
     )
     assert response.status_code == 200
     assert response.json()["cancel_task_ids"] == [task_id]

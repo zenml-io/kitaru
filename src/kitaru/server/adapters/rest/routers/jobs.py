@@ -22,7 +22,11 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.job import JobListParams, JobResponse, JobTasksListParams
 from kitaru.api_models.v1.task import TaskResponse
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_worker,
+    get_job_service,
+)
 from kitaru.server.adapters.rest.mapping.jobs import (
     job_list_params_to_filter,
     job_tasks_list_params_to_filter,
@@ -65,7 +69,7 @@ async def list_jobs(
 async def get_job(
     job_id: uuid.UUID,
     service: Annotated[JobService, Depends(get_job_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_worker)],
 ) -> JobResponse:
     """Get a job by id.
 

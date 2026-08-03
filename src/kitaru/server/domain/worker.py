@@ -20,7 +20,7 @@ from pydantic import Field
 
 from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
-from kitaru.server.domain.base import DomainModel, NotFoundError
+from kitaru.server.domain.base import DomainModel, ForbiddenError, NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -35,6 +35,26 @@ class WorkerNotFound(NotFoundError):
             worker_id: Id of the missing worker.
         """
         super().__init__(f"Worker {worker_id} was not found")
+
+
+class WorkerCredentialRequired(ForbiddenError):
+    """Raised when an operation requires the caller to hold a worker token."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("This operation requires a worker credential")
+
+
+class WorkerAccessDenied(ForbiddenError):
+    """Raised when the caller's credential does not authorize this worker."""
+
+    def __init__(self, worker_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            worker_id: Id of the worker.
+        """
+        super().__init__(f"Worker {worker_id} is not accessible to this caller")
 
 
 class Worker(DomainModel):

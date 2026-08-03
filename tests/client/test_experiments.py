@@ -66,7 +66,11 @@ def plugin_repository(services: ReplayServices) -> FakePluginRepository:
 async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with fake-backed services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_experiment_service] = lambda: (
         services.experiment_service

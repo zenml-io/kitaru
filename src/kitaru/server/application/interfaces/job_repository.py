@@ -14,6 +14,7 @@
 """Job repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.job import JobFilter
@@ -58,6 +59,17 @@ class JobRepository(Protocol):
 
         Returns:
             Stored job.
+        """
+        ...
+
+    async def get_many(self, job_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Job]:
+        """Bulk-load jobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Stored jobs keyed by id.
         """
         ...
 

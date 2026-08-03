@@ -34,23 +34,24 @@ from conftest import (
     create_agent_task,
     create_job,
     create_worker,
+    local_settings,
+    mint_worker_token,
 )
+from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
-    authorize,
+    get_auth_service,
     get_task_service,
     get_worker_service,
 )
 from kitaru.server.api.app import create_app
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
-
-ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
 RUNTIME = {"platform": "bare"}
 
@@ -74,15 +75,21 @@ def job_repository(task_repository: FakeTaskRepository) -> FakeJobRepository:
 
 
 @pytest.fixture
+async def account_token(auth_service: AuthService, account: Account) -> str:
+    """Provide a bearer token authenticating as the fixture account."""
+    return auth_service.issue_token(AuthContext(account=account)).token
+
+
+@pytest.fixture
 async def client(
     repository: FakeWorkerRepository,
     task_repository: FakeTaskRepository,
     job_repository: FakeJobRepository,
+    auth_service: AuthService,
+    account_token: str,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app with fake-backed worker and task services."""
-    app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
-    )
+    """Provide an HTTP client authenticated as the fixture account by default."""
+    app = create_app(local_settings())
     service = WorkerService(repository=repository)
     transitions = TaskTransitions(
         task_repository=task_repository,
@@ -90,27 +97,37 @@ async def client(
         dispatcher=EventDispatcher(),
     )
     agents = FakeAgentRepository()
-    task_service = TaskService(
-        repository=task_repository,
-        worker_repository=repository,
-        session_repository=FakeSessionRepository(),
+    task_policy = TaskPolicy()
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=FakeAgentVersionRepository(agents),
         plugin_repository=FakePluginRepository(),
         blob_repository=FakeBlobRepository(),
         secret_repository=FakeSecretRepository(),
+        policy=task_policy,
+    )
+    task_service = TaskService(
+        repository=task_repository,
+        worker_repository=repository,
+        session_repository=FakeSessionRepository(),
+        job_repository=job_repository,
+        spec_builder=spec_builder,
         transitions=transitions,
-        policy=TaskPolicy(),
+        policy=task_policy,
     )
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service
-    app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[get_auth_service] = lambda: auth_service
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {account_token}"},
+    ) as client:
         yield client
 
 
-async def test_register_worker(client: httpx.AsyncClient) -> None:
-    """Register a worker and observe HTTP 200."""
+async def test_register_worker(client: httpx.AsyncClient, account: Account) -> None:
+    """Register a worker and observe a worker record plus a bearer token."""
     response = await client.post(
         "/v1/workers",
         json={
@@ -122,11 +139,13 @@ async def test_register_worker(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["name"] == "worker-1"
-    assert body["owner_id"] == str(ACCOUNT.id)
-    assert body["metadata"] == {"region": "eu"}
-    assert body["live"] is True
-    assert uuid.UUID(body["id"])
+    assert body["worker"]["name"] == "worker-1"
+    assert body["worker"]["owner_id"] == str(account.id)
+    assert body["worker"]["metadata"] == {"region": "eu"}
+    assert body["worker"]["live"] is True
+    assert uuid.UUID(body["worker"]["id"])
+    assert isinstance(body["token"], str) and body["token"]
+    assert body["token_expires_at"]
 
 
 async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
@@ -153,12 +172,13 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
             },
         )
     ).json()
-    assert second["id"] == first["id"]
-    assert second["created"] == first["created"]
-    assert second["scope"]["kinds"] == ["importer"]
-    assert second["runtime"]["platform"] == "docker"
-    assert second["metadata"] == {"region": "us"}
-    assert second["updated"] > first["updated"]
+    assert second["worker"]["id"] == first["worker"]["id"]
+    assert second["worker"]["created"] == first["worker"]["created"]
+    assert second["worker"]["scope"]["kinds"] == ["importer"]
+    assert second["worker"]["runtime"]["platform"] == "docker"
+    assert second["worker"]["metadata"] == {"region": "us"}
+    assert second["worker"]["updated"] > first["worker"]["updated"]
+    assert isinstance(second["token"], str) and second["token"]
 
 
 async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
@@ -171,16 +191,59 @@ async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
 
 
 async def test_get_worker(client: httpx.AsyncClient) -> None:
-    """Get a worker by id."""
+    """Get a worker by id using the registering account's credential."""
     created = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
-    response = await client.get(f"/v1/workers/{created['id']}")
+    response = await client.get(f"/v1/workers/{created['worker']['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == created["worker"]
+
+
+async def test_get_worker_with_its_own_token(
+    client: httpx.AsyncClient, auth_service: AuthService, account: Account
+) -> None:
+    """Get a worker using its own worker token."""
+    created = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    worker_id = uuid.UUID(created["worker"]["id"])
+    token = mint_worker_token(auth_service, worker_id, account)
+    response = await client.get(
+        f"/v1/workers/{worker_id}", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json() == created["worker"]
+
+
+async def test_get_worker_with_a_different_workers_token_is_forbidden(
+    client: httpx.AsyncClient, auth_service: AuthService, account: Account
+) -> None:
+    """Observe HTTP 403 when a worker token names a different worker."""
+    first = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    second = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-2", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    token = mint_worker_token(auth_service, uuid.UUID(first["worker"]["id"]), account)
+    response = await client.get(
+        f"/v1/workers/{second['worker']['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
 
 
 async def test_get_worker_not_found(client: httpx.AsyncClient) -> None:
@@ -226,9 +289,9 @@ async def test_delete_worker(client: httpx.AsyncClient) -> None:
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
-    response = await client.delete(f"/v1/workers/{created['id']}")
+    response = await client.delete(f"/v1/workers/{created['worker']['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/workers/{created['id']}")
+    response = await client.get(f"/v1/workers/{created['worker']['id']}")
     assert response.status_code == 404
 
 
@@ -239,13 +302,13 @@ async def test_delete_worker_not_found(client: httpx.AsyncClient) -> None:
 
 
 async def test_worker_live_derivation(
-    client: httpx.AsyncClient, repository: FakeWorkerRepository
+    client: httpx.AsyncClient, repository: FakeWorkerRepository, account: Account
 ) -> None:
     """Derive live from last_seen_at against the liveness setting."""
-    live = await create_worker(repository, ACCOUNT.id, name="live")
+    live = await create_worker(repository, account.id, name="live")
     stale = await create_worker(
         repository,
-        ACCOUNT.id,
+        account.id,
         name="stale",
         last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
     )
@@ -262,16 +325,21 @@ async def test_heartbeat_worker(
     repository: FakeWorkerRepository,
     job_repository: FakeJobRepository,
     task_repository: FakeTaskRepository,
+    auth_service: AuthService,
+    account: Account,
 ) -> None:
     """Report held tasks and observe the ones to stop in cancel_task_ids."""
-    worker = await create_worker(repository, ACCOUNT.id)
-    job = await create_job(job_repository, ACCOUNT.id)
+    worker = await create_worker(repository, account.id)
+    job = await create_job(job_repository, account.id)
     task = await create_agent_task(task_repository, job.id)
     task.claim(worker.id, datetime.now(UTC))
     await task_repository.update(task)
+    token = mint_worker_token(auth_service, worker.id, account)
 
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat", json={"task_ids": [str(task.id)]}
+        f"/v1/workers/{worker.id}/heartbeat",
+        json={"task_ids": [str(task.id)]},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     assert response.json()["cancel_task_ids"] == []
@@ -280,20 +348,60 @@ async def test_heartbeat_worker(
 async def test_heartbeat_worker_returns_reported_ids_the_worker_no_longer_owns(
     client: httpx.AsyncClient,
     repository: FakeWorkerRepository,
+    auth_service: AuthService,
+    account: Account,
 ) -> None:
     """A task the caller does not own comes back in cancel_task_ids."""
-    worker = await create_worker(repository, ACCOUNT.id)
+    worker = await create_worker(repository, account.id)
     missing_id = uuid.uuid4()
+    token = mint_worker_token(auth_service, worker.id, account)
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat", json={"task_ids": [str(missing_id)]}
+        f"/v1/workers/{worker.id}/heartbeat",
+        json={"task_ids": [str(missing_id)]},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
     assert response.json()["cancel_task_ids"] == [str(missing_id)]
 
 
-async def test_heartbeat_worker_not_found(client: httpx.AsyncClient) -> None:
+async def test_heartbeat_worker_not_found(
+    client: httpx.AsyncClient, auth_service: AuthService, account: Account
+) -> None:
     """Observe HTTP 404 for an unknown worker id."""
+    missing_id = uuid.uuid4()
+    token = mint_worker_token(auth_service, missing_id, account)
     response = await client.post(
-        f"/v1/workers/{uuid.uuid4()}/heartbeat", json={"task_ids": []}
+        f"/v1/workers/{missing_id}/heartbeat",
+        json={"task_ids": []},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 404
+
+
+async def test_heartbeat_worker_with_a_different_workers_token_is_forbidden(
+    client: httpx.AsyncClient,
+    repository: FakeWorkerRepository,
+    auth_service: AuthService,
+    account: Account,
+) -> None:
+    """Observe HTTP 403 when a worker token names a different worker."""
+    worker = await create_worker(repository, account.id)
+    other = await create_worker(repository, account.id, name="other")
+    token = mint_worker_token(auth_service, other.id, account)
+    response = await client.post(
+        f"/v1/workers/{worker.id}/heartbeat",
+        json={"task_ids": []},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+async def test_heartbeat_worker_rejects_an_account_credential(
+    client: httpx.AsyncClient, repository: FakeWorkerRepository, account: Account
+) -> None:
+    """Observe HTTP 403 when the caller holds only an account credential."""
+    worker = await create_worker(repository, account.id)
+    response = await client.post(
+        f"/v1/workers/{worker.id}/heartbeat", json={"task_ids": []}
+    )
+    assert response.status_code == 403

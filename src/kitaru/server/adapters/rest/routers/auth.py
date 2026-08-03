@@ -38,11 +38,13 @@ from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
     AuthService,
+    IssuedToken,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     get_app_settings,
     get_auth_service,
+    get_bearer_credential,
     get_device_service,
 )
 from kitaru.server.adapters.rest.mapping.devices import (
@@ -83,24 +85,6 @@ class TokenGrantError(Exception):
             Token error response.
         """
         return TokenErrorResponse(error=self.error, detail=self.description)
-
-
-def _get_bearer_credential(request: Request) -> str | None:
-    """Read a bearer credential from the request authorization header.
-
-    Args:
-        request: Incoming request.
-
-    Returns:
-        Credential string without the ``Bearer`` prefix, or ``None``.
-    """
-    header = request.headers.get("Authorization")
-    if not header:
-        return None
-    scheme, _, credential = header.partition(" ")
-    if scheme.lower() != "bearer" or not credential:
-        return None
-    return credential
 
 
 class LoginRequestForm:
@@ -285,31 +269,26 @@ async def login(
     Returns:
         Issued token.
     """
-    csrf_token = None
     try:
         if form.grant_type is GrantType.DEVICE_CODE:
             assert form.device_id is not None
-            token, expires_at = await _login_with_device(
-                service, form.device_id, form.device_code
-            )
+            issued = await _login_with_device(service, form.device_id, form.device_code)
         elif form.grant_type is GrantType.API_KEY:
-            token, expires_at = await service.login_with_api_key(
+            issued = await service.login_with_api_key(
                 _require_bearer_credential(request, "API key")
             )
         elif form.grant_type is GrantType.CONTROL_PLANE:
-            token, expires_at, csrf_token = await service.login_with_control_plane(
+            issued = await service.login_with_control_plane(
                 _require_bearer_credential(request, "control plane credential")
             )
         else:
-            token, expires_at, csrf_token = await service.login_with_password(
-                form.username, form.password
-            )
+            issued = await service.login_with_password(form.username, form.password)
     except AuthenticationError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
-    expires_in = int((expires_at - datetime.now(UTC)).total_seconds())
+    expires_in = int((issued.expires_at - datetime.now(UTC)).total_seconds())
     # A device or API key token belongs to a headless client, so it never rides
     # a cookie.
     if settings.AUTH_COOKIE_NAME and form.grant_type not in (
@@ -318,7 +297,7 @@ async def login(
     ):
         response.set_cookie(
             key=settings.AUTH_COOKIE_NAME,
-            value=token,
+            value=issued.token,
             max_age=expires_in,
             httponly=True,
             samesite="lax",
@@ -326,10 +305,10 @@ async def login(
             domain=settings.AUTH_COOKIE_DOMAIN or None,
         )
     return TokenResponse(
-        access_token=token,
+        access_token=issued.token,
         token_type="bearer",
         expires_in=expires_in,
-        csrf_token=csrf_token,
+        csrf_token=issued.csrf_token,
     )
 
 
@@ -354,7 +333,7 @@ async def logout(
 
 async def _login_with_device(
     service: AuthService, device_id: uuid.UUID, device_code: str
-) -> tuple[str, datetime]:
+) -> IssuedToken:
     """Run the device grant and translate its failures into OAuth 2.0 errors.
 
     Args:
@@ -366,7 +345,7 @@ async def _login_with_device(
         TokenGrantError: The device authorization is not ready or not valid.
 
     Returns:
-        Encoded bearer token and its expiry time.
+        Issued token.
     """
     try:
         return await service.login_with_device(device_id, device_code)
@@ -395,7 +374,7 @@ def _require_bearer_credential(request: Request, kind: str) -> str:
     Returns:
         Credential string without the ``Bearer`` prefix.
     """
-    credential = _get_bearer_credential(request)
+    credential = get_bearer_credential(request)
     if credential is None:
         raise AuthenticationError(f"Missing {kind}.")
     return credential

@@ -35,7 +35,11 @@ class ImportHandler:
     """Builds the kitaru.task import process for an importer task."""
 
     async def prepare(
-        self, ctx: ExecutionContext, task_id: uuid.UUID, spec: TaskSpecResponse
+        self,
+        ctx: ExecutionContext,
+        task_id: uuid.UUID,
+        spec: TaskSpecResponse,
+        token: str,
     ) -> TaskProcess:
         """Build the importer process, materializing its plugin and payload.
 
@@ -43,13 +47,14 @@ class ImportHandler:
             ctx: Execution context.
             task_id: Id of the task being prepared.
             spec: Execution spec of the task, carrying importer task details.
+            token: Bearer token scoped to this task and attempt.
 
         Returns:
             Process running the importer plugin against its payload.
         """
         assert isinstance(spec.details, ImportTaskDetails)
         details = spec.details
-        env = build_process_env(task_id, {}, spec.env, spec.secret_env)
+        env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
         if isinstance(details.plugin, ScriptPluginSpec):
             plugin_path, payload_path = await asyncio.gather(
                 materialize_blob(

@@ -6094,16 +6094,9 @@
             "minimum": 1.0,
             "title": "Max Tasks",
             "type": "integer"
-          },
-          "worker_id": {
-            "description": "Claiming worker.",
-            "format": "uuid",
-            "title": "Worker Id",
-            "type": "string"
           }
         },
         "required": [
-          "worker_id",
           "max_tasks"
         ],
         "title": "TaskClaimRequest",
@@ -6521,18 +6514,6 @@
         "additionalProperties": false,
         "description": "Task update request.",
         "properties": {
-          "attempt": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Attempt this transition is fenced by.",
-            "title": "Attempt"
-          },
           "error": {
             "anyOf": [
               {
@@ -6580,11 +6561,19 @@
           "task": {
             "$ref": "#/components/schemas/TaskResponse",
             "description": "Task."
+          },
+          "token": {
+            "description": "Bearer token scoped to this task and attempt.",
+            "format": "password",
+            "title": "Token",
+            "type": "string",
+            "writeOnly": true
           }
         },
         "required": [
           "task",
-          "spec"
+          "spec",
+          "token"
         ],
         "title": "TaskWithSpec",
         "type": "object"
@@ -6951,6 +6940,35 @@
           "cancel_task_ids"
         ],
         "title": "WorkerHeartbeatResponse",
+        "type": "object"
+      },
+      "WorkerRegistrationResponse": {
+        "description": "Worker registration response.",
+        "properties": {
+          "token": {
+            "description": "Bearer token scoped to this worker.",
+            "format": "password",
+            "title": "Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "token_expires_at": {
+            "description": "Time the token expires.",
+            "format": "date-time",
+            "title": "Token Expires At",
+            "type": "string"
+          },
+          "worker": {
+            "$ref": "#/components/schemas/WorkerResponse",
+            "description": "Registered worker."
+          }
+        },
+        "required": [
+          "worker",
+          "token",
+          "token_expires_at"
+        ],
+        "title": "WorkerRegistrationResponse",
         "type": "object"
       },
       "WorkerResponse": {
@@ -12010,7 +12028,7 @@
     },
     "/v1/replays/{replay_id}": {
       "get": {
-        "description": "Get a replay by id.\n\nClients observe HTTP 200 on success and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
+        "description": "Get a replay by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
         "operationId": "get_replay_v1_replays__replay_id__get",
         "parameters": [
           {
@@ -12054,7 +12072,7 @@
     },
     "/v1/replays/{replay_id}/tool-lookup": {
       "post": {
-        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 404 when no replay has this id, and\n422 when the tool is not configured for history.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
+        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
         "operationId": "tool_lookup_v1_replays__replay_id__tool_lookup_post",
         "parameters": [
           {
@@ -12549,7 +12567,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nClients observe HTTP 201 on success, 409 when the provider and\nexternal id pair is already registered, and 422 on invalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe provider and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
         "operationId": "create_session_v1_sessions_post",
         "requestBody": {
           "content": {
@@ -12780,7 +12798,7 @@
     },
     "/v1/sessions/{session_id}/nodes": {
       "get": {
-        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
+        "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
         "operationId": "list_session_nodes_v1_sessions__session_id__nodes_get",
         "parameters": [
           {
@@ -13374,7 +13392,7 @@
     },
     "/v1/tasks/claim": {
       "post": {
-        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 404 when no worker has this id, and\n422 on invalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs.",
+        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    settings: API settings for this process.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
         "operationId": "claim_tasks_v1_tasks_claim_post",
         "requestBody": {
           "content": {
@@ -13416,7 +13434,7 @@
     },
     "/v1/tasks/{task_id}": {
       "get": {
-        "description": "Get a task by id.\n\nClients observe HTTP 200 on success and 404 when no task has this id.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Stored task.",
+        "description": "Get a task by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a\ndifferent task, and 404 when no task has this id.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Stored task.",
         "operationId": "get_task_v1_tasks__task_id__get",
         "parameters": [
           {
@@ -13458,7 +13476,7 @@
         ]
       },
       "patch": {
-        "description": "Apply an executor transition to a task.\n\nClients observe HTTP 200 on success, 404 when no task has this id, 409\nwhen the attempt does not match or the transition is illegal, 413 when\nthe result exceeds the size cap, and 422 when the body carries no\nstatus.\n\nArgs:\n    task_id: Id of the task.\n    body: Task update request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Task carrying its new status.",
+        "description": "Apply an executor transition to a task.\n\nClients observe HTTP 200 on success, 403 when the caller holds no task\ntoken for this task, 404 when no task has this id, 409 when the attempt\ndoes not match or the transition is illegal, 413 when the result exceeds\nthe size cap, and 422 when the body carries no status.\n\nArgs:\n    task_id: Id of the task.\n    body: Task update request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Task carrying its new status.",
         "operationId": "update_task_v1_tasks__task_id__patch",
         "parameters": [
           {
@@ -13512,7 +13530,7 @@
     },
     "/v1/tasks/{task_id}/spec": {
       "get": {
-        "description": "Get the execution spec of a task.\n\nClients observe HTTP 200 on success and 404 when no task has this id or\nthe spec references a missing resource.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Execution spec.",
+        "description": "Get the execution spec of a task.\n\nClients observe HTTP 200 on success, 403 when a task token names a\ndifferent task, and 404 when no task has this id or the spec references\na missing resource.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Execution spec.",
         "operationId": "get_task_spec_v1_tasks__task_id__spec_get",
         "parameters": [
           {
@@ -13660,7 +13678,7 @@
         ]
       },
       "post": {
-        "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the scope, runtime, and metadata and stamps\nlast_seen_at, keeping the id and created time. Clients observe HTTP 200\non both the first registration and every re-registration, and 422 on\ninvalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker.",
+        "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the scope, runtime, and metadata, stamps\nlast_seen_at, and mints a fresh token, keeping the id and created time.\nRe-registering with a fresh token is how a worker renews before its\ncurrent token expires. Clients observe HTTP 200 on both the first\nregistration and every re-registration, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
         "operationId": "register_worker_v1_workers_post",
         "requestBody": {
           "content": {
@@ -13677,7 +13695,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkerResponse"
+                  "$ref": "#/components/schemas/WorkerRegistrationResponse"
                 }
               }
             },
@@ -13737,7 +13755,7 @@
         ]
       },
       "get": {
-        "description": "Get a worker by id.\n\nClients observe HTTP 200 on success and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker.",
+        "description": "Get a worker by id.\n\nClients observe HTTP 200 on success, 403 when a worker token names a\ndifferent worker, and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker.",
         "operationId": "get_worker_v1_workers__worker_id__get",
         "parameters": [
           {
@@ -13781,7 +13799,7 @@
     },
     "/v1/workers/{worker_id}/heartbeat": {
       "post": {
-        "description": "Report the tasks a worker currently holds.\n\nClients observe HTTP 200 on success and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    body: Worker heartbeat request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Held tasks the worker should stop running.",
+        "description": "Report the tasks a worker currently holds.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken for this worker, and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    body: Worker heartbeat request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Held tasks the worker should stop running.",
         "operationId": "heartbeat_worker_v1_workers__worker_id__heartbeat_post",
         "parameters": [
           {

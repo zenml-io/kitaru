@@ -35,6 +35,7 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_task,
     get_evaluation_service,
     get_session_node_service,
     get_session_service,
@@ -68,12 +69,14 @@ router = APIRouter(route_class=CommitRoute)
 async def create_session(
     body: SessionCreateRequest,
     service: Annotated[SessionService, Depends(get_session_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> SessionResponse:
     """Create a session.
 
-    Clients observe HTTP 201 on success, 409 when the provider and
-    external id pair is already registered, and 422 on invalid input.
+    A task principal's session is always linked to its own task, regardless
+    of the request's task_id. Clients observe HTTP 201 on success, 409 when
+    the provider and external id pair is already registered, and 422 on
+    invalid input.
 
     Args:
         body: Session create request.
@@ -119,7 +122,7 @@ async def list_sessions(
 async def get_session(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> SessionResponse:
     """Get a session by id.
 
@@ -143,7 +146,7 @@ async def update_session(
     session_id: uuid.UUID,
     body: SessionUpdateRequest,
     service: Annotated[SessionService, Depends(get_session_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> SessionResponse:
     """Update a session.
 
@@ -189,7 +192,7 @@ async def ingest_session_nodes(
     session_id: uuid.UUID,
     body: SessionNodeBatchRequest,
     service: Annotated[SessionNodeService, Depends(get_session_node_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> list[SessionNodeResponse]:
     """Ingest a batch of session nodes.
 
@@ -222,13 +225,13 @@ async def ingest_session_nodes(
 async def list_session_nodes(
     session_id: uuid.UUID,
     service: Annotated[SessionNodeService, Depends(get_session_node_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
     params: Annotated[SessionNodeListParams, Query()],
 ) -> Page[SessionNodeResponse]:
     """List the nodes of a session, ordered by index ascending.
 
-    Clients observe HTTP 200 on success and 422 on invalid pagination
-    parameters.
+    Clients observe HTTP 200 on success, 403 when a task token neither owns
+    nor reads this session, and 422 on invalid pagination parameters.
 
     Args:
         session_id: Id of the session.
@@ -258,7 +261,7 @@ async def merge_session_evaluations(
     session_id: uuid.UUID,
     body: SessionEvaluationsRequest,
     service: Annotated[EvaluationService, Depends(get_evaluation_service)],
-    actor: Annotated[AuthContext, Depends(authorize)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> list[EvaluationResponse]:
     """Merge manual evaluations into a session.
 
