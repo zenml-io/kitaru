@@ -17,7 +17,11 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import RequestModel, TimestampedResponseModel
+from kitaru.api_models.v1.base import (
+    JsonValue,
+    RequestModel,
+    TimestampedResponseModel,
+)
 from kitaru.api_models.v1.filter import FilterableListParams
 
 
@@ -32,8 +36,20 @@ class AccountCreateRequest(RequestModel):
 class AccountUpdateRequest(RequestModel):
     """Account update request."""
 
-    active: bool | None = Field(default=None, description="New active state.")
     password: str | None = Field(default=None, description="New login password.")
+    old_password: str | None = Field(
+        default=None, description="Current login password."
+    )
+    metadata: dict[str, JsonValue] | None = Field(
+        default=None, description="New metadata."
+    )
+
+
+class AccountActivateRequest(RequestModel):
+    """Account activate request."""
+
+    activation_token: str = Field(description="Activation token.")
+    password: str = Field(description="Login password to set.")
 
 
 class AccountListParams(FilterableListParams):
@@ -48,3 +64,10 @@ class AccountResponse(TimestampedResponseModel):
     email: str | None = Field(description="Contact email.")
     is_service_account: bool = Field(description="Whether this is a service account.")
     active: bool = Field(description="Whether the account can authenticate.")
+    metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+
+
+class AccountActivationTokenResponse(AccountResponse):
+    """Account response carrying a newly minted activation token."""
+
+    activation_token: str = Field(description="Plaintext token, shown once.")

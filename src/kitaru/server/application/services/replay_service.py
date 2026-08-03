@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.replay_config import HistoryScope
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -40,11 +41,13 @@ from kitaru.server.application.models.replay import (
     ReplayWithDetails,
     ToolLookupResult,
 )
+from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
@@ -69,6 +72,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -84,6 +88,7 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._experiments = experiment_repository
@@ -94,6 +99,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
         """Enrich replays with their config and result session id, in bulk.
@@ -183,6 +189,12 @@ class ReplayService:
             job_repository=self._jobs,
             task_repository=self._tasks,
         )
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.REPLAY_CREATED,
+                analytics_events.build_replay_created_properties(command.override),
+            )
         return (await self._bundle([replay]))[0]
 
     async def get_replay(

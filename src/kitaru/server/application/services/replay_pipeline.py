@@ -14,6 +14,7 @@
 """Replay job and task composition, shared by standalone replays and run fan-out."""
 
 import uuid
+from collections.abc import Sequence
 
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
@@ -35,7 +36,7 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, effective_inputs
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import AgentTask, EvaluationTask
+from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 
 REPLAY_ID_ENV = "KITARU_REPLAY_ID"
 AGENT_VERSION_LABEL = "agent_version"
@@ -119,6 +120,85 @@ async def create_replay_pipeline(
                 task_repository,
             )
     return replay
+
+
+async def create_replay_pipelines(
+    baselines: Sequence[Session],
+    agent_version_id: uuid.UUID,
+    config: ReplayConfig,
+    evaluate_baselines: bool,
+    experiment_run_id: uuid.UUID,
+    actor: AuthContext,
+    replay_repository: ReplayRepository,
+    job_repository: JobRepository,
+    task_repository: TaskRepository,
+) -> list[Replay]:
+    """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
+
+    Args:
+        baselines: Sessions being replayed.
+        agent_version_id: Agent version to replay with.
+        config: Replay config every created replay points at.
+        evaluate_baselines: Whether to also score the baseline sessions.
+        experiment_run_id: Run the replays belong to.
+        actor: Caller context.
+        replay_repository: Replay repository.
+        job_repository: Job repository.
+        task_repository: Task repository.
+
+    Returns:
+        Created replays, in baseline order.
+    """
+    if not baselines:
+        return []
+    jobs = [Job(owner_id=actor.account.id) for _ in baselines]
+    replays = [
+        Replay(
+            owner_id=actor.account.id,
+            job_id=job.id,
+            experiment_run_id=experiment_run_id,
+            replay_config_id=config.id,
+            baseline_session_id=baseline.id,
+            evaluate_baselines=evaluate_baselines,
+        )
+        for job, baseline in zip(jobs, baselines, strict=True)
+    ]
+    scored_by_session: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if evaluate_baselines:
+        scored_by_session = await task_repository.get_scored_evaluator_version_ids_many(
+            [baseline.id for baseline in baselines]
+        )
+    tasks: list[Task] = []
+    for job, replay, baseline in zip(jobs, replays, baselines, strict=True):
+        tasks.append(
+            AgentTask(
+                job_id=job.id,
+                agent_version_id=agent_version_id,
+                inputs=effective_inputs(baseline.inputs, config.override),
+                env={REPLAY_ID_ENV: str(replay.id)},
+                labels={AGENT_VERSION_LABEL: str(agent_version_id)},
+                on_failure=TaskOnFailure.ABORT,
+            )
+        )
+        if not evaluate_baselines:
+            continue
+        scored = scored_by_session.get(baseline.id, set())
+        for evaluator in config.evaluators:
+            if evaluator.evaluator_version_id in scored:
+                continue
+            tasks.append(
+                EvaluationTask(
+                    job_id=job.id,
+                    plugin_version_id=evaluator.evaluator_version_id,
+                    input_session_id=baseline.id,
+                    params=evaluator.params,
+                    on_failure=TaskOnFailure.ABORT,
+                )
+            )
+    await job_repository.create_many(jobs)
+    stored_replays = await replay_repository.create_many(replays)
+    await task_repository.create_many(tasks)
+    return stored_replays
 
 
 async def append_result_evaluations(

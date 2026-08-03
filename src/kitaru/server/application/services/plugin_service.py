@@ -16,6 +16,7 @@
 import uuid
 from typing import Any
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
@@ -24,6 +25,8 @@ from kitaru.server.application.models.plugin import (
     PluginUpdate,
     PluginVersionFilter,
 )
+from kitaru.server.application.services import analytics_events
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.plugin import (
     Plugin,
     PluginKind,
@@ -41,6 +44,7 @@ class PluginService:
         kind: PluginKind,
         repository: PluginRepository,
         blob_repository: BlobRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -48,10 +52,12 @@ class PluginService:
             kind: Plugin kind this service manages.
             repository: Plugin repository.
             blob_repository: Blob repository, for script source validation.
+            analytics: Analytics tracker, None skips tracking.
         """
         self.kind = kind
         self._repository = repository
         self._blob_repository = blob_repository
+        self._analytics = analytics
 
     async def create_plugin(
         self,
@@ -179,10 +185,18 @@ class PluginService:
         Returns:
             Created plugin version.
         """
-        _ = actor
         if isinstance(source, ScriptPluginSource):
             await self._blob_repository.get(source.blob_id)
-        return await self._repository.create_version(plugin_id, source, display_version)
+        version = await self._repository.create_version(
+            plugin_id, source, display_version
+        )
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.PLUGIN_REGISTERED,
+                analytics_events.build_plugin_registered_properties(self.kind, source),
+            )
+        return version
 
     async def get_version(
         self, plugin_id: uuid.UUID, version: int, actor: AuthContext

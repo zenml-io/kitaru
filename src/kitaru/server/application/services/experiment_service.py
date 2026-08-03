@@ -17,6 +17,7 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -44,13 +45,15 @@ from kitaru.server.application.models.experiment import (
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
-from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
+from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -81,6 +84,7 @@ class ExperimentService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -96,6 +100,7 @@ class ExperimentService:
                 progress.
             job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._plugin_repository = plugin_repository
@@ -106,6 +111,7 @@ class ExperimentService:
         self._replays = replay_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._analytics = analytics
 
     async def _create_replay_config(
         self,
@@ -181,6 +187,15 @@ class ExperimentService:
             replay_config_id=config.id,
         )
         experiment = await self._repository.create(experiment)
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.EXPERIMENT_CREATED,
+                analytics_events.build_experiment_created_properties(
+                    evaluator_count=len(evaluators),
+                    tool_override_count=len(config.tool_policy.tools),
+                ),
+            )
         return experiment, config
 
     async def get_experiment(
@@ -338,7 +353,7 @@ class ExperimentService:
         )
         return await paginate_all(
             lambda cursor: self._sessions.query(
-                SessionFilter(expression=membership, cursor=cursor)
+                SessionFilter(expression=membership, cursor=cursor, size=1000)
             )
         )
 
@@ -392,17 +407,16 @@ class ExperimentService:
         run.start(datetime.now(UTC))
         run = await self._experiment_runs.create(run)
 
-        for session in sessions:
-            await create_replay_pipeline(
-                baseline=session,
-                agent_version_id=agent_version.id,
-                config=config,
-                evaluate_baselines=command.evaluate_baselines,
-                experiment_run_id=run.id,
-                actor=actor,
-                replay_repository=self._replays,
-                job_repository=self._jobs,
-                task_repository=self._tasks,
-            )
+        await create_replay_pipelines(
+            baselines=sessions,
+            agent_version_id=agent_version.id,
+            config=config,
+            evaluate_baselines=command.evaluate_baselines,
+            experiment_run_id=run.id,
+            actor=actor,
+            replay_repository=self._replays,
+            job_repository=self._jobs,
+            task_repository=self._tasks,
+        )
         counts = await self._replays.count_by_status(run.id)
         return run, counts

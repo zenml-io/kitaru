@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.sql import text
 
+from kitaru.server.adapters.db.analytics import register_analytics_listeners
 from kitaru.server.adapters.db.pagination import LIST_QUERY_TIMEOUT_INFO_KEY
 from kitaru.server.config import Settings, get_settings
 
@@ -48,6 +49,7 @@ class DatabaseService:
         self.engine = create_async_engine(
             self.generate_database_uri(self.settings), echo=False
         )
+        register_analytics_listeners()
 
     async def cleanup(self) -> None:
         """Release database engine resources."""

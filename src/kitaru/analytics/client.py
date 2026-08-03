@@ -88,6 +88,15 @@ class AnalyticsClient:
         self._worker: asyncio.Task[None] | None = None
         self._closed = False
 
+    @property
+    def enabled(self) -> bool:
+        """Whether messages are sent.
+
+        Returns:
+            Whether messages are sent.
+        """
+        return self._enabled
+
     def track(
         self,
         user_id: UUID,

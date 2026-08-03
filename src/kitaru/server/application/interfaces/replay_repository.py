@@ -40,6 +40,17 @@ class ReplayRepository(Protocol):
         """
         ...
 
+    async def create_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist many new replays in one round trip, skipping constraint translation.
+
+        Args:
+            replays: Replays to store.
+
+        Returns:
+            Stored replays with timestamps set, in the same order.
+        """
+        ...
+
     async def get(self, replay_id: uuid.UUID) -> Replay:
         """Load a replay by id.
 

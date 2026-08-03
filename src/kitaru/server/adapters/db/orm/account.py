@@ -14,8 +14,10 @@
 """Account ORM table."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import Index, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import (
@@ -53,7 +55,9 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     email: Mapped[str | None] = mapped_column(String(255))
     password_hash: Mapped[str | None] = mapped_column(String(128))
+    activation_token_hash: Mapped[str | None] = mapped_column(String(64))
     active: Mapped[bool]
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
 
     @classmethod
     def from_domain(cls, account: Account) -> "AccountORM":
@@ -72,7 +76,9 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=account.name,
             email=account.email,
             password_hash=account.password_hash,
+            activation_token_hash=account.activation_token_hash,
             active=account.active,
+            metadata_=account.metadata,
         )
 
     def to_domain(self) -> Account:
@@ -88,7 +94,9 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             email=self.email,
             password_hash=self.password_hash,
+            activation_token_hash=self.activation_token_hash,
             active=self.active,
+            metadata=self.metadata_,
             created=self.created,
             updated=self.updated,
         )

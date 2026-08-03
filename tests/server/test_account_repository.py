@@ -255,9 +255,11 @@ async def test_update(repository: AccountRepository) -> None:
     created = await repository.create(Account(name="alice"))
     created.update_active(False)
     created.update_password_hash("hash")
+    created.update_metadata({"theme": "dark"})
     updated = await repository.update(created)
     assert updated.active is False
     assert updated.password_hash == "hash"
+    assert updated.metadata == {"theme": "dark"}
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None

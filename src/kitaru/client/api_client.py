@@ -181,6 +181,10 @@ class KitaruAPIClient:
         provider = self._auth if authenticate else None
         generation = provider.generation if provider is not None else 0
         request_headers = dict(headers or {})
+        if params is not None:
+            # httpx renders None query values as empty strings, which the
+            # server rejects for typed filters.
+            params = {key: value for key, value in params.items() if value is not None}
 
         async def send() -> httpx.Response:
             return await self._http.request(

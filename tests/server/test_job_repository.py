@@ -70,6 +70,23 @@ async def test_create_sets_timestamps(setup: Setup) -> None:
     assert job.updated is not None
 
 
+async def test_create_many_round_trips_jobs(setup: Setup) -> None:
+    """Bulk-create persists every job in one round trip, timestamps set."""
+    repository, owner_id = setup
+    jobs = [_job(owner_id) for _ in range(3)]
+    created = await repository.create_many(jobs)
+    assert [job.id for job in created] == [job.id for job in jobs]
+    assert all(job.created is not None for job in created)
+    for job in created:
+        assert await repository.get(job.id) == job
+
+
+async def test_create_many_empty(setup: Setup) -> None:
+    """Bulk-create with no jobs is a no-op."""
+    repository, _ = setup
+    assert await repository.create_many([]) == []
+
+
 async def test_get(setup: Setup) -> None:
     """Load a stored job by id."""
     repository, owner_id = setup

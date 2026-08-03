@@ -14,6 +14,7 @@
 """Tests for experiment use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -26,6 +27,7 @@ from conftest import (
     create_plugin,
     create_replay,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
@@ -36,6 +38,7 @@ from kitaru.server.application.models.experiment import (
 )
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import (
@@ -57,6 +60,29 @@ from kitaru.server.filtering import FilterCondition
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
 SOURCE = PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score")
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -495,3 +521,46 @@ async def test_delete_experiment_conflicts_once_it_has_runs(
     )
     with pytest.raises(ExperimentInUse):
         await service.delete_experiment(created.id, actor=ACTOR)
+
+
+async def test_create_experiment_tracks_experiment_created(
+    services: ReplayServices, plugin_repository: FakePluginRepository
+) -> None:
+    """Fire EXPERIMENT_CREATED with the evaluator and tool override counts."""
+    await _register_evaluator(plugin_repository)
+    analytics = _RecordingAnalytics()
+    service = ExperimentService(
+        repository=services.experiments,
+        plugin_repository=services.plugins,
+        experiment_run_repository=services.experiment_runs,
+        cohort_version_repository=services.cohort_versions,
+        session_repository=services.sessions,
+        agent_version_repository=services.agent_versions,
+        replay_repository=services.replays,
+        job_repository=services.jobs,
+        task_repository=services.tasks,
+        analytics=analytics,
+    )
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+
+    await service.create_experiment(command, actor=ACTOR)
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.EXPERIMENT_CREATED
+    assert properties == {"evaluator_count": 1, "tool_override_count": 0}
+
+
+async def test_create_experiment_without_analytics_tracker(
+    service: ExperimentService, plugin_repository: FakePluginRepository
+) -> None:
+    """Create an experiment normally when no analytics tracker is configured."""
+    await _register_evaluator(plugin_repository)
+    command = ExperimentCreate(
+        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+    )
+    experiment, _ = await service.create_experiment(command, actor=ACTOR)
+    assert experiment.owner_id == ACTOR.account.id

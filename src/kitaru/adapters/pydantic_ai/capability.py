@@ -626,20 +626,26 @@ class _KitaruCapability(AbstractCapability[Any]):
                     )
             elif isinstance(policy, HistoryConfig):
                 assert state.replay is not None
-                response = await state.client.replays.tool_lookup(
-                    state.replay.id,
-                    ToolLookupRequest(
-                        tool_name=call.tool_name,
-                        cache_key=compute_tool_cache_key(call.tool_name, json_args),
-                    ),
-                )
-                if response.found:
-                    result = response.result
-                    mocked_policy = policy.type
-                else:
+                cache_key = compute_tool_cache_key(call.tool_name, json_args)
+                if cache_key is None:
                     result, mocked_policy, failed_result = await self._handle_miss(
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
+                else:
+                    response = await state.client.replays.tool_lookup(
+                        state.replay.id,
+                        ToolLookupRequest(
+                            tool_name=call.tool_name,
+                            cache_key=cache_key,
+                        ),
+                    )
+                    if response.found:
+                        result = response.result
+                        mocked_policy = policy.type
+                    else:
+                        result, mocked_policy, failed_result = await self._handle_miss(
+                            policy.type, policy.on_miss, call.tool_name, args, handler
+                        )
             elif isinstance(policy, LLMConfig):
                 raise ToolPolicyError(
                     "Tool policy 'llm' is not supported by the PydanticAI adapter"

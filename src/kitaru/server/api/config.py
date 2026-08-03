@@ -87,6 +87,7 @@ class APISettings(Settings):
     SECRET_ENCRYPTION_KEY: str = ""
 
     ANALYTICS_OPT_IN: bool = True
+    ANALYTICS_DEBUG: bool = False
 
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = Field(
         default=None,

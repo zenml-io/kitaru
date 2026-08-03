@@ -60,6 +60,22 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         await self._add(row)
         return row.to_domain()
 
+    async def create_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist many new jobs in one round trip.
+
+        Args:
+            jobs: Jobs to store.
+
+        Returns:
+            Stored jobs with timestamps set, in the same order.
+        """
+        if not jobs:
+            return []
+        rows = [JobORM.from_domain(job) for job in jobs]
+        self._session.add_all(rows)
+        await self._flush()
+        return [row.to_domain() for row in rows]
+
     async def get(self, job_id: uuid.UUID, exclusive: bool = False) -> Job:
         """Load a job by id.
 
