@@ -10,7 +10,7 @@ import json
 import re
 import shlex
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,18 +27,22 @@ from kitaru.api_models.v1.agent_version import (
     RunSpec,
 )
 from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.cohort import CohortListParams
 from kitaru.api_models.v1.evaluation import EvaluationListParams
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorListParams,
     EvaluatorVersionCreateRequest,
 )
+from kitaru.api_models.v1.experiment import ExperimentListParams
+from kitaru.api_models.v1.experiment_run import ExperimentRunListParams
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
     ImporterListParams,
     ImporterVersionCreateRequest,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
 from kitaru.cli.output import CLIError, CommandResult
@@ -423,6 +427,72 @@ def parse_json_object(value: str | None, *, option: str) -> dict[str, Any]:
     return parsed
 
 
+async def resolve_evaluator_configs(
+    client: Any,
+    evaluator_tokens: Sequence[str],
+    parameter_entries: Sequence[str],
+) -> tuple[list[EvaluatorConfig], list[dict[str, Any]], list[uuid.UUID]]:
+    """Resolve exact evaluator configurations and bounded identities."""
+    if not evaluator_tokens:
+        raise CLIError("invalid_arguments", "Provide at least one --evaluator.")
+    if len(set(evaluator_tokens)) != len(evaluator_tokens):
+        raise CLIError("invalid_arguments", "Each --evaluator token must be unique.")
+
+    selected = set(evaluator_tokens)
+    params_by_token: dict[str, dict[str, Any]] = {}
+    for entry in parameter_entries:
+        token, separator, value = entry.partition("=")
+        if not separator or not token:
+            raise CLIError(
+                "invalid_arguments",
+                "--evaluator-params must be EVALUATOR@VERSION=JSON_OBJECT.",
+            )
+        if token not in selected:
+            raise CLIError(
+                "invalid_arguments",
+                f"--evaluator-params token {token!r} is not a selected evaluator.",
+            )
+        if token in params_by_token:
+            raise CLIError(
+                "invalid_arguments",
+                f"Parameters for evaluator token {token!r} were provided "
+                "more than once.",
+            )
+        params_by_token[token] = parse_json_object(value, option="--evaluator-params")
+
+    configs: list[EvaluatorConfig] = []
+    identities: list[dict[str, Any]] = []
+    version_ids: list[uuid.UUID] = []
+    seen_versions: set[uuid.UUID] = set()
+    for token in evaluator_tokens:
+        parent, version = await get_plugin_version(
+            client.evaluators, token, "Evaluator"
+        )
+        if version.id in seen_versions:
+            raise CLIError(
+                "invalid_arguments",
+                "Different evaluator tokens resolved to the same evaluator version.",
+            )
+        seen_versions.add(version.id)
+        version_ids.append(version.id)
+        configs.append(
+            EvaluatorConfig(
+                evaluator=parent.name,
+                version=version.version,
+                params=params_by_token.get(token, {}),
+            )
+        )
+        identities.append(
+            {
+                "id": str(parent.id),
+                "name": parent.name,
+                "version_id": str(version.id),
+                "version": version.version,
+            }
+        )
+    return configs, identities, version_ids
+
+
 async def upload_plugin_source(
     client: Any, source: PluginSourceInput
 ) -> tuple[ScriptPluginSource | PackagePluginSource, Any | None]:
@@ -570,7 +640,16 @@ def plugin_parent_request(
 
 
 def list_params(
-    kind: Literal["agent", "evaluation", "evaluator", "importer", "session"],
+    kind: Literal[
+        "agent",
+        "cohort",
+        "evaluation",
+        "evaluator",
+        "experiment",
+        "experiment_run",
+        "importer",
+        "session",
+    ],
     *,
     size: int,
     cursor: str | None,
@@ -580,8 +659,11 @@ def list_params(
     """Build a kind-specific list request."""
     request_type = {
         "agent": AgentListParams,
+        "cohort": CohortListParams,
         "evaluation": EvaluationListParams,
         "evaluator": EvaluatorListParams,
+        "experiment": ExperimentListParams,
+        "experiment_run": ExperimentRunListParams,
         "importer": ImporterListParams,
         "session": SessionListParams,
     }[kind]

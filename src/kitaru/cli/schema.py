@@ -25,6 +25,7 @@ SideEffect = Literal[
     "uploads_data",
     "creates_remote_state",
     "mutates_remote_state",
+    "deletes_remote_state",
     "executes_local_code",
 ]
 
@@ -72,10 +73,12 @@ class CommandSpec:
 _COMMANDS: dict[tuple[str, ...], CommandSpec] = {}
 GROUP_DESCRIPTIONS = {
     "agent": "Register and inspect agents.",
+    "cohort": "Manage cohort namespaces and immutable membership versions.",
     "config": "Manage allowlisted CLI preferences.",
     "context": "Manage named server contexts.",
     "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
+    "experiment": "Configure experiments and manage asynchronous runs.",
     "importer": "Develop, register, and inspect importers.",
     "session": "Import and inspect sessions and their nodes.",
     "worker": "Run and inspect generic local workers.",
@@ -188,6 +191,7 @@ def _describe_command(spec: CommandSpec) -> dict[str, Any]:
             "uploads_data",
             "creates_remote_state",
             "mutates_remote_state",
+            "deletes_remote_state",
             "executes_local_code",
         )
     }

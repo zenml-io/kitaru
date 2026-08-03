@@ -24,15 +24,13 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationResult,
 )
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.registration import (
-    get_plugin_version,
     list_params,
     page_result,
-    parse_json_object,
+    resolve_evaluator_configs,
 )
 
 _FAILED_TASK_STATUSES = {
@@ -109,34 +107,6 @@ def _parse_session_ids(
         seen.add(session_id)
         session_ids.append(session_id)
     return session_ids
-
-
-def _parse_evaluator_params(
-    evaluator_tokens: list[str], entries: list[str]
-) -> dict[str, dict[str, Any]]:
-    """Bind each evaluator parameter object to one selected exact token."""
-    selected = set(evaluator_tokens)
-    parsed: dict[str, dict[str, Any]] = {}
-    for entry in entries:
-        token, separator, value = entry.partition("=")
-        if not separator or not token:
-            raise CLIError(
-                "invalid_arguments",
-                "--evaluator-params must be EVALUATOR@VERSION=JSON_OBJECT.",
-            )
-        if token not in selected:
-            raise CLIError(
-                "invalid_arguments",
-                f"--evaluator-params token {token!r} is not a selected evaluator.",
-            )
-        if token in parsed:
-            raise CLIError(
-                "invalid_arguments",
-                f"Parameters for evaluator token {token!r} were provided "
-                "more than once.",
-            )
-        parsed[token] = parse_json_object(value, option="--evaluator-params")
-    return parsed
 
 
 def _task_metadata(task: TaskResponse) -> dict[str, Any]:
@@ -320,42 +290,15 @@ async def evaluate_sessions(
         wait=wait, interval=interval, timeout=timeout
     )
     session_ids = _parse_session_ids(sessions or [], sessions_file)
-    if not evaluators:
-        raise CLIError("invalid_arguments", "Provide at least one --evaluator.")
-    if len(set(evaluators)) != len(evaluators):
-        raise CLIError("invalid_arguments", "Each --evaluator token must be unique.")
-    params_by_token = _parse_evaluator_params(evaluators, evaluator_params or [])
-
-    configs: list[EvaluatorConfig] = []
-    evaluator_identity: list[dict[str, Any]] = []
-    evaluator_version_ids: list[uuid.UUID] = []
-    seen_versions: set[uuid.UUID] = set()
-    for token in evaluators:
-        parent, version = await get_plugin_version(
-            client.evaluators, token, "Evaluator"
-        )
-        if version.id in seen_versions:
-            raise CLIError(
-                "invalid_arguments",
-                "Different evaluator tokens resolved to the same evaluator version.",
-            )
-        seen_versions.add(version.id)
-        evaluator_version_ids.append(version.id)
-        configs.append(
-            EvaluatorConfig(
-                evaluator=parent.name,
-                version=version.version,
-                params=params_by_token.get(token, {}),
-            )
-        )
-        evaluator_identity.append(
-            {
-                "id": str(parent.id),
-                "name": parent.name,
-                "version_id": str(version.id),
-                "version": version.version,
-            }
-        )
+    (
+        configs,
+        evaluator_identity,
+        evaluator_version_ids,
+    ) = await resolve_evaluator_configs(
+        client,
+        evaluators,
+        evaluator_params or [],
+    )
 
     identity = {
         "session_ids": [str(session_id) for session_id in session_ids],
