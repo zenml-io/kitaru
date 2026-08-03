@@ -76,23 +76,42 @@ def build_tag_condition_binding(
 
 
 def build_scope_condition_binding(
+    *,
     local_column: InstrumentedAttribute[Any],
     related_key: InstrumentedAttribute[Any],
     scope_column: InstrumentedAttribute[Any],
 ) -> Callable[[FilterCondition], ColumnElement[bool]]:
     """Build a filter binding for a field held by a related row.
 
+    The predicate is a correlated EXISTS rather than an IN subquery. Under
+    ``not`` an IN becomes NOT IN, which evaluates to null and drops the row
+    whenever ``local_column`` is null, so a nullable reference would silently
+    lose exactly the rows a negated filter should return. NOT EXISTS is false
+    rather than null there, and Postgres can plan it as an anti-join.
+
     Args:
         local_column: Column on the filtered table referencing the related row.
         related_key: Column on the related table that ``local_column`` points at.
         scope_column: Column on the related table the condition applies to.
 
+    Raises:
+        ValueError: ``related_key`` and ``scope_column`` are not on one table,
+            which means the arguments were transposed.
+
     Returns:
-        Binding compiling a scope condition into a membership predicate.
+        Binding compiling a scope condition into an EXISTS predicate.
     """
+    # All three columns are uuids, so a transposition type-checks and yields a
+    # query that runs and returns the wrong rows. Bindings are built at import,
+    # so this makes that a startup failure.
+    if related_key.class_ is not scope_column.class_:
+        raise ValueError(
+            f"related_key {related_key} and scope_column {scope_column} must be "
+            "columns of the same table"
+        )
 
     def compile_scope_condition(condition: FilterCondition) -> ColumnElement[bool]:
-        """Compile a scope condition into a membership predicate.
+        """Compile a scope condition into an EXISTS predicate.
 
         Args:
             condition: Validated scope condition.
@@ -100,10 +119,15 @@ def build_scope_condition_binding(
         Returns:
             SQL predicate.
         """
-        related = select(related_key).where(
-            compile_column_condition(scope_column, condition)
+        related = (
+            select(related_key)
+            .where(
+                related_key == local_column,
+                compile_column_condition(scope_column, condition),
+            )
+            .correlate(local_column.class_)
         )
-        return local_column.in_(related)
+        return related.exists()
 
     return compile_scope_condition
 

@@ -47,13 +47,15 @@ EXPERIMENT_RUN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     # A run pins one cohort version, so a cohort-wide history spans every
     # version of that cohort.
     "cohort_id": build_scope_condition_binding(
-        ExperimentRunORM.cohort_version_id,
-        CohortVersionORM.id,
-        CohortVersionORM.cohort_id,
+        local_column=ExperimentRunORM.cohort_version_id,
+        related_key=CohortVersionORM.id,
+        scope_column=CohortVersionORM.cohort_id,
     ),
     "agent_version_id": ExperimentRunORM.agent_version_id,
     "agent_id": build_scope_condition_binding(
-        ExperimentRunORM.agent_version_id, AgentVersionORM.id, AgentVersionORM.agent_id
+        local_column=ExperimentRunORM.agent_version_id,
+        related_key=AgentVersionORM.id,
+        scope_column=AgentVersionORM.agent_id,
     ),
     "status": ExperimentRunORM.status,
     "tag": build_tag_condition_binding(

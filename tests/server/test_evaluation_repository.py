@@ -91,7 +91,7 @@ from kitaru.server.domain.replay_config import (
 )
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import EvaluationTask
-from kitaru.server.filtering import FilterCondition
+from kitaru.server.filtering import FilterCondition, NotExpression
 
 Setup = tuple[EvaluationRepository, uuid.UUID, uuid.UUID]
 PluginSetup = tuple[PluginRepository, EvaluationRepository, uuid.UUID, uuid.UUID]
@@ -617,8 +617,8 @@ async def test_query_filters_by_experiment_run() -> None:
     Postgres-only: the run is three hops from the evaluation, reached through
     the producing task's job and the replay that owns it.
 
-    Scoping by task rather than by session is what puts a run's baseline and
-    result evaluations on the same page, so both are asserted here.
+    Scoping by task rather than by session is what brings a run's baseline and
+    result evaluations into the same result set, so both are asserted here.
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -727,3 +727,24 @@ async def test_query_filters_by_experiment_run() -> None:
             )
         )
         assert items == []
+
+        # A session-level evaluation carries no task, and an IN subquery would
+        # negate to NOT IN, which is null for a null task_id and would drop
+        # exactly the rows a negated run filter must return.
+        loose = await _create_session_row(session, owner_id, agent_id)
+        await repository.merge_session_evaluations(
+            loose, [_evaluation(owner_id, loose, "session-scoped", score=1.0)]
+        )
+        items, _ = await repository.query(
+            EvaluationFilter(
+                expression=NotExpression(
+                    operand=FilterCondition(
+                        field="experiment_run_id", op=FilterOp.EQ, value=run.id
+                    )
+                )
+            )
+        )
+        assert {item.evaluation.name for item in items} == {
+            "unrelated",
+            "session-scoped",
+        }

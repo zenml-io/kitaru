@@ -18,7 +18,13 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Collection,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -706,21 +712,36 @@ def _matches_condition(value: Any, condition: FilterCondition) -> bool:
             return condition.value in value
 
 
-def _refuse_scope_condition(item: Any, condition: FilterCondition) -> bool:
-    """Refuse a scope condition the fake cannot resolve.
+def _refuse_unresolvable_fields(
+    expression: FilterExpression | None, fields: Collection[str]
+) -> None:
+    """Refuse an expression naming a field the fake cannot resolve.
+
+    Walks the whole expression before any item is evaluated. Refusing per item
+    would stay silent on an empty store, and on an `and` whose earlier operand
+    already answered false, so a test could pass without the filter ever
+    running.
 
     Args:
-        item: Domain object the condition would apply to.
-        condition: Validated scope condition.
+        expression: Filter expression, or ``None`` when the query is unfiltered.
+        fields: Field names that resolve through rows the fake has no handle on.
 
     Raises:
-        NotImplementedError: Always. The field resolves through rows the fake
-            has no handle on, so answering would silently under-filter.
-
-    Returns:
-        Never returns.
+        NotImplementedError: The expression names one of those fields.
     """
-    raise NotImplementedError(f"The fake cannot resolve the {condition.field} filter")
+    if expression is None:
+        return
+    if isinstance(expression, (AndExpression, OrExpression)):
+        for operand in expression.operands:
+            _refuse_unresolvable_fields(operand, fields)
+        return
+    if isinstance(expression, NotExpression):
+        _refuse_unresolvable_fields(expression.operand, fields)
+        return
+    if expression.field in fields:
+        raise NotImplementedError(
+            f"The fake cannot resolve the {expression.field} filter"
+        )
 
 
 class FakeAccountRepository:
@@ -3972,12 +3993,12 @@ class FakeExperimentRunRepository:
         Returns:
             Page of matching runs and the next cursor.
         """
+        _refuse_unresolvable_fields(run_filter.expression, ("agent_id",))
         runs = list(self._runs.values())
         if run_filter.expression is not None:
             resolvers = {
                 "tag": self._evaluate_tag_condition,
                 "cohort_id": self._evaluate_cohort_condition,
-                "agent_id": _refuse_scope_condition,
             }
             runs = [
                 r
@@ -4185,18 +4206,15 @@ class FakeEvaluationRepository:
         Returns:
             Page of matching evaluations and the next cursor.
         """
+        _refuse_unresolvable_fields(
+            evaluation_filter.expression, ("agent_id", "cohort_id", "experiment_run_id")
+        )
         evaluations = list(self._evaluations.values())
         if evaluation_filter.expression is not None:
-            resolvers = {
-                field: _refuse_scope_condition
-                for field in ("agent_id", "cohort_id", "experiment_run_id")
-            }
             evaluations = [
                 e
                 for e in evaluations
-                if _evaluate_filter_expression(
-                    e, evaluation_filter.expression, resolvers
-                )
+                if _evaluate_filter_expression(e, evaluation_filter.expression)
             ]
         page, next_cursor = _paginate_fake(evaluations, evaluation_filter)
         items = [

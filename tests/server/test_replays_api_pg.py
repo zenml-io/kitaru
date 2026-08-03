@@ -174,6 +174,30 @@ async def test_replay_pipeline_completes_through_the_api(
         )
     ).json()["items"]
     assert unmatched == []
+    # A second replay whose agent task never produces a session, so the is_null
+    # assertion below distinguishes the correct answer from an empty page.
+    other_baseline = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": agent_id,
+                "agent_version_id": version_id,
+                "origin": "recorded",
+                "inputs": {"q": "hi again"},
+                "outputs": None,
+                "expected": None,
+            },
+        )
+    ).json()
+    unfinished = (
+        await client.post(
+            "/v1/replays",
+            json={
+                "baseline_session_id": other_baseline["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
     pending = (
         await client.get(
             "/v1/replays",
@@ -182,7 +206,7 @@ async def test_replay_pipeline_completes_through_the_api(
             },
         )
     ).json()["items"]
-    assert replay["id"] not in {item["id"] for item in pending}
+    assert [item["id"] for item in pending] == [unfinished["id"]]
 
     claimed = (
         await client.post(

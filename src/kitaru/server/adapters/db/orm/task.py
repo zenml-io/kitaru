@@ -120,9 +120,10 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(TASK_JOB_ID_STATUS_INDEX, "job_id", "status"),
         Index(TASK_INPUT_SESSION_ID_INDEX, "input_session_id"),
-        # Partial: only agent tasks ever set a result session, and both the
-        # replay result-session filter and its is_null anti-join probe read
-        # this column.
+        # Partial: the column is null on every task but the agent tasks that
+        # link a result session, so the index covers a small fraction of the
+        # table. The eq and in forms of the replay result-session filter probe
+        # this column directly.
         Index(
             TASK_RESULT_SESSION_ID_INDEX,
             "result_session_id",

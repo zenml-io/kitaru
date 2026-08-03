@@ -49,15 +49,17 @@ EvaluatorInfo = tuple[str, int]
 
 # Sessions hang off a cohort version, so a cohort scope spans every version of
 # the cohort rather than only its latest.
-_in_cohort = build_scope_condition_binding(
-    CohortVersionSessionORM.cohort_version_id,
-    CohortVersionORM.id,
-    CohortVersionORM.cohort_id,
+_scopes_to_cohort = build_scope_condition_binding(
+    local_column=CohortVersionSessionORM.cohort_version_id,
+    related_key=CohortVersionORM.id,
+    scope_column=CohortVersionORM.cohort_id,
 )
 
-# A replay's evaluator tasks share its job, and the run owns the replay.
-_in_experiment_run = build_scope_condition_binding(
-    TaskORM.job_id, ReplayORM.job_id, ReplayORM.experiment_run_id
+# A replay's tasks share its job, and the run owns the replay.
+_scopes_to_experiment_run = build_scope_condition_binding(
+    local_column=TaskORM.job_id,
+    related_key=ReplayORM.job_id,
+    scope_column=ReplayORM.experiment_run_id,
 )
 
 
@@ -70,10 +72,15 @@ def _compile_cohort_condition(condition: FilterCondition) -> ColumnElement[bool]
     Returns:
         SQL predicate.
     """
-    cohort_sessions = select(CohortVersionSessionORM.session_id).where(
-        _in_cohort(condition)
+    memberships = (
+        select(CohortVersionSessionORM.session_id)
+        .where(
+            CohortVersionSessionORM.session_id == EvaluationORM.session_id,
+            _scopes_to_cohort(condition),
+        )
+        .correlate(EvaluationORM)
     )
-    return EvaluationORM.session_id.in_(cohort_sessions)
+    return memberships.exists()
 
 
 def _compile_experiment_run_condition(
@@ -88,9 +95,16 @@ def _compile_experiment_run_condition(
         SQL predicate.
     """
     # Scoped by producing task rather than by session, so a run's baseline and
-    # result evaluations both land in the same page.
-    run_tasks = select(TaskORM.id).where(_in_experiment_run(condition))
-    return EvaluationORM.task_id.in_(run_tasks)
+    # result evaluations both reach the same result set.
+    run_tasks = (
+        select(TaskORM.id)
+        .where(
+            TaskORM.id == EvaluationORM.task_id,
+            _scopes_to_experiment_run(condition),
+        )
+        .correlate(EvaluationORM)
+    )
+    return run_tasks.exists()
 
 
 EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
@@ -100,7 +114,9 @@ EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": EvaluationORM.name,
     "data_type": EvaluationORM.data_type,
     "agent_id": build_scope_condition_binding(
-        EvaluationORM.session_id, SessionORM.id, SessionORM.agent_id
+        local_column=EvaluationORM.session_id,
+        related_key=SessionORM.id,
+        scope_column=SessionORM.agent_id,
     ),
     "cohort_id": _compile_cohort_condition,
     "experiment_run_id": _compile_experiment_run_condition,

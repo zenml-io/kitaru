@@ -58,12 +58,12 @@ def _compile_result_session_condition(
     """
     # The result session belongs to the replay's agent task, not to the replay
     # row, so this resolves through the job the two share.
-    agent_tasks = select(TaskORM.job_id).where(TaskORM.kind == TaskKind.AGENT.value)
     if condition.op is FilterOp.IS_NULL:
         # A replay whose agent task has not produced a session yet, which
         # includes one that never will because the task failed. Written as a
-        # correlated NOT EXISTS: Postgres cannot turn NOT IN into an anti-join,
-        # so the IN form would hash the whole task table on every call.
+        # correlated NOT EXISTS so Postgres can plan it as an anti-join: NOT IN
+        # is not anti-join convertible, so it degrades to a subplan over every
+        # agent task holding a result session.
         linked = (
             select(TaskORM.id)
             .where(
@@ -74,11 +74,11 @@ def _compile_result_session_condition(
             .correlate(ReplayORM)
         )
         return ~linked.exists()
-    return ReplayORM.job_id.in_(
-        agent_tasks.where(
-            compile_column_condition(TaskORM.result_session_id, condition)
-        )
+    agent_tasks = select(TaskORM.job_id).where(
+        TaskORM.kind == TaskKind.AGENT.value,
+        compile_column_condition(TaskORM.result_session_id, condition),
     )
+    return ReplayORM.job_id.in_(agent_tasks)
 
 
 REPLAY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {

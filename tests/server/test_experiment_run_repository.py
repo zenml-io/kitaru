@@ -68,7 +68,7 @@ from kitaru.server.domain.replay_config import (
     ReplayConfig,
     ToolPolicy,
 )
-from kitaru.server.filtering import FilterCondition
+from kitaru.server.filtering import AndExpression, FilterCondition
 
 Setup = tuple[
     ExperimentRunRepository,
@@ -705,6 +705,51 @@ async def test_fake_refuses_the_agent_filter() -> None:
             ExperimentRunFilter(
                 expression=FilterCondition(
                     field="agent_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+
+
+async def test_fake_refuses_the_agent_filter_on_an_empty_store() -> None:
+    """Refuse the agent filter before any run is evaluated.
+
+    Refusing per stored run would stay silent here, and a test asserting an
+    empty page would pass without the filter ever running.
+    """
+    runs = FakeExperimentRunRepository()
+    with pytest.raises(NotImplementedError, match="agent_id"):
+        await runs.query(
+            ExperimentRunFilter(
+                expression=FilterCondition(
+                    field="agent_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+
+
+async def test_fake_refuses_the_agent_filter_behind_a_false_operand() -> None:
+    """Refuse the agent filter even when an earlier operand answers false.
+
+    `all()` short-circuits, so a per-run refusal never fires when the first
+    condition already excluded the run.
+    """
+    owner_id = uuid.uuid4()
+    runs = FakeExperimentRunRepository()
+    await runs.create(
+        _run(owner_id, uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), number=1)
+    )
+    with pytest.raises(NotImplementedError, match="agent_id"):
+        await runs.query(
+            ExperimentRunFilter(
+                expression=AndExpression(
+                    operands=(
+                        FilterCondition(
+                            field="experiment_id", op=FilterOp.EQ, value=uuid.uuid4()
+                        ),
+                        FilterCondition(
+                            field="agent_id", op=FilterOp.EQ, value=uuid.uuid4()
+                        ),
+                    )
                 )
             )
         )

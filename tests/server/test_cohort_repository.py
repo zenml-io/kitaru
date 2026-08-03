@@ -137,7 +137,7 @@ async def test_query_filters_by_name(setup: Setup) -> None:
 
 
 async def test_query_filters_by_agent(setup: Setup) -> None:
-    """Filter cohorts by the agent their sessions belong to."""
+    """Filter cohorts by the agent they group sessions for."""
     repository, owner_id, agent_id, _ = setup
     first = await repository.create(
         Cohort(owner_id=owner_id, name="first", agent_id=agent_id)
