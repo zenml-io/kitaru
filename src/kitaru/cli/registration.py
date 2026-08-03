@@ -14,11 +14,11 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kitaru.api_models.v1.agent import AgentCreateRequest, AgentListParams
 from kitaru.api_models.v1.agent_version import (
@@ -53,6 +53,7 @@ from kitaru.source_refs import parse_python_source_ref
 _MAX_REQUIREMENT_LENGTH = 255
 _ATTRIBUTE_RE = re.compile(r"^[A-Za-z_]\w*$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+ListParamsT = TypeVar("ListParamsT", bound=ListParams)
 
 
 class _SpecModel(BaseModel):
@@ -667,12 +668,70 @@ def list_params(
         "importer": ImporterListParams,
         "session": SessionListParams,
     }[kind]
-    return request_type(size=size, cursor=cursor, sort=sort, filter=filter)
+    return build_list_params(
+        request_type,
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
+    )
 
 
 def version_list_params(*, size: int, cursor: str | None, sort: str) -> ListParams:
     """Build shared version-list parameters."""
-    return ListParams(size=size, cursor=cursor, sort=sort)
+    _validate_created_sort(sort)
+    try:
+        return ListParams(size=size, cursor=cursor, sort=sort)
+    except ValidationError as error:
+        raise _list_validation_error(error) from None
+
+
+def build_list_params(
+    request_type: type[ListParamsT],
+    *,
+    size: int,
+    cursor: str | None,
+    sort: str,
+    filter: str | None,
+) -> ListParamsT:
+    """Build filterable list params against the shared server sort contract."""
+    _validate_created_sort(sort)
+    try:
+        return request_type.model_validate(
+            {
+                "size": size,
+                "cursor": cursor,
+                "sort": sort,
+                "filter": filter,
+            }
+        )
+    except ValidationError as error:
+        raise _list_validation_error(error) from None
+
+
+def _validate_created_sort(sort: str) -> None:
+    """Validate the shared server sort allowlist used by collection reads."""
+    if sort not in {"created:asc", "created:desc"}:
+        raise CLIError(
+            "invalid_arguments",
+            "--sort must be created:asc or created:desc.",
+            hint="Use --filter to narrow results without changing their order.",
+        )
+
+
+def _list_validation_error(error: ValidationError) -> CLIError:
+    """Convert list-model validation into a concise option-named error."""
+    issue = error.errors(include_url=False)[0]
+    field = str(issue["loc"][0]) if issue["loc"] else "parameters"
+    if field == "filter":
+        message = "--filter must be a valid JSON filter expression."
+    elif field == "size":
+        message = "--size must be between 1 and 1000."
+    elif field == "sort":
+        message = "--sort must be created:asc or created:desc."
+    else:
+        message = f"Invalid --{field.replace('_', '-')}: {issue['msg']}."
+    return CLIError("invalid_arguments", message)
 
 
 def _load_document(path: Path) -> dict[str, Any]:

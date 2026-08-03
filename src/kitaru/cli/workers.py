@@ -39,7 +39,7 @@ from kitaru.cli.output import (
     reset_output_context,
     set_output_context,
 )
-from kitaru.cli.registration import resolve_asset
+from kitaru.cli.registration import build_list_params, resolve_asset
 from kitaru.client.credential_store import DIRECTORY_MODE, FILE_MODE, CredentialStore
 
 _ENV_MISSING = object()
@@ -368,7 +368,13 @@ async def list_workers(
     filter: str | None,
 ) -> CommandResult:
     """List one server page of workers with explicit live/stale wording."""
-    params = WorkerListParams(size=size, cursor=cursor, sort=sort, filter=filter)
+    params = build_list_params(
+        WorkerListParams,
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
+    )
     page = await client.workers.list(params)
     return CommandResult(
         items=[_worker_item(item) for item in page.items],
