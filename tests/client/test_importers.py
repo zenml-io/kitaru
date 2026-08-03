@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository, asgi_api_client
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
     ImporterListParams,
@@ -98,7 +99,11 @@ async def test_list_filter_by_provider(api_client: KitaruAPIClient) -> None:
         ImporterCreateRequest(name="braintrust-import", provider="braintrust")
     )
 
-    page = await api_client.importers.list(ImporterListParams(provider="langfuse"))
+    page = await api_client.importers.list(
+        ImporterListParams(
+            filter=FilterCondition(field="provider", op=FilterOp.EQ, value="langfuse")
+        )
+    )
     assert [item.name for item in page.items] == ["langfuse-import"]
 
 

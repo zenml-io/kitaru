@@ -14,12 +14,13 @@
 """SQL task repository."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from sqlalchemy import ColumnElement, func, not_, or_, select, update
 
 from kitaru.api_models.v1.task import TaskKind, TaskStatus, WorkerScope
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.task import (
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
     TaskORM,
@@ -39,6 +40,13 @@ IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
 TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
 
 _LAST_SEEN = func.coalesce(TaskORM.heartbeat_at, TaskORM.claimed_at)
+
+TASK_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "job_id": TaskORM.job_id,
+    "kind": TaskORM.kind,
+    "status": TaskORM.status,
+    "worker_id": TaskORM.worker_id,
+}
 
 
 def _scope_conditions(scope: WorkerScope) -> list[ColumnElement[bool]]:
@@ -157,16 +165,14 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         statement = select(TaskORM)
         if task_filter.job_id is not None:
             statement = statement.where(TaskORM.job_id == task_filter.job_id)
-        if task_filter.kind is not None:
-            statement = statement.where(TaskORM.kind == task_filter.kind.value)
-        if task_filter.status is not None:
-            statement = statement.where(TaskORM.status == task_filter.status.value)
-        if task_filter.worker_id is not None:
-            statement = statement.where(TaskORM.worker_id == task_filter.worker_id)
         if task_filter.stale_before is not None:
             statement = statement.where(
                 TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
                 task_filter.stale_before > _LAST_SEEN,
+            )
+        if task_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(task_filter.expression, TASK_FILTER_BINDINGS)
             )
         rows, next_cursor = await paginate(
             self._session, statement, task_filter, id_column=TaskORM.id

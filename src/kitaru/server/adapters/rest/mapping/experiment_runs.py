@@ -20,6 +20,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunProgress,
     ExperimentRunResponse,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.experiment_run import (
     ExperimentRunCreate,
     ExperimentRunFilter,
@@ -110,9 +111,9 @@ def experiment_run_list_params_to_filter(
         Experiment run filter.
     """
     return ExperimentRunFilter(
-        experiment_id=params.experiment_id,
-        status=params.status,
-        tag=params.tag,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,
@@ -131,7 +132,9 @@ def experiment_run_jobs_list_params_to_filter(
         Experiment run jobs filter.
     """
     return ExperimentRunJobsFilter(
-        status=params.status,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

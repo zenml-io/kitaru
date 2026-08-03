@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.sql import text
 
+from kitaru.server.adapters.db.pagination import LIST_QUERY_TIMEOUT_INFO_KEY
 from kitaru.server.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,12 @@ class DatabaseService:
             Request- or task-scoped session bound to the service engine.
         """
         session_factory = async_sessionmaker(
-            bind=self.engine, class_=AsyncSession, expire_on_commit=False
+            bind=self.engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            info={
+                LIST_QUERY_TIMEOUT_INFO_KEY: self.settings.LIST_QUERY_TIMEOUT_SECONDS
+            },
         )
         async with session_factory() as session:
             yield session

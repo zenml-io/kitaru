@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end evaluation tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -63,7 +64,10 @@ async def test_merge_and_list_persist_across_requests(
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/evaluations", params={"session_id": session_id})
+    filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
+    response = await client.get(
+        "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None

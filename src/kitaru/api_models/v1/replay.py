@@ -20,11 +20,11 @@ from typing import Any
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
-    ListParams,
     RequestModel,
     ResponseModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.replay_config import (
     EvaluatorConfig,
     ReplayOverride,
@@ -65,18 +65,8 @@ class ReplayCreateRequest(RequestModel):
     )
 
 
-class ReplayListParams(ListParams):
+class ReplayListParams(FilterableListParams):
     """Replay list params."""
-
-    experiment_run_id: uuid.UUID | None = Field(
-        default=None, description="Filter on experiment run."
-    )
-    baseline_session_id: uuid.UUID | None = Field(
-        default=None, description="Filter on baseline session."
-    )
-    status: ReplayStatus | None = Field(
-        default=None, description="Filter on replay status."
-    )
 
 
 class ReplayResponse(TimestampedResponseModel):

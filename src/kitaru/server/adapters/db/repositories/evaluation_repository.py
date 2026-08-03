@@ -14,11 +14,13 @@
 """SQL evaluation repository."""
 
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 
+from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.pagination import paginate
@@ -31,6 +33,14 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
 
 EvaluatorInfo = tuple[str, int]
+
+EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "session_id": EvaluationORM.session_id,
+    "task_id": EvaluationORM.task_id,
+    "evaluator_version_id": EvaluationORM.evaluator_version_id,
+    "name": EvaluationORM.name,
+    "data_type": EvaluationORM.data_type,
+}
 
 
 class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
@@ -117,24 +127,11 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
             and version, and the next cursor.
         """
         statement = select(EvaluationORM)
-        if evaluation_filter.session_id is not None:
+        if evaluation_filter.expression is not None:
             statement = statement.where(
-                EvaluationORM.session_id == evaluation_filter.session_id
-            )
-        if evaluation_filter.task_id is not None:
-            statement = statement.where(
-                EvaluationORM.task_id == evaluation_filter.task_id
-            )
-        if evaluation_filter.evaluator_version_id is not None:
-            statement = statement.where(
-                EvaluationORM.evaluator_version_id
-                == evaluation_filter.evaluator_version_id
-            )
-        if evaluation_filter.name is not None:
-            statement = statement.where(EvaluationORM.name == evaluation_filter.name)
-        if evaluation_filter.data_type is not None:
-            statement = statement.where(
-                EvaluationORM.data_type == evaluation_filter.data_type.value
+                compile_filter_expression(
+                    evaluation_filter.expression, EVALUATION_FILTER_BINDINGS
+                )
             )
         rows, next_cursor = await paginate(
             self._session, statement, evaluation_filter, id_column=EvaluationORM.id

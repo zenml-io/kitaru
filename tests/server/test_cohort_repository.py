@@ -24,6 +24,7 @@ from conftest import (
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -40,6 +41,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
 from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[CohortRepository, uuid.UUID, uuid.UUID, TagRepository]
 
@@ -125,7 +127,11 @@ async def test_query_filters_by_name(setup: Setup) -> None:
     repository, owner_id, agent_id, _ = setup
     await repository.create(Cohort(owner_id=owner_id, name="alpha", agent_id=agent_id))
     await repository.create(Cohort(owner_id=owner_id, name="beta", agent_id=agent_id))
-    cohorts, next_cursor = await repository.query(CohortFilter(name="beta"))
+    cohorts, next_cursor = await repository.query(
+        CohortFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="beta")
+        )
+    )
     assert next_cursor is None
     assert [cohort.name for cohort in cohorts] == ["beta"]
 
@@ -147,7 +153,11 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
             resource_id=tagged.id,
         )
     )
-    cohorts, _ = await repository.query(CohortFilter(tag="smoke-test"))
+    cohorts, _ = await repository.query(
+        CohortFilter(
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+        )
+    )
     assert [cohort.id for cohort in cohorts] == [tagged.id]
 
 

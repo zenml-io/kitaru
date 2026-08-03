@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the evaluator routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -114,7 +115,10 @@ async def test_list_evaluators(client: httpx.AsyncClient) -> None:
     assert body["next_cursor"] is None
     assert [item["name"] for item in body["items"]] == ["relevance", "accuracy"]
 
-    response = await client.get("/v1/evaluators", params={"name": "accuracy"})
+    filter_expression = {"field": "name", "op": "eq", "value": "accuracy"}
+    response = await client.get(
+        "/v1/evaluators", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "accuracy"
 

@@ -19,11 +19,11 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    ListParams,
     OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.plugin import PluginSource
 
 
@@ -48,10 +48,8 @@ class EvaluatorUpdateRequest(RequestModel):
     )
 
 
-class EvaluatorListParams(ListParams):
+class EvaluatorListParams(FilterableListParams):
     """Evaluator list params."""
-
-    name: str | None = Field(default=None, description="Filter on evaluator name.")
 
 
 class EvaluatorResponse(OwnedResponseModel):

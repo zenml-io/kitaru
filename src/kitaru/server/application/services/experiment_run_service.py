@@ -120,7 +120,7 @@ class ExperimentRunService:
         job_ids = [replay.job_id for replay in replays]
         return await self._jobs.query(
             JobFilter(
-                status=job_filter.status,
+                expression=job_filter.expression,
                 job_ids=job_ids,
                 cursor=job_filter.cursor,
                 size=job_filter.size,

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the experiment run routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -166,14 +167,24 @@ async def test_list_runs_filters_by_experiment(
             "agent_version_id": run_setup["agent_version_id"],
         },
     )
+    filter_expression = {
+        "field": "experiment_id",
+        "op": "eq",
+        "value": run_setup["experiment_id"],
+    }
     response = await client.get(
-        "/v1/experiment-runs", params={"experiment_id": run_setup["experiment_id"]}
+        "/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
 
+    filter_expression = {
+        "field": "experiment_id",
+        "op": "eq",
+        "value": str(uuid.uuid4()),
+    }
     response = await client.get(
-        "/v1/experiment-runs", params={"experiment_id": str(uuid.uuid4())}
+        "/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.json()["items"] == []
 

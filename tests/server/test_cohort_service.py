@@ -18,6 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeAgentRepository, FakeCohortRepository, create_agent
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohort import (
     CohortCreate,
@@ -29,6 +30,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort import CohortNotFound, DuplicateCohortName
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -134,7 +136,10 @@ async def test_list_cohorts(service: CohortService, agent_id: uuid.UUID) -> None
     assert [cohort.name for cohort in cohorts] == ["beta", "alpha"]
 
     cohorts, next_cursor = await service.list_cohorts(
-        CohortFilter(name="alpha"), actor=ACTOR
+        CohortFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="alpha")
+        ),
+        actor=ACTOR,
     )
     assert [cohort.name for cohort in cohorts] == ["alpha"]
 

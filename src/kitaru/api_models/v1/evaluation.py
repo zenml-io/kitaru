@@ -22,10 +22,10 @@ from pydantic import AfterValidator, Field, field_validator, model_validator
 
 from kitaru.api_models.v1.base import (
     FiniteFloat,
-    ListParams,
     OwnedResponseModel,
     RequestModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 
 MAX_NAME_LENGTH = 255
@@ -151,20 +151,8 @@ class EvaluationBatchCreateRequest(RequestModel):
         return value
 
 
-class EvaluationListParams(ListParams):
+class EvaluationListParams(FilterableListParams):
     """Evaluation list params."""
-
-    session_id: uuid.UUID | None = Field(default=None, description="Filter on session.")
-    task_id: uuid.UUID | None = Field(
-        default=None, description="Filter on evaluator task."
-    )
-    evaluator_version_id: uuid.UUID | None = Field(
-        default=None, description="Filter on evaluator version."
-    )
-    name: str | None = Field(default=None, description="Filter on evaluation name.")
-    data_type: EvaluationDataType | None = Field(
-        default=None, description="Filter on data type."
-    )
 
 
 class EvaluationResponse(OwnedResponseModel):

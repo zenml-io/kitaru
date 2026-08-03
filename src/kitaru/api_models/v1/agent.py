@@ -17,7 +17,8 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import ListParams, OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class AgentCreateRequest(RequestModel):
@@ -34,10 +35,8 @@ class AgentUpdateRequest(RequestModel):
     description: str | None = Field(default=None, description="New agent description.")
 
 
-class AgentListParams(ListParams):
+class AgentListParams(FilterableListParams):
     """Agent list params."""
-
-    name: str | None = Field(default=None, description="Filter on agent name.")
 
 
 class AgentResponse(OwnedResponseModel):

@@ -17,7 +17,8 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import ListParams, OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.replay_config import (
     EvaluatorConfig,
     ReplayOverride,
@@ -55,11 +56,8 @@ class ExperimentUpdateRequest(RequestModel):
     )
 
 
-class ExperimentListParams(ListParams):
+class ExperimentListParams(FilterableListParams):
     """Experiment list params."""
-
-    name: str | None = Field(default=None, description="Filter on experiment name.")
-    tag: str | None = Field(default=None, description="Filter on tag name.")
 
 
 class ExperimentResponse(OwnedResponseModel):

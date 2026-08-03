@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the cohort routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -137,7 +138,10 @@ async def test_list_cohorts(client: httpx.AsyncClient, agent_id: str) -> None:
     assert body["next_cursor"] is None
     assert [item["name"] for item in body["items"]] == ["beta", "alpha"]
 
-    response = await client.get("/v1/cohorts", params={"name": "alpha"})
+    filter_expression = {"field": "name", "op": "eq", "value": "alpha"}
+    response = await client.get(
+        "/v1/cohorts", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.json()["items"][0]["name"] == "alpha"
 
 

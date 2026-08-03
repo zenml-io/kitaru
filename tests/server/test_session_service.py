@@ -29,6 +29,7 @@ from conftest import (
     create_import_task,
     create_session,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.session import (
@@ -57,6 +58,7 @@ from kitaru.server.domain.task import (
     TaskNotRunning,
     TaskResultSessionAlreadyLinked,
 )
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -194,7 +196,10 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
     )
 
     sessions, next_cursor = await service.list_sessions(
-        SessionFilter(agent_id=agent_id), actor=ACTOR
+        SessionFilter(
+            expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert {session.id for session in sessions} == {first.id, second.id}

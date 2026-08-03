@@ -20,6 +20,7 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, pg_session, postgres_available
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -39,6 +40,7 @@ from kitaru.server.domain.secret import (
     Secret,
     SecretNotFound,
 )
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[SecretRepository, uuid.UUID, uuid.UUID]
 
@@ -134,7 +136,11 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert [secret.name for secret in secrets] == ["s3", "smtp", "db"]
 
-    secrets, next_cursor = await repository.query(SecretFilter(name="db"))
+    secrets, next_cursor = await repository.query(
+        SecretFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="db")
+        )
+    )
     assert next_cursor is None
     assert secrets[0] == db
 
@@ -142,7 +148,11 @@ async def test_query(setup: Setup) -> None:
     assert next_cursor is None
     assert secrets[0] == s3
 
-    secrets, next_cursor = await repository.query(SecretFilter(name="missing"))
+    secrets, next_cursor = await repository.query(
+        SecretFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
+        )
+    )
     assert next_cursor is None
     assert secrets == []
 

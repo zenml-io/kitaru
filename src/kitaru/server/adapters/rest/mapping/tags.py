@@ -14,6 +14,7 @@
 """Tag and tag link DTO conversions."""
 
 from kitaru.api_models.v1.tag import TagLinkResponse, TagListParams, TagResponse
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.domain.tag import Tag, TagLink
 
@@ -69,7 +70,9 @@ def tag_list_params_to_filter(params: TagListParams) -> TagFilter:
         Tag filter.
     """
     return TagFilter(
-        name=params.name,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

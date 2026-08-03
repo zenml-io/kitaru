@@ -24,6 +24,7 @@ from conftest import (
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -49,6 +50,7 @@ from kitaru.server.domain.replay_config import (
     default_tool_policy,
 )
 from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[ExperimentRepository, uuid.UUID]
 
@@ -174,7 +176,9 @@ async def test_query_by_name(setup: Setup) -> None:
     assert [experiment.name for experiment in experiments] == ["reviewer", "assistant"]
 
     experiments, next_cursor = await repository.query(
-        ExperimentFilter(name="assistant")
+        ExperimentFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="assistant")
+        )
     )
     assert next_cursor is None
     assert experiments == [first]
@@ -313,6 +317,10 @@ async def test_query_by_tag(tag_setup: TagSetup) -> None:
         )
     )
 
-    experiments, next_cursor = await repository.query(ExperimentFilter(tag="smoke"))
+    experiments, next_cursor = await repository.query(
+        ExperimentFilter(
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke")
+        )
+    )
     assert next_cursor is None
     assert experiments == [tagged]

@@ -30,6 +30,7 @@ from conftest import (
     create_session,
     create_worker,
 )
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
@@ -58,6 +59,7 @@ from kitaru.server.domain.task import (
     EvaluationTask,
     ImportTask,
 )
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -506,7 +508,12 @@ async def test_list_jobs_filters_by_status(services: JobAndTaskServices) -> None
     await create_job(services.jobs, ACTOR.account.id, status=JobStatus.PENDING)
     await create_job(services.jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
     items, _ = await services.job_service.list_jobs(
-        JobFilter(status=JobStatus.COMPLETED), actor=ACTOR
+        JobFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=JobStatus.COMPLETED
+            )
+        ),
+        actor=ACTOR,
     )
     assert len(items) == 1
     assert items[0].status is JobStatus.COMPLETED

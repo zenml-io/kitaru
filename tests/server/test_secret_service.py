@@ -19,11 +19,13 @@ import pytest
 from pydantic import SecretStr
 
 from conftest import FakeSecretRepository, create_secret
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.secret import DuplicateSecretName, SecretNotFound
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
@@ -120,7 +122,10 @@ async def test_list_secrets(service: SecretService) -> None:
     assert [secret.name for secret in secrets] == ["s3", "smtp", "db"]
 
     secrets, next_cursor = await service.list_secrets(
-        SecretFilter(name="smtp"), actor=ACTOR
+        SecretFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="smtp")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert secrets[0].name == "smtp"

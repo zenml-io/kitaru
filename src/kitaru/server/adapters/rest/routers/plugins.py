@@ -32,6 +32,7 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
 )
+from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import ImporterCreateRequest, ImporterUpdateRequest
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.server.adapters.rest.mapping.plugins import (
@@ -84,8 +85,7 @@ async def list_plugins(
     params: ListParams,
     response_class: type[PluginResponseT],
     actor: AuthContext,
-    name: str | None = None,
-    provider: str | None = None,
+    filter_: Filter | None = None,
 ) -> Page[PluginResponseT]:
     """List plugins of the resource's kind.
 
@@ -94,13 +94,12 @@ async def list_plugins(
         params: List params carrying pagination.
         response_class: ``EvaluatorResponse`` or ``ImporterResponse``.
         actor: Caller context.
-        name: Name filter, when present on the wire params.
-        provider: Provider filter, when present on the wire params.
+        filter_: Filter expression, when present on the wire params.
 
     Returns:
         Page of plugin responses.
     """
-    plugin_filter = plugin_list_params_to_filter(params, service.kind, name, provider)
+    plugin_filter = plugin_list_params_to_filter(params, service.kind, filter_)
     plugins, next_cursor = await service.list_plugins(plugin_filter, actor=actor)
     return Page[response_class](  # ty: ignore[invalid-type-form]
         items=[plugin_to_response(plugin, response_class) for plugin in plugins],

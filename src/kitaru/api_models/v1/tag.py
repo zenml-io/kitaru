@@ -19,11 +19,11 @@ from enum import StrEnum
 from pydantic import Field
 
 from kitaru.api_models.v1.base import (
-    ListParams,
     OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class TagResourceType(StrEnum):
@@ -47,10 +47,8 @@ class TagUpdateRequest(RequestModel):
     name: str = Field(description="New tag name.")
 
 
-class TagListParams(ListParams):
+class TagListParams(FilterableListParams):
     """Tag list params."""
-
-    name: str | None = Field(default=None, description="Filter on tag name.")
 
 
 class TagResponse(OwnedResponseModel):

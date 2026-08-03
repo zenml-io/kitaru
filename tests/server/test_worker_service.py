@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import FakeWorkerRepository, create_worker
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import LabelSelector, WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.application.models.auth import AuthContext
@@ -26,6 +27,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.worker import WorkerNotFound
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -123,7 +125,10 @@ async def test_list_workers(service: WorkerService) -> None:
     assert [worker.name for worker in workers] == ["worker-3", "worker-2", "worker-1"]
 
     workers, next_cursor = await service.list_workers(
-        WorkerFilter(name="worker-2"), actor=ACTOR
+        WorkerFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="worker-2")
+        ),
+        actor=ACTOR,
     )
     assert next_cursor is None
     assert workers[0].name == "worker-2"

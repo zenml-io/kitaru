@@ -20,6 +20,7 @@ from kitaru.api_models.v1.secret import (
     SecretResponse,
     SecretWithValuesResponse,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.secret import Secret
 
@@ -80,7 +81,9 @@ def secret_list_params_to_filter(params: SecretListParams) -> SecretFilter:
         Secret filter.
     """
     return SecretFilter(
-        name=params.name,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

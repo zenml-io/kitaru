@@ -40,6 +40,7 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionResponse,
     CohortVersionUpdateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
@@ -176,7 +177,11 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     assert page.next_cursor is None
     assert [item.name for item in page.items] == ["beta", "alpha"]
 
-    page = await api_client.cohorts.list(CohortListParams(name="alpha"))
+    page = await api_client.cohorts.list(
+        CohortListParams(
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value="alpha")
+        )
+    )
     assert page.items[0].name == "alpha"
 
 

@@ -21,6 +21,7 @@ from kitaru.api_models.v1.session import (
     SessionResponse,
     SessionUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.session import (
     SessionCreate,
     SessionFilter,
@@ -109,23 +110,9 @@ def session_list_params_to_filter(params: SessionListParams) -> SessionFilter:
         Session filter.
     """
     return SessionFilter(
-        agent_id=params.agent_id,
-        agent_version_id=params.agent_version_id,
-        cohort_version_id=params.cohort_version_id,
-        task_id=params.task_id,
-        origin=params.origin,
-        status=params.status,
-        provider=params.provider,
-        external_id=params.external_id,
-        name=params.name,
-        tag=params.tag,
-        started_after=params.started_after,
-        started_before=params.started_before,
-        ended_after=params.ended_after,
-        ended_before=params.ended_before,
-        has_evaluation=params.has_evaluation,
-        min_cost=params.min_cost,
-        max_cost=params.max_cost,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

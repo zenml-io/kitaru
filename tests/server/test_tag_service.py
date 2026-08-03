@@ -18,6 +18,7 @@ import uuid
 import pytest
 
 from conftest import FakeTagRepository, create_tag
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.tag import TagFilter
@@ -29,6 +30,7 @@ from kitaru.server.domain.tag import (
     TagLinkNotFound,
     TagNotFound,
 )
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -70,7 +72,12 @@ async def test_list_tags(service: TagService) -> None:
     assert next_cursor is None
     assert [tag.name for tag in tags] == ["canary", "staging", "prod"]
 
-    tags, next_cursor = await service.list_tags(TagFilter(name="staging"), actor=ACTOR)
+    tags, next_cursor = await service.list_tags(
+        TagFilter(
+            expression=FilterCondition(field="name", op=FilterOp.EQ, value="staging")
+        ),
+        actor=ACTOR,
+    )
     assert next_cursor is None
     assert tags[0].name == "staging"
 

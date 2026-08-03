@@ -14,7 +14,8 @@
 """Job filter and command models."""
 
 import uuid
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 from pydantic import Field
 
@@ -22,12 +23,16 @@ from kitaru.api_models.v1.job import JobStatus
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
+from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
 
 class JobFilter(ListFilter):
     """Job list filter."""
 
-    status: JobStatus | None = None
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "status": FilterField(value_type=JobStatus, ops=EQUALITY_OPS),
+    }
+
     job_ids: list[uuid.UUID] | None = None
 
 

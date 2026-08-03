@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the evaluation routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -132,7 +133,10 @@ async def test_list_evaluations(
     assert response.status_code == 200
     assert len(response.json()["items"]) == 2
 
-    response = await client.get("/v1/evaluations", params={"session_id": session_id})
+    filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
+    response = await client.get(
+        "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+    )
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
