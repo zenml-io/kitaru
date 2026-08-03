@@ -39,6 +39,7 @@ from kitaru.server.application.models.task import (
     TaskPolicy,
     TaskUpdate,
 )
+from kitaru.server.application.services.resource_access import check_task_attempt
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.task import (
@@ -233,6 +234,7 @@ class TaskService:
             actor.principal.task_id != task_id
         ):
             raise TaskAccessDenied(task_id)
+        await check_task_attempt(actor, self._repository)
         task = await self._repository.get(task_id)
         return await self._spec_builder.build_spec(task)
 

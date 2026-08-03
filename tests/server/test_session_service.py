@@ -61,6 +61,7 @@ from kitaru.server.domain.session import (
     SessionStatusCannotBeCleared,
 )
 from kitaru.server.domain.task import (
+    AgentTask,
     Task,
     TaskNotFound,
     TaskNotRunning,
@@ -976,10 +977,15 @@ async def test_update_session_denies_a_task_principal_for_another_tasks_session(
 
 
 async def test_update_session_allows_a_task_principal_for_its_own_session(
-    service: SessionService, repository: FakeSessionRepository
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
 ) -> None:
     """Allow a task principal to update the session linked to its own task."""
-    task_id = uuid.uuid4()
+    task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
+    )
+    task_id = task.id
     session = await create_session(
         repository, uuid.uuid4(), uuid.uuid4(), task_id=task_id
     )

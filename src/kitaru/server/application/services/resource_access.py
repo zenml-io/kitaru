@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
@@ -28,6 +29,30 @@ from kitaru.server.domain.task import (
     ScriptPluginSpec,
     TaskSpec,
 )
+
+
+async def check_task_attempt(actor: AuthContext, tasks: TaskRepository) -> None:
+    """Require a task principal's token to name the task's current attempt.
+
+    A requeue leaves the superseded attempt's token unexpired, and the task
+    id it carries stays valid across attempts, so the attempt has to be
+    checked against the stored task.
+
+    An account principal always passes.
+
+    Args:
+        actor: Caller context.
+        tasks: Task repository.
+
+    Raises:
+        TaskNotFound: The principal names a task that no longer exists.
+        TaskAttemptMismatch: The token is fenced by an attempt the task has
+            moved past.
+    """
+    if not isinstance(actor.principal, TaskPrincipal):
+        return
+    task = await tasks.get(actor.principal.task_id)
+    task.check_attempt(actor.principal.attempt)
 
 
 def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
