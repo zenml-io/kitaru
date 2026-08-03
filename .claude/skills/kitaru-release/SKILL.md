@@ -106,7 +106,7 @@ Classify each changed behavior into one or more areas:
 
 | Area | Typical paths | Evidence to record |
 |---|---|---|
-| CLI | `src/kitaru/_cli/**`, `src/kitaru/cli.py` | Deterministic pytest, local smoke command, or manual waiver |
+| CLI | `src/kitaru/cli/**` | Deterministic pytest, local smoke command, or manual waiver |
 | MCP | `src/kitaru/mcp/**`, `tests/mcp/**` | MCP pytest and/or smoke `fastmcp` command |
 | SDK primitives | `src/kitaru/**` core runtime/client/checkpoint/wait/replay code | Deterministic pytest plus local smoke flow if available |
 | Provider adapters | `src/kitaru/adapters/**`, provider examples | Provider area below, deterministic fake test if available, live/local provider check if required. OpenAI/Anthropic changes need exact-ref `llm-integration.yml` evidence or an explicit waiver; weekly-green `develop` is only a canary. |
