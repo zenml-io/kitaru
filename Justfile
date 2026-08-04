@@ -167,7 +167,7 @@ release-smoke *ARGS:
 
 # Validate the canonical example without a server or provider credentials.
 canonical-example-test:
-    uv run pytest -q tests/test_document_processing_example.py
+    PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py tests/test_document_processing_example.py
 
 # Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.
