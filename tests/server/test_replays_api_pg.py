@@ -14,6 +14,7 @@
 """End-to-end replay pipeline tests against PostgreSQL."""
 
 import json
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -147,6 +148,70 @@ async def test_replay_pipeline_completes_through_the_api(
     replay_after = (await client.get(f"/v1/replays/{replay['id']}")).json()
     assert replay_after["status"] == "evaluating"
     assert replay_after["result_session_id"] == result_session["id"]
+
+    filtered = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {
+                        "field": "result_session_id",
+                        "op": "eq",
+                        "value": result_session["id"],
+                    }
+                )
+            },
+        )
+    ).json()["items"]
+    assert [item["id"] for item in filtered] == [replay["id"]]
+    unmatched = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps(
+                    {
+                        "field": "result_session_id",
+                        "op": "eq",
+                        "value": str(uuid.uuid4()),
+                    }
+                )
+            },
+        )
+    ).json()["items"]
+    assert unmatched == []
+    # A second replay whose agent task never produces a session, so the is_null
+    # assertion below distinguishes the correct answer from an empty page.
+    other_baseline = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": agent_id,
+                "agent_version_id": version_id,
+                "origin": "recorded",
+                "inputs": {"q": "hi again"},
+                "outputs": None,
+                "expected": None,
+            },
+        )
+    ).json()
+    unfinished = (
+        await client.post(
+            "/v1/replays",
+            json={
+                "baseline_session_id": other_baseline["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    pending = (
+        await client.get(
+            "/v1/replays",
+            params={
+                "filter": json.dumps({"field": "result_session_id", "op": "is_null"})
+            },
+        )
+    ).json()["items"]
+    assert [item["id"] for item in pending] == [unfinished["id"]]
 
     claimed = (
         await client.post(

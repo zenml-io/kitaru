@@ -33,6 +33,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -42,7 +43,7 @@ from kitaru.server.application.models.auth import (
     WorkerAuthContext,
     WorkerPrincipal,
 )
-from kitaru.server.application.models.replay import ReplayCreate
+from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.application.services.replay_service import ReplayService
@@ -67,6 +68,7 @@ from kitaru.server.domain.replay_config import (
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.domain.task import AgentTask
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -635,3 +637,108 @@ async def test_tool_lookup_denies_a_task_principal_from_another_job(
             "cache-key",
             actor=_task_actor_for(foreign_task.id, foreign_job_id),
         )
+
+
+async def test_list_replays_filters_by_result_session(
+    services: ReplayServices,
+) -> None:
+    """List replays filters on the result session linked by the agent task."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    async def replay_with_result_session() -> tuple[uuid.UUID, uuid.UUID]:
+        baseline = await _session(services, agent_version)
+        bundle = await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            ),
+            actor=ACTOR,
+        )
+        tasks, _ = await services.task_service.list_tasks(
+            TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+        )
+        await services.task_service.claim_tasks(
+            10,
+            actor=WorkerAuthContext(
+                account=ACTOR.account, principal=WorkerPrincipal(worker_id=worker.id)
+            ),
+        )
+        stored_task = await services.tasks.get(tasks[0].id)
+        assert isinstance(stored_task, AgentTask)
+        stored_task.result_session_id = uuid.uuid4()
+        await services.tasks.update(stored_task)
+        return bundle.replay.id, stored_task.result_session_id
+
+    wanted_replay_id, wanted_session_id = await replay_with_result_session()
+    await replay_with_result_session()
+
+    matches, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="result_session_id", op=FilterOp.EQ, value=wanted_session_id
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert [bundle.replay.id for bundle in matches] == [wanted_replay_id]
+    assert matches[0].result_session_id == wanted_session_id
+
+    empty, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="result_session_id", op=FilterOp.EQ, value=uuid.uuid4()
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert empty == []
+
+
+async def test_list_replays_filters_on_a_missing_result_session(
+    services: ReplayServices,
+) -> None:
+    """An is_null result session filter keeps the replays with no result yet."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+
+    baseline = await _session(services, agent_version)
+    linked = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=linked.replay.job_id), actor=ACTOR
+    )
+    await services.task_service.claim_tasks(
+        10,
+        actor=WorkerAuthContext(
+            account=ACTOR.account, principal=WorkerPrincipal(worker_id=worker.id)
+        ),
+    )
+    stored_task = await services.tasks.get(tasks[0].id)
+    assert isinstance(stored_task, AgentTask)
+    stored_task.result_session_id = uuid.uuid4()
+    await services.tasks.update(stored_task)
+
+    other_baseline = await _session(services, agent_version)
+    unlinked = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=other_baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+
+    pending, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(field="result_session_id", op=FilterOp.IS_NULL)
+        ),
+        actor=ACTOR,
+    )
+    assert [bundle.replay.id for bundle in pending] == [unlinked.replay.id]

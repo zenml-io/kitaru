@@ -75,6 +75,101 @@ def build_tag_condition_binding(
     return compile_tag_condition
 
 
+def build_scope_condition_binding(
+    *,
+    local_column: InstrumentedAttribute[Any],
+    related_key: InstrumentedAttribute[Any],
+    scope_column: InstrumentedAttribute[Any],
+) -> Callable[[FilterCondition], ColumnElement[bool]]:
+    """Build a filter binding for a field held by a related row.
+
+    The predicate is a correlated EXISTS rather than an IN subquery. Under
+    ``not`` an IN becomes NOT IN, which evaluates to null and drops the row
+    whenever ``local_column`` is null, so a nullable reference would silently
+    lose exactly the rows a negated filter should return. NOT EXISTS is false
+    rather than null there, and Postgres can plan it as an anti-join.
+
+    Args:
+        local_column: Column on the filtered table referencing the related row.
+        related_key: Column on the related table that ``local_column`` points at.
+        scope_column: Column on the related table the condition applies to.
+
+    Raises:
+        ValueError: ``related_key`` and ``scope_column`` are not on one table,
+            which means the arguments were transposed.
+
+    Returns:
+        Binding compiling a scope condition into an EXISTS predicate.
+    """
+    # All three columns are uuids, so a transposition type-checks and yields a
+    # query that runs and returns the wrong rows. Bindings are built at import,
+    # so this makes that a startup failure.
+    if related_key.class_ is not scope_column.class_:
+        raise ValueError(
+            f"related_key {related_key} and scope_column {scope_column} must be "
+            "columns of the same table"
+        )
+
+    def compile_scope_condition(condition: FilterCondition) -> ColumnElement[bool]:
+        """Compile a scope condition into an EXISTS predicate.
+
+        Args:
+            condition: Validated scope condition.
+
+        Returns:
+            SQL predicate.
+        """
+        related = (
+            select(related_key)
+            .where(
+                related_key == local_column,
+                compile_column_condition(scope_column, condition),
+            )
+            .correlate(local_column.class_)
+        )
+        return related.exists()
+
+    return compile_scope_condition
+
+
+def compile_column_condition(
+    column: InstrumentedAttribute[Any], condition: FilterCondition
+) -> ColumnElement[bool]:
+    """Compile a filter condition against a column.
+
+    Args:
+        column: Column the condition applies to.
+        condition: Validated filter condition.
+
+    Returns:
+        SQL predicate.
+    """
+    value = condition.value
+    match condition.op:
+        case FilterOp.EQ:
+            return column == value
+        case FilterOp.NE:
+            return column != value
+        case FilterOp.LT:
+            return column < value
+        case FilterOp.LE:
+            return column <= value
+        case FilterOp.GT:
+            return column > value
+        case FilterOp.GE:
+            return column >= value
+        case FilterOp.IN:
+            return column.in_(value)
+        case FilterOp.IS_NULL:
+            return column.is_(None)
+        case FilterOp.STARTSWITH:
+            return column.startswith(value, autoescape=True)
+        case FilterOp.ENDSWITH:
+            return column.endswith(value, autoescape=True)
+        case FilterOp.CONTAINS:
+            return column.contains(value, autoescape=True)
+
+
 def _compile_condition(
     condition: FilterCondition,
     bindings: Mapping[str, FilterBinding],
@@ -92,30 +187,7 @@ def _compile_condition(
     binding = bindings[condition.field]
     if not isinstance(binding, InstrumentedAttribute):
         return binding(condition)
-    value = condition.value
-    match condition.op:
-        case FilterOp.EQ:
-            return binding == value
-        case FilterOp.NE:
-            return binding != value
-        case FilterOp.LT:
-            return binding < value
-        case FilterOp.LE:
-            return binding <= value
-        case FilterOp.GT:
-            return binding > value
-        case FilterOp.GE:
-            return binding >= value
-        case FilterOp.IN:
-            return binding.in_(value)
-        case FilterOp.IS_NULL:
-            return binding.is_(None)
-        case FilterOp.STARTSWITH:
-            return binding.startswith(value, autoescape=True)
-        case FilterOp.ENDSWITH:
-            return binding.endswith(value, autoescape=True)
-        case FilterOp.CONTAINS:
-            return binding.contains(value, autoescape=True)
+    return compile_column_condition(binding, condition)
 
 
 def compile_filter_expression(
