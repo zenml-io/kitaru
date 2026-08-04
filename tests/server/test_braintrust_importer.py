@@ -19,7 +19,7 @@ from typing import Any
 
 from kitaru.importers import ImportContext, NodeType, SessionStatus
 from kitaru.importers.braintrust import BraintrustProjectLogImporter, parse
-from kitaru.task.importer import ParsedSession
+from kitaru.task.importer import ImportFailure, ParsedSession
 
 
 def context(
@@ -141,6 +141,43 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     assert len(parsed) == 1
     assert isinstance(parsed[0], ParsedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
+
+
+def test_unified_parse_isolates_invalid_token_metrics() -> None:
+    """Report malformed token metrics without aborting valid sessions."""
+    invalid = event(
+        event_id="event-invalid",
+        span_id="invalid",
+        root_span_id="invalid",
+        name="invalid",
+        span_type="llm",
+        parents=[],
+        input_="bad",
+        output="bad",
+        start=1_785_000_000.0,
+        metadata={"session_id": "invalid-session"},
+    )
+    invalid["metrics"]["prompt_tokens"] = "not-a-number"
+    valid = event(
+        event_id="event-valid",
+        span_id="valid",
+        root_span_id="valid",
+        name="valid",
+        span_type="task",
+        parents=[],
+        input_="good",
+        output="good",
+        start=1_785_000_001.0,
+        metadata={"session_id": "valid-session"},
+    )
+
+    parsed = list(parse(json.dumps({"events": [invalid, valid]}).encode(), {}))
+
+    assert len(parsed) == 2
+    assert isinstance(parsed[0], ParsedSession)
+    assert parsed[0].external_id == "project-1:valid-session"
+    assert isinstance(parsed[1], ImportFailure)
+    assert "prompt_tokens" in parsed[1].error
 
 
 def test_groups_multiple_root_traces_into_one_session() -> None:
