@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Tests for job use cases."""
 
-import json
 import uuid
 
 import pytest
@@ -59,7 +58,6 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import JobAlreadySettled, JobNotFound
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
-    IMPORT_TAGS_LABEL,
     AgentTask,
     DuplicateEvaluationTask,
     EvaluationTask,
@@ -243,7 +241,6 @@ async def test_create_import_stamps_the_agent_version_on_its_task(
             agent_version_id=version.id,
             payload_blob_id=payload.id,
             params={},
-            tags=["baseline", "discovery"],
         ),
         actor=ACTOR,
     )
@@ -253,7 +250,6 @@ async def test_create_import_stamps_the_agent_version_on_its_task(
     task = tasks[0]
     assert isinstance(task, ImportTask)
     assert task.agent_version_id == version.id
-    assert json.loads(task.labels[IMPORT_TAGS_LABEL]) == ["baseline", "discovery"]
 
 
 async def test_create_import_rejects_a_version_of_another_agent(

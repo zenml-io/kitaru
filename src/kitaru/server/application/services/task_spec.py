@@ -13,8 +13,6 @@
 #  permissions and limitations under the License.
 """Task execution spec building."""
 
-import json
-
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
@@ -29,7 +27,6 @@ from kitaru.server.application.services.agent_version_resolution import (
 )
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
-    IMPORT_TAGS_LABEL,
     AgentTask,
     AgentTaskDetails,
     EvaluationTask,
@@ -193,7 +190,6 @@ class TaskSpecBuilder:
                 provider=plugin.provider,
                 agent_id=task.agent_id,
                 params=task.params,
-                tags=json.loads(task.labels.get(IMPORT_TAGS_LABEL, "[]")),
             ),
         )
 

@@ -183,7 +183,6 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
             provider=details.provider,
             agent_id=details.agent_id,
             params=details.params,
-            tags=details.tags,
         )
     raise ValueError(f"Task {spec.task_id} details have no response mapping")
 

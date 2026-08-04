@@ -2844,7 +2844,7 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "text[]",
                 "option",
                 False,
-                "Tag every session created by this import.",
+                "Tag every session created by this import; requires --wait.",
             ),
             ParameterSpec(
                 "--media-type",
