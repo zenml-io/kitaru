@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Blobs, managed via `/v1/blobs`, content-addressed storage for plugin payloads and task inputs.
 - Plugins for evaluators and importers, managed via `/v1/evaluators` and `/v1/importers`, each versioned and backed by a script or package source.
 - Cohorts and cohort versions, managed via `/v1/cohorts` and `/v1/cohort-versions`, where a cohort names a group of sessions and each immutable version snapshots the membership used as experiment baselines. A new version applies a membership delta to a baseline version chosen via `baseline_id`, defaulting to the latest version.
-- Tags, managed via `/v1/tags`, linking to sessions, cohorts, experiments, and experiment runs.
+- Tags, managed via `/v1/tags`, linking to sessions, cohorts, cohort versions, agent versions, experiments, and experiment runs.
 - Experiments and experiment runs, managed via `/v1/experiments` and `/v1/experiment-runs`, comparing agent versions against a cohort version.
 - Replays, managed via `/v1/replays`, re-running a session against a replay config with a per-tool lookup, passthrough, or override policy.
 - Evaluations, managed via `/v1/evaluations`, scoring a session or task output. An evaluation result can carry an optional `passed` pass or fail verdict alongside its score, value, and explanation. The flag is independent of the score and is named `passed` because `pass` is a Python keyword.

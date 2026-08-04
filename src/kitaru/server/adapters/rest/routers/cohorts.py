@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import (
     CohortCreateRequest,
     CohortListParams,
@@ -27,6 +27,7 @@ from kitaru.api_models.v1.cohort import (
 )
 from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
+    CohortVersionListParams,
     CohortVersionResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
@@ -209,7 +210,7 @@ async def list_cohort_versions(
     cohort_id: uuid.UUID,
     service: Annotated[CohortVersionService, Depends(get_cohort_version_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    params: Annotated[ListParams, Query()],
+    params: Annotated[CohortVersionListParams, Query()],
 ) -> Page[CohortVersionResponse]:
     """List the versions of a cohort.
 
@@ -220,7 +221,7 @@ async def list_cohort_versions(
         cohort_id: Id of the cohort.
         service: Cohort version service.
         actor: Caller context.
-        params: List params.
+        params: Cohort version list params.
 
     Returns:
         Page of cohort versions.

@@ -21,6 +21,7 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeTagRepository,
     asgi_api_client,
 )
 from kitaru.api_models.v1.agent import (
@@ -32,18 +33,24 @@ from kitaru.api_models.v1.agent import (
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionCreateRequest,
+    AgentVersionListParams,
     AgentVersionResponse,
     AgentVersionUpdateRequest,
     RunSpec,
 )
-from kitaru.api_models.v1.base import ListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagResourceType,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
     get_agent_version_service,
+    get_tag_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -52,6 +59,7 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -68,12 +76,16 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         )
     )
     agent_repository = FakeAgentRepository()
+    tag_repository = FakeTagRepository()
     agent_service = AgentService(repository=agent_repository)
     version_service = AgentVersionService(
-        repository=FakeAgentVersionRepository(agent_repository)
+        repository=FakeAgentVersionRepository(agent_repository, tags=tag_repository)
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
+    app.dependency_overrides[get_tag_service] = lambda: TagService(
+        repository=tag_repository
+    )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
@@ -206,6 +218,30 @@ async def test_list_versions(api_client: KitaruAPIClient) -> None:
     assert [item.id for item in page.items] == [v2.id, v1.id]
 
 
+async def test_list_versions_filters_by_tag(api_client: KitaruAPIClient) -> None:
+    """List versions filtered by tag through the SDK."""
+    agent = await api_client.agents.create(AgentCreateRequest(name="assistant"))
+    tagged = await api_client.agents.create_version(
+        agent.id, AgentVersionCreateRequest()
+    )
+    await api_client.agents.create_version(agent.id, AgentVersionCreateRequest())
+    tag = await api_client.tags.create(TagCreateRequest(name="smoke-test"))
+    await api_client.tags.create_link(
+        tag.id,
+        TagLinkCreateRequest(
+            resource_type=TagResourceType.AGENT_VERSION, resource_id=tagged.id
+        ),
+    )
+
+    page = await api_client.agents.list_versions(
+        agent.id,
+        AgentVersionListParams(
+            filter=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+        ),
+    )
+    assert [item.id for item in page.items] == [tagged.id]
+
+
 async def test_iter_versions(api_client: KitaruAPIClient) -> None:
     """Iterate every version of an agent across pages through the SDK."""
     agent = await api_client.agents.create(AgentCreateRequest(name="assistant"))
@@ -216,7 +252,9 @@ async def test_iter_versions(api_client: KitaruAPIClient) -> None:
 
     collected = [
         item.id
-        async for item in api_client.agents.iter_versions(agent.id, ListParams(size=1))
+        async for item in api_client.agents.iter_versions(
+            agent.id, AgentVersionListParams(size=1)
+        )
     ]
 
     assert collected == list(reversed([version.id for version in created]))

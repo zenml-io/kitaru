@@ -18,6 +18,7 @@ import uuid
 from pydantic import Field
 
 from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class CohortVersionCreateRequest(RequestModel):
@@ -44,6 +45,10 @@ class CohortVersionUpdateRequest(RequestModel):
     display_version: str | None = Field(
         default=None, description="New human-readable designator."
     )
+
+
+class CohortVersionListParams(FilterableListParams):
+    """Cohort version list params."""
 
 
 class CohortVersionResponse(OwnedResponseModel):

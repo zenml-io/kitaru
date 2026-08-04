@@ -37,6 +37,10 @@ class CohortFilter(ListFilter):
 class CohortVersionFilter(ListFilter):
     """Cohort version list filter."""
 
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
+    }
+
     cohort_id: uuid.UUID
 
 

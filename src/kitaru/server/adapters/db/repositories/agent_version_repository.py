@@ -14,10 +14,16 @@
 """SQL agent version repository."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import delete, select, update
 
+from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_tag_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.agent import AgentORM
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
 from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecretORM
@@ -31,6 +37,12 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import NotFoundError
+
+AGENT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "tag": build_tag_condition_binding(
+        TagResourceType.AGENT_VERSION, AgentVersionORM.id
+    ),
+}
 
 
 class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
@@ -231,6 +243,12 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         if agent_version_filter.agent_id is not None:
             statement = statement.where(
                 AgentVersionORM.agent_id == agent_version_filter.agent_id
+            )
+        if agent_version_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    agent_version_filter.expression, AGENT_VERSION_FILTER_BINDINGS
+                )
             )
         rows, next_cursor = await paginate(
             self._session, statement, agent_version_filter, id_column=AgentVersionORM.id

@@ -15,12 +15,13 @@
 
 import uuid
 
-from kitaru.api_models.v1.base import ListParams
 from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
+    CohortVersionListParams,
     CohortVersionResponse,
     CohortVersionUpdateRequest,
 )
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.cohort import (
     CohortVersionCreate,
     CohortVersionFilter,
@@ -72,19 +73,22 @@ def cohort_version_to_response(version: CohortVersion) -> CohortVersionResponse:
 
 
 def cohort_version_list_params_to_filter(
-    cohort_id: uuid.UUID, params: ListParams
+    cohort_id: uuid.UUID, params: CohortVersionListParams
 ) -> CohortVersionFilter:
     """Convert list params to the application filter scoped to one cohort.
 
     Args:
         cohort_id: Id of the cohort whose versions to list.
-        params: List params.
+        params: Cohort version list params.
 
     Returns:
         Cohort version filter.
     """
     return CohortVersionFilter(
         cohort_id=cohort_id,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

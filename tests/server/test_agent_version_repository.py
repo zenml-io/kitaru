@@ -22,9 +22,12 @@ from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeSecretRepository,
+    FakeTagRepository,
     pg_session,
     postgres_available,
 )
+from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -36,9 +39,11 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
+from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
@@ -49,6 +54,8 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.secret import Secret
+from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[
     AgentVersionRepository,
@@ -56,17 +63,20 @@ Setup = tuple[
     uuid.UUID,
     Callable[[], Awaitable[uuid.UUID]],
     Callable[[], Awaitable[uuid.UUID]],
+    TagRepository,
 ]
 
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each agent version repository implementation, an owner id, an
-    agent id to attach versions to, and factories for further agent ids and
-    secret ids a run spec can reference."""
+    agent id to attach versions to, factories for further agent ids and
+    secret ids a run spec can reference, and a tag repository sharing the
+    backend."""
     if request.param == "fake":
         agents = FakeAgentRepository()
         secrets = FakeSecretRepository()
+        tags = FakeTagRepository()
         owner_id = uuid.uuid4()
 
         async def make_agent_id() -> uuid.UUID:
@@ -85,11 +95,12 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 
         agent_id = await make_agent_id()
         yield (
-            FakeAgentVersionRepository(agents),
+            FakeAgentVersionRepository(agents, tags=tags),
             owner_id,
             agent_id,
             make_agent_id,
             make_secret_id,
+            tags,
         )
         return
     if not await postgres_available():
@@ -123,12 +134,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             agent_id,
             make_agent_id,
             make_secret_id,
+            SQLTagRepository(session),
         )
 
 
 async def test_create_sets_version_and_timestamps(setup: Setup) -> None:
     """Assign version 1 and both timestamps to the first version."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     version = await repository.create(
         AgentVersion(
             owner_id=owner_id,
@@ -150,7 +162,7 @@ async def test_create_sets_version_and_timestamps(setup: Setup) -> None:
 
 async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
     """Assign consecutive version numbers per agent."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     first = await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
     second = await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
     third = await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
@@ -159,7 +171,7 @@ async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
 
 async def test_create_missing_agent(setup: Setup) -> None:
     """Raise when the agent does not exist."""
-    repository, owner_id, _, _, _ = setup
+    repository, owner_id, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(AgentNotFound, match=f"Agent {missing_id} was not found"):
         await repository.create(AgentVersion(owner_id=owner_id, agent_id=missing_id))
@@ -167,7 +179,7 @@ async def test_create_missing_agent(setup: Setup) -> None:
 
 async def test_create_with_run_spec_and_secret_order(setup: Setup) -> None:
     """Round-trip a run spec, preserving the secret id order."""
-    repository, owner_id, agent_id, _, make_secret_id = setup
+    repository, owner_id, agent_id, _, make_secret_id, _ = setup
     secret_ids = [
         await make_secret_id(),
         await make_secret_id(),
@@ -191,7 +203,7 @@ async def test_create_with_run_spec_and_secret_order(setup: Setup) -> None:
 
 async def test_get(setup: Setup) -> None:
     """Load a stored agent version by id."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     created = await repository.create(
         AgentVersion(owner_id=owner_id, agent_id=agent_id)
     )
@@ -201,7 +213,7 @@ async def test_get(setup: Setup) -> None:
 
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown agent version id."""
-    repository, _, _, _, _ = setup
+    repository, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(
         AgentVersionNotFound, match=f"Agent version {missing_id} was not found"
@@ -211,7 +223,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 async def test_query_scoped_to_agent(setup: Setup) -> None:
     """Query only the versions of the requested agent, newest-first."""
-    repository, owner_id, agent_id, make_agent_id, _ = setup
+    repository, owner_id, agent_id, make_agent_id, _, _ = setup
     other_agent_id = await make_agent_id()
 
     v1 = await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
@@ -225,9 +237,30 @@ async def test_query_scoped_to_agent(setup: Setup) -> None:
     assert [version.id for version in versions] == [v2.id, v1.id]
 
 
+async def test_query_filters_by_tag(setup: Setup) -> None:
+    """Filter agent versions linked to a tag through tag_link."""
+    repository, owner_id, agent_id, _, _, tags = setup
+    tagged = await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
+    await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
+    tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
+    await tags.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.AGENT_VERSION,
+            resource_id=tagged.id,
+        )
+    )
+    versions, _ = await repository.query(
+        AgentVersionFilter(
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+        )
+    )
+    assert [version.id for version in versions] == [tagged.id]
+
+
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     created = [
         await repository.create(AgentVersion(owner_id=owner_id, agent_id=agent_id))
         for _ in range(5)
@@ -251,7 +284,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
 async def test_update(setup: Setup) -> None:
     """Persist field changes and renew the updated timestamp."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     created = await repository.create(
         AgentVersion(
             owner_id=owner_id,
@@ -277,7 +310,7 @@ async def test_update(setup: Setup) -> None:
 
 async def test_update_not_found(setup: Setup) -> None:
     """Raise for an unknown agent version id."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     version = AgentVersion(owner_id=owner_id, agent_id=agent_id)
     with pytest.raises(
         AgentVersionNotFound, match=f"Agent version {version.id} was not found"
@@ -287,7 +320,7 @@ async def test_update_not_found(setup: Setup) -> None:
 
 async def test_update_replaces_run_spec_and_secret_links(setup: Setup) -> None:
     """Replace the run spec, including its secret links, on update."""
-    repository, owner_id, agent_id, _, make_secret_id = setup
+    repository, owner_id, agent_id, _, make_secret_id, _ = setup
     old_secret_ids = [await make_secret_id(), await make_secret_id()]
     created = await repository.create(
         AgentVersion(
@@ -309,7 +342,7 @@ async def test_update_replaces_run_spec_and_secret_links(setup: Setup) -> None:
 
 async def test_update_clears_run_spec_and_secret_links(setup: Setup) -> None:
     """Drop the secret links when the run spec is cleared."""
-    repository, owner_id, agent_id, _, make_secret_id = setup
+    repository, owner_id, agent_id, _, make_secret_id, _ = setup
     created = await repository.create(
         AgentVersion(
             owner_id=owner_id,
@@ -326,7 +359,7 @@ async def test_update_clears_run_spec_and_secret_links(setup: Setup) -> None:
 
 async def test_delete(setup: Setup) -> None:
     """Delete a stored agent version."""
-    repository, owner_id, agent_id, _, _ = setup
+    repository, owner_id, agent_id, _, _, _ = setup
     created = await repository.create(
         AgentVersion(owner_id=owner_id, agent_id=agent_id)
     )
@@ -337,7 +370,7 @@ async def test_delete(setup: Setup) -> None:
 
 async def test_delete_not_found(setup: Setup) -> None:
     """Raise for an unknown agent version id."""
-    repository, _, _, _, _ = setup
+    repository, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(
         AgentVersionNotFound, match=f"Agent version {missing_id} was not found"

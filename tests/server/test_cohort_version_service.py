@@ -24,12 +24,15 @@ from conftest import (
     FakeCohortVersionRepository,
     FakeExperimentRunRepository,
     FakeSessionRepository,
+    FakeTagRepository,
     create_agent,
     create_cohort,
     create_experiment_run,
     create_session,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohort import (
     CohortVersionCreate,
@@ -48,6 +51,8 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionInUse,
 )
 from kitaru.server.domain.names import InvalidName
+from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -100,14 +105,24 @@ def experiment_run_repository() -> FakeExperimentRunRepository:
 
 
 @pytest.fixture
+def tag_repository() -> FakeTagRepository:
+    """Provide a fake tag repository."""
+    return FakeTagRepository()
+
+
+@pytest.fixture
 def repository(
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
     experiment_run_repository: FakeExperimentRunRepository,
+    tag_repository: FakeTagRepository,
 ) -> FakeCohortVersionRepository:
     """Provide a fake cohort version repository sharing the cohort backend."""
     return FakeCohortVersionRepository(
-        cohort_repository, session_repository, experiment_runs=experiment_run_repository
+        cohort_repository,
+        session_repository,
+        experiment_runs=experiment_run_repository,
+        tags=tag_repository,
     )
 
 
@@ -538,6 +553,33 @@ async def test_list_versions(
     )
     assert next_cursor is None
     assert [version.id for version in versions] == [v2.id, v1.id]
+
+
+async def test_list_versions_filters_by_tag(
+    service: CohortVersionService,
+    tag_repository: FakeTagRepository,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Filter cohort versions linked to a tag through tag_link."""
+    tagged = await service.create_version(cohort_id, CohortVersionCreate(), actor=ACTOR)
+    await service.create_version(cohort_id, CohortVersionCreate(), actor=ACTOR)
+    tag = await tag_repository.create(Tag(owner_id=ACTOR.account.id, name="smoke-test"))
+    await tag_repository.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.COHORT_VERSION,
+            resource_id=tagged.id,
+        )
+    )
+
+    versions, _ = await service.list_versions(
+        CohortVersionFilter(
+            cohort_id=cohort_id,
+            expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test"),
+        ),
+        actor=ACTOR,
+    )
+    assert [version.id for version in versions] == [tagged.id]
 
 
 async def test_list_versions_missing_cohort(service: CohortVersionService) -> None:

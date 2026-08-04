@@ -14,14 +14,22 @@
 """Agent version filter and command models."""
 
 import uuid
+from collections.abc import Mapping
+from typing import ClassVar
 
+from kitaru.api_models.v1.filter import FilterOp
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
+from kitaru.server.filtering import FilterField
 
 
 class AgentVersionFilter(ListFilter):
     """Agent version list filter."""
+
+    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
+    }
 
     agent_id: uuid.UUID | None = None
 

@@ -31,6 +31,8 @@ class TagResourceType(StrEnum):
 
     SESSION = "session"
     COHORT = "cohort"
+    COHORT_VERSION = "cohort_version"
+    AGENT_VERSION = "agent_version"
     EXPERIMENT = "experiment"
     EXPERIMENT_RUN = "experiment_run"
 
