@@ -20,7 +20,11 @@ from kitaru.server.api.config import APISettings
 def test_route_manifest_is_registered() -> None:
     """Expose every router's paths through the application."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     paths = set(app.openapi()["paths"])
     expected = {

@@ -87,7 +87,13 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    TaskAuthContext,
+    TaskPrincipal,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.account_service import AccountService
@@ -118,6 +124,7 @@ from kitaru.server.application.services.session_node_service import (
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
@@ -446,18 +453,24 @@ def get_task_service(
     Returns:
         Task service bound to the SQL repositories.
     """
-    return TaskService(
-        repository=SQLTaskRepository(session),
-        worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session),
+    policy = get_task_policy(settings)
+    spec_builder = TaskSpecBuilder(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+        policy=policy,
+    )
+    return TaskService(
+        repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        session_repository=SQLSessionRepository(session),
+        job_repository=SQLJobRepository(session),
+        spec_builder=spec_builder,
         transitions=_build_task_transitions(session, analytics),
-        policy=get_task_policy(settings),
+        policy=policy,
     )
 
 
@@ -703,6 +716,24 @@ def get_auth_service(
     )
 
 
+def get_bearer_credential(request: Request) -> str | None:
+    """Read the bearer credential from the request authorization header.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Credential string without the ``Bearer`` prefix, or ``None``.
+    """
+    header = request.headers.get("Authorization")
+    if not header:
+        return None
+    scheme, _, credential = header.partition(" ")
+    if scheme.lower() != "bearer" or not credential:
+        return None
+    return credential
+
+
 def get_optional_bearer_credential(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
@@ -717,12 +748,10 @@ def get_optional_bearer_credential(
         Credential without the ``Bearer`` prefix, the CSRF token, and where
         the credential came from, or ``None``.
     """
-    header = request.headers.get("Authorization")
+    credential = get_bearer_credential(request)
     csrf_token = request.headers.get(CSRF_HEADER)
-    if header:
-        scheme, _, credential = header.partition(" ")
-        if scheme.lower() == "bearer" and credential:
-            return RequestCredential(credential, csrf_token, from_cookie=False)
+    if credential is not None:
+        return RequestCredential(credential, csrf_token, from_cookie=False)
     if settings.AUTH_COOKIE_NAME:
         cookie = request.cookies.get(settings.AUTH_COOKIE_NAME)
         if cookie:
@@ -748,17 +777,18 @@ def require_local_account_management(
         )
 
 
-async def authorize(
+async def _resolve_auth_context(
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         RequestCredential | None, Depends(get_optional_bearer_credential)
     ],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AuthContext:
-    """Authorize a request and return its auth context.
+    """Resolve a request into its auth context, gating on nothing but validity.
 
-    With the ``none`` auth scheme every request is accepted and runs as the
-    default account. Other schemes require a bearer credential.
+    With the ``none`` auth scheme a request without a worker or task
+    credential runs as the default account. Other schemes require a bearer
+    credential.
 
     Args:
         settings: Service settings governing auth behavior.
@@ -770,9 +800,15 @@ async def authorize(
         RuntimeError: The default account was not initialized at startup.
 
     Returns:
-        Resolved scope and principal for use-case calls.
+        Resolved account and principal for use-case calls.
     """
     if settings.AUTH_SCHEME is AuthScheme.NONE:
+        if credential is not None:
+            principal_context = await auth_service.try_resolve_worker_or_task(
+                credential.token
+            )
+            if principal_context is not None:
+                return principal_context
         try:
             return await auth_service.resolve_default_account()
         except AccountNotFound as exc:
@@ -795,3 +831,142 @@ async def authorize(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+
+
+def _reject_disallowed_principal(
+    context: AuthContext, allow_worker: bool, allow_task: bool
+) -> AuthContext:
+    """Reject a resolved context whose principal kind this route does not accept.
+
+    Args:
+        context: Resolved auth context.
+        allow_worker: Whether a worker principal may pass.
+        allow_task: Whether a task principal may pass.
+
+    Raises:
+        HTTPException: The principal is a worker or task principal the route
+            does not accept.
+
+    Returns:
+        The context, unchanged.
+    """
+    if isinstance(context.principal, WorkerPrincipal) and not allow_worker:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Worker credentials are not accepted on this route.",
+        )
+    if isinstance(context.principal, TaskPrincipal) and not allow_task:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Task credentials are not accepted on this route.",
+        )
+    return context
+
+
+async def authorize(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> AuthContext:
+    """Authorize a request, accepting only an account principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Raises:
+        HTTPException: The principal is a worker or task principal.
+
+    Returns:
+        Resolved account context for use-case calls.
+    """
+    return _reject_disallowed_principal(context, allow_worker=False, allow_task=False)
+
+
+async def authorize_with_worker(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> AuthContext:
+    """Authorize a request, accepting an account or worker principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Raises:
+        HTTPException: The principal is a task principal.
+
+    Returns:
+        Resolved account or worker context for use-case calls.
+    """
+    return _reject_disallowed_principal(context, allow_worker=True, allow_task=False)
+
+
+async def authorize_with_task(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> AuthContext:
+    """Authorize a request, accepting an account or task principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Raises:
+        HTTPException: The principal is a worker principal.
+
+    Returns:
+        Resolved account or task context for use-case calls.
+    """
+    return _reject_disallowed_principal(context, allow_worker=False, allow_task=True)
+
+
+async def authorize_with_worker_or_task(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> AuthContext:
+    """Authorize a request, accepting an account, worker, or task principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Returns:
+        Resolved context for use-case calls.
+    """
+    return _reject_disallowed_principal(context, allow_worker=True, allow_task=True)
+
+
+async def authorize_worker_only(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> WorkerAuthContext:
+    """Authorize a request, accepting only a worker principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Raises:
+        HTTPException: The caller holds no worker credential.
+
+    Returns:
+        Resolved worker context for use-case calls.
+    """
+    if not isinstance(context, WorkerAuthContext):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A worker credential is required on this route.",
+        )
+    return context
+
+
+async def authorize_task_only(
+    context: Annotated[AuthContext, Depends(_resolve_auth_context)],
+) -> TaskAuthContext:
+    """Authorize a request, accepting only a task principal.
+
+    Args:
+        context: Resolved auth context.
+
+    Raises:
+        HTTPException: The caller holds no task credential.
+
+    Returns:
+        Resolved task context for use-case calls.
+    """
+    if not isinstance(context, TaskAuthContext):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A task credential is required on this route.",
+        )
+    return context

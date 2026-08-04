@@ -35,7 +35,6 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
     WorkerScope,
 )
-from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.worker import worker as worker_module
 from kitaru.worker.blob_cache import BlobCache
@@ -233,7 +232,7 @@ async def test_claim_loop_full_claim_loops_again_without_sleeping(
     heartbeat = worker_module.WorkerHeartbeat(
         as_client(client), uuid.uuid4(), interval=1000
     )
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert len(client.tasks.claim_calls) == 2
     # max_tasks is clamped by claim_batch_size, not the full free_slots.
@@ -252,7 +251,7 @@ async def test_claim_loop_respects_the_concurrency_bound(tmp_path: Path) -> None
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert client.tasks.claim_calls[0].max_tasks == 1
 
@@ -269,7 +268,7 @@ async def test_claim_size_is_clamped_to_endpoint_limit(tmp_path: Path) -> None:
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert client.tasks.claim_calls[0].max_tasks == worker_module._MAX_CLAIM_BATCH
 
@@ -290,9 +289,7 @@ async def test_claim_loop_short_claim_checks_stop_before_sleeping(
 
     # An immediate empty claim is a "short" claim (0 < 5), so with stop
     # already set the loop must end without ever sleeping poll_interval.
-    await asyncio.wait_for(
-        worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop), timeout=1.0
-    )
+    await asyncio.wait_for(worker._claim_loop(ctx, heartbeat, stop), timeout=1.0)
 
     assert len(client.tasks.claim_calls) == 1
 
@@ -326,7 +323,7 @@ async def test_claim_loop_backoff_doubles_and_resets_on_success(
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert sleeps == [1.0, 2.0, 4.0]
     assert len(client.tasks.claim_calls) == 4
@@ -358,7 +355,7 @@ async def test_claim_loop_backoff_caps_at_the_maximum(
         as_client(client), uuid.uuid4(), interval=1000
     )
 
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, stop)
+    await worker._claim_loop(ctx, heartbeat, stop)
 
     assert sleeps == [
         50.0,
@@ -406,7 +403,7 @@ async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
     heartbeat = worker_module.WorkerHeartbeat(
         as_client(client), uuid.uuid4(), interval=1000
     )
-    await worker._claim_loop(ctx, uuid.uuid4(), heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
 
     assert len(client.tasks.claim_calls) == 4
     assert [task_id for task_id, _ in client.tasks.update_calls] == [
@@ -425,7 +422,11 @@ async def test_run_registers_and_drains_a_claimed_task(
 ) -> None:
     """run() registers the worker, executes a claimed task, and stops cleanly."""
     client = FakeKitaruAPIClient()
-    monkeypatch.setattr(KitaruAPIClient, "from_env", classmethod(lambda cls: client))
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
 
     task = make_task(kind=TaskKind.AGENT, status=TaskStatus.CLAIMED, attempt=1)
     spec = make_agent_spec(task.id, command="true")

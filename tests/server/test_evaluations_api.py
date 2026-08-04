@@ -34,6 +34,7 @@ from conftest import (
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_task,
     get_evaluation_service,
     get_job_service,
 )
@@ -77,7 +78,11 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client with fake-backed evaluation and job services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     evaluation_service = EvaluationService(
         repository=evaluation_repository, session_repository=session_repository
@@ -102,6 +107,7 @@ async def client(
     app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[get_job_service] = lambda: job_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

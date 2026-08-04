@@ -21,7 +21,12 @@ import pytest
 from conftest import FakeBlobRepository, asgi_api_client
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
-from kitaru.server.adapters.rest.dependencies import authorize, get_blob_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    authorize_with_task,
+    authorize_with_worker_or_task,
+    get_blob_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -35,11 +40,19 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client routed to the app with a fake-backed service."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     service = BlobService(repository=FakeBlobRepository(), max_size_bytes=1024)
     app.dependency_overrides[get_blob_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_worker_or_task] = lambda: AuthContext(
+        account=ACCOUNT
+    )
     async with asgi_api_client(app) as client:
         yield client
 

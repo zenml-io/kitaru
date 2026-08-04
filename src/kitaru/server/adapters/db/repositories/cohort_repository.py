@@ -35,6 +35,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
 
 COHORT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "agent_id": CohortORM.agent_id,
     "name": CohortORM.name,
     "tag": build_tag_condition_binding(TagResourceType.COHORT, CohortORM.id),
 }

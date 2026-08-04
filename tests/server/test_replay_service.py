@@ -22,6 +22,7 @@ from conftest import (
     ReplayServices,
     build_replay_services,
     create_agent,
+    create_agent_task,
     create_agent_version,
     create_blob,
     create_cohort,
@@ -35,7 +36,12 @@ from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    TaskPrincipal,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
 from kitaru.server.application.models.replay import ReplayCreate
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
@@ -50,6 +56,7 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.replay import ReplayAccessDenied
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     PassthroughConfig,
@@ -483,7 +490,12 @@ async def test_get_replay_result_session_id_appears_after_agent_task_links_it(
     )
     agent_task = tasks[0]
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10,
+        actor=WorkerAuthContext(
+            account=ACTOR.account, principal=WorkerPrincipal(worker_id=worker.id)
+        ),
+    )
     stored_task = await services.tasks.get(agent_task.id)
     assert isinstance(stored_task, AgentTask)
     stored_task.result_session_id = uuid.uuid4()
@@ -555,3 +567,71 @@ async def test_create_replay_without_analytics_tracker(
         actor=ACTOR,
     )
     assert bundle.replay.owner_id == ACTOR.account.id
+
+
+async def _replay_bundle(services: ReplayServices):
+    """Create a replay whose job carries one agent task."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+    return await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            agent_version_id=agent_version.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+
+
+def _task_actor_for(task_id: uuid.UUID, job_id: uuid.UUID) -> AuthContext:
+    """Build an auth context for a task principal running a task of the given job."""
+    return AuthContext(
+        account=ACTOR.account,
+        principal=TaskPrincipal(
+            task_id=task_id, attempt=1, worker_id=uuid.uuid4(), job_id=job_id
+        ),
+    )
+
+
+async def test_get_replay_allows_a_task_principal_from_the_replays_job(
+    services: ReplayServices,
+) -> None:
+    """Allow a task principal whose task belongs to the replay's job."""
+    bundle = await _replay_bundle(services)
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    refreshed = await services.replay_service.get_replay(
+        bundle.replay.id, actor=_task_actor_for(tasks[0].id, bundle.replay.job_id)
+    )
+    assert refreshed.replay.id == bundle.replay.id
+
+
+async def test_get_replay_denies_a_task_principal_from_another_job(
+    services: ReplayServices,
+) -> None:
+    """Reject a task principal whose task belongs to another job."""
+    bundle = await _replay_bundle(services)
+    foreign_job_id = uuid.uuid4()
+    foreign_task = await create_agent_task(services.tasks, foreign_job_id)
+    with pytest.raises(ReplayAccessDenied):
+        await services.replay_service.get_replay(
+            bundle.replay.id, actor=_task_actor_for(foreign_task.id, foreign_job_id)
+        )
+
+
+async def test_tool_lookup_denies_a_task_principal_from_another_job(
+    services: ReplayServices,
+) -> None:
+    """Reject a foreign task principal before the tool config is read."""
+    bundle = await _replay_bundle(services)
+    foreign_job_id = uuid.uuid4()
+    foreign_task = await create_agent_task(services.tasks, foreign_job_id)
+    with pytest.raises(ReplayAccessDenied):
+        await services.replay_service.tool_lookup(
+            bundle.replay.id,
+            "search",
+            "cache-key",
+            actor=_task_actor_for(foreign_task.id, foreign_job_id),
+        )

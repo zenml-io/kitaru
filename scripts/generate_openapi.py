@@ -17,7 +17,9 @@ DEFAULT_OUTPUT = ROOT / "openapi" / "openapi.json"
 def main() -> None:
     """Write OpenAPI JSON to openapi/openapi.json (or argv path)."""
     output = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_OUTPUT
-    settings = APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="unused")
+    settings = APISettings(
+        DB_HOST="localhost", SECRET_ENCRYPTION_KEY="unused", JWT_SIGNING_KEY="unused"
+    )
     app = create_app(settings)
     schema = app.openapi()
     output.parent.mkdir(parents=True, exist_ok=True)

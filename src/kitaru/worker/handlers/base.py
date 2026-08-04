@@ -27,7 +27,11 @@ class TaskHandler(Protocol):
     """Per-kind strategy building the process for a claimed task."""
 
     async def prepare(
-        self, ctx: ExecutionContext, task_id: uuid.UUID, spec: TaskSpecResponse
+        self,
+        ctx: ExecutionContext,
+        task_id: uuid.UUID,
+        spec: TaskSpecResponse,
+        token: str,
     ) -> TaskProcess:
         """Build the process that executes a claimed task.
 
@@ -35,6 +39,7 @@ class TaskHandler(Protocol):
             ctx: Execution context.
             task_id: Id of the task being prepared.
             spec: Execution spec of the task.
+            token: Bearer token scoped to this task and attempt.
 
         Returns:
             Process ready to run.

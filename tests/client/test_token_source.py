@@ -11,19 +11,17 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the cached bearer token provider."""
+"""Tests for the credential store backed token source."""
 
-import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 from kitaru.api_models.v1.auth import (
     API_KEY_PREFIX,
     CONTROL_PLANE_API_KEY_PREFIX,
     TokenResponse,
 )
-from kitaru.client.auth import TokenProvider
+from kitaru.client.auth import CredentialStoreTokenSource
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken, ApiType
 
@@ -77,18 +75,6 @@ class FakeTokenExchange:
         )
 
 
-def _store(tmp_path: Path) -> CredentialStore:
-    """Build a credential store backed by a file under tmp_path.
-
-    Args:
-        tmp_path: Pytest temporary directory.
-
-    Returns:
-        Store pointed at a fresh credentials file.
-    """
-    return CredentialStore(path=tmp_path / "credentials.json")
-
-
 def _expired_token() -> ApiToken:
     """Build a token that expired a minute ago.
 
@@ -102,145 +88,135 @@ def _expired_token() -> ApiToken:
     )
 
 
-async def test_cached_valid_token_is_used_without_exchange(tmp_path: Path) -> None:
+async def test_cached_valid_token_is_used_without_exchange(
+    credential_store: CredentialStore,
+) -> None:
     """Return a cached valid token without calling the exchange."""
-    store = _store(tmp_path)
     device_id = uuid.uuid4()
-    store.set_device(SERVER_URL, device_id, "device-code")
-    store.set_token(
+    credential_store.set_device(SERVER_URL, device_id, "device-code")
+    credential_store.set_token(
         SERVER_URL, ApiToken(access_token="cached-token", leeway_seconds=30)
     )
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
+    token = source.get_cached_token()
 
     assert token == "cached-token"
     assert exchange.device_code_calls == 0
 
 
-async def test_server_api_key_is_sent_directly(tmp_path: Path) -> None:
-    """Send a stored server API key as the bearer token without exchanging it."""
-    store = _store(tmp_path)
-    store.set_api_key(SERVER_URL, SERVER_API_KEY)
+async def test_server_api_key_is_sent_directly(
+    credential_store: CredentialStore,
+) -> None:
+    """Return a stored server API key as the bearer token without exchanging it."""
+    credential_store.set_api_key(SERVER_URL, SERVER_API_KEY)
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
+    token = source.get_cached_token()
 
     assert token == SERVER_API_KEY
     assert exchange.device_code_calls == 0
-    assert store.get_token(SERVER_URL) is None
+    assert credential_store.get_token(SERVER_URL) is None
 
 
 async def test_control_plane_api_key_is_exchanged_for_a_session(
-    tmp_path: Path,
+    credential_store: CredentialStore,
 ) -> None:
-    """Exchange a stored control plane API key instead of sending it directly."""
-    store = _store(tmp_path)
-    store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
+    """Exchange a stored control plane API key instead of returning it directly."""
+    credential_store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
-    await provider.close()
+    assert source.get_cached_token() is None
+    token = await source.fetch_token()
+    await source.close()
 
     assert exchange.control_plane_credentials == [CONTROL_PLANE_API_KEY]
     assert token == f"token-for-{CONTROL_PLANE_API_KEY}"
-    cached = store.get_token(SERVER_URL)
+    cached = credential_store.get_token(SERVER_URL)
     assert cached is not None
     assert cached.access_token == token
 
 
-async def test_control_plane_api_key_is_exchanged_once(tmp_path: Path) -> None:
-    """Reuse the exchanged token rather than exchanging the key on every call."""
-    store = _store(tmp_path)
-    store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
+async def test_fetched_token_is_served_from_the_store(
+    credential_store: CredentialStore,
+) -> None:
+    """Return the exchanged token from the store rather than exchanging again."""
+    credential_store.set_api_key(SERVER_URL, CONTROL_PLANE_API_KEY)
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    tokens = [await provider.get_token() for _ in range(3)]
-    await provider.close()
+    fetched = await source.fetch_token()
+    cached = [source.get_cached_token() for _ in range(3)]
+    await source.close()
 
     assert len(exchange.control_plane_credentials) == 1
-    assert len(set(tokens)) == 1
+    assert set(cached) == {fetched}
 
 
-async def test_expired_token_triggers_device_code_exchange(tmp_path: Path) -> None:
+async def test_expired_token_triggers_device_code_exchange(
+    credential_store: CredentialStore,
+) -> None:
     """Exchange the device code for a fresh token and write it back to the store."""
-    store = _store(tmp_path)
-    store.set_device(SERVER_URL, uuid.uuid4(), "device-code")
-    store.set_token(SERVER_URL, _expired_token())
+    credential_store.set_device(SERVER_URL, uuid.uuid4(), "device-code")
+    credential_store.set_token(SERVER_URL, _expired_token())
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
+    assert source.get_cached_token() is None
+    token = await source.fetch_token()
 
     assert exchange.device_code_calls == 1
     assert token == "token-for-device-1"
-    cached = store.get_token(SERVER_URL)
+    cached = credential_store.get_token(SERVER_URL)
     assert cached is not None
     assert cached.access_token == token
 
 
-async def test_renew_with_stale_generation_reuses_fetched_token(
-    tmp_path: Path,
-) -> None:
-    """Return the token another caller already fetched instead of exchanging again."""
-    store = _store(tmp_path)
-    store.set_device(SERVER_URL, uuid.uuid4(), "device-code")
-    exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
-
-    tokens = await asyncio.gather(*(provider.renew(0) for _ in range(5)))
-
-    assert exchange.device_code_calls == 1
-    assert len(set(tokens)) == 1
-    assert provider.generation == 1
-
-
-async def test_get_token_returns_none_when_nothing_can_refresh(
-    tmp_path: Path,
+async def test_fetch_returns_none_when_nothing_can_refresh(
+    credential_store: CredentialStore,
 ) -> None:
     """Return None when the stored entry has no way to produce a fresh token."""
-    store = _store(tmp_path)
-    store.set_token(SERVER_URL, _expired_token())
+    credential_store.set_token(SERVER_URL, _expired_token())
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
+    token = await source.fetch_token()
 
     assert token is None
     assert exchange.device_code_calls == 0
 
 
-async def test_get_token_returns_none_for_unknown_server(tmp_path: Path) -> None:
+async def test_unknown_server_produces_no_token(
+    credential_store: CredentialStore,
+) -> None:
     """Return None when the server has no stored credentials at all."""
-    store = _store(tmp_path)
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    assert await provider.get_token() is None
+    assert source.get_cached_token() is None
+    assert await source.fetch_token() is None
 
 
 async def test_control_plane_credential_is_exchanged_for_a_session(
-    tmp_path: Path,
+    credential_store: CredentialStore,
 ) -> None:
     """Present a stored control plane token to the server for a session token."""
-    store = _store(tmp_path)
-    store.set_token(
+    credential_store.set_token(
         SERVER_URL, _expired_token(), control_plane_api_url=CONTROL_PLANE_URL
     )
-    store.set_token(
+    credential_store.set_token(
         CONTROL_PLANE_URL,
         ApiToken(access_token="cp-token", leeway_seconds=0),
         type=ApiType.CONTROL_PLANE,
     )
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
-    await provider.close()
+    token = await source.fetch_token()
+    await source.close()
 
     assert exchange.control_plane_credentials == ["cp-token"]
     assert token == "token-for-cp-token"
@@ -248,42 +224,40 @@ async def test_control_plane_credential_is_exchanged_for_a_session(
 
 
 async def test_device_authorization_wins_over_the_control_plane(
-    tmp_path: Path,
+    credential_store: CredentialStore,
 ) -> None:
     """Run the device code exchange first, so credential priority stays in one place."""
-    store = _store(tmp_path)
-    store.set_device(SERVER_URL, uuid.uuid4(), "device-code")
-    store.set_token(
+    credential_store.set_device(SERVER_URL, uuid.uuid4(), "device-code")
+    credential_store.set_token(
         SERVER_URL, _expired_token(), control_plane_api_url=CONTROL_PLANE_URL
     )
-    store.set_token(
+    credential_store.set_token(
         CONTROL_PLANE_URL,
         ApiToken(access_token="cp-token", leeway_seconds=0),
         type=ApiType.CONTROL_PLANE,
     )
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
-    await provider.close()
+    token = await source.fetch_token()
+    await source.close()
 
     assert token == "token-for-device-1"
     assert exchange.control_plane_credentials == []
 
 
 async def test_control_plane_without_a_stored_token_cannot_refresh(
-    tmp_path: Path,
+    credential_store: CredentialStore,
 ) -> None:
     """Return None when the control plane entry can produce no token either."""
-    store = _store(tmp_path)
-    store.set_token(
+    credential_store.set_token(
         SERVER_URL, _expired_token(), control_plane_api_url=CONTROL_PLANE_URL
     )
     exchange = FakeTokenExchange()
-    provider = TokenProvider(SERVER_URL, store, exchange)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, exchange)
 
-    token = await provider.get_token()
-    await provider.close()
+    token = await source.fetch_token()
+    await source.close()
 
     assert token is None
     assert exchange.control_plane_credentials == []
