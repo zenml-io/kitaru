@@ -2795,6 +2795,13 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "--params", "JSON object", "option", False, "Importer parameters."
             ),
             ParameterSpec(
+                "--tag",
+                "text",
+                "option",
+                False,
+                "Tag every session created by this import.",
+            ),
+            ParameterSpec(
                 "--media-type",
                 "string",
                 "option",
@@ -2820,6 +2827,7 @@ async def session_import(
     importer: str,
     agent: str,
     params: str | None = None,
+    tag: str | None = None,
     media_type: str = "application/octet-stream",
     wait: bool = False,
     interval: float | None = None,
@@ -2833,6 +2841,7 @@ async def session_import(
             importer=importer,
             agent=agent,
             params=params,
+            tag=tag,
             media_type=media_type,
             wait=wait,
             interval=interval,
@@ -2984,7 +2993,7 @@ async def session_nodes(
     session_app,
     _spec(
         ("session", "evaluate"),
-        "Evaluate explicit sessions with exact evaluator versions.",
+        "Evaluate sessions selected by ID, tag, or all sessions.",
         parameters=(
             ParameterSpec(
                 "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
@@ -2995,6 +3004,12 @@ async def session_nodes(
                 "option",
                 False,
                 "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--tag", "text", "option", False, "Evaluate sessions with this tag."
+            ),
+            ParameterSpec(
+                "--all", "boolean", "option", False, "Evaluate all sessions."
             ),
             ParameterSpec(
                 "--evaluator",
@@ -3027,18 +3042,24 @@ async def session_evaluate(
     /,
     *,
     sessions_file: Path | None = None,
+    tag: str | None = None,
+    all_sessions: Annotated[
+        bool, Parameter(name="--all", help="Evaluate all sessions.")
+    ] = False,
     evaluator: list[str],
     evaluator_params: list[str] | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
 ) -> CommandResult:
-    """Evaluate explicit sessions with exact evaluator versions."""
+    """Evaluate sessions selected by ID, tag, or all sessions."""
     async with _open_asset_client() as client:
         return await evaluations.evaluate_sessions(
             client,
             session,
             sessions_file=sessions_file,
+            tag=tag,
+            all_sessions=all_sessions,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
             wait=wait,

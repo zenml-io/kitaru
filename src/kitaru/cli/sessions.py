@@ -30,6 +30,12 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionNodeListParams
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagListParams,
+    TagResourceType,
+)
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
@@ -54,6 +60,57 @@ def _read_payload(path: Path) -> bytes:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+
+
+def _validate_import_tag(tag: str | None, *, wait: bool) -> str | None:
+    """Validate an optional import tag before any remote mutation."""
+    if tag is None:
+        return None
+    normalized = tag.strip()
+    if not normalized:
+        raise CLIError("invalid_arguments", "--tag must not be empty.")
+    if not wait:
+        raise CLIError(
+            "invalid_arguments",
+            "--tag requires --wait so the imported sessions can be tagged.",
+        )
+    return normalized
+
+
+async def _get_or_create_tag(client: Any, name: str) -> Any:
+    """Resolve a tag by exact name, creating it when it does not exist."""
+    params = TagListParams(
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=name)
+    )
+    async for tag in client.tags.iter(params):
+        return tag
+    try:
+        return await client.tags.create(TagCreateRequest(name=name))
+    except APIError as error:
+        if error.status_code != 409:
+            raise
+    async for tag in client.tags.iter(params):
+        return tag
+    raise CLIError("internal_error", f"Tag {name!r} could not be resolved.")
+
+
+async def _tag_imported_sessions(client: Any, task_id: uuid.UUID, name: str) -> int:
+    """Apply a tag to every session created by one import task."""
+    tag = await _get_or_create_tag(client, name)
+    params = SessionListParams(
+        filter=FilterCondition(field="task_id", op=FilterOp.EQ, value=str(task_id))
+    )
+    count = 0
+    async for session in client.sessions.iter(params):
+        await client.tags.create_link(
+            tag.id,
+            TagLinkCreateRequest(
+                resource_type=TagResourceType.SESSION,
+                resource_id=session.id,
+            ),
+        )
+        count += 1
+    return count
 
 
 def _blob_metadata(blob: Any) -> dict[str, Any]:
@@ -177,12 +234,14 @@ async def import_sessions(
     importer: str,
     agent: str,
     params: str | None,
+    tag: str | None = None,
     media_type: str,
     wait: bool,
     interval: float | None,
     timeout: float | None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
+    tag = _validate_import_tag(tag, wait=wait)
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
@@ -210,6 +269,8 @@ async def import_sessions(
         },
         "blob": blob_identity,
     }
+    if tag is not None:
+        identity["tag"] = tag
     request = ImportCreateRequest(
         importer=importer_parent.name,
         version=importer_version.version,
@@ -268,6 +329,11 @@ async def import_sessions(
         timeout=wait_settings[1],
         initial_job=job,
     )
+    task, _ = _get_import_stats(terminal_job, tasks)
+    if tag is not None and task.status is TaskStatus.COMPLETED:
+        identity["tagged_session_count"] = await _tag_imported_sessions(
+            client, task.id, tag
+        )
     return _terminal_import_result(terminal_job, tasks, identity=identity)
 
 
