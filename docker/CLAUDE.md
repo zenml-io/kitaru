@@ -1,51 +1,64 @@
 # Docker Architecture
 
-This directory contains the Kitaru server Dockerfiles. The main project
-`CLAUDE.md` links here for Docker-specific guidance.
+This directory contains the Kitaru development and release Dockerfiles. The
+main project `CLAUDE.md` links here for Docker-specific guidance.
 
 ## Images
 
-Both images build the Kitaru API server on `python:<version>-slim-bookworm`
-and differ only in where the package comes from:
+| Dockerfile | Image | Kitaru source |
+|---|---|---|
+| `dev.Dockerfile` | Development server | Local repository source |
+| `release-client.Dockerfile` | Release client | Published PyPI wheel |
+| `release-server.Dockerfile` | Release server | Published PyPI wheel |
 
-| Dockerfile | Installs Kitaru from |
-|---|---|
-| `dev.Dockerfile` | Local source, `uv sync --locked --no-dev --extra server --extra otel` |
-| `release.Dockerfile` | PyPI, `kitaru[server,otel]` (latest, or `KITARU_VERSION` when set) |
+All three builds resolve dependencies from the committed `uv.lock`. The release
+builds then install the matching published Kitaru wheel without resolving its
+dependencies again. This keeps container releases reproducible while allowing
+the Python package and container publishing processes to be recovered or run
+independently.
 
-The source build pins every dependency through the committed `uv.lock`. The
-release build resolves dependencies from PyPI at build time.
+The release builders fail when `KITARU_VERSION` is missing, differs from the
+version in `pyproject.toml`, is unavailable on PyPI, or declares dependencies
+that are incompatible with the lockfile.
 
-`dev.Dockerfile` stages:
+## Stages
+
+`dev.Dockerfile` uses `base`, `builder`, and `runtime` stages. It installs the
+local project with the `server` and `otel` extras.
+
+Both release Dockerfiles use these stages:
 
 | Stage | Purpose |
 |---|---|
-| `base` | Slim Python, uv binary, non-root user `kitaru` (UID 1000) |
-| `builder` | `uv sync --locked --no-dev --extra server --extra otel --no-editable` into `/app/.venv` |
-| `runtime` | Final image, copies only the venv from `builder` |
+| `uv` | Supplies the pinned uv binary to build stages |
+| `base` | Creates the slim Python base and non-root `kitaru` user |
+| `builder` | Creates the locked virtual environment and installs the published wheel |
+| `client` or `server` | Copies only the virtual environment and dependency snapshot into the runtime image |
 
-`release.Dockerfile` has the same `base`, `builder`, and `runtime` stages, with
-the builder running `uv pip install "kitaru[server,otel]"` instead of a source sync.
-
-The server listens on port 8000 and starts via
-`python -m kitaru.server.api.main`. Database migrations run on startup unless
-`KITARU_SERVER_SKIP_DB_MIGRATION` is set. To run migrations as a separate process,
-override the command with `python -m kitaru.server.database.main`.
+The release runtime images do not contain uv, pip, setuptools, or wheel. The
+resolved environment is recorded at `/app/requirements.txt` for inspection.
 
 ## Build and run
 
-Build from the repository root (the build context is the repo root, not
-`docker/`):
+Build from the repository root. A release build must use a repository checkout
+whose version and lockfile match the published package version.
 
 ```bash
-# From local source
-docker build -f docker/dev.Dockerfile --target runtime -t kitaru-server .
+# Development server from local source
+docker build -f docker/dev.Dockerfile --target runtime -t kitaru-server-dev .
 
-# From PyPI (latest, or pin with --build-arg KITARU_VERSION=<version>)
-docker build -f docker/release.Dockerfile --target runtime -t kitaru-server .
+# Release client from the matching published package
+docker build -f docker/release-client.Dockerfile --target client \
+  --build-arg KITARU_VERSION=<version> -t kitaru-client .
+
+# Release server from the matching published package
+docker build -f docker/release-server.Dockerfile --target server \
+  --build-arg KITARU_VERSION=<version> -t kitaru-server .
 ```
 
-Run against a PostgreSQL instance:
+The release server listens on port 8000 and starts the FastAPI application
+factory with uvicorn. Run it against a PostgreSQL instance with the appropriate
+`KITARU_SERVER_` environment variables:
 
 ```bash
 docker run -p 8000:8000 \
@@ -54,16 +67,13 @@ docker run -p 8000:8000 \
   kitaru-server
 ```
 
-Connection settings are the `KITARU_SERVER_`-prefixed variables from
-`kitaru.server.config.Settings` (`KITARU_SERVER_DB_HOST`, `KITARU_SERVER_DB_PORT`,
-`KITARU_SERVER_DB_USER`, `KITARU_SERVER_DB_PWD`, `KITARU_SERVER_DB_NAME`, or a full
-`KITARU_SERVER_DATABASE_URL`).
+## Build arguments
 
-## Build args
-
-| Arg | Default | Description |
-|-----|---------|-------------|
+| Argument | Default | Description |
+|---|---|---|
 | `PYTHON_VERSION` | `3.13` | Base image Python version |
+| `UV_VERSION` | `0.12.1` | uv image version used by release builds |
+| `VIRTUAL_ENV` | `/app/.venv` | Release virtual environment path |
 | `USERNAME` | `kitaru` | Runtime user |
-| `USER_UID` / `USER_GID` | `1000` | Runtime user and group ids |
-| `KITARU_VERSION` | *(empty)* | `release.Dockerfile` only. PyPI version to install, latest when empty |
+| `USER_UID` / `USER_GID` | `1000` | Runtime user and group IDs |
+| `KITARU_VERSION` | Empty | Required published Kitaru release version |

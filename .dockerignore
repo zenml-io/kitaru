@@ -45,4 +45,5 @@ build/
 
 # Docker (avoid recursive copy)
 docker/dev.Dockerfile
-docker/release.Dockerfile
+docker/release-client.Dockerfile
+docker/release-server.Dockerfile

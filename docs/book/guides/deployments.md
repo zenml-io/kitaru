@@ -424,7 +424,7 @@ For older deployments created before this guard existed, `kitaru invoke` and
 `kitaru flow deployments curl` may fail with a stack-compatibility error until
 you redeploy using a stack the Kitaru server can execute remotely.
 
-The official `zenmldocker/kitaru` server image already enables workload-manager
+The official `zenmldocker/kitaru-server` image already enables workload-manager
 support for snapshot-backed invocation. If you run a custom image or a plain
 ZenML server setup, preserve or configure workload-manager support explicitly
 (e.g. set `ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE`) so deployment

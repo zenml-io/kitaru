@@ -514,20 +514,45 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and publish public Docker image
+      - name: Validate release Dockerfiles (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
+        run: |
+          docker build --check -f docker/release-client.Dockerfile .
+          docker build --check -f docker/release-server.Dockerfile .
+      - name: Build and publish public client Docker image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
-          file: docker/release.Dockerfile
-          target: runtime
-          push: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          file: docker/release-client.Dockerfile
+          target: client
+          push: true
           build-args: |
-            ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') && format('KITARU_VERSION={0}', env.VERSION) || '' }}
+            KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
             zenmldocker/kitaru:latest
           labels: |
             org.opencontainers.image.title=kitaru
+            org.opencontainers.image.description=Kitaru client
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: Build and publish public server Docker image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-server.Dockerfile
+          target: server
+          push: true
+          build-args: |
+            KITARU_VERSION=${{ env.VERSION }}
+          tags: |
+            zenmldocker/kitaru-server:${{ env.VERSION }}
+            zenmldocker/kitaru-server:latest
+          labels: |
+            org.opencontainers.image.title=kitaru-server
             org.opencontainers.image.description=Kitaru server
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/zenml-io/kitaru
@@ -587,8 +612,9 @@ jobs:
             ls dist/
             echo ""
             echo "### Docker image"
-            echo "Built and not pushed: zenmldocker/kitaru:$VERSION"
-            echo "Built and not pushed: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:$VERSION"
+            echo "Statically validated: docker/release-client.Dockerfile"
+            echo "Statically validated: docker/release-server.Dockerfile"
+            echo "Images require the published kitaru==$VERSION package and were not built."
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
