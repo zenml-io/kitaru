@@ -18,7 +18,14 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -711,33 +718,77 @@ def _evaluate_filter_expression(
     assert isinstance(expression, FilterCondition)
     if resolvers is not None and expression.field in resolvers:
         return resolvers[expression.field](item, expression)
-    value = getattr(item, expression.field)
-    if expression.op is FilterOp.IS_NULL:
+    return _matches_condition(getattr(item, expression.field), expression)
+
+
+def _matches_condition(value: Any, condition: FilterCondition) -> bool:
+    """Evaluate a filter condition against a resolved value.
+
+    Args:
+        value: Value the condition applies to.
+        condition: Validated filter condition.
+
+    Returns:
+        Whether the value matches the condition.
+    """
+    if condition.op is FilterOp.IS_NULL:
         return value is None
     if value is None:
         # Comparisons with a null column value never match, mirroring SQL.
         return False
-    match expression.op:
+    match condition.op:
         case FilterOp.EQ:
-            return value == expression.value
+            return value == condition.value
         case FilterOp.NE:
-            return value != expression.value
+            return value != condition.value
         case FilterOp.LT:
-            return value < expression.value
+            return value < condition.value
         case FilterOp.LE:
-            return value <= expression.value
+            return value <= condition.value
         case FilterOp.GT:
-            return value > expression.value
+            return value > condition.value
         case FilterOp.GE:
-            return value >= expression.value
+            return value >= condition.value
         case FilterOp.IN:
-            return value in expression.value
+            return value in condition.value
         case FilterOp.STARTSWITH:
-            return value.startswith(expression.value)
+            return value.startswith(condition.value)
         case FilterOp.ENDSWITH:
-            return value.endswith(expression.value)
+            return value.endswith(condition.value)
         case FilterOp.CONTAINS:
-            return expression.value in value
+            return condition.value in value
+
+
+def _refuse_unresolvable_fields(
+    expression: FilterExpression | None, fields: Collection[str]
+) -> None:
+    """Refuse an expression naming a field the fake cannot resolve.
+
+    Walks the whole expression before any item is evaluated. Refusing per item
+    would stay silent on an empty store, and on an `and` whose earlier operand
+    already answered false, so a test could pass without the filter ever
+    running.
+
+    Args:
+        expression: Filter expression, or ``None`` when the query is unfiltered.
+        fields: Field names that resolve through rows the fake has no handle on.
+
+    Raises:
+        NotImplementedError: The expression names one of those fields.
+    """
+    if expression is None:
+        return
+    if isinstance(expression, (AndExpression, OrExpression)):
+        for operand in expression.operands:
+            _refuse_unresolvable_fields(operand, fields)
+        return
+    if isinstance(expression, NotExpression):
+        _refuse_unresolvable_fields(expression.operand, fields)
+        return
+    if expression.field in fields:
+        raise NotImplementedError(
+            f"The fake cannot resolve the {expression.field} filter"
+        )
 
 
 class FakeAccountRepository:
@@ -2744,7 +2795,9 @@ class FakeCohortVersionRepository:
                 repository so its query can resolve the
                 ``cohort_version_id`` filter.
             experiment_runs: Fake experiment run repository, consulted by
-                delete to check for an in-use version.
+                delete to check for an in-use version. Also wired back onto
+                the run repository so its query can resolve the ``cohort_id``
+                filter.
             tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._cohorts = cohorts
@@ -2752,6 +2805,8 @@ class FakeCohortVersionRepository:
         self._sessions._cohort_versions = self
         self._experiment_runs = experiment_runs
         self._tags = tags
+        if experiment_runs is not None:
+            experiment_runs._cohort_versions = self
         self._versions: dict[uuid.UUID, CohortVersion] = {}
         self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
 
@@ -3817,9 +3872,16 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tasks: Fake task repository, needed to resolve the result session
+                filter, which reads through the agent task rather than the
+                replay row.
+        """
         self._replays: dict[uuid.UUID, Replay] = {}
+        self._tasks = tasks
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -3932,13 +3994,38 @@ class FakeReplayRepository:
         """
         replays = list(self._replays.values())
         if replay_filter.expression is not None:
+            resolvers = {"result_session_id": self._evaluate_result_session_condition}
             replays = [
                 r
                 for r in replays
-                if _evaluate_filter_expression(r, replay_filter.expression)
+                if _evaluate_filter_expression(r, replay_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(replays, replay_filter)
         return [r.model_copy() for r in page], next_cursor
+
+    def _evaluate_result_session_condition(
+        self, replay: Replay, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a result session condition against a replay.
+
+        Args:
+            replay: Replay to evaluate.
+            condition: Validated result session condition.
+
+        Returns:
+            Whether the replay's agent task produced a matching session.
+        """
+        assert self._tasks is not None
+        agent_task = next(
+            (
+                task
+                for task in self._tasks._tasks.values()
+                if task.job_id == replay.job_id and isinstance(task, AgentTask)
+            ),
+            None,
+        )
+        result_session_id = agent_task.result_session_id if agent_task else None
+        return _matches_condition(result_session_id, condition)
 
     async def list_by_experiment_run(
         self, experiment_run_id: uuid.UUID
@@ -4103,6 +4190,9 @@ class FakeExperimentRunRepository:
         """
         self._runs: dict[uuid.UUID, ExperimentRun] = {}
         self._tag_repository = tag_repository
+        # Wired back by FakeCohortVersionRepository, to resolve the cohort
+        # filter the way the SQL repository resolves it through a subquery.
+        self._cohort_versions: FakeCohortVersionRepository | None = None
 
     async def create(self, run: ExperimentRun) -> ExperimentRun:
         """Persist a new experiment run.
@@ -4161,9 +4251,13 @@ class FakeExperimentRunRepository:
         Returns:
             Page of matching runs and the next cursor.
         """
+        _refuse_unresolvable_fields(run_filter.expression, ("agent_id",))
         runs = list(self._runs.values())
         if run_filter.expression is not None:
-            resolvers = {"tag": self._evaluate_tag_condition}
+            resolvers = {
+                "tag": self._evaluate_tag_condition,
+                "cohort_id": self._evaluate_cohort_condition,
+            }
             runs = [
                 r
                 for r in runs
@@ -4171,6 +4265,22 @@ class FakeExperimentRunRepository:
             ]
         page, next_cursor = _paginate_fake(runs, run_filter)
         return [r.model_copy() for r in page], next_cursor
+
+    def _evaluate_cohort_condition(
+        self, run: ExperimentRun, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a cohort condition against an experiment run.
+
+        Args:
+            run: Experiment run to evaluate.
+            condition: Validated cohort condition.
+
+        Returns:
+            Whether the run pins a version of a matching cohort.
+        """
+        assert self._cohort_versions is not None
+        version = self._cohort_versions._versions.get(run.cohort_version_id)
+        return _matches_condition(version.cohort_id if version else None, condition)
 
     def _evaluate_tag_condition(
         self, run: ExperimentRun, condition: FilterCondition
@@ -4354,6 +4464,9 @@ class FakeEvaluationRepository:
         Returns:
             Page of matching evaluations and the next cursor.
         """
+        _refuse_unresolvable_fields(
+            evaluation_filter.expression, ("agent_id", "cohort_id", "experiment_run_id")
+        )
         evaluations = list(self._evaluations.values())
         if evaluation_filter.expression is not None:
             evaluations = [
@@ -5481,7 +5594,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository()
+    replays = FakeReplayRepository(tasks=tasks)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags

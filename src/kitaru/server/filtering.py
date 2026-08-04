@@ -36,6 +36,12 @@ STRING_OPS = EQUALITY_OPS | {
 }
 BOOLEAN_OPS = frozenset({FilterOp.EQ, FilterOp.NE})
 NULLABLE_OPS = frozenset({FilterOp.IS_NULL})
+# Ops for a field resolved through other rows rather than held by the filtered
+# table. NE is left out because it reads as the complement of EQ but compiles
+# to "points at a related row whose value is not X", which is a different
+# question wherever a row reaches several related rows, or none. Negation is
+# spelled `not`, which the bindings compile to NOT EXISTS.
+SCOPE_OPS = frozenset({FilterOp.EQ, FilterOp.IN})
 
 
 class FilterField(FrozenModel):
