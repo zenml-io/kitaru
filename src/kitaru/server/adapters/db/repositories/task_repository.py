@@ -210,6 +210,31 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         rows = (await self._session.scalars(statement)).all()
         return [row.to_domain() for row in rows]
 
+    async def list_by_jobs(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Task]]:
+        """Bulk-load every task of many jobs, grouped by job id in creation order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        if not job_ids:
+            return {}
+        statement = (
+            select(TaskORM)
+            .where(TaskORM.job_id.in_(list(job_ids)))
+            .order_by(TaskORM.job_id.asc(), TaskORM.id.asc())
+        )
+        rows = (await self._session.scalars(statement)).all()
+        tasks_by_job: dict[uuid.UUID, list[Task]] = {}
+        for row in rows:
+            tasks_by_job.setdefault(row.job_id, []).append(row.to_domain())
+        return tasks_by_job
+
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
 
@@ -351,6 +376,54 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         await self._session.execute(statement)
         await self._session.flush()
+
+    async def cancel_pending(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> list[Task]:
+        """Move each still-pending task of the jobs straight to canceled.
+
+        Rows are locked in id order across all jobs.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            now: Current time.
+
+        Returns:
+            Canceled tasks.
+        """
+        if not job_ids:
+            return []
+        locked = (
+            select(TaskORM.id)
+            .where(
+                TaskORM.job_id.in_(list(job_ids)),
+                TaskORM.status == TaskStatus.PENDING.value,
+            )
+            .order_by(TaskORM.id.asc())
+            .with_for_update()
+        )
+        statement = (
+            update(TaskORM)
+            .where(TaskORM.id.in_(locked))
+            .values(
+                status=TaskStatus.CANCELED.value,
+                ended_at=now,
+                cancel_requested_at=func.coalesce(TaskORM.cancel_requested_at, now),
+                updated=now,
+            )
+            .returning(TaskORM.id)
+            .execution_options(synchronize_session="fetch")
+        )
+        canceled_ids = (await self._session.scalars(statement)).all()
+        await self._session.flush()
+        if not canceled_ids:
+            return []
+        rows = await self._session.scalars(
+            select(TaskORM)
+            .where(TaskORM.id.in_(canceled_ids))
+            .order_by(TaskORM.id.asc())
+        )
+        return [row.to_domain() for row in rows]
 
     async def get_scored_evaluator_version_ids(
         self, input_session_id: uuid.UUID

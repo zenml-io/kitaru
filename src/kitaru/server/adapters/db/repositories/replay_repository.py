@@ -137,6 +137,23 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         row = (await self._session.scalars(statement)).one_or_none()
         return row.to_domain() if row is not None else None
 
+    async def get_many_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Replay]:
+        """Bulk-load the replay of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Replays keyed by job id, jobs without a replay omitted.
+        """
+        if not job_ids:
+            return {}
+        statement = select(ReplayORM).where(ReplayORM.job_id.in_(list(job_ids)))
+        rows = (await self._session.scalars(statement)).all()
+        return {row.job_id: row.to_domain() for row in rows}
+
     async def query(
         self, replay_filter: ReplayFilter
     ) -> tuple[list[Replay], str | None]:
@@ -195,6 +212,32 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         row.apply(replay)
         await self._flush()
         return row.to_domain()
+
+    async def update_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist changes to many existing replays in one round trip.
+
+        No replay row is locked ahead of this call, so the rows are applied
+        in id order, the first lock each row's update takes is acquired in
+        the same order every caller touching many replay rows takes.
+
+        Args:
+            replays: Replays with modified fields.
+
+        Raises:
+            ReplayNotFound: A replay id matches no replay.
+
+        Returns:
+            Stored replays with the updated timestamp renewed, in id order.
+        """
+        if not replays:
+            return []
+        rows = []
+        for replay in sorted(replays, key=lambda replay: replay.id):
+            row = await self._get_row(replay.id)
+            row.apply(replay)
+            rows.append(row)
+        await self._flush()
+        return [row.to_domain() for row in rows]
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.

@@ -21,9 +21,9 @@ from conftest import FakeExperimentRunRepository, FakeReplayRepository, create_r
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.server.application.events import ReplaySettled
+from kitaru.server.application.events import ReplaysSettled
 from kitaru.server.application.services.run_finalization import (
-    finalize_run_if_drained,
+    finalize_runs_if_drained,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -58,7 +58,7 @@ async def _drained_run(
     run_repository: FakeExperimentRunRepository,
     replay_repository: FakeReplayRepository,
     status: ReplayStatus,
-) -> tuple[ReplaySettled, uuid.UUID]:
+) -> tuple[ReplaysSettled, uuid.UUID]:
     """Store a run with its single, now-settled replay and return the settled event."""
     started_at = datetime.now(UTC) - timedelta(seconds=5)
     run = await run_repository.create(
@@ -81,10 +81,10 @@ async def _drained_run(
         experiment_run_id=run.id,
         status=status,
     )
-    return ReplaySettled(replay=replay), run.id
+    return ReplaysSettled(replays=[replay]), run.id
 
 
-async def test_finalize_run_if_drained_tracks_experiment_run_completed() -> None:
+async def test_finalize_runs_if_drained_tracks_experiment_run_completed() -> None:
     """Fire EXPERIMENT_RUN_COMPLETED with the outcome, replay count, and duration."""
     run_repository = FakeExperimentRunRepository()
     replay_repository = FakeReplayRepository()
@@ -93,7 +93,7 @@ async def test_finalize_run_if_drained_tracks_experiment_run_completed() -> None
     )
     analytics = _RecordingAnalytics()
 
-    await finalize_run_if_drained(
+    await finalize_runs_if_drained(
         event,
         replay_repository=replay_repository,
         experiment_run_repository=run_repository,
@@ -109,7 +109,7 @@ async def test_finalize_run_if_drained_tracks_experiment_run_completed() -> None
     assert properties["duration_seconds"] >= 0
 
 
-async def test_finalize_run_if_drained_without_analytics_tracker() -> None:
+async def test_finalize_runs_if_drained_without_analytics_tracker() -> None:
     """Finalize a run normally when no analytics tracker is configured."""
     run_repository = FakeExperimentRunRepository()
     replay_repository = FakeReplayRepository()
@@ -117,7 +117,7 @@ async def test_finalize_run_if_drained_without_analytics_tracker() -> None:
         run_repository, replay_repository, ReplayStatus.COMPLETED
     )
 
-    await finalize_run_if_drained(
+    await finalize_runs_if_drained(
         event,
         replay_repository=replay_repository,
         experiment_run_repository=run_repository,

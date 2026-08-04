@@ -166,10 +166,12 @@ class ExperimentRunService:
         The first pass stamps every job's cancel request and takes only
         task and job locks: pending tasks move straight to canceled and
         claimed or running tasks are stamped for their worker or the sweep
-        to settle. The second pass settles each drained job, which locks
-        replay rows and the run row. By then every stamped task row is
-        held, so no reporter is partway through the task, job, replay, run
-        lock order and the tail locks cannot invert against one.
+        to settle. The second pass settles every drained job in one bulk
+        read and one bulk write, and its ``JobsSettled`` drives the replay
+        settlement and run finalization, all in the task, job, replay, run
+        lock order. By then every stamped task row is held, so no reporter
+        is partway through that order and the tail locks cannot invert
+        against one.
 
         Args:
             experiment_run_id: Id of the run.
@@ -185,8 +187,7 @@ class ExperimentRunService:
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
         job_ids = [replay.job_id for replay in replays if not replay.settled]
         await self._transitions.request_jobs_cancel(job_ids)
-        for job_id in job_ids:
-            await self._transitions.settle_job_if_drained(job_id)
+        await self._transitions.settle_jobs_if_drained(job_ids)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts

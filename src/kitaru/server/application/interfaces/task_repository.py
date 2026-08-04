@@ -104,6 +104,20 @@ class TaskRepository(Protocol):
         """
         ...
 
+    async def list_by_jobs(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Task]]:
+        """Bulk-load every task of many jobs, grouped by job id in creation order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        ...
+
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
 
@@ -179,6 +193,20 @@ class TaskRepository(Protocol):
         Args:
             job_ids: Ids the tasks belong to.
             now: Current time.
+        """
+        ...
+
+    async def cancel_pending(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> list[Task]:
+        """Move each still-pending task of the jobs straight to canceled.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            now: Current time.
+
+        Returns:
+            Canceled tasks.
         """
         ...
 

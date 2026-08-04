@@ -16,12 +16,15 @@
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from functools import partial
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
-from kitaru.server.application.events import EventDispatcher, JobSettled, TaskTerminal
+from kitaru.server.application.events import (
+    EventDispatcher,
+    JobsSettled,
+    TaskTerminal,
+)
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
@@ -79,7 +82,7 @@ class TaskTransitions:
         The ordered sequence runs inside the caller's transaction: the
         transition is persisted, a terminal status publishes ``TaskTerminal``
         so subscribers can append work before the job is checked, and the job
-        advances afterward, publishing ``JobSettled`` when it settles.
+        advances afterward, publishing ``JobsSettled`` when it settles.
 
         Args:
             task: Task to transition.
@@ -158,7 +161,7 @@ class TaskTransitions:
             task.counted_hard_failure and task.on_failure is TaskOnFailure.ABORT
             for task in tasks
         ):
-            await self._propagate_abort(job_id, tasks)
+            await self._propagate_abort(job_id)
         job = await self._jobs.get(job_id, exclusive=True)
         return await self._settle_drained_job(job)
 
@@ -188,34 +191,33 @@ class TaskTransitions:
                 analytics_events.build_job_completed_properties(job, tasks),
             )
         settled = await self._jobs.update(job)
-        await self._dispatcher.dispatch(JobSettled(job=settled))
+        await self._dispatcher.dispatch(JobsSettled(jobs=[settled]))
         return settled
 
-    async def _cancel_pending_tasks(self, tasks: list[Task], now: datetime) -> None:
-        """Move each still-pending task in the list straight to canceled.
+    async def _cancel_pending_tasks(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Move each still-pending task of the jobs straight to canceled.
 
         Args:
-            tasks: Candidate tasks, in creation order.
+            job_ids: Ids the tasks belong to.
             now: Current time.
         """
-        for task in tasks:
-            if task.status is not TaskStatus.PENDING:
-                continue
-            current = await self._tasks.get(task.id, exclusive=True)
-            if current.status is not TaskStatus.PENDING:
-                continue
-            await self._write_transition(current, partial(Task.request_cancel, now=now))
+        canceled = await self._tasks.cancel_pending(job_ids, now)
+        for task in canceled:
+            await self._dispatcher.dispatch(
+                TaskTerminal(task=task, previous_status=TaskStatus.PENDING)
+            )
 
-    async def _propagate_abort(self, job_id: uuid.UUID, tasks: list[Task]) -> None:
+    async def _propagate_abort(self, job_id: uuid.UUID) -> None:
         """Cancel-request every live sibling and cancel the pending ones.
 
         Args:
             job_id: Id of the job.
-            tasks: Every task of the job, in creation order.
         """
         now = datetime.now(UTC)
         await self._tasks.stamp_cancel_requested([job_id], now)
-        await self._cancel_pending_tasks(tasks, now)
+        await self._cancel_pending_tasks([job_id], now)
 
     async def request_jobs_cancel(self, job_ids: Sequence[uuid.UUID]) -> None:
         """Stamp the cancel request on each job and cancel their pending tasks.
@@ -235,8 +237,7 @@ class TaskTransitions:
         """
         now = datetime.now(UTC)
         await self._tasks.stamp_cancel_requested(job_ids, now)
-        for job_id in job_ids:
-            await self._cancel_pending_tasks(await self._tasks.list_by_job(job_id), now)
+        await self._cancel_pending_tasks(job_ids, now)
         for job_id in job_ids:
             job = await self._jobs.get(job_id, exclusive=True)
             if job.settled:
@@ -258,6 +259,42 @@ class TaskTransitions:
         """
         job = await self._jobs.get(job_id, exclusive=True)
         return await self._settle_drained_job(job)
+
+    async def settle_jobs_if_drained(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Settle every drained job among many in one bulk read and one bulk write.
+
+        Jobs are locked in id order in one statement. A job that already
+        settled, or still has a non-terminal task, is left untouched. The
+        newly settled jobs publish a single ``JobsSettled``.
+
+        Args:
+            job_ids: Ids of the jobs.
+        """
+        if not job_ids:
+            return
+        jobs = await self._jobs.get_many_locked(job_ids)
+        tasks_by_job = await self._tasks.list_by_jobs(job_ids)
+        settled: list[Job] = []
+        for job_id in job_ids:
+            job = jobs.get(job_id)
+            if job is None or job.settled:
+                continue
+            tasks = tasks_by_job.get(job_id, [])
+            if not tasks or not all(task.terminal for task in tasks):
+                continue
+            status, error = _settlement_outcome(tasks)
+            job.settle(status, error, datetime.now(UTC))
+            if self._analytics is not None:
+                self._analytics.track(
+                    job.owner_id,
+                    AnalyticsEvent.JOB_COMPLETED,
+                    analytics_events.build_job_completed_properties(job, tasks),
+                )
+            settled.append(job)
+        if not settled:
+            return
+        stored = await self._jobs.update_many(settled)
+        await self._dispatcher.dispatch(JobsSettled(jobs=stored))
 
     async def cancel_job(self, job_id: uuid.UUID) -> Job:
         """Stamp the cancel request on a job and settle it if that drained it.

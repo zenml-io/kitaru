@@ -3855,6 +3855,24 @@ class FakeReplayRepository:
                 return replay.model_copy()
         return None
 
+    async def get_many_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Replay]:
+        """Bulk-load the replay of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Replays keyed by job id, jobs without a replay omitted.
+        """
+        job_id_set = set(job_ids)
+        return {
+            replay.job_id: replay.model_copy()
+            for replay in self._replays.values()
+            if replay.job_id in job_id_set
+        }
+
     async def query(
         self, replay_filter: ReplayFilter
     ) -> tuple[list[Replay], str | None]:
@@ -3913,6 +3931,23 @@ class FakeReplayRepository:
         updated = replay.model_copy(update={"created": stored.created, "updated": now})
         self._replays[replay.id] = updated
         return updated.model_copy()
+
+    async def update_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist changes to many existing replays in one round trip.
+
+        Args:
+            replays: Replays with modified fields.
+
+        Raises:
+            ReplayNotFound: A replay id matches no replay.
+
+        Returns:
+            Stored replays with the updated timestamp renewed, in id order.
+        """
+        return [
+            await self.update(replay)
+            for replay in sorted(replays, key=lambda replay: replay.id)
+        ]
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.
@@ -4495,6 +4530,22 @@ class FakeJobRepository:
             if job_id in self._jobs
         }
 
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Row locking has no in-memory counterpart, a single process never
+        contends with itself.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        return await self.get_many(job_ids)
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -4537,6 +4588,20 @@ class FakeJobRepository:
         )
         self._jobs[job.id] = renewed
         return renewed.model_copy()
+
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
+        """
+        return [await self.update(job) for job in jobs]
 
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.
@@ -4713,6 +4778,25 @@ class FakeTaskRepository:
         tasks = [task for task in self._tasks.values() if task.job_id == job_id]
         return [task.model_copy() for task in sorted(tasks, key=lambda task: task.id)]
 
+    async def list_by_jobs(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Task]]:
+        """Bulk-load every task of many jobs, grouped by job id in creation order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        job_id_set = set(job_ids)
+        tasks_by_job: dict[uuid.UUID, list[Task]] = {}
+        for task in sorted(self._tasks.values(), key=lambda task: task.id):
+            if task.job_id in job_id_set:
+                tasks_by_job.setdefault(task.job_id, []).append(task.model_copy())
+        return tasks_by_job
+
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
 
@@ -4842,6 +4926,27 @@ class FakeTaskRepository:
                     "updated": _renewed_timestamp(task.updated),
                 }
             )
+
+    async def cancel_pending(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> list[Task]:
+        """Move each still-pending task of the jobs straight to canceled.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            now: Current time.
+
+        Returns:
+            Canceled tasks.
+        """
+        canceled: list[Task] = []
+        for task in sorted(self._tasks.values(), key=lambda task: task.id):
+            if task.job_id not in job_ids or task.status is not TaskStatus.PENDING:
+                continue
+            canceled_task = task.model_copy()
+            canceled_task.request_cancel(now)
+            canceled.append(await self.update(canceled_task))
+        return canceled
 
     def cascade_job_delete(self, job_id: uuid.UUID) -> None:
         """Drop the tasks of a deleted job, mirroring the cascading key.

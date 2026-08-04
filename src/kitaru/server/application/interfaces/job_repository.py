@@ -73,6 +73,21 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Rows are locked in id order in one statement.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        ...
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -95,6 +110,20 @@ class JobRepository(Protocol):
 
         Returns:
             Stored job with the updated timestamp renewed.
+        """
+        ...
+
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
         """
         ...
 

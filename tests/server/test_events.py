@@ -15,7 +15,7 @@
 
 import uuid
 
-from kitaru.server.application.events import EventDispatcher, JobSettled
+from kitaru.server.application.events import EventDispatcher, JobsSettled
 from kitaru.server.domain.job import Job, JobKind, JobStatus
 
 
@@ -24,18 +24,18 @@ async def test_dispatch_runs_handlers_in_registration_order() -> None:
     dispatcher = EventDispatcher()
     calls = []
 
-    async def first(event: JobSettled) -> None:
-        calls.append(("first", event.job.id))
+    async def first(event: JobsSettled) -> None:
+        calls.append(("first", event.jobs[0].id))
 
-    async def second(event: JobSettled) -> None:
-        calls.append(("second", event.job.id))
+    async def second(event: JobsSettled) -> None:
+        calls.append(("second", event.jobs[0].id))
 
-    dispatcher.register(JobSettled, first)
-    dispatcher.register(JobSettled, second)
+    dispatcher.register(JobsSettled, first)
+    dispatcher.register(JobsSettled, second)
     job = Job(
         owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN, status=JobStatus.COMPLETED
     )
 
-    await dispatcher.dispatch(JobSettled(job))
+    await dispatcher.dispatch(JobsSettled([job]))
 
     assert calls == [("first", job.id), ("second", job.id)]

@@ -108,6 +108,30 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         rows = await self._load_by_ids(job_ids)
         return {job_id: row.to_domain() for job_id, row in rows.items()}
 
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Rows are locked in id order.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        if not job_ids:
+            return {}
+        statement = (
+            select(JobORM)
+            .where(JobORM.id.in_(list(job_ids)))
+            .order_by(JobORM.id.asc())
+            .with_for_update()
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return {row.id: row.to_domain() for row in rows}
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -143,6 +167,32 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         row.apply(job)
         await self._flush()
         return row.to_domain()
+
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Every job row is already loaded and locked in the session's identity
+        map by ``get_many_locked``, so ``_get_row`` resolves from memory and
+        the changes flush as one batch.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
+        """
+        if not jobs:
+            return []
+        rows = []
+        for job in jobs:
+            row = await self._get_row(job.id)
+            row.apply(job)
+            rows.append(row)
+        await self._flush()
+        return [row.to_domain() for row in rows]
 
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.

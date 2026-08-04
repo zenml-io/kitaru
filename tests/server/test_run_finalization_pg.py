@@ -50,9 +50,9 @@ from kitaru.server.adapters.db.repositories.replay_repository import (
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
-from kitaru.server.application.events import ReplaySettled
+from kitaru.server.application.events import ReplaysSettled
 from kitaru.server.application.services.run_finalization import (
-    finalize_run_if_drained,
+    finalize_runs_if_drained,
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
@@ -78,14 +78,14 @@ async def _settle_and_finalize(session: AsyncSession, replay_id: uuid.UUID) -> N
     replay = await replay_repository.get(replay_id)
     replay.complete()
     replay = await replay_repository.update(replay)
-    await finalize_run_if_drained(
-        ReplaySettled(replay=replay),
+    await finalize_runs_if_drained(
+        ReplaysSettled(replays=[replay]),
         replay_repository=replay_repository,
         experiment_run_repository=run_repository,
     )
 
 
-async def test_finalize_run_if_drained_serializes_concurrent_settlements() -> None:
+async def test_finalize_runs_if_drained_serializes_concurrent_settlements() -> None:
     """Two replays of one run settling in overlapping transactions still finalize it.
 
     Regression test for a race in run finalization: it used to count
