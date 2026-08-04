@@ -57,6 +57,18 @@ class SessionAccessDenied(ForbiddenError):
         super().__init__(f"Session {session_id} is not accessible to this caller")
 
 
+class SessionBaselineNotFound(NotFoundError):
+    """Raised when a session was not produced by a replay."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} was not produced by a replay")
+
+
 class DuplicateSessionExternalId(ConflictError):
     """Raised when a provider and external id pair is already registered."""
 

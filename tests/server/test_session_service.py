@@ -22,6 +22,7 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayRepository,
     FakeSessionRepository,
     FakeTaskRepository,
     create_agent,
@@ -51,12 +52,15 @@ from kitaru.server.domain.agent_version import (
     AgentVersionAgentMismatch,
     AgentVersionNotFound,
 )
+from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.session import (
     IllegalSessionStatusTransition,
+    Session,
     SessionAccessDenied,
     SessionAgentMismatch,
     SessionAgentRequired,
     SessionAgentVersionMismatch,
+    SessionBaselineNotFound,
     SessionNotFound,
     SessionStatusCannotBeCleared,
 )
@@ -122,16 +126,24 @@ def agent_version_repository(
 
 
 @pytest.fixture
+def replay_repository() -> FakeReplayRepository:
+    """Provide a fake replay repository."""
+    return FakeReplayRepository()
+
+
+@pytest.fixture
 def service(
     repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_version_repository: FakeAgentVersionRepository,
+    replay_repository: FakeReplayRepository,
 ) -> SessionService:
     """Provide a session service backed by the fake repositories."""
     return SessionService(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=replay_repository,
     )
 
 
@@ -210,6 +222,76 @@ async def test_get_session_not_found(service: SessionService) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
         await service.get_session(missing_id, actor=ACTOR)
+
+
+async def _replayed_session(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    replay_repository: FakeReplayRepository,
+) -> tuple[Session, Session]:
+    """Store a baseline session and the replay result session produced from it."""
+    baseline = await create_session(repository, ACTOR.account.id, uuid.uuid4())
+    job_id = uuid.uuid4()
+    task = await create_agent_task(task_repository, job_id)
+    await replay_repository.create(
+        Replay(
+            owner_id=ACTOR.account.id,
+            job_id=job_id,
+            replay_config_id=uuid.uuid4(),
+            baseline_session_id=baseline.id,
+        )
+    )
+    result = await create_session(
+        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
+    )
+    return baseline, result
+
+
+async def test_get_baseline_session(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Resolve a replay result session to the baseline the replay ran against."""
+    baseline, result = await _replayed_session(
+        repository, task_repository, replay_repository
+    )
+    loaded = await service.get_baseline_session(result.id, actor=ACTOR)
+    assert loaded.id == baseline.id
+
+
+async def test_get_baseline_session_without_a_task(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Raise for a session that no task produced."""
+    session = await create_session(repository, ACTOR.account.id, uuid.uuid4())
+    with pytest.raises(
+        SessionBaselineNotFound,
+        match=f"Session {session.id} was not produced by a replay",
+    ):
+        await service.get_baseline_session(session.id, actor=ACTOR)
+
+
+async def test_get_baseline_session_outside_a_replay_job(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Raise for a session whose task belongs to a job that holds no replay."""
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    session = await create_session(
+        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
+    )
+    with pytest.raises(SessionBaselineNotFound):
+        await service.get_baseline_session(session.id, actor=ACTOR)
+
+
+async def test_get_baseline_session_not_found(service: SessionService) -> None:
+    """Raise for an unknown session id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(SessionNotFound):
+        await service.get_baseline_session(missing_id, actor=ACTOR)
 
 
 async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
@@ -390,6 +472,7 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
         analytics=analytics,
     )
     started_at = datetime.now(UTC)
@@ -432,6 +515,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
         analytics=analytics,
     )
     created = await service.create_session(
@@ -454,6 +538,7 @@ async def test_update_session_already_terminal_tracks_nothing(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
         analytics=analytics,
     )
     created = await create_session(
@@ -481,6 +566,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
         analytics=analytics,
     )
     created = await service.create_session(
@@ -510,6 +596,7 @@ async def test_create_session_in_progress_tracks_nothing(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
         analytics=analytics,
     )
     await service.create_session(

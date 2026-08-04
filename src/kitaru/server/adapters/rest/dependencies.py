@@ -366,6 +366,7 @@ def get_session_service(
         repository=SQLSessionRepository(session),
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
+        replay_repository=SQLReplayRepository(session),
         analytics=analytics,
     )
 
