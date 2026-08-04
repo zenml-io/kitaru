@@ -752,10 +752,7 @@ async def test_duplicate_replay_for_the_same_baseline_in_a_run_conflicts(
 async def _cancel_run(services: ReplayServices, run_id: uuid.UUID) -> None:
     """Drive the two cancellation phases the way the endpoint does."""
     await services.experiment_run_service.mark_run_canceling(run_id, actor=ACTOR)
-    for job_id in await services.experiment_run_service.list_cancelable_job_ids(
-        run_id, actor=ACTOR
-    ):
-        await services.experiment_run_service.cancel_run_job(job_id, actor=ACTOR)
+    await services.experiment_run_service.cancel_run_jobs(run_id, actor=ACTOR)
 
 
 async def test_run_cancel_pending_only_run_cancels_immediately(
@@ -809,9 +806,7 @@ async def test_marking_an_already_canceling_run_is_a_no_op(
     marked, _ = await services.experiment_run_service.get_run(run.id, actor=ACTOR)
     assert marked.status is ExperimentRunStatus.CANCELING
     await _cancel_run(services, run.id)
-    canceled_run, _ = await services.experiment_run_service.get_run(
-        run.id, actor=ACTOR
-    )
+    canceled_run, _ = await services.experiment_run_service.get_run(run.id, actor=ACTOR)
     assert canceled_run.status is ExperimentRunStatus.CANCELED
 
 

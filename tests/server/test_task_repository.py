@@ -448,7 +448,7 @@ async def test_stamp_cancel_requested_skips_terminal_tasks(setup: Setup) -> None
     stored_completed = await setup.tasks.create(completed)
 
     now = datetime.now(UTC)
-    await setup.tasks.stamp_cancel_requested(setup.job_id, now)
+    await setup.tasks.stamp_cancel_requested([setup.job_id], now)
 
     reloaded_pending = await setup.tasks.get(pending.id)
     assert reloaded_pending.cancel_requested_at == now

@@ -48,14 +48,13 @@ async def cancel_run(
     settings: APISettings,
     analytics: AnalyticsClient,
 ) -> tuple[ExperimentRun, ReplayStatusCounts]:
-    """Mark a run canceling, then cancel each of its jobs in its own transaction.
+    """Mark a run canceling, then cancel its jobs in a second transaction.
 
-    Every transaction here takes its locks in the task, job, run order the
-    reporting and claiming paths take. Marking the run touches only the run
-    row and commits, and each job is cancelled and committed on its own, so
-    no transaction ever holds the run row lock while reaching for another
-    job's task rows. Doing all of it at once deadlocks against a worker
-    reporting one of those tasks.
+    Marking the run touches only the run row and commits, so the second
+    transaction never holds the run row lock while reaching for a task row.
+    That transaction takes its locks in the task, job, replay, run order the
+    reporting and claiming paths take. Doing all of it at once deadlocks
+    against a worker reporting one of those tasks.
 
     A run left canceling by a failure part way through is finished by calling
     this again, because marking an already canceling run is a no-op.
@@ -86,13 +85,7 @@ async def cancel_run(
     async for session in database.get_async_session():
         try:
             service = _build_service(session, settings, analytics)
-            job_ids = await service.list_cancelable_job_ids(
-                experiment_run_id, actor=actor
-            )
-            for job_id in job_ids:
-                await service.cancel_run_job(job_id, actor=actor)
-                await session.commit()
-            result = await service.get_run(experiment_run_id, actor=actor)
+            result = await service.cancel_run_jobs(experiment_run_id, actor=actor)
             await session.commit()
             return result
         except Exception:
@@ -138,8 +131,6 @@ def get_run_canceler(
     async def cancel(
         experiment_run_id: uuid.UUID, actor: AuthContext
     ) -> tuple[ExperimentRun, ReplayStatusCounts]:
-        return await cancel_run(
-            experiment_run_id, actor, database, settings, analytics
-        )
+        return await cancel_run(experiment_run_id, actor, database, settings, analytics)
 
     return cancel

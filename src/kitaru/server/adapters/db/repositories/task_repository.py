@@ -320,19 +320,23 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         await self._session.flush()
         return {task_id: cancel_requested_at for task_id, cancel_requested_at in rows}
 
-    async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
-        """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+    async def stamp_cancel_requested(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Stamp cancel_requested_at on the jobs' non-terminal tasks lacking it.
 
-        Rows are locked in id order.
+        Rows are locked in id order across all jobs.
 
         Args:
-            job_id: Id the tasks belong to.
+            job_ids: Ids the tasks belong to.
             now: Current time.
         """
+        if not job_ids:
+            return
         locked = (
             select(TaskORM.id)
             .where(
-                TaskORM.job_id == job_id,
+                TaskORM.job_id.in_(list(job_ids)),
                 not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
                 TaskORM.cancel_requested_at.is_(None),
             )

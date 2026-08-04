@@ -4822,15 +4822,17 @@ class FakeTaskRepository:
             stamped[task_id] = task.cancel_requested_at
         return stamped
 
-    async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
-        """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+    async def stamp_cancel_requested(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Stamp cancel_requested_at on the jobs' non-terminal tasks lacking it.
 
         Args:
-            job_id: Id the tasks belong to.
+            job_ids: Ids the tasks belong to.
             now: Current time.
         """
         for task_id, task in list(self._tasks.items()):
-            if task.job_id != job_id or task.terminal:
+            if task.job_id not in job_ids or task.terminal:
                 continue
             if task.cancel_requested_at is not None:
                 continue

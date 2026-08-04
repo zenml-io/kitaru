@@ -158,39 +158,38 @@ class ExperimentRunService:
         run.cancel()
         await self._repository.update(run)
 
-    async def list_cancelable_job_ids(
+    async def cancel_run_jobs(
         self, experiment_run_id: uuid.UUID, actor: AuthContext
-    ) -> list[uuid.UUID]:
-        """List the jobs of the run's replays that have not settled.
+    ) -> tuple[ExperimentRun, ReplayStatusCounts]:
+        """Cancel every unsettled job of a canceling run in two passes.
+
+        The first pass stamps every job's cancel request and takes only
+        task and job locks: pending tasks move straight to canceled and
+        claimed or running tasks are stamped for their worker or the sweep
+        to settle. The second pass settles each drained job, which locks
+        replay rows and the run row. By then every stamped task row is
+        held, so no reporter is partway through the task, job, replay, run
+        lock order and the tail locks cannot invert against one.
 
         Args:
             experiment_run_id: Id of the run.
             actor: Caller context.
 
+        Raises:
+            ExperimentRunNotFound: No run has this id.
+
         Returns:
-            Job ids to cancel, in replay order.
+            Run carrying the cancel request, and its replay counts by status.
         """
         _ = actor
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
-        return [replay.job_id for replay in replays if not replay.settled]
-
-    async def cancel_run_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
-        """Cancel one job of a canceling run.
-
-        Pending tasks move straight to canceled and claimed or running tasks
-        are stamped for their worker or the sweep to settle. The caller
-        commits between jobs, so this never holds the run row lock the
-        settlement takes while reaching for the next job's task rows.
-
-        Args:
-            job_id: Id of the job.
-            actor: Caller context.
-
-        Raises:
-            JobNotFound: No job has this id.
-        """
-        _ = actor
-        await self._transitions.cancel_job(job_id)
+        job_ids = [replay.job_id for replay in replays if not replay.settled]
+        await self._transitions.request_jobs_cancel(job_ids)
+        for job_id in job_ids:
+            await self._transitions.settle_job_if_drained(job_id)
+        run = await self._repository.get(experiment_run_id)
+        counts = await self._replays.count_by_status(experiment_run_id)
+        return run, counts
 
     async def delete_run(
         self, experiment_run_id: uuid.UUID, actor: AuthContext

@@ -67,11 +67,7 @@ async def _cancel_run(
 ) -> tuple[ExperimentRun, ReplayStatusCounts]:
     """Drive both cancellation phases against one fake-backed service."""
     await service.mark_run_canceling(experiment_run_id, actor=actor)
-    for job_id in await service.list_cancelable_job_ids(
-        experiment_run_id, actor=actor
-    ):
-        await service.cancel_run_job(job_id, actor=actor)
-    return await service.get_run(experiment_run_id, actor=actor)
+    return await service.cancel_run_jobs(experiment_run_id, actor=actor)
 
 
 @pytest.fixture
