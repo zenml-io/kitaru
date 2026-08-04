@@ -89,9 +89,6 @@ packages = ["src/kitaru"]
 [tool.uv]
 exclude-newer = "3 days"
 
-[tool.uv.sources]
-kitaru = { workspace = true }
-
 [dependency-groups]
 dev = [
     "pydantic-ai-slim>=2.14.1,<3",

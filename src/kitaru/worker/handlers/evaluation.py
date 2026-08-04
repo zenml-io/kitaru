@@ -25,7 +25,6 @@ from kitaru.worker.handlers.base import materialize_blob
 from kitaru.worker.process import (
     TaskProcess,
     build_process_env,
-    filter_uninstalled_requirements,
     get_python_run_command,
     parse_inline_dependencies,
 )
@@ -62,7 +61,7 @@ class EvaluationHandler:
             env["KITARU_TASK_PLUGIN_PATH"] = str(path)
             dependencies = parse_inline_dependencies(path)
         else:
-            dependencies = filter_uninstalled_requirements([plugin.requirement])
+            dependencies = [plugin.requirement]
         command = get_python_run_command("kitaru.task", ["evaluate"], dependencies)
         return TaskProcess(
             command=command,

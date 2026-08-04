@@ -23,7 +23,6 @@ import signal
 import sys
 import tomllib
 import uuid
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import NamedTuple
 
@@ -259,35 +258,6 @@ def parse_inline_dependencies(path: Path) -> list[str]:
     metadata = tomllib.loads(content)
     dependencies = metadata.get("dependencies", [])
     return list(dependencies)
-
-
-def filter_uninstalled_requirements(requirements: list[str]) -> list[str]:
-    """Keep package requirements not already satisfied by the worker.
-
-    Package plugin requirements are exact pins validated by the server. Reusing
-    an installed exact version lets repository and image workers execute local
-    plugin packages without resolving them from a package index.
-
-    Args:
-        requirements: Exact pinned package requirements.
-
-    Returns:
-        Requirements whose distributions are absent or have another version.
-    """
-    missing = []
-    for requirement in requirements:
-        name, separator, required_version = requirement.partition("==")
-        if "[" in name:
-            missing.append(requirement)
-            continue
-        try:
-            installed_version = version(name)
-        except PackageNotFoundError:
-            missing.append(requirement)
-            continue
-        if not separator or installed_version != required_version:
-            missing.append(requirement)
-    return missing
 
 
 def get_python_run_command(

@@ -43,7 +43,6 @@ from kitaru.server.application.interfaces.api_key_repository import (
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.auth import (
-    AccountPrincipal,
     AuthContext,
     TaskAuthContext,
     TaskPrincipal,
@@ -349,10 +348,7 @@ class AuthService:
                 "Local API keys are rejected under control plane authentication."
             )
         context = await self._resolve_session_token(credential)
-        if (
-            isinstance(context.principal, AccountPrincipal)
-            and context.account.external_id is None
-        ):
+        if context.account.external_id is None:
             raise AuthenticationError(
                 "Local accounts are rejected under control plane authentication."
             )
