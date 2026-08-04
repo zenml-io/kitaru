@@ -14,14 +14,17 @@
 """Task status transition dispatch and job settlement."""
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from functools import partial
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
-from kitaru.server.application.events import EventDispatcher, JobSettled, TaskTerminal
+from kitaru.server.application.events import (
+    EventDispatcher,
+    JobsSettled,
+    TaskTerminal,
+)
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
@@ -79,7 +82,7 @@ class TaskTransitions:
         The ordered sequence runs inside the caller's transaction: the
         transition is persisted, a terminal status publishes ``TaskTerminal``
         so subscribers can append work before the job is checked, and the job
-        advances afterward, publishing ``JobSettled`` when it settles.
+        advances afterward, publishing ``JobsSettled`` when it settles.
 
         Args:
             task: Task to transition.
@@ -102,9 +105,6 @@ class TaskTransitions:
         self, task: Task, transition: Callable[[Task], None]
     ) -> Task:
         """Persist a transition and publish TaskTerminal without advancing the job.
-
-        Batch callers move many tasks toward the same status and advance the
-        job once after the batch instead of once per task.
 
         Args:
             task: Task to transition.
@@ -142,7 +142,9 @@ class TaskTransitions:
         await self._jobs.update(job)
 
     async def advance_job(self, job_id: uuid.UUID) -> Job:
-        """Propagate an abort failure and settle the job once its tasks drain.
+        """Stamp an abort failure on the job and settle it once its tasks drain.
+
+        Locks the job row and no task row.
 
         Args:
             job_id: Id of the job.
@@ -153,19 +155,45 @@ class TaskTransitions:
         Returns:
             Loaded job, settled if this call drained its tasks.
         """
-        tasks = await self._tasks.list_by_job(job_id)
-        if any(
-            task.counted_hard_failure and task.on_failure is TaskOnFailure.ABORT
-            for task in tasks
-        ):
-            await self._propagate_abort(job_id, tasks)
         job = await self._jobs.get(job_id, exclusive=True)
-        if job.settled:
-            return job
-
         # Read the tasks after the job row lock to prevent race conditions
         # during concurrent task settlements.
         tasks = await self._tasks.list_by_job(job_id)
+        await self._request_cancel_on_abort(job, tasks)
+        return await self._settle_drained_job(job, tasks)
+
+    async def _request_cancel_on_abort(self, job: Job, tasks: list[Task]) -> None:
+        """Stamp the job's cancel request when one of its aborting tasks failed.
+
+        Locks no task row, so live siblings keep their status until the
+        sweep's propagation backstop reaches them.
+
+        Args:
+            job: Job loaded under its row lock.
+            tasks: Every task of the job.
+        """
+        if job.settled or job.cancel_requested_at is not None:
+            return
+        if not any(
+            task.counted_hard_failure and task.on_failure is TaskOnFailure.ABORT
+            for task in tasks
+        ):
+            return
+        job.request_cancel(datetime.now(UTC))
+        await self._jobs.update(job)
+
+    async def _settle_drained_job(self, job: Job, tasks: list[Task]) -> Job:
+        """Settle a locked job once every one of its tasks is terminal.
+
+        Args:
+            job: Job loaded under its row lock.
+            tasks: Every task of the job, read after the job row lock.
+
+        Returns:
+            Job, settled if this call drained its tasks.
+        """
+        if job.settled:
+            return job
         if not tasks or not all(task.terminal for task in tasks):
             return job
         status, error = _settlement_outcome(tasks)
@@ -177,51 +205,124 @@ class TaskTransitions:
                 analytics_events.build_job_completed_properties(job, tasks),
             )
         settled = await self._jobs.update(job)
-        await self._dispatcher.dispatch(JobSettled(job=settled))
+        await self._dispatcher.dispatch(JobsSettled(jobs=[settled]))
         return settled
 
-    async def _cancel_pending_tasks(self, tasks: list[Task], now: datetime) -> None:
-        """Move each still-pending task in the list straight to canceled.
+    async def _cancel_pending_tasks(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Move each still-pending task of the jobs straight to canceled.
 
         Args:
-            tasks: Candidate tasks, in creation order.
+            job_ids: Ids the tasks belong to.
             now: Current time.
         """
-        for task in tasks:
-            if task.status is not TaskStatus.PENDING:
-                continue
-            current = await self._tasks.get(task.id, exclusive=True)
-            if current.status is not TaskStatus.PENDING:
-                continue
-            await self._write_transition(current, partial(Task.request_cancel, now=now))
+        canceled = await self._tasks.cancel_pending(job_ids, now)
+        for task in canceled:
+            await self._dispatcher.dispatch(
+                TaskTerminal(task=task, previous_status=TaskStatus.PENDING)
+            )
 
-    async def _propagate_abort(self, job_id: uuid.UUID, tasks: list[Task]) -> None:
-        """Cancel-request every live sibling and cancel the pending ones.
+    async def request_jobs_cancel(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Stamp the cancel request on each job and cancel their pending tasks.
+
+        Locks the jobs' live task rows in one id-ordered acquisition, then
+        their job rows. A job id matching no job, or a settled job, is
+        skipped.
+
+        Args:
+            job_ids: Ids of the jobs.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the task rows.
+
+        Raises:
+            DBAPIError: ``nowait`` is set and a task row is held elsewhere.
+        """
+        now = datetime.now(UTC)
+        await self._tasks.lock_by_jobs(job_ids, nowait=nowait)
+        await self._tasks.stamp_cancel_requested(job_ids, now)
+        await self._cancel_pending_tasks(job_ids, now)
+        jobs = await self._jobs.get_many_locked(job_ids)
+        canceling: list[Job] = []
+        for job_id in job_ids:
+            job = jobs.get(job_id)
+            if job is None or job.settled:
+                continue
+            job.request_cancel(now)
+            canceling.append(job)
+        if canceling:
+            await self._jobs.update_many(canceling)
+
+    async def settle_job_if_drained(self, job_id: uuid.UUID) -> Job:
+        """Settle a job once every one of its tasks is terminal.
+
+        Locks the job row and no task row.
 
         Args:
             job_id: Id of the job.
-            tasks: Every task of the job, in creation order.
-        """
-        now = datetime.now(UTC)
-        await self._tasks.stamp_cancel_requested(job_id, now)
-        await self._cancel_pending_tasks(tasks, now)
 
-    async def cancel_job(self, job: Job) -> Job:
-        """Stamp the cancel request on a job and cancel its pending tasks.
+        Raises:
+            JobNotFound: No job has this id.
+
+        Returns:
+            Loaded job, settled if its tasks have drained.
+        """
+        job = await self._jobs.get(job_id, exclusive=True)
+        tasks = await self._tasks.list_by_job(job_id)
+        return await self._settle_drained_job(job, tasks)
+
+    async def settle_jobs_if_drained(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Settle every drained job among many in one bulk read and one bulk write.
+
+        Locks the job rows in one id-ordered acquisition and no task row. A
+        job that already settled, or still has a non-terminal task, is left
+        untouched. The newly settled jobs publish a single ``JobsSettled``.
 
         Args:
-            job: Job to cancel, loaded exclusively.
+            job_ids: Ids of the jobs.
+        """
+        if not job_ids:
+            return
+        jobs = await self._jobs.get_many_locked(job_ids)
+        tasks_by_job = await self._tasks.list_by_jobs(job_ids)
+        settled: list[Job] = []
+        for job_id in job_ids:
+            job = jobs.get(job_id)
+            if job is None or job.settled:
+                continue
+            tasks = tasks_by_job.get(job_id, [])
+            if not tasks or not all(task.terminal for task in tasks):
+                continue
+            status, error = _settlement_outcome(tasks)
+            job.settle(status, error, datetime.now(UTC))
+            if self._analytics is not None:
+                self._analytics.track(
+                    job.owner_id,
+                    AnalyticsEvent.JOB_COMPLETED,
+                    analytics_events.build_job_completed_properties(job, tasks),
+                )
+            settled.append(job)
+        if not settled:
+            return
+        stored = await self._jobs.update_many(settled)
+        await self._dispatcher.dispatch(JobsSettled(jobs=stored))
+
+    async def cancel_job(self, job_id: uuid.UUID) -> Job:
+        """Stamp the cancel request on a job and settle it if that drained it.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            JobNotFound: No job has this id.
 
         Returns:
             Stored job carrying the cancel request.
         """
-        now = datetime.now(UTC)
-        job.request_cancel(now)
-        stored = await self._jobs.update(job)
-        await self._tasks.stamp_cancel_requested(job.id, now)
-        await self._cancel_pending_tasks(await self._tasks.list_by_job(job.id), now)
-        await self.advance_job(job.id)
-        return await self._jobs.get(stored.id)
+        await self.request_jobs_cancel([job_id])
+        return await self.settle_job_if_drained(job_id)
 
     def _track_task_terminal(self, task: Task, job: Job) -> None:
         """Track a task's transition to a terminal status by kind.

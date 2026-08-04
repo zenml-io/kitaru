@@ -33,8 +33,8 @@ from kitaru.server.adapters.db.repositories.replay_repository import (
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.events import (
     EventDispatcher,
-    JobSettled,
-    ReplaySettled,
+    JobsSettled,
+    ReplaysSettled,
     TaskTerminal,
 )
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -102,17 +102,17 @@ def register_subscribers(
         ),
     )
     dispatcher.register(
-        JobSettled,
+        JobsSettled,
         partial(
-            replay_pipeline.settle_replay,
+            replay_pipeline.settle_replays,
             replay_repository=replay_repository,
             dispatcher=dispatcher,
         ),
     )
     dispatcher.register(
-        ReplaySettled,
+        ReplaysSettled,
         partial(
-            run_finalization.finalize_run_if_drained,
+            run_finalization.finalize_runs_if_drained,
             replay_repository=replay_repository,
             experiment_run_repository=experiment_run_repository,
             analytics=analytics,

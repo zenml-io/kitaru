@@ -13,11 +13,12 @@
 #  permissions and limitations under the License.
 """Experiment run finalization, driven off the run's replay rows."""
 
+import uuid
 from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
-from kitaru.server.application.events import ReplaySettled
+from kitaru.server.application.events import ReplaysSettled
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
@@ -26,8 +27,39 @@ from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 
 
-async def finalize_run_if_drained(
-    event: ReplaySettled,
+async def finalize_runs_if_drained(
+    event: ReplaysSettled,
+    replay_repository: ReplayRepository,
+    experiment_run_repository: ExperimentRunRepository,
+    analytics: ServerAnalytics | None = None,
+) -> None:
+    """Finalize the settled replays' runs once all of their replays settled.
+
+    Standalone replays are skipped and each run is finalized once however
+    many of its replays the event carries.
+
+    Args:
+        event: ReplaysSettled event.
+        replay_repository: Replay repository, for the drained counts.
+        experiment_run_repository: Experiment run repository.
+        analytics: Analytics tracker, None skips tracking.
+    """
+    run_ids = {
+        replay.experiment_run_id
+        for replay in event.replays
+        if replay.experiment_run_id is not None
+    }
+    for run_id in sorted(run_ids):
+        await _finalize_run(
+            run_id,
+            replay_repository,
+            experiment_run_repository,
+            analytics,
+        )
+
+
+async def _finalize_run(
+    experiment_run_id: uuid.UUID,
     replay_repository: ReplayRepository,
     experiment_run_repository: ExperimentRunRepository,
     analytics: ServerAnalytics | None = None,
@@ -35,27 +67,24 @@ async def finalize_run_if_drained(
     """Finalize a run once every one of its replays has settled.
 
     Cancellation wins over everything, then any failed or canceled replay
-    fails the run, otherwise the run completes. A no-op when the settled
-    replay is standalone or the run still has live replays.
+    fails the run, otherwise the run completes. A no-op when the run still
+    has live replays.
 
-    The run row is locked before the drained count is read, so two replays of
-    the same run settling concurrently serialize on the lock instead of both
-    reading the other's still-uncommitted settlement and skipping
-    finalization, which would stall the run forever.
+    The run row is locked before the drained count is read, so two callers
+    settling replays of the same run concurrently serialize on the lock
+    instead of both reading the other's still-uncommitted settlement and
+    skipping finalization, which would stall the run forever.
 
     Args:
-        event: ReplaySettled event.
+        experiment_run_id: Id of the run.
         replay_repository: Replay repository, for the drained count.
         experiment_run_repository: Experiment run repository.
         analytics: Analytics tracker, None skips tracking.
     """
-    replay = event.replay
-    if replay.experiment_run_id is None:
-        return
-    run = await experiment_run_repository.get(replay.experiment_run_id, exclusive=True)
+    run = await experiment_run_repository.get(experiment_run_id, exclusive=True)
     if run.settled:
         return
-    counts = await replay_repository.count_by_status(replay.experiment_run_id)
+    counts = await replay_repository.count_by_status(experiment_run_id)
     if counts.non_settled > 0:
         return
     if run.status is ExperimentRunStatus.CANCELING:

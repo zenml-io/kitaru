@@ -23,12 +23,14 @@ from kitaru.server.application.interfaces.session_node_repository import (
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext, TaskPrincipal
 from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
 from kitaru.server.application.services.resource_access import (
+    check_task_attempt,
     check_task_session_read,
     check_task_session_write,
 )
@@ -48,6 +50,7 @@ class SessionNodeService:
         self,
         repository: SessionNodeRepository,
         session_repository: SessionRepository,
+        task_repository: TaskRepository,
     ) -> None:
         """Initialize the service.
 
@@ -55,9 +58,11 @@ class SessionNodeService:
             repository: Session node repository.
             session_repository: Session repository, for the ingest gate and
                 the rollup update.
+            task_repository: Task repository, for the attempt fence.
         """
         self._repository = repository
         self._sessions = session_repository
+        self._tasks = task_repository
 
     async def ingest_nodes(
         self,
@@ -89,8 +94,13 @@ class SessionNodeService:
         Returns:
             Stored nodes in batch order.
         """
-        session = await self._sessions.get(session_id)
+        # Node ids are minted for indexes this read does not find, so two
+        # concurrent batches for one index would both insert and collide on
+        # the (session, index) key. The lock also stabilizes the pre-image
+        # the rollup deltas are computed against.
+        session = await self._sessions.get(session_id, exclusive=True)
         check_task_session_write(session_id, session.task_id, actor)
+        await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
         if not batch:
             return []

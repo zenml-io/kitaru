@@ -76,6 +76,19 @@ class ReplayRepository(Protocol):
         """
         ...
 
+    async def get_many_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Replay]:
+        """Bulk-load the replay of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Replays keyed by job id, jobs without a replay omitted.
+        """
+        ...
+
     async def query(
         self, replay_filter: ReplayFilter
     ) -> tuple[list[Replay], str | None]:
@@ -113,6 +126,21 @@ class ReplayRepository(Protocol):
 
         Returns:
             Stored replay with the updated timestamp renewed.
+        """
+        ...
+
+    async def update_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist changes to many existing replays in one round trip.
+
+        Args:
+            replays: Replays with modified fields.
+
+        Raises:
+            ReplayNotFound: A replay id matches no replay.
+
+        Returns:
+            Stored replays with the updated timestamp renewed, in the same
+            order.
         """
         ...
 

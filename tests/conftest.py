@@ -45,8 +45,8 @@ from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client_id import ENV_CLIENT_ID
 from kitaru.client.credential_store import CredentialStore
@@ -2534,11 +2534,12 @@ class FakeCohortRepository:
         self._cohorts[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+    async def get(self, cohort_id: uuid.UUID, exclusive: bool = False) -> Cohort:
         """Load a cohort by id.
 
         Args:
             cohort_id: Id of the cohort.
+            exclusive: Ignored, the fake holds no rows to lock.
 
         Raises:
             CohortNotFound: No cohort has this id.
@@ -2735,11 +2736,14 @@ class FakeCohortVersionRepository:
             self._sessions._mark_cohort_member(session_id)
         return stored.model_copy()
 
-    async def get(self, cohort_version_id: uuid.UUID) -> CohortVersion:
+    async def get(
+        self, cohort_version_id: uuid.UUID, exclusive: bool = False
+    ) -> CohortVersion:
         """Load a cohort version by id.
 
         Args:
             cohort_version_id: Id of the cohort version.
+            exclusive: Ignored, the fake holds no rows to lock.
 
         Raises:
             CohortVersionIdNotFound: No cohort version has this id.
@@ -3851,6 +3855,24 @@ class FakeReplayRepository:
                 return replay.model_copy()
         return None
 
+    async def get_many_by_job_ids(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Replay]:
+        """Bulk-load the replay of each job, keyed by job id.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Returns:
+            Replays keyed by job id, jobs without a replay omitted.
+        """
+        job_id_set = set(job_ids)
+        return {
+            replay.job_id: replay.model_copy()
+            for replay in self._replays.values()
+            if replay.job_id in job_id_set
+        }
+
     async def query(
         self, replay_filter: ReplayFilter
     ) -> tuple[list[Replay], str | None]:
@@ -3909,6 +3931,23 @@ class FakeReplayRepository:
         updated = replay.model_copy(update={"created": stored.created, "updated": now})
         self._replays[replay.id] = updated
         return updated.model_copy()
+
+    async def update_many(self, replays: list[Replay]) -> list[Replay]:
+        """Persist changes to many existing replays in one round trip.
+
+        Args:
+            replays: Replays with modified fields.
+
+        Raises:
+            ReplayNotFound: A replay id matches no replay.
+
+        Returns:
+            Stored replays with the updated timestamp renewed, in id order.
+        """
+        return [
+            await self.update(replay)
+            for replay in sorted(replays, key=lambda replay: replay.id)
+        ]
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.
@@ -4491,6 +4530,50 @@ class FakeJobRepository:
             if job_id in self._jobs
         }
 
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Row locking has no in-memory counterpart, a single process never
+        contends with itself.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        return await self.get_many(job_ids)
+
+    async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        Args:
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        if self._tasks is None:
+            return []
+        owing: list[uuid.UUID] = []
+        for job_id in sorted(self._jobs):
+            job = self._jobs[job_id]
+            if job.cancel_requested_at is None or job.settled:
+                continue
+            tasks = await self._tasks.list_by_job(job_id)
+            if any(
+                not task.terminal
+                and (
+                    task.cancel_requested_at is None
+                    or task.status is TaskStatus.PENDING
+                )
+                for task in tasks
+            ):
+                owing.append(job_id)
+        return owing[:limit]
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -4534,6 +4617,20 @@ class FakeJobRepository:
         self._jobs[job.id] = renewed
         return renewed.model_copy()
 
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
+        """
+        return [await self.update(job) for job in jobs]
+
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.
 
@@ -4549,6 +4646,18 @@ class FakeJobRepository:
         if self._tasks is not None:
             self._tasks.cascade_job_delete(job_id)
 
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+        """
+        for job_id in sorted(job_ids):
+            await self.delete(job_id)
+
 
 class FakeTaskRepository:
     """In-memory task repository."""
@@ -4562,6 +4671,9 @@ class FakeTaskRepository:
         """
         self._tasks: dict[uuid.UUID, Task] = {}
         self._sessions = sessions
+        # Assigned after construction, since the fake job repository takes
+        # this repository in its own constructor.
+        self.jobs: FakeJobRepository | None = None
 
     def _check_evaluator_pair(self, task: Task) -> None:
         """Mirror the unique (job_id, input_session_id, plugin_version_id) key.
@@ -4709,6 +4821,25 @@ class FakeTaskRepository:
         tasks = [task for task in self._tasks.values() if task.job_id == job_id]
         return [task.model_copy() for task in sorted(tasks, key=lambda task: task.id)]
 
+    async def list_by_jobs(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Task]]:
+        """Bulk-load every task of many jobs, grouped by job id in creation order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        job_id_set = set(job_ids)
+        tasks_by_job: dict[uuid.UUID, list[Task]] = {}
+        for task in sorted(self._tasks.values(), key=lambda task: task.id):
+            if task.job_id in job_id_set:
+                tasks_by_job.setdefault(task.job_id, []).append(task.model_copy())
+        return tasks_by_job
+
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
 
@@ -4766,26 +4897,42 @@ class FakeTaskRepository:
             claimed.append(await self.update(claimed_task))
         return claimed
 
-    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
-        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+    async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
+        """Lock one task by id if it is still in flight and older than a cutoff.
+
+        Args:
+            task_id: Id of the candidate task.
+            cutoff: Bound the last heartbeat must be older than.
+
+        Returns:
+            Locked stale task, or ``None`` when it is no longer stale.
+        """
+        task = self._tasks.get(task_id)
+        if task is None or task.status not in (TaskStatus.CLAIMED, TaskStatus.RUNNING):
+            return None
+        if not _is_stale_before(task, cutoff):
+            return None
+        return task.model_copy()
+
+    async def list_stale_ids(self, cutoff: datetime, limit: int) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks whose last heartbeat is older than a cutoff.
 
         Args:
             cutoff: Bound the last heartbeat must be older than.
-            limit: Maximum number of tasks to lock.
+            limit: Maximum number of ids to read.
 
         Returns:
-            Locked stale tasks.
+            Ids of the stale tasks in ascending order.
         """
         stale = sorted(
             (
-                task
+                task.id
                 for task in self._tasks.values()
                 if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
                 and _is_stale_before(task, cutoff)
             ),
-            key=lambda task: task.id,
         )
-        return [task.model_copy() for task in stale[:limit]]
+        return stale[:limit]
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
@@ -4798,7 +4945,8 @@ class FakeTaskRepository:
             now: Current time.
 
         Returns:
-            Cancel request time by id for every stamped task.
+            Cancel request time of the task, falling back to its job's, by id
+            for every stamped task.
         """
         stamped: dict[uuid.UUID, datetime | None] = {}
         for task_id in task_ids:
@@ -4816,17 +4964,38 @@ class FakeTaskRepository:
                 }
             )
             stamped[task_id] = task.cancel_requested_at
+            if stamped[task_id] is None and self.jobs is not None:
+                owner = (await self.jobs.get_many([task.job_id])).get(task.job_id)
+                if owner is not None:
+                    stamped[task_id] = owner.cancel_requested_at
         return stamped
 
-    async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
-        """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+    async def lock_by_jobs(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Lock the jobs' non-terminal task rows in id order.
+
+        Row locking has no in-memory counterpart, a single process never
+        contends with itself.
 
         Args:
-            job_id: Id the tasks belong to.
+            job_ids: Ids the tasks belong to.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the rows.
+        """
+        _ = job_ids, nowait
+
+    async def stamp_cancel_requested(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Stamp cancel_requested_at on the jobs' non-terminal tasks lacking it.
+
+        Args:
+            job_ids: Ids the tasks belong to.
             now: Current time.
         """
         for task_id, task in list(self._tasks.items()):
-            if task.job_id != job_id or task.terminal:
+            if task.job_id not in job_ids or task.terminal:
                 continue
             if task.cancel_requested_at is not None:
                 continue
@@ -4836,6 +5005,27 @@ class FakeTaskRepository:
                     "updated": _renewed_timestamp(task.updated),
                 }
             )
+
+    async def cancel_pending(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> list[Task]:
+        """Move each still-pending task of the jobs straight to canceled.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            now: Current time.
+
+        Returns:
+            Canceled tasks.
+        """
+        canceled: list[Task] = []
+        for task in sorted(self._tasks.values(), key=lambda task: task.id):
+            if task.job_id not in job_ids or task.status is not TaskStatus.PENDING:
+                continue
+            canceled_task = task.model_copy()
+            canceled_task.request_cancel(now)
+            canceled.append(await self.update(canceled_task))
+        return canceled
 
     def cascade_job_delete(self, job_id: uuid.UUID) -> None:
         """Drop the tasks of a deleted job, mirroring the cascading key.
@@ -5095,6 +5285,7 @@ def _build_task_substrate() -> TaskSubstrate:
     workers = FakeWorkerRepository()
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
+    tasks.jobs = jobs
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,

@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from kitaru.api_models.v1.task import WorkerScope
+from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.task import Task
 
@@ -104,6 +104,20 @@ class TaskRepository(Protocol):
         """
         ...
 
+    async def list_by_jobs(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, list[Task]]:
+        """Bulk-load every task of many jobs, grouped by job id in creation order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        ...
+
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
 
@@ -138,18 +152,32 @@ class TaskRepository(Protocol):
         """
         ...
 
-    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
-        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+    async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
+        """Lock one task by id if it is still in flight and older than a cutoff.
 
-        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent sweeps
-        take disjoint tasks.
+        The row is locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
+        sweeps take disjoint tasks. Staleness is re-checked on the locked
+        row because the candidate read ran unlocked.
+
+        Args:
+            task_id: Id of the candidate task.
+            cutoff: Bound the last heartbeat must be older than.
+
+        Returns:
+            Locked stale task, or ``None`` when it is contended or no longer
+            stale.
+        """
+        ...
+
+    async def list_stale_ids(self, cutoff: datetime, limit: int) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks whose last heartbeat is older than a cutoff.
 
         Args:
             cutoff: Bound the last heartbeat must be older than.
-            limit: Maximum number of tasks to lock.
+            limit: Maximum number of ids to read.
 
         Returns:
-            Locked stale tasks.
+            Ids of the stale tasks in ascending order.
         """
         ...
 
@@ -167,16 +195,45 @@ class TaskRepository(Protocol):
             now: Current time.
 
         Returns:
-            Cancel request time by id for every stamped task.
+            Cancel request time of the task, falling back to its job's, by id
+            for every stamped task.
         """
         ...
 
-    async def stamp_cancel_requested(self, job_id: uuid.UUID, now: datetime) -> None:
-        """Stamp cancel_requested_at on the job's non-terminal tasks lacking it.
+    async def lock_by_jobs(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Lock the jobs' non-terminal task rows in id order.
 
         Args:
-            job_id: Id the tasks belong to.
+            job_ids: Ids the tasks belong to.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the rows.
+        """
+        ...
+
+    async def stamp_cancel_requested(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> None:
+        """Stamp cancel_requested_at on the jobs' non-terminal tasks lacking it.
+
+        Args:
+            job_ids: Ids the tasks belong to.
             now: Current time.
+        """
+        ...
+
+    async def cancel_pending(
+        self, job_ids: Sequence[uuid.UUID], now: datetime
+    ) -> list[Task]:
+        """Move each still-pending task of the jobs straight to canceled.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            now: Current time.
+
+        Returns:
+            Canceled tasks.
         """
         ...
 

@@ -54,11 +54,13 @@ class BaseSQLRepository(Generic[RowT]):
         """
         raise NotImplementedError
 
-    async def _get_row(self, entity_id: uuid.UUID) -> RowT:
+    async def _get_row(self, entity_id: uuid.UUID, exclusive: bool = False) -> RowT:
         """Load a row by id.
 
         Args:
             entity_id: Id of the row.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             NotFoundError: No row has this id.
@@ -66,16 +68,22 @@ class BaseSQLRepository(Generic[RowT]):
         Returns:
             Stored row.
         """
-        row = await self._session.get(self.orm_class, entity_id)
+        row = await self._session.get(
+            self.orm_class, entity_id, with_for_update=exclusive
+        )
         if row is None:
             raise self._not_found(entity_id)
         return row
 
-    async def _load_by_ids(self, ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, RowT]:
+    async def _load_by_ids(
+        self, ids: Sequence[uuid.UUID], exclusive: bool = False
+    ) -> dict[uuid.UUID, RowT]:
         """Load rows by id into a dict keyed by id, missing ids omitted.
 
         Args:
             ids: Ids of the rows.
+            exclusive: Whether to lock the rows in id order for the duration
+                of the transaction.
 
         Returns:
             Rows keyed by id.
@@ -83,6 +91,8 @@ class BaseSQLRepository(Generic[RowT]):
         if not ids:
             return {}
         statement = select(self.orm_class).where(self.orm_class.id.in_(ids))
+        if exclusive:
+            statement = statement.order_by(self.orm_class.id.asc()).with_for_update()
         rows = (await self._session.scalars(statement)).all()
         return {row.id: row for row in rows}
 

@@ -20,8 +20,7 @@ import pytest
 
 from conftest import FakeWorkerRepository, create_worker
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.task import LabelSelector, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService

@@ -17,7 +17,8 @@ import uuid
 
 import pytest
 
-from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import LabelSelector, WorkerScope
 from kitaru.worker.config import WorkerConfig
 from kitaru.worker.worker import default_worker_name
 

@@ -488,6 +488,7 @@ def get_session_node_service(
     return SessionNodeService(
         repository=SQLSessionNodeRepository(session),
         session_repository=SQLSessionRepository(session),
+        task_repository=SQLTaskRepository(session),
     )
 
 

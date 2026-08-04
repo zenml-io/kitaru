@@ -46,11 +46,15 @@ class CohortVersionRepository(Protocol):
         """
         ...
 
-    async def get(self, cohort_version_id: uuid.UUID) -> CohortVersion:
+    async def get(
+        self, cohort_version_id: uuid.UUID, exclusive: bool = False
+    ) -> CohortVersion:
         """Load a cohort version by id.
 
         Args:
             cohort_version_id: Id of the cohort version.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             CohortVersionIdNotFound: No cohort version has this id.

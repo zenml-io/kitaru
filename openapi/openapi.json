@@ -10469,7 +10469,7 @@
     },
     "/v1/experiment-runs/{experiment_run_id}/cancel": {
       "post": {
-        "description": "Request cancellation of a running experiment run.\n\nClients observe HTTP 200 on success, 404 when no run has this id, and\n409 when the run is not running.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Run carrying the cancel request.",
+        "description": "Request cancellation of a running experiment run.\n\nClients observe HTTP 200 on success, 404 when no run has this id, and\n409 when the run is not running.\n\nArgs:\n    experiment_run_id: Id of the run.\n    actor: Caller context.\n    cancel: Run cancellation flow, committed across its own transactions.\n\nReturns:\n    Run carrying the cancel request.",
         "operationId": "cancel_experiment_run_v1_experiment_runs__experiment_run_id__cancel_post",
         "parameters": [
           {

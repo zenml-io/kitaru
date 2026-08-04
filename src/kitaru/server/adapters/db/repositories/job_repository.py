@@ -16,20 +16,24 @@
 import uuid
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import not_, or_, select
 
+from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.task import TERMINAL_STATUS_VALUES, TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.job import Job, JobNotFound
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job, JobNotFound
 
 JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "kind": JobORM.kind,
     "status": JobORM.status,
 }
+
+TERMINAL_JOB_STATUS_VALUES = [status.value for status in TERMINAL_JOB_STATUSES]
 
 
 class SQLJobRepository(BaseSQLRepository[JobORM]):
@@ -91,9 +95,7 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         Returns:
             Stored job.
         """
-        row = await self._session.get(self.orm_class, job_id, with_for_update=exclusive)
-        if row is None:
-            raise JobNotFound(job_id)
+        row = await self._get_row(job_id, exclusive=exclusive)
         return row.to_domain()
 
     async def get_many(self, job_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Job]:
@@ -107,6 +109,55 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         """
         rows = await self._load_by_ids(job_ids)
         return {job_id: row.to_domain() for job_id, row in rows.items()}
+
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Rows are locked in id order.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        rows = await self._load_by_ids(job_ids, exclusive=True)
+        return {job_id: row.to_domain() for job_id, row in rows.items()}
+
+    async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        A live task owes the stamp when it carries no cancel request of its
+        own, or when it is still pending and has to move straight to
+        canceled. Rows are read without locking.
+
+        Args:
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        owing = select(TaskORM.id).where(
+            TaskORM.job_id == JobORM.id,
+            not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
+            or_(
+                TaskORM.cancel_requested_at.is_(None),
+                TaskORM.status == TaskStatus.PENDING.value,
+            ),
+        )
+        statement = (
+            select(JobORM.id)
+            .where(
+                JobORM.cancel_requested_at.is_not(None),
+                not_(JobORM.status.in_(TERMINAL_JOB_STATUS_VALUES)),
+                owing.exists(),
+            )
+            .order_by(JobORM.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
 
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
@@ -144,8 +195,37 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         await self._flush()
         return row.to_domain()
 
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Every job row is already loaded and locked in the session's identity
+        map by ``get_many_locked``, so ``_get_row`` resolves from memory and
+        the changes flush as one batch.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
+        """
+        if not jobs:
+            return []
+        rows = []
+        for job in jobs:
+            row = await self._get_row(job.id)
+            row.apply(job)
+            rows.append(row)
+        await self._flush()
+        return [row.to_domain() for row in rows]
+
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.
+
+        The job's task rows are locked in id order before the job row, since
+        the delete's cascade would otherwise lock them unordered after it.
 
         Args:
             job_id: Id of the job.
@@ -153,4 +233,37 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         Raises:
             JobNotFound: No job has this id.
         """
+        await self._lock_task_rows([job_id])
         await self._delete_row(job_id)
+
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        The jobs' task rows are locked in id order across all jobs before
+        the job rows, which are deleted in ascending id order.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+        """
+        if not job_ids:
+            return
+        await self._lock_task_rows(job_ids)
+        for job_id in sorted(job_ids):
+            await self._delete_row(job_id)
+
+    async def _lock_task_rows(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Lock the jobs' task rows in id order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+        """
+        statement = (
+            select(TaskORM.id)
+            .where(TaskORM.job_id.in_(list(job_ids)))
+            .order_by(TaskORM.id.asc())
+            .with_for_update()
+        )
+        await self._session.execute(statement)

@@ -39,13 +39,13 @@ from conftest import (
     mint_worker_token,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
-from kitaru.api_models.v1.task import WorkerScope
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
     WorkerHeartbeatRequest,
     WorkerListParams,
     WorkerRegistrationResponse,
     WorkerRuntime,
+    WorkerScope,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError

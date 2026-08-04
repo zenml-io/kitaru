@@ -145,7 +145,11 @@ class CohortVersionService:
         Returns:
             Created cohort version.
         """
-        cohort = await self._cohorts.get(cohort_id)
+        # The delta defaults to the latest version's members, so the cohort
+        # row is locked for the read as well as the version bump. Reading it
+        # unlocked lets two concurrent deltas build on the same base and the
+        # later version silently drop the earlier one's change.
+        cohort = await self._cohorts.get(cohort_id, exclusive=True)
         base_members = await self._resolve_base_members(cohort, command.baseline_id)
         new_members = apply_membership_delta(
             base_members, command.add_session_ids, command.remove_session_ids

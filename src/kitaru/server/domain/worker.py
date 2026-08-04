@@ -18,8 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.task import WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.domain.base import DomainModel, ForbiddenError, NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name

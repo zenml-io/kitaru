@@ -41,8 +41,17 @@ from conftest import (
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.task import LabelSelector, TaskKind, TaskStatus, WorkerScope
+from kitaru.api_models.v1.task import (
+    TaskKind,
+    TaskOnFailure,
+    TaskStatus,
+)
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerScope,
+)
 from kitaru.server.application.events import EventDispatcher
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
@@ -71,6 +80,13 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 def services() -> JobAndTaskServices:
     """Provide fake-backed job and task services."""
     return build_job_and_task_services()
+
+
+async def _sweep_stale(services: JobAndTaskServices) -> None:
+    """Run the sweeper's stale rescue over every candidate task."""
+    now = datetime.now(UTC)
+    for task_id in await services.task_service.list_stale_task_ids(now):
+        await services.task_service.sweep_stale_task(task_id, now)
 
 
 async def _pending_job(services: JobAndTaskServices) -> uuid.UUID:
@@ -250,8 +266,10 @@ async def test_claim_scope_non_required_selector_matches_unlabeled(
     assert {item.task.id for item in claimed} == {matching.id, unlabeled.id}
 
 
-async def test_claim_sweeps_stale_tasks_first(services: JobAndTaskServices) -> None:
-    """A stale claimed task requeues before the claim query runs."""
+async def test_sweep_requeues_a_stale_task_for_a_later_claim(
+    services: JobAndTaskServices,
+) -> None:
+    """A stale claimed task requeues on the sweep and the next claim picks it up."""
     job_id = await _pending_job(services)
     stale = await _claimable_agent_task(services, job_id)
     stuck_worker = await create_worker(services.workers, ACTOR.account.id, name="stuck")
@@ -263,6 +281,7 @@ async def test_claim_sweeps_stale_tasks_first(services: JobAndTaskServices) -> N
     stored = await services.tasks.get(stale.id)
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
+    await _sweep_stale(services)
 
     other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
     reclaimed = await services.task_service.claim_tasks(
@@ -287,12 +306,136 @@ async def test_sweep_abandons_at_the_retry_cap(services: JobAndTaskServices) -> 
         stored = await services.tasks.get(task.id)
         stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
         await services.tasks.update(stored)
+        await _sweep_stale(services)
 
+    stored = await services.tasks.get(task.id)
+    assert stored.status is TaskStatus.ABANDONED
+
+
+async def test_backstop_stamps_live_siblings_and_cancels_pending_ones(
+    services: JobAndTaskServices,
+) -> None:
+    """An aborting failure stamps only the job, the backstop reaches its siblings."""
+    job_id = await _pending_job(services)
+    failing = await _claimable_agent_task(
+        services, job_id, on_failure=TaskOnFailure.ABORT
+    )
+    running_sibling = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert {item.task.id for item in claimed} == {failing.id, running_sibling.id}
+    pending_sibling = await _claimable_agent_task(services, job_id)
+
+    await services.task_service.update_task(
+        failing.id,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
+    )
+
+    job = await services.jobs.get(job_id)
+    assert job.cancel_requested_at is not None
+    assert (await services.tasks.get(running_sibling.id)).cancel_requested_at is None
+    assert (await services.tasks.get(pending_sibling.id)).status is TaskStatus.PENDING
+
+    assert await services.task_service.list_unpropagated_cancel_job_ids() == [job_id]
+    await services.task_service.propagate_job_cancel(job_id)
+
+    stamped = await services.tasks.get(running_sibling.id)
+    assert stamped.status is TaskStatus.CLAIMED
+    assert stamped.cancel_requested_at is not None
+    assert (await services.tasks.get(pending_sibling.id)).status is TaskStatus.CANCELED
+    # The claimed sibling is still live, so the job stays unsettled.
+    assert (await services.jobs.get(job_id)).status is JobStatus.RUNNING
+    assert await services.task_service.list_unpropagated_cancel_job_ids() == []
+
+
+async def test_heartbeat_stops_a_sibling_before_the_backstop_runs(
+    services: JobAndTaskServices,
+) -> None:
+    """An aborting failure reaches a live sibling on its next heartbeat."""
+    job_id = await _pending_job(services)
+    failing = await _claimable_agent_task(
+        services, job_id, on_failure=TaskOnFailure.ABORT
+    )
+    sibling = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    worker_actor = build_worker_actor(ACTOR.account, worker.id)
+    await services.task_service.claim_tasks(10, actor=worker_actor)
+
+    assert (
+        await services.task_service.heartbeat_worker(
+            worker.id, [sibling.id], actor=worker_actor
+        )
+        == []
+    )
+
+    await services.task_service.update_task(
+        failing.id,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
+    )
+
+    # The sibling's own row is still unstamped, the job carries the request.
+    assert (await services.tasks.get(sibling.id)).cancel_requested_at is None
+    assert await services.task_service.heartbeat_worker(
+        worker.id, [sibling.id], actor=worker_actor
+    ) == [sibling.id]
+
+
+async def test_backstop_settles_the_job_once_it_drains(
+    services: JobAndTaskServices,
+) -> None:
+    """Canceling the last pending sibling drains the job and settles it failed."""
+    job_id = await _pending_job(services)
+    failing = await _claimable_agent_task(
+        services, job_id, on_failure=TaskOnFailure.ABORT
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
     await services.task_service.claim_tasks(
         10, actor=build_worker_actor(ACTOR.account, worker.id)
     )
+    await _claimable_agent_task(services, job_id)
+
+    await services.task_service.update_task(
+        failing.id,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
+    )
+    assert (await services.jobs.get(job_id)).status is JobStatus.RUNNING
+
+    await services.task_service.propagate_job_cancel(job_id)
+
+    job = await services.jobs.get(job_id)
+    assert job.status is JobStatus.FAILED
+    assert job.error == "boom"
+
+
+async def test_abandoned_aborting_task_stamps_its_job(
+    services: JobAndTaskServices,
+) -> None:
+    """A stale aborting task abandoned by the sweep leaves its job cancel-requested."""
+    services = build_job_and_task_services(policy=TaskPolicy(retry_limit=1))
+    job_id = await _pending_job(services)
+    task = await _claimable_agent_task(services, job_id, on_failure=TaskOnFailure.ABORT)
+    sibling = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
     stored = await services.tasks.get(task.id)
-    assert stored.status is TaskStatus.ABANDONED
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+    await _sweep_stale(services)
+
+    assert (await services.tasks.get(task.id)).status is TaskStatus.ABANDONED
+    assert (await services.jobs.get(job_id)).cancel_requested_at is not None
+    assert (await services.tasks.get(sibling.id)).cancel_requested_at is None
+
+    await services.task_service.propagate_job_cancel(job_id)
+    assert (await services.tasks.get(sibling.id)).cancel_requested_at is not None
 
 
 async def test_sweep_cancels_a_cancel_requested_stale_task(
@@ -311,10 +454,7 @@ async def test_sweep_cancels_a_cancel_requested_stale_task(
     stored.cancel_requested_at = datetime.now(UTC)
     await services.tasks.update(stored)
 
-    other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
-    await services.task_service.claim_tasks(
-        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
-    )
+    await _sweep_stale(services)
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.CANCELED
 
@@ -339,10 +479,7 @@ async def test_sweep_requeue_unlinks_the_result_session(
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
 
-    other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
-    await services.task_service.claim_tasks(
-        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
-    )
+    await _sweep_stale(services)
 
     reloaded_task = await services.tasks.get(task.id)
     assert isinstance(reloaded_task, AgentTask)
@@ -351,13 +488,8 @@ async def test_sweep_requeue_unlinks_the_result_session(
     assert reloaded_session.task_id is None
 
 
-async def test_sweep_stale_tasks_works_outside_the_claim_path() -> None:
-    """sweep_stale_tasks abandons a stale task and settles its job, called directly.
-
-    claim_tasks calls the same method, this proves it also works standalone
-    so a caller outside the claim path, such as a background sweep loop, can
-    reuse it without duplicating the sweep logic.
-    """
+async def test_sweep_stale_task_abandons_and_settles() -> None:
+    """The sweep unit abandons a task past its retry limit and settles its job."""
     services = build_job_and_task_services(policy=TaskPolicy(retry_limit=1))
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
@@ -370,7 +502,9 @@ async def test_sweep_stale_tasks_works_outside_the_claim_path() -> None:
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
 
-    await services.task_service.sweep_stale_tasks(datetime.now(UTC))
+    now = datetime.now(UTC)
+    assert await services.task_service.list_stale_task_ids(now) == [task.id]
+    await services.task_service.sweep_stale_task(task.id, now)
 
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.ABANDONED

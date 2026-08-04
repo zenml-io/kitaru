@@ -169,6 +169,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_job_cancel_requested_at",
+            ["cancel_requested_at"],
+            unique=False,
+            postgresql_where=sa.text("cancel_requested_at IS NOT NULL"),
+        )
         batch_op.create_index("ix_job_kind", ["kind"], unique=False)
         batch_op.create_index("ix_job_status", ["status"], unique=False)
 
@@ -936,6 +942,7 @@ def downgrade() -> None:
 
     op.drop_table("plugin")
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.drop_index("ix_job_cancel_requested_at")
         batch_op.drop_index("ix_job_kind")
         batch_op.drop_index("ix_job_status")
 

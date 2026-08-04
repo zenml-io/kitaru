@@ -20,8 +20,8 @@ from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import (
     EventDispatcher,
-    JobSettled,
-    ReplaySettled,
+    JobsSettled,
+    ReplaysSettled,
     TaskTerminal,
 )
 from kitaru.server.application.interfaces.experiment_repository import (
@@ -246,24 +246,16 @@ async def append_result_evaluations(
     await replay_repository.update(replay)
 
 
-async def settle_replay(
-    event: JobSettled,
-    replay_repository: ReplayRepository,
-    dispatcher: EventDispatcher,
-) -> None:
-    """Map a job's settlement outcome onto its replay and emit ReplaySettled.
-
-    A no-op when the job holds no replay.
+def _apply_job_settlement(replay: Replay, job: Job) -> bool:
+    """Apply a settled job's outcome onto its replay.
 
     Args:
-        event: JobSettled event.
-        replay_repository: Replay repository.
-        dispatcher: Event dispatcher to emit ``ReplaySettled`` on.
+        replay: Replay to update.
+        job: Job that settled.
+
+    Returns:
+        Whether the job's status mapped onto a replay transition.
     """
-    job = event.job
-    replay = await replay_repository.get_by_job_id(job.id)
-    if replay is None:
-        return
     if job.status is JobStatus.COMPLETED:
         replay.complete()
     elif job.status is JobStatus.FAILED:
@@ -271,6 +263,37 @@ async def settle_replay(
     elif job.status is JobStatus.CANCELED:
         replay.cancel()
     else:
+        return False
+    return True
+
+
+async def settle_replays(
+    event: JobsSettled,
+    replay_repository: ReplayRepository,
+    dispatcher: EventDispatcher,
+) -> None:
+    """Map settled jobs' outcomes onto their replays and emit ReplaysSettled.
+
+    A job holding no replay is skipped. The updated replays publish a
+    single ``ReplaysSettled``.
+
+    Args:
+        event: JobsSettled event.
+        replay_repository: Replay repository.
+        dispatcher: Event dispatcher to emit ``ReplaysSettled`` on.
+    """
+    replays_by_job_id = await replay_repository.get_many_by_job_ids(
+        [job.id for job in event.jobs]
+    )
+    changed: list[Replay] = []
+    for job in event.jobs:
+        replay = replays_by_job_id.get(job.id)
+        if replay is None:
+            continue
+        if not _apply_job_settlement(replay, job):
+            continue
+        changed.append(replay)
+    if not changed:
         return
-    stored = await replay_repository.update(replay)
-    await dispatcher.dispatch(ReplaySettled(replay=stored))
+    stored = await replay_repository.update_many(changed)
+    await dispatcher.dispatch(ReplaysSettled(replays=stored))

@@ -188,10 +188,10 @@ class JobService:
             Job carrying the cancel request.
         """
         _ = actor
-        job = await self._repository.get(job_id, exclusive=True)
+        job = await self._repository.get(job_id)
         if job.settled:
             raise JobAlreadySettled(job_id)
-        return await self._transitions.cancel_job(job)
+        return await self._transitions.cancel_job(job_id)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a job, cascading its tasks.
@@ -232,17 +232,6 @@ class JobService:
             Created task.
         """
         return await add_task(task, self._repository, self._tasks)
-
-    async def advance_job(self, job_id: uuid.UUID) -> None:
-        """Propagate an abort failure and settle the job once its tasks drain.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            JobNotFound: No job has this id.
-        """
-        await self._transitions.advance_job(job_id)
 
     async def create_session_run(
         self, command: SessionRunCreate, actor: AuthContext

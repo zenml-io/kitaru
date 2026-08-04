@@ -37,17 +37,17 @@ class TaskTerminal(Event):
 
 
 @dataclass(frozen=True)
-class JobSettled(Event):
-    """Job settled event."""
+class JobsSettled(Event):
+    """Jobs settled event."""
 
-    job: Job
+    jobs: list[Job]
 
 
 @dataclass(frozen=True)
-class ReplaySettled(Event):
-    """Replay settled event."""
+class ReplaysSettled(Event):
+    """Replays settled event."""
 
-    replay: Replay
+    replays: list[Replay]
 
 
 EventT = TypeVar("EventT", bound=Event)

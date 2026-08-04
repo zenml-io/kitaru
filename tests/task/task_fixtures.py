@@ -78,7 +78,9 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     """Build an API client routed to the app with fake-backed services."""
     services = build_job_and_task_services()
     node_service = SessionNodeService(
-        repository=FakeSessionNodeRepository(), session_repository=services.sessions
+        repository=FakeSessionNodeRepository(),
+        session_repository=services.sessions,
+        task_repository=services.tasks,
     )
     session_service = SessionService(
         repository=services.sessions,

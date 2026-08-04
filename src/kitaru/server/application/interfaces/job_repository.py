@@ -73,6 +73,36 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def get_many_locked(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Job]:
+        """Bulk-lock and load jobs by id, keyed by id, missing ids omitted.
+
+        Rows are locked in id order in one statement.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Locked jobs keyed by id.
+        """
+        ...
+
+    async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        A live task owes the stamp when it carries no cancel request of its
+        own, or when it is still pending and has to move straight to
+        canceled. Rows are read without locking.
+
+        Args:
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        ...
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -98,6 +128,20 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def update_many(self, jobs: list[Job]) -> list[Job]:
+        """Persist changes to many existing jobs in one round trip.
+
+        Args:
+            jobs: Jobs with modified fields.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+
+        Returns:
+            Stored jobs with the updated timestamp renewed, in the same order.
+        """
+        ...
+
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.
 
@@ -106,5 +150,19 @@ class JobRepository(Protocol):
 
         Raises:
             JobNotFound: No job has this id.
+        """
+        ...
+
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        The jobs' task rows are locked in id order across all jobs before
+        the job rows, which are deleted in ascending id order.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
         """
         ...
