@@ -35,13 +35,13 @@ from kitaru.api_models.v1.task import (
     TaskSpecResponse,
     TaskStatus,
     TaskWithSpec,
-    WorkerScope,
 )
 from kitaru.api_models.v1.worker import (
     WorkerHeartbeatResponse,
     WorkerRegistrationResponse,
     WorkerResponse,
     WorkerRuntime,
+    WorkerScope,
 )
 from kitaru.client.api_client import KitaruAPIClient
 

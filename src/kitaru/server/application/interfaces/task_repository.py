@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 
-from kitaru.api_models.v1.task import WorkerScope
+from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.task import Task
 

@@ -44,10 +44,12 @@ from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import (
-    LabelSelector,
     TaskKind,
     TaskOnFailure,
     TaskStatus,
+)
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
     WorkerScope,
 )
 from kitaru.server.application.events import EventDispatcher

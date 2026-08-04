@@ -32,8 +32,8 @@ from conftest import (
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind
-from kitaru.api_models.v1.task import LabelSelector, TaskKind, TaskStatus, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )

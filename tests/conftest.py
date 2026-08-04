@@ -45,8 +45,8 @@ from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client_id import ENV_CLIENT_ID
 from kitaru.client.credential_store import CredentialStore

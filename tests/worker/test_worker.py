@@ -33,6 +33,8 @@ from kitaru.api_models.v1.task import (
     TaskClaimResponse,
     TaskKind,
     TaskStatus,
+)
+from kitaru.api_models.v1.worker import (
     WorkerScope,
 )
 from kitaru.client.exceptions import APIError, NotFoundError

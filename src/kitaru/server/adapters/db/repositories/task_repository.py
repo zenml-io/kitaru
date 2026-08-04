@@ -19,7 +19,8 @@ from datetime import datetime
 
 from sqlalchemy import ColumnElement, func, not_, or_, select, update
 
-from kitaru.api_models.v1.task import TaskKind, TaskStatus, WorkerScope
+from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import (

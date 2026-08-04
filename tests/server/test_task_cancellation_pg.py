@@ -25,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.task import TaskStatus, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.task import TaskStatus
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.db.repositories.account_repository import (

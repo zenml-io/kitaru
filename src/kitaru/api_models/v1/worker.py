@@ -15,8 +15,9 @@
 
 import uuid
 from datetime import datetime
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import (
     OwnedResponseModel,
@@ -25,7 +26,54 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.task import WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.base import FrozenModel
+
+
+class LabelSelector(FrozenModel):
+    """Label selector."""
+
+    key: str = Field(description="Label key.")
+    values: list[str] = Field(min_length=1, description="Values the label may take.")
+    required: bool = Field(
+        default=False, description="Whether a task lacking the key fails the match."
+    )
+
+
+class WorkerScope(FrozenModel):
+    """Worker scope."""
+
+    kinds: list[TaskKind] | None = Field(
+        default=None, description="Task kinds the worker claims."
+    )
+    selectors: list[LabelSelector] | None = Field(
+        default=None,
+        description="Label selectors the worker claims, combined by conjunction.",
+    )
+    job_id: uuid.UUID | None = Field(
+        default=None, description="Job the worker claims tasks from."
+    )
+
+    @model_validator(mode="after")
+    def _validate_scope(self) -> Self:
+        """Reject empty scope lists and duplicate selector keys.
+
+        Raises:
+            ValueError: kinds or selectors is set but empty, or two selectors
+                share a key.
+
+        Returns:
+            The validated scope.
+        """
+        if self.kinds is not None and not self.kinds:
+            raise ValueError("kinds must not be empty when set")
+        if self.selectors is not None:
+            if not self.selectors:
+                raise ValueError("selectors must not be empty when set")
+            keys = [selector.key for selector in self.selectors]
+            if len(set(keys)) != len(keys):
+                raise ValueError("selector keys must be unique")
+        return self
 
 
 class WorkerRuntime(RequestModel):

@@ -16,8 +16,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from kitaru.api_models.v1.task import WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
