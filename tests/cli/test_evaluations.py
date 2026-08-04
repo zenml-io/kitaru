@@ -264,6 +264,12 @@ class StubEvaluationClient:
             yield self.owner.quality
             yield self.owner.judge
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(
+                items=[self.owner.quality, self.owner.judge], next_cursor=None
+            )
+
         async def get(self, parent_id: uuid.UUID) -> Any:
             if parent_id == self.owner.quality.id:
                 return self.owner.quality

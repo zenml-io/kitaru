@@ -124,7 +124,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](examples.md) |
 | `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](../adapters/openai-agents.md#end-to-end-research-bot-example) |
 | `end_to_end/compliance_review/README.md` | Four-stage Claude Agent SDK audit: checkpointed turns, partial replay, and durable wait/resume conversation | [Replay and Overrides](../guides/replay-and-overrides.md) |
-| `features/mcp/mcp_query_tools.py` | Query executions and data through the Kitaru MCP server | [MCP Server](../agent-native/mcp-server.md) |
+| `v2/mcp/README.md` | Configure the native Kitaru v2 MCP server in its default read-only mode | [MCP Server](../agent-native/mcp-server.md) |
 
 {% hint style="info" %}
 The LLM and most adapter examples require additional dependencies and provider
@@ -166,5 +166,5 @@ Agent Harness Platform is the recommended starting point for most readers — it
 21. `integrations/langgraph_agent/langgraph_adapter.py` — [LangGraph Adapter](../adapters/langgraph.md).
 22. `integrations/langgraph_agent/langgraph_streaming.py` — [LangGraph streaming](../adapters/langgraph.md#graph-call-streaming).
 23. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-24. `features/mcp/mcp_query_tools.py` — [MCP Server](../agent-native/mcp-server.md).
+24. `v2/mcp/README.md` — [MCP Server](../agent-native/mcp-server.md).
 25. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.

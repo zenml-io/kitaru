@@ -95,6 +95,14 @@ build:
 cli-artifact-smoke:
     uv run --no-sync python scripts/smoke_cli_artifacts.py
 
+# Verify the measured MCP schemas and committed snapshots
+mcp-schema-check:
+    uv run --extra mcp python scripts/report_mcp_schema.py --check
+
+# Verify clean base and MCP installations from the single wheel under dist/
+mcp-wheel-smoke:
+    uv run --no-sync python scripts/smoke_mcp_wheel.py dist
+
 # Download/extract a local Kitaru UI bundle for manual login/smoke testing.
 # Defaults to the latest stable kitaru-ui-v* release.
 # Pass UI_TAG=kitaru-ui-v0.2.0 to pin a stable release.

@@ -520,18 +520,7 @@ kitaru executions delete kr-a8f3c2 --yes
 With `--output json`, `--yes` is required. This keeps stdout and stderr
 machine-readable by avoiding an interactive prompt in structured-output mode.
 
-MCP callers use the direct mutation tool and receive a minimal acknowledgement:
-
-```text
-kitaru_executions_delete(exec_id="kr-a8f3c2")
-```
-
-```json
-{"exec_id": "kr-a8f3c2", "deleted": true}
-```
-
-The MCP tool does not prompt or accept a confirmation argument. The MCP caller
-must obtain any required user approval before invoking it.
+The native v2 MCP server does not expose execution deletion. Use the CLI or SDK for this operation.
 
 ## Execution convenience methods
 
@@ -624,40 +613,13 @@ kitaru executions cancel kr-a8f3c2
 kitaru executions delete kr-a8f3c2 --yes
 ```
 
-## Query executions through MCP
+## Inspect v2 activity through MCP
 
-If you want assistant-native tooling (Claude Code, Cursor, etc.), install and
-run the MCP server:
+Install `kitaru[mcp]` and run `kitaru-mcp` to expose the default read-only v2 surface. `kitaru_activity_read` can list or get sessions, replays, evaluations, experiment runs, and jobs, and can list bounded child pages for session nodes, experiment-run jobs, and job tasks.
 
-```bash
-pip install "kitaru[mcp]"
-kitaru-mcp
-```
+The native v2 server does not expose the execution logs, artifacts, wait input, resume, retry, or execution deletion operations described in this guide. Standard mode adds immediate v2 replay, session-run, session-import, session-evaluation, and experiment-run starts; destructive mode adds job and experiment-run cancellation plus a narrow delete allowlist for cohorts, cohort versions, experiments, and experiment runs.
 
-Then use tool calls like:
-
-- `kitaru_executions_list(status="waiting")`
-- `kitaru_executions_statistics(group_by=["status"])`
-- `kitaru_executions_input(exec_id=..., wait=..., value=...)` (MCP requires explicit `wait`)
-- `kitaru_executions_abort_wait(exec_id=..., wait=...)`
-- `kitaru_executions_resume(exec_id=...)`
-- `kitaru_executions_delete(exec_id=...)`
-- `get_execution_logs(exec_id=...)`
-- `kitaru_artifacts_get(artifact_id=...)`
-- `kitaru_status()`
-
-Use the pending-wait name or ID shown by the execution, or already known by the
-workflow. Resolve that wait with `kitaru_executions_input` or explicitly abort
-it with `kitaru_executions_abort_wait`, then inspect the returned execution's
-`status` and singular `pending_wait`. If `pending_wait` is absent but the
-execution does not continue, call `kitaru_executions_resume` (for example,
-because the original runner exited).
-
-Aborting a wait resolves only that selected wait; it does not cancel the whole
-execution. The input and abort-wait tools do not call resume themselves, though
-an existing runner may continue after the wait is resolved.
-
-See the full setup guide at [MCP Server](../agent-native/mcp-server.md).
+See the complete measured registry and mode guidance at [MCP Server](../agent-native/mcp-server.md).
 
 ## Try the examples
 
@@ -674,7 +636,6 @@ uv run pytest tests/test_phase15_wait_example.py
 uv run python examples/features/replay/replay_with_overrides.py
 uv run pytest tests/test_phase16_replay_example.py
 
-uv sync --extra local --extra mcp
-uv run python examples/features/mcp/mcp_query_tools.py
-uv run pytest tests/mcp/test_phase19_mcp_example.py
+uv sync --extra mcp
+# Configure examples/v2/mcp/.mcp.json.example in your MCP client.
 ```

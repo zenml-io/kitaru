@@ -93,6 +93,11 @@ class StubExperimentClient:
             self.owner.evaluator_lookups += 1
             yield self.owner.quality
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.evaluator_lookups += 1
+            return SimpleNamespace(items=[self.owner.quality], next_cursor=None)
+
         async def get(self, parent_id: uuid.UUID) -> Any:
             self.owner.evaluator_lookups += 1
             if parent_id == self.owner.quality.id:

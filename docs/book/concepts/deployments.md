@@ -18,7 +18,6 @@ You can create deployments from three surfaces:
 
 * CLI: `kitaru deploy path/to/file.py:flow_name`
 * Python SDK: `flow_name.deploy(...)`
-* MCP: `kitaru_deployments_deploy(target="path/to/file.py:flow_name", ...)`
 
 The CLI also has `kitaru build path/to/file.py:flow_name` for the narrower case
 where you want to create an immutable deployment version **without** attaching a
@@ -30,7 +29,6 @@ You can then invoke the deployed flow without the original target path:
 
 * CLI: `kitaru invoke flow_name`
 * Python SDK: `flow_name.invoke(...)` or `deployment.invoke(...)`
-* MCP: `kitaru_deployments_invoke(flow="flow_name", ...)`
 
 If you want a step-by-step producer/consumer walkthrough, see the
 [Deploy and invoke flows guide](../guides/deployments.md).
@@ -264,12 +262,12 @@ For headless environments, configure the same connection with environment
 variables:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 
-For automation, `KITARU_AUTH_TOKEN` should normally be a service-account API key
+For automation, `KITARU_API_KEY` should normally be a service-account API key
 created with `kitaru auth service-accounts create` and
 `kitaru auth api-keys create`. Those three values are the whole connection
 puzzle: where the Kitaru server is, how to authenticate to it, and which project
@@ -277,9 +275,7 @@ to use once you are there. If any piece is missing, commands that need the serve
 fail with a short error telling you what to set. `kitaru info` shows which
 connection values Kitaru currently sees.
 
-After that, `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, and MCP
-`kitaru_deployments_invoke(...)` all use the active Kitaru server connection. The
-invocation request does not carry a separate deployment-specific token.
+After that, `kitaru invoke` and `KitaruClient().deployments.invoke(...)` use the active Kitaru server connection. The invocation request does not carry a separate deployment-specific token.
 
 For shell scripts or CI jobs, `kitaru flow deployments curl FLOW` generates a
 copy-pasteable curl command for the active Kitaru server. Kitaru resolves the
@@ -375,6 +371,4 @@ An MCP-capable assistant can do the same with structured tool input:
 }
 ```
 
-Use `kitaru_deployments_list(flow="research_agent")` or
-`kitaru_deployments_get(flow="research_agent", tag="stable")` when the assistant
-needs to inspect the available routes before invoking.
+Use `kitaru flow deployments list research_agent` when an assistant needs to inspect the available routes before invoking. The native v2 MCP server does not expose deployment management.
