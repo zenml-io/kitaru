@@ -31,12 +31,12 @@ Concretely:
 1. Create a service account for the machine or automation job.
 2. Create an API key for that service account.
 3. Use that API key with `kitaru login --api-key ...` or
-   `KITARU_AUTH_TOKEN=...`.
+   `KITARU_API_KEY=...`.
 4. When a raw HTTP call needs a bearer token, run `kitaru auth token`. Kitaru
    exchanges the active API-key-backed connection for a short-lived bearer
    token.
 
-In automation, `KITARU_AUTH_TOKEN` holds the long-lived service-account API key;
+In automation, `KITARU_API_KEY` holds the long-lived service-account API key;
 `kitaru auth token` exchanges that active connection for a short-lived bearer
 token when a raw HTTP call needs one. The bearer token is useful for curl
 snippets, but it is not the long-lived secret you store in CI.
@@ -75,8 +75,8 @@ For a non-interactive job, configure the server URL, service-account API key,
 and project:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_...
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=kat_...
 export KITARU_PROJECT=production
 ```
 

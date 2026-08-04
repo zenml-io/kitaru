@@ -34,7 +34,9 @@ schema:
       explains why automation is incomplete, and reviewer_action tells a release reviewer
       what to do if that example changed.
     release_policy: Whether changes in this area should prompt release evidence.
-explicit_exclusions: []
+explicit_exclusions:
+  - examples/v2/mcp
+  - examples/v2/mcp/.mcp.json.example
 examples:
   - id: basic-flow
     path: examples/features/basic_flow/first_working_flow.py
@@ -1123,21 +1125,3 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
-  - id: mcp-query-tools
-    path: examples/features/mcp/mcp_query_tools.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: MCP query tools example
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/mcp/test_phase19_mcp_example.py
-      local_smoke:
-        status: covered
-        command: uv run python examples/features/mcp/mcp_query_tools.py
-        requires_server: true
-        timeout_seconds: 30
-      live_provider:
-        status: not_applicable
-        required: false
-    release_policy:
-      required_when_changed: true

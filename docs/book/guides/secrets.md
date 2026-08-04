@@ -157,11 +157,7 @@ raw secret values from checkpoints unless that is explicitly intended.
 
 ## MCP support
 
-The Kitaru MCP server exposes `kitaru_secrets_create` for metadata-only secret
-creation and `kitaru_secrets_list` for paginated discovery without values. List
-results follow the same `keys_known=False` contract described above. The server
-intentionally does not expose secret deletion; use the CLI or Python SDK when
-you need to delete a secret.
+The native v2 MCP server does not expose secret creation, discovery, values, or deletion. Use the CLI or Python SDK for secret management; never place secret values in an MCP transcript.
 
 ## Related reference pages
 

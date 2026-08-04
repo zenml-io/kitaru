@@ -11,6 +11,7 @@ Use this when you need the command catalog beyond the daily loop in the root
 ## Python Workflows
 
 - `uv sync`: install and sync dependencies
+- `uv sync --extra mcp`: include the optional native MCP server
 - `uv sync --extra local`: install with local ZenML runtime components
 - `uv run kitaru init`: required in a fresh `git worktree`; it creates the
   `.kitaru/` project marker that ZenML's dynamic pipeline resolver needs to
@@ -33,6 +34,8 @@ Use this when you need the command catalog beyond the daily loop in the root
   against public example docs, referenced tests/smoke/provider metadata, and
   explicit waivers for `missing`, `planned`, or `manual_only` coverage
 - `just build`: build wheel and sdist locally
+- `just mcp-schema-check`: verify the public MCP registry budgets and committed snapshots
+- `just mcp-wheel-smoke`: verify clean base and `[mcp]` installs from the single wheel under `dist/`
 
 When merging `develop` into a feature branch and resolving `pyproject.toml` or
 `uv.lock`, do not assume a broad `uv lock` preserves recent dependency-security
@@ -48,6 +51,12 @@ These require Node 22+ and pnpm.
 - `just docs`: preview docs locally at `localhost:3000`
 - `just docs-build`: build docs static export
 - `just docs-validate`: validate the static export as served under `/docs`
+
+## Native MCP Server
+
+The native v2 server is installed with `kitaru[mcp]` and started with `kitaru-mcp`. It defaults to `read-only` mode with 2 tools; `standard` advertises 5 and `destructive` advertises 7. Treat a mode change or schema snapshot change as a public API and security review.
+
+Run `uv run --extra mcp python scripts/report_mcp_schema.py --check` after changing MCP models, registry declarations, descriptions, annotations, or SDK versions. Build the wheel and run `just mcp-wheel-smoke` after entrypoint, packaging, or optional-import changes.
 
 ## CLI Structure
 
@@ -76,7 +85,7 @@ be tracked.
   and counts.
 - Never include user content, file paths, prompts, or secret values.
 - CLI feature events use `track()` in subcommand handlers under `src/kitaru/cli/`.
-- MCP feature events use `@tracked_mcp_tool` in `src/kitaru/mcp/server.py`.
+- Native MCP calls are attributed through `AnalyticsSource.MCP` on the shared API client; do not add argument/body telemetry or a separate tool event without a reviewed privacy contract.
 - Core SDK lifecycle events use `track(AnalyticsEvent.X, {...})` in the relevant module.
 - All `track()` calls must fail silently.
 

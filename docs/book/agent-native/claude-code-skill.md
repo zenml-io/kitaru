@@ -5,19 +5,9 @@ icon: wand-magic-sparkles
 
 # Agent Skills
 
-The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills)
-package teaches your coding agent how to build and operate Kitaru flows. It is
-eight reusable Markdown agent skills for scoping, authoring, migrating, and
-running durable workflows. Pair them with the [MCP server](mcp-server.md) so a
-coding agent (Claude Code, Codex, Cursor) can both write the flow and drive the
-run → replay → improve loop against it.
+The [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package teaches your coding agent how to build and operate Kitaru workflows. It contains reusable Markdown skills for scoping, authoring, migrating, and running durable workflows. Pair them with the read-only-by-default [MCP server](mcp-server.md) when a coding agent also needs bounded access to the v2 registry, sessions, replays, evaluations, experiments, and jobs.
 
-The skills do not add a new runtime product to Kitaru. They are Markdown
-procedures that Claude Code and other skill-aware agent hosts read so they know
-the current Kitaru patterns: where to put checkpoints, where waits are safe,
-which adapter boundary is honest, and which side effects need extra care. The
-MCP server gives the agent the tools to execute and replay; the skills give it
-the judgment to author correctly.
+The skills do not add a new runtime product to Kitaru. They are Markdown procedures that Claude Code and other skill-aware agent hosts read so they know the current Kitaru patterns: where to put checkpoints, where waits are safe, which adapter boundary is honest, and which side effects need extra care. The MCP server supplies a compact operational interface with explicitly gated workflow starts and destructive actions; the skills supply authoring judgment.
 
 ## Skill inventory
 
@@ -65,7 +55,7 @@ For existing framework code:
    an approximate boundary, and which behavior stays owned by the framework.
 3. **Use `/kitaru:kitaru-authoring` for follow-up Kitaru work.** After the adapter seam
    is in place, authoring helps with extra checkpoints, waits, artifacts,
-   deployment commands, CLI/MCP inspection, and operational polish.
+   CLI operations, MCP registry/activity inspection, and operational polish.
 
 ## Install from the Claude Code marketplace
 
@@ -147,7 +137,7 @@ include `references/` files that the agent reads during the guided workflow.
 - "Use `/kitaru:kitaru-authoring` to refactor this script into one `@flow` with explicit checkpoints."
 - "Add a flow-level `kitaru.wait()` approval gate before publishing the final report."
 - "Add named `kitaru.save()` artifacts so I can inspect the plan, draft, and final output later."
-- "Show me how to inspect executions, waits, logs, and artifacts from the CLI and MCP tools."
+- "Show me how to inspect workflow details from the CLI, then use the read-only MCP server to inspect related v2 sessions and jobs."
 
 ### Migration
 

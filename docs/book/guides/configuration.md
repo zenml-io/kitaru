@@ -123,50 +123,19 @@ Kitaru's public env-var surface uses `KITARU_*` names.
 
 ### Connection
 
-These are the key env vars for non-interactive setup:
+The v2 client and native MCP server use two independent environment variables for non-interactive setup:
 
-- `KITARU_SERVER_URL`
-- `KITARU_AUTH_TOKEN`
-- `KITARU_PROJECT`
+- `KITARU_API_URL` selects the API target.
+- `KITARU_API_KEY` supplies a credential when the target is not anonymous.
 
-For CI and other machine callers, `KITARU_AUTH_TOKEN` is usually a
-service-account API key created with `kitaru auth service-accounts ...` and
-`kitaru auth api-keys ...`. See [Authentication](authentication.md) for
-the full service-account/API-key flow.
-
-For normal interactive use, prefer `kitaru login` (starts and connects to a
-local server) or `kitaru login <server>` (connects to a remote server). The
-`KITARU_*` connection variables are for Docker, CI, and other headless
-environments. Set them together:
+For normal interactive use, prefer `kitaru login SERVER` and a persisted context. For CI, Docker, and other headless environments, set the API URL and, when required, an API key:
 
 ```bash
-export KITARU_SERVER_URL=https://my-server.example.com
-export KITARU_AUTH_TOKEN=kat_abc123...
-export KITARU_PROJECT=my-project
+export KITARU_API_URL=https://my-server.example.com
+export KITARU_API_KEY=kat_abc123...
 ```
 
-There are two guardrails:
-
-1. `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` must be set together.
-2. If a remote server is configured via env vars, `KITARU_PROJECT` is required
-   at first use (`KitaruClient()`, `my_flow.run()`, replay, etc.).
-
-For interactive work, you can persist the project instead with
-`kitaru project use production` or choose it during login with
-`kitaru login <server> --project production`. For CI, Docker, and other
-headless processes, prefer `KITARU_PROJECT` so the job states its project
-explicitly.
-
-Auth-management commands are the exception to the project rule because service
-accounts and API keys belong to the server, not to a single project. For
-example, `kitaru auth api-keys rotate ...` can run with a server URL and auth
-token even when `KITARU_PROJECT` is not set.
-
-Internally, Kitaru translates the server URL and auth token into the ZenML env
-vars the runtime already understands. `KITARU_PROJECT` remains the Kitaru project
-selector for names like `production`; it is mirrored to `ZENML_ACTIVE_PROJECT_ID`
-only when the value is already a UUID for compatibility. That means you should
-configure `KITARU_*`, not `ZENML_*`, in normal Kitaru docs and examples.
+The API key is optional so public servers can be used anonymously. Target resolution and credential resolution are independent: an explicit target can still use a stored credential for the same normalized URL, and `KITARU_API_KEY` overrides a stored credential. The native MCP server also accepts `--server` or `--context`, fixes the selected connection for the process lifetime, and intentionally ignores `KITARU_TASK_TOKEN`.
 
 ### Execution
 
@@ -183,10 +152,8 @@ The same image shape is used at deploy time:
 
 - CLI: `kitaru deploy ... --image ...` / `kitaru build ... --image ...`
 - SDK: `flow.deploy(image=...)`
-- MCP: `kitaru_deployments_deploy(image=...)`
 
-All three accept either a base image string or an object matching
-`kitaru.ImageSettings`. On deployments, that image config becomes part of the
+Both accept either a base image string or an object matching `kitaru.ImageSettings`. On deployments, that image config becomes part of the
 saved deployment snapshot.
 
 ### LLM
@@ -217,7 +184,7 @@ If you want the full secret-backed setup path for `kitaru.llm()`, see
 ### `kitaru status`
 
 `kitaru status` shows an **Environment** section when `KITARU_*` vars are
-active. Secret values such as `KITARU_AUTH_TOKEN` and
+active. Secret values such as `KITARU_API_KEY` and
 `KITARU_LOG_STORE_API_KEY` are masked.
 
 ## Precedence (highest to lowest)
@@ -225,7 +192,7 @@ active. Secret values such as `KITARU_AUTH_TOKEN` and
 1. Invocation-time overrides (`my_flow.run(..., stack="prod")`)
 2. Flow decorator defaults (`@flow(stack="prod")`)
 3. `kitaru.configure(...)`
-4. Environment variables (`KITARU_STACK`, `KITARU_SERVER_URL`, etc.)
+4. Environment variables (`KITARU_STACK`, `KITARU_API_URL`, etc.)
 5. Project config (`pyproject.toml` under `[tool.kitaru]`)
 6. Persisted active project/stack fallback plus global user config (for example connection defaults)
 7. Built-in defaults (`retries=0`; cache is left unset so per-checkpoint cache settings and orchestrator defaults apply)
@@ -352,14 +319,14 @@ For env-driven remote bootstrap, set `KITARU_PROJECT` alongside the server URL
 and auth token:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_...
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=kat_...
 export KITARU_PROJECT=production
 ```
 
 This rule prevents a headless job from accidentally using a stale persisted
 project from some previous interactive session. The concrete story is: if a CI
-container starts with `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN`, Kitaru expects
+container starts with `KITARU_API_URL` and `KITARU_API_KEY`, Kitaru expects
 the container to also say `KITARU_PROJECT`. It does not silently borrow whatever
 project a developer used last week.
 
@@ -372,17 +339,17 @@ When several sources name a project, higher-priority sources win:
    `kitaru project use ...`
 
 Bare `kitaru login` is the local-server path: it does not use
-`KITARU_SERVER_URL` or `KITARU_AUTH_TOKEN`, and it warns instead of failing if
+`KITARU_API_URL` or `KITARU_API_KEY`, and it warns instead of failing if
 those remote auth env vars are already set in your shell.
 
-See [Projects](projects.md) for the full CLI, SDK, and MCP project workflow.
+See [Projects](projects.md) for the full CLI and SDK project workflow.
 
 ## Headless / Docker / CI recipe
 
 ```bash
 # Connection
-export KITARU_SERVER_URL=https://my-server.example.com
-export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_API_URL=https://my-server.example.com
+export KITARU_API_KEY=kat_abc123...
 export KITARU_PROJECT=my-project
 
 # Execution

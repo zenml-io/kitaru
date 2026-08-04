@@ -15,7 +15,6 @@ Fetch runtime logs through:
 
 - Python SDK: `KitaruClient().executions.logs(...)`
 - CLI: `kitaru executions logs ...`
-- MCP: `get_execution_logs` (so a coding agent can read logs while driving the loop)
 
 ## CLI quick start
 
