@@ -20,6 +20,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -34,6 +35,7 @@ from kitaru.server.adapters.db.orm.base import (
 )
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
+    index_name,
     unique_constraint_name,
 )
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -52,6 +54,12 @@ EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name(
 )
 EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "experiment_run", ["experiment_id", "number"]
+)
+EXPERIMENT_RUN_AGENT_VERSION_ID_INDEX = index_name(
+    "experiment_run", ["agent_version_id"]
+)
+EXPERIMENT_RUN_COHORT_VERSION_ID_INDEX = index_name(
+    "experiment_run", ["cohort_version_id"]
 )
 
 
@@ -81,6 +89,8 @@ class ExperimentRunORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "experiment_id", "number", name=EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT
         ),
+        Index(EXPERIMENT_RUN_AGENT_VERSION_ID_INDEX, "agent_version_id"),
+        Index(EXPERIMENT_RUN_COHORT_VERSION_ID_INDEX, "cohort_version_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
