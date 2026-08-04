@@ -1,37 +1,51 @@
-{{- $server := .Values.kitaru.server -}}
-{{- if $server.ingress.enabled }}
-{{- if $server.ingress.host }}
+{{- if .Values.server.pro.enabled }}
 
-Kitaru server is available at:
+The ZenML Pro workspace API is now active and ready to use at the following URL:
 
-  http{{ if $server.ingress.tls.enabled }}s{{ end }}://{{ $server.ingress.host }}{{ $server.ingress.path }}
+  {{ .Values.server.serverURL }}
 
-Connect your CLI:
+{{- else }}
+{{- if .Values.server.gateway.enabled }}
+{{- if .Values.server.gateway.host }}
+{{- $gatewayScheme := "http" }}
+{{- if eq .Values.server.gateway.sectionName "https" }}
+{{- $gatewayScheme = "https" }}
+{{- end }}
 
-  kitaru login http{{ if $server.ingress.tls.enabled }}s{{ end }}://{{ $server.ingress.host }}
+Please access the Kitaru server at the following URL {{- if .Release.IsInstall }} to activate the server and create an initial admin user account {{- end }}:
 
+  {{ $gatewayScheme }}://{{ .Values.server.gateway.host }}{{ .Values.server.gateway.path }}
+
+{{- else }}
+{{- end }}
+{{- else if .Values.server.ingress.enabled }}
+{{- if .Values.server.ingress.host }}
+
+Please access the Kitaru server at the following URL {{- if .Release.IsInstall }} to activate the server and create an initial admin user account {{- end }}:
+
+  http{{ if .Values.server.ingress.tls.enabled }}s{{ end }}://{{ .Values.server.ingress.host }}{{ .Values.server.ingress.path }}
+
+{{- else }}
 {{- end }}
 {{- else }}
 
-Access the Kitaru server using one of these methods:
+You can get the Kitaru server URL by running these commands:
 
-{{- if contains "NodePort" $server.service.type }}
-  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ .Release.Name }}-kitaru)
+{{- if contains "NodePort" .Values.server.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "kitaru.fullname" . }})
   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
-  echo "Kitaru server: http://$NODE_IP:$NODE_PORT"
-  kitaru login http://$NODE_IP:$NODE_PORT
-{{- else if contains "LoadBalancer" $server.service.type }}
-  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
-        Watch status with: kubectl get svc --namespace {{ .Release.Namespace }} -w {{ .Release.Name }}-kitaru
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.server.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "kitaru.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "kitaru.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.server.service.port }}
+{{- else if contains "ClusterIP" .Values.server.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "kitaru.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
 
-  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ .Release.Name }}-kitaru --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
-  echo "Kitaru server: http://$SERVICE_IP:{{ $server.service.port }}"
-  kitaru login http://$SERVICE_IP:{{ $server.service.port }}
-{{- else if contains "ClusterIP" $server.service.type }}
-  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-kitaru 8080:{{ $server.service.port }}
-
-  Then connect:
-
-  kitaru login http://localhost:8080
 {{- end }}
 {{- end }}

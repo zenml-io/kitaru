@@ -1,0 +1,58 @@
+{{- if .Values.server.ingress.enabled -}}
+{{- $fullName := include "kitaru.fullname" . -}}
+{{- if and .Values.server.ingress.className (not (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion)) }}
+  {{- if not (hasKey .Values.server.ingress.annotations "kubernetes.io/ingress.class") }}
+  {{- $_ := set .Values.server.ingress.annotations "kubernetes.io/ingress.class" .Values.server.ingress.className}}
+  {{- end }}
+{{- end }}
+{{- if and .Values.server.ingress.tls.enabled (eq .Values.server.ingress.className "nginx") }}
+  {{- $_ := set .Values.server.ingress.annotations "nginx.ingress.kubernetes.io/ssl-redirect" "true"}}
+{{- end }}
+
+{{- if semverCompare ">=1.19-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1
+{{- else if semverCompare ">=1.14-0" .Capabilities.KubeVersion.GitVersion -}}
+apiVersion: networking.k8s.io/v1beta1
+{{- else -}}
+apiVersion: extensions/v1beta1
+{{- end }}
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "kitaru.labels" . | nindent 4 }}
+  {{- with .Values.server.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if and .Values.server.ingress.className (semverCompare ">=1.18-0" .Capabilities.KubeVersion.GitVersion) }}
+  ingressClassName: {{ .Values.server.ingress.className }}
+  {{- end }}
+  {{- if .Values.server.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.server.ingress.host | quote }}
+      secretName: {{ .Values.server.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - http:
+        paths:
+          - path: {{ .Values.server.ingress.path }}
+            {{- if semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion }}
+            pathType: Prefix
+            {{- end }}
+            backend:
+              {{- if semverCompare ">=1.19-0" $.Capabilities.KubeVersion.GitVersion }}
+              service:
+                name: {{ $fullName }}
+                port:
+                  number: {{ .Values.server.service.port }}
+              {{- else }}
+              serviceName: {{ $fullName }}
+              servicePort: {{ .Values.server.service.port }}
+              {{- end }}
+      {{- if .Values.server.ingress.host }}
+      host: {{ .Values.server.ingress.host | quote }}
+      {{- end }}
+{{- end }}

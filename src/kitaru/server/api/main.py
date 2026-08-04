@@ -16,16 +16,32 @@
 import logging
 
 import uvicorn
+from fastapi import FastAPI
 
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 
 
+def app() -> FastAPI:
+    """Create the API application from environment settings.
+
+    Returns:
+        Configured FastAPI application.
+    """
+    settings = APISettings()
+    logging.basicConfig(level=settings.LOG_LEVEL)
+    return create_app(settings)
+
+
 def main() -> None:
     """Run the API server."""
     settings = APISettings()
-    logging.basicConfig(level=settings.LOG_LEVEL)
-    uvicorn.run(create_app(settings), host=settings.HOST, port=settings.PORT)
+    uvicorn.run(
+        app(settings),
+        host=settings.HOST,
+        port=settings.PORT,
+        log_level=settings.LOG_LEVEL.lower(),
+    )
 
 
 if __name__ == "__main__":

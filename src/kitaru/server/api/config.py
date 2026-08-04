@@ -50,6 +50,8 @@ class APISettings(Settings):
 
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    ROOT_URL_PATH: str = ""
+    CORS_ALLOW_ORIGINS: str = "*"
 
     AUTH_SCHEME: AuthScheme = AuthScheme.NONE
 

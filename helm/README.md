@@ -1,20 +1,10 @@
 # Kitaru Helm Chart
 
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/kitaru)](https://artifacthub.io/packages/helm/kitaru/kitaru)
-
-![Kitaru Logo](https://raw.githubusercontent.com/zenml-io/kitaru/main/assets/kitaru_logo.png)
+![Kitaru Logo](https://kitaru.ai/kitaru-logo.svg)
 
 ## Overview
 
 [Kitaru](https://kitaru.ai) is a durable execution layer for AI agents. It provides primitives that make agent workflows persistent, replayable, and observable — without requiring users to learn a graph DSL or change their Python control flow.
-
-## Features
-
-- Easy deployment of the Kitaru server on Kubernetes.
-- Wraps the [ZenML Helm chart](https://artifacthub.io/packages/helm/zenml/zenml) as a dependency with Kitaru-specific defaults.
-- All ZenML server features available: database migrations, secrets encryption, ingress, autoscaling, and more.
-- Highly configurable via Helm values.
-- Supports multiple secrets store backends (AWS Secrets Manager, GCP Secrets Manager, Azure Key Vault).
 
 ## Quickstart
 
@@ -24,103 +14,134 @@ To install the Kitaru chart directly from Amazon ECR, use the following command:
 
 ```bash
 # example command for version 0.2.0
-helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --namespace kitaru \
-  --create-namespace \
-  --version 0.2.0
+helm install my-kitaru oci://public.ecr.aws/kitaru/kitaru --version 0.2.0
 ```
 
-This starts a Kitaru server with a local SQLite database persisted via a
-PersistentVolumeClaim. Once the pod is ready, port-forward and connect:
-
-```bash
-kubectl -n kitaru port-forward svc/kitaru-server-kitaru 8080:80
-kitaru login http://localhost:8080
-```
+Note: Ensure you have OCI support enabled in your Helm client.
 
 ## Configuration
 
-All configuration is done through a values file. Server settings go under
-`kitaru.server` (the ZenML runtime that powers the Kitaru server). Create a
-`my-values.yaml` with the settings you need, then install:
+This chart offers a multitude of configuration options. For detailed
+information, check the default [`values.yaml`](values.yaml) file. For full
+details of the configuration options, refer to the
+[Kitaru documentation](https://docs.zenml.io/kitaru/).
 
-```bash
-helm install kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  --namespace kitaru \
-  --create-namespace \
-  -f my-values.yaml
-```
+### PostgreSQL TLS
 
-### Minimal production example
+Configure PostgreSQL TLS with `server.database.sslMode`. Supported modes are
+`disable`, `require`, `verify-ca`, and `verify-full`. The `verify-full` mode
+uses the system CA trust store unless `sslCa` supplies a custom CA.
 
-A typical production setup with MySQL, Ingress, and secrets encryption:
+Certificates can be supplied inline:
 
 ```yaml
-kitaru:
-  server:
-    serverURL: https://kitaru.example.com
-
-    database:
-      url: "mysql://kitaru@mysql-host:3306/kitaru"
-      passwordSecretRef:
-        name: kitaru-db-password
-        key: password
-
-    auth:
-      jwtSecretKey: "<openssl rand -hex 32>"
-
-    secretsStore:
-      enabled: true
-      type: sql
-      sql:
-        encryptionKey: "<openssl rand -hex 32>"
-
-    ingress:
-      enabled: true
-      host: kitaru.example.com
-      annotations:
-        cert-manager.io/cluster-issuer: "letsencrypt"
-      tls:
-        enabled: true
-        secretName: kitaru-tls
-
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: "1"
-      memory: 2Gi
+server:
+  database:
+    sslMode: verify-full
+    sslCa:
+      value: |
+        -----BEGIN CERTIFICATE-----
+        ...
+        -----END CERTIFICATE-----
 ```
 
-Before installing, create the database password Secret:
+For production deployments, referencing an existing Kubernetes Secret avoids
+placing certificate material in Helm values:
 
-```bash
-kubectl -n kitaru create secret generic kitaru-db-password \
-  --from-literal=password=my-secret-password
+```yaml
+server:
+  database:
+    sslMode: verify-full
+    sslCa:
+      secretRef:
+        name: postgres-ca
+        key: ca.crt
+    sslCert:
+      secretRef:
+        name: postgres-client
+        key: tls.crt
+    sslKey:
+      secretRef:
+        name: postgres-client
+        key: tls.key
 ```
 
-All available settings are documented with inline comments in
-[`values.yaml`](values.yaml). For the full list of ZenML server options, see the
-[ZenML Helm chart values](https://artifacthub.io/packages/helm/zenml/zenml?modal=values)
-— all options are available under the `kitaru.server` key.
+`sslCert` and `sslKey` configure mutual TLS and must be supplied together. For
+each certificate, configure either `value` or `secretRef`, but not both.
 
-## Upgrading
+### Custom CA Certificates
 
-```bash
-helm upgrade kitaru-server oci://public.ecr.aws/zenml/kitaru \
-  -n kitaru -f my-values.yaml
+If you need to connect to services using HTTPS with certificates signed by custom Certificate Authorities (e.g., self-signed certificates), you can configure custom CA certificates. There are two ways to provide custom CA certificates:
+
+1. Direct injection in values.yaml:
+```yaml
+server:
+  certificates:
+    customCAs:
+      - name: "my-custom-ca"
+        certificate: |
+          -----BEGIN CERTIFICATE-----
+          MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiIMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
+          ...
+          -----END CERTIFICATE-----
 ```
 
-## Uninstalling
-
-```bash
-helm uninstall kitaru-server --namespace kitaru
+2. Reference existing Kubernetes secrets:
+```yaml
+server:
+  certificates:
+    secretRefs:
+      - name: "my-secret"
+        key: "ca.crt"
 ```
 
-The PVC created for SQLite persistence is **not** deleted automatically. To
-remove it:
+The certificates will be installed in the server container, allowing it to securely connect to services using these custom CA certificates.
 
-```bash
-kubectl -n kitaru delete pvc -l app.kubernetes.io/instance=kitaru-server
+### HTTP Proxy Configuration
+
+If your environment requires a proxy for external connections, you can configure it using:
+
+```yaml
+server:
+  proxy:
+    enabled: true
+    httpProxy: "http://proxy.example.com:8080"
+    httpsProxy: "http://proxy.example.com:8080"
+    # Additional hostnames/domains/IPs/CIDRs to exclude from proxying
+    additionalNoProxy:
+      - "internal.example.com"
+      - "10.0.0.0/8"
 ```
+
+By default, the following hostnames/domains are excluded from proxying:
+- `localhost`, `127.0.0.1`, `::1` (IPv4 and IPv6 localhost)
+- `fe80::/10` (IPv6 link-local addresses)
+- `.svc` and `.svc.cluster.local` (Kubernetes service DNS domains)
+- The hostname from `server.serverURL` if configured
+- The ingress hostname (`server.ingress.host`) if configured
+- Internal service names used for communication between components
+
+You can add additional exclusions using the `additionalNoProxy` list. The NO_PROXY environment variable accepts:
+- Hostnames (e.g., "kitaru.example.com")
+- Domain names with leading dot for wildcards (e.g., ".example.com")
+- IPv4 addresses (e.g., "10.0.0.1")
+- IPv4 ranges in CIDR notation (e.g., "10.0.0.0/8")
+- IPv6 addresses (e.g., "::1")
+- IPv6 ranges in CIDR notation (e.g., "fe80::/10")
+
+## Telemetry
+
+The Kitaru server collects anonymous usage data to help us improve the product. You can opt out by setting `server.analyticsOptIn` to false.
+
+## Contributing
+
+Feel free to [submit issues or pull requests](https://github.com/zenml-io/kitaru) if you would like to improve the chart.
+
+## License
+
+[This project is licensed](https://github.com/zenml-io/kitaru/blob/main/LICENSE) under the terms of the Apache-2.0 license.
+
+## Further Reading
+
+- [Kitaru Documentation](https://docs.zenml.io)
+- [Kitaru Source Code](https://github.com/zenml-io/kitaru)

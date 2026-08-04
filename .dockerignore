@@ -44,5 +44,7 @@ build/
 .env.*
 
 # Docker (avoid recursive copy)
-docker/dev.Dockerfile
-docker/release.Dockerfile
+docker/dev-client.Dockerfile
+docker/dev-server.Dockerfile
+docker/release-client.Dockerfile
+docker/release-server.Dockerfile

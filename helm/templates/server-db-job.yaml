@@ -1,0 +1,194 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "kitaru.fullname" . }}-db-migration
+  labels:
+    {{- include "kitaru.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation{{ if ne (lower (default "info" .Values.server.logging.verbosity)) "debug" }},hook-succeeded{{ end }}
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/server-secret.yaml") . | sha256sum }}
+      {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kitaru.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: db-migration
+    spec:
+      {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
+      initContainers:
+        - name: update-ca-certificates
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              # Copy the system CA bundle
+              cp /etc/ssl/certs/ca-certificates.crt /updated-certs/ca-certificates.crt
+              # Append all custom certificates
+              for cert in /custom-certs/*.crt; do
+                if [ -f "$cert" ]; then
+                  cat "$cert" >> /updated-certs/ca-certificates.crt
+                fi
+              done
+          volumeMounts:
+            - name: custom-certs
+              mountPath: /custom-certs
+              readOnly: true
+            - name: ca-certificates
+              mountPath: /updated-certs
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "kitaru.serviceAccountName" . }}-db-migration
+      {{- else }}
+      serviceAccountName: {{ include "kitaru.serviceAccountName" . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+      {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
+        - name: custom-certs
+          projected:
+            sources:
+            {{- range .Values.server.certificates.customCAs }}
+            - secret:
+                name: {{ include "kitaru.fullname" $ }}-custom-ca-{{ .name }}-db-migration
+                items:
+                  - key: certificate
+                    path: {{ .name }}.crt
+            {{- end }}
+            {{- range .Values.server.certificates.secretRefs }}
+            - secret:
+                name: {{ .name }}
+                items:
+                  - key: {{ .key }}
+                    path: {{ .name }}.crt
+            {{- end }}
+        - name: ca-certificates
+          emptyDir: {}
+      {{- end }}
+      {{- if or .Values.server.database.sslCa .Values.server.database.sslCert .Values.server.database.sslKey }}
+        - name: db-certs
+          projected:
+            defaultMode: 0400
+            sources:
+              {{- if or (and .Values.server.database.sslCa .Values.server.database.sslCa.value) (and .Values.server.database.sslCert .Values.server.database.sslCert.value) (and .Values.server.database.sslKey .Values.server.database.sslKey.value) }}
+              - secret:
+                  name: {{ include "kitaru.fullname" . }}-db-certs-db-migration
+                  items:
+                    {{- if and .Values.server.database.sslCa .Values.server.database.sslCa.value }}
+                    - key: ca.pem
+                      path: ca.pem
+                    {{- end }}
+                    {{- if and .Values.server.database.sslCert .Values.server.database.sslCert.value }}
+                    - key: client-cert.pem
+                      path: client-cert.pem
+                    {{- end }}
+                    {{- if and .Values.server.database.sslKey .Values.server.database.sslKey.value }}
+                    - key: client-key.pem
+                      path: client-key.pem
+                    {{- end }}
+              {{- end }}
+              {{- if and .Values.server.database.sslCa .Values.server.database.sslCa.secretRef }}
+              - secret:
+                  name: {{ .Values.server.database.sslCa.secretRef.name }}
+                  items:
+                    - key: {{ .Values.server.database.sslCa.secretRef.key }}
+                      path: ca.pem
+              {{- end }}
+              {{- if and .Values.server.database.sslCert .Values.server.database.sslCert.secretRef }}
+              - secret:
+                  name: {{ .Values.server.database.sslCert.secretRef.name }}
+                  items:
+                    - key: {{ .Values.server.database.sslCert.secretRef.key }}
+                      path: client-cert.pem
+              {{- end }}
+              {{- if and .Values.server.database.sslKey .Values.server.database.sslKey.secretRef }}
+              - secret:
+                  name: {{ .Values.server.database.sslKey.secretRef.name }}
+                  items:
+                    - key: {{ .Values.server.database.sslKey.secretRef.key }}
+                      path: client-key.pem
+              {{- end }}
+      {{- end }}
+      restartPolicy: Never
+      containers:
+        - name: {{ .Chart.Name }}-db-migration
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          command: ["python", "-m", "kitaru.server.database.main"]
+          volumeMounts:
+          {{- if or .Values.server.certificates.customCAs .Values.server.certificates.secretRefs }}
+            - name: ca-certificates
+              mountPath: /updated-certs
+              readOnly: true
+          {{- end }}
+          {{- if or .Values.server.database.sslCa .Values.server.database.sslCert .Values.server.database.sslKey }}
+            - name: db-certs
+              mountPath: /dbcerts
+              readOnly: true
+          {{- end }}
+          env:
+            {{- $envVars := include "kitaru.envVariables" . | fromYaml | default dict }}
+            {{- range $k, $v := $envVars }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if .Values.server.database.passwordSecretRef }}
+            - name: KITARU_SERVER_DB_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.database.passwordSecretRef.name }}
+                  key: {{ .Values.server.database.passwordSecretRef.key }}
+            {{- end }}
+            {{- if .Values.server.database.encryptionKeySecretRef }}
+            - name: KITARU_SERVER_SECRET_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.database.encryptionKeySecretRef.name }}
+                  key: {{ .Values.server.database.encryptionKeySecretRef.key }}
+            {{- end }}
+            {{- if and (not .Values.server.pro.enabled) (eq .Values.server.auth.authScheme "local") .Values.server.auth.defaultAccount.passwordSecretRef }}
+            - name: KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.auth.defaultAccount.passwordSecretRef.name }}
+                  key: {{ .Values.server.auth.defaultAccount.passwordSecretRef.key }}
+            {{- end }}
+            {{- range .Values.server.environmentSecretKeyRefs }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ .secretKey }}
+            {{- end }}
+          envFrom:
+          - secretRef:
+              name: {{ include "kitaru.fullname" . }}-db-migration
+          resources:
+            {{- if .Values.resourcesMigrationPod }}
+            {{- toYaml .Values.resourcesMigrationPod | nindent 12 }}
+            {{- else }}
+            {{- toYaml .Values.resources | nindent 12 }}
+            {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from importlib.metadata import version
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from kitaru.analytics.client import AnalyticsClient
@@ -212,10 +213,23 @@ def create_app(settings: APISettings) -> FastAPI:
             # gets exported and flushed.
             shutdown_otel()
 
+    cors_allow_origins = [
+        origin.strip()
+        for origin in settings.CORS_ALLOW_ORIGINS.split(",")
+        if origin.strip()
+    ]
     app = FastAPI(
         title="Kitaru",
         version=version("kitaru"),
         lifespan=lifespan,
+        root_path=settings.ROOT_URL_PATH,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_allow_origins,
+        allow_credentials="*" not in cors_allow_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.settings = settings
     app.state.analytics = analytics
