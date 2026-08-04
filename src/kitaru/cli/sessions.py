@@ -30,6 +30,13 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionNodeListParams
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagListParams,
+    TagResourceType,
+    TagResponse,
+)
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
@@ -57,14 +64,58 @@ def _read_payload(path: Path) -> bytes:
         ) from None
 
 
-def _normalize_import_tags(tags: list[str] | None) -> list[str]:
+def _normalize_import_tags(tags: list[str] | None, *, wait: bool) -> list[str]:
     """Normalize repeatable import tags before any remote mutation."""
     normalized = [tag.strip() for tag in tags or []]
     if any(not tag for tag in normalized):
         raise CLIError("invalid_arguments", "--tag must not be empty.")
     if len(set(normalized)) != len(normalized):
         raise CLIError("invalid_arguments", "Each --tag value must be unique.")
+    if normalized and not wait:
+        raise CLIError(
+            "invalid_arguments",
+            "--tag requires --wait so the imported sessions can be tagged.",
+        )
     return normalized
+
+
+async def _get_or_create_tag(client: Any, name: str) -> TagResponse:
+    """Resolve one exact tag name, creating it when absent."""
+    params = TagListParams(
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=name)
+    )
+    async for tag in client.tags.iter(params):
+        return tag
+    try:
+        return await client.tags.create(TagCreateRequest(name=name))
+    except APIError as error:
+        if error.status_code != 409:
+            raise
+    async for tag in client.tags.iter(params):
+        return tag
+    raise CLIError("internal_error", f"Tag {name!r} could not be resolved.")
+
+
+async def _tag_imported_sessions(
+    client: Any, task_id: uuid.UUID, names: list[str]
+) -> int:
+    """Apply every requested tag to sessions created by one import task."""
+    tags = [await _get_or_create_tag(client, name) for name in names]
+    params = SessionListParams(
+        filter=FilterCondition(field="task_id", op=FilterOp.EQ, value=str(task_id))
+    )
+    count = 0
+    async for session in client.sessions.iter(params):
+        for tag in tags:
+            await client.tags.create_link(
+                tag.id,
+                TagLinkCreateRequest(
+                    resource_type=TagResourceType.SESSION,
+                    resource_id=session.id,
+                ),
+            )
+        count += 1
+    return count
 
 
 def _blob_metadata(blob: Any) -> dict[str, Any]:
@@ -195,7 +246,7 @@ async def import_sessions(
     timeout: float | None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
-    tags = _normalize_import_tags(tags)
+    tags = _normalize_import_tags(tags, wait=wait)
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
@@ -232,7 +283,6 @@ async def import_sessions(
         agent_version_id=agent_version.id,
         payload_blob_id=blob.id,
         params=parsed_params,
-        tags=tags,
     )
     try:
         job = await client.imports.create(request)
@@ -284,7 +334,21 @@ async def import_sessions(
         timeout=wait_settings[1],
         initial_job=job,
     )
-    return _terminal_import_result(terminal_job, tasks, identity=identity)
+    result = _terminal_import_result(terminal_job, tasks, identity=identity)
+    if tags:
+        task, _ = _get_import_stats(terminal_job, tasks)
+        try:
+            result.item["tagged_session_count"] = await _tag_imported_sessions(
+                client, task.id, tags
+            )
+        except Exception as error:
+            raise CLIError(
+                "partial_failure",
+                "The import completed, but its tags could not be applied.",
+                details={"receipt": result.item, "error": type(error).__name__},
+                hint="Retry the import without --tag or apply the tags manually.",
+            ) from error
+    return result
 
 
 async def list_sessions(

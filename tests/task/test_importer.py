@@ -17,7 +17,6 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -48,7 +47,6 @@ from kitaru.api_models.v1.task import ImportTaskDetails
 from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import IMPORT_TAGS_LABEL
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
@@ -356,7 +354,6 @@ async def _create_importer_task(
     script: str,
     tmp_path: Path,
     params: dict[str, Any] | None = None,
-    tags: list[str] | None = None,
 ) -> tuple[uuid.UUID, Path]:
     """Register a script importer plugin and a running import task for it.
 
@@ -365,8 +362,6 @@ async def _create_importer_task(
         script: Parser script source written to the plugin file.
         tmp_path: Temporary directory the plugin file is written under.
         params: Parameters passed to the importer task.
-        tags: Tags applied to created sessions.
-
     Returns:
         Id of the running import task and the path of its plugin file.
     """
@@ -386,59 +381,12 @@ async def _create_importer_task(
         payload_blob_id=payload_blob.id,
         agent_id=task_app.agent.id,
         params=params or {},
-        labels={IMPORT_TAGS_LABEL: json.dumps(tags or [])},
     )
     await start_task(task_app, task.id)
 
     plugin_path = tmp_path / "importer.py"
     plugin_path.write_text(script)
     return task.id, plugin_path
-
-
-async def test_importer_flow_applies_every_import_tag(
-    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Create and link repeatable import tags inside asynchronous task work."""
-    task_id, plugin_path = await _create_importer_task(
-        task_app,
-        _SINGLE_SESSION_PARSER_SCRIPT,
-        tmp_path,
-        tags=["baseline", "discovery"],
-    )
-    payload_path = tmp_path / "payload.json"
-    payload_path.write_text("{}")
-    result_path = tmp_path / "result.json"
-    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
-    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
-    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
-
-    class Tags:
-        def __init__(self) -> None:
-            self.created: list[Any] = []
-            self.links: list[tuple[uuid.UUID, Any]] = []
-
-        async def iter(self, params: Any):
-            if False:
-                yield params
-
-        async def create(self, request: Any) -> Any:
-            tag = SimpleNamespace(id=uuid.uuid4(), name=request.name)
-            self.created.append(tag)
-            return tag
-
-        async def create_link(self, tag_id: uuid.UUID, request: Any) -> None:
-            self.links.append((tag_id, request))
-
-    tags = Tags()
-    monkeypatch.setattr(task_app.client, "tags", tags)
-
-    await run(task_app.client, str(task_id))
-
-    assert [tag.name for tag in tags.created] == ["baseline", "discovery"]
-    assert len(tags.links) == 2
-    assert {link.resource_id for _, link in tags.links} == {
-        tags.links[0][1].resource_id
-    }
 
 
 async def test_importer_flow_batches_nodes_and_dedups(
