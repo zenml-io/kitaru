@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for task use cases."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -61,6 +62,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
+    IMPORT_TAGS_LABEL,
     AgentTask,
     ImportTask,
     ImportTaskDetails,
@@ -830,7 +832,11 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
 
     job_id = await _pending_job(services)
     task = await create_import_task(
-        services.tasks, job_id, plugin_version_id=version.id, payload_blob_id=payload.id
+        services.tasks,
+        job_id,
+        plugin_version_id=version.id,
+        payload_blob_id=payload.id,
+        labels={IMPORT_TAGS_LABEL: json.dumps(["baseline", "discovery"])},
     )
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
     assert (
@@ -840,6 +846,7 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
     assert spec.details.provider == "acme"
     assert spec.details.payload.blob_id == payload.id
     assert spec.details.payload.sha256 == payload.sha256
+    assert spec.details.tags == ["baseline", "discovery"]
 
 
 class _RecordingAnalytics(ServerAnalytics):

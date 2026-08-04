@@ -207,6 +207,9 @@ class ImportTaskDetails(ResponseModel):
     params: dict[str, JsonValue] = Field(
         description="Parameters passed to the importer."
     )
+    tags: list[str] = Field(
+        default_factory=list, description="Tags applied to created sessions."
+    )
 
 
 TaskDetails = Annotated[

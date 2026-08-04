@@ -264,6 +264,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         agent="assistant",
         origin=SessionOrigin.IMPORTED,
         provider="langfuse",
+        tag="baseline",
         started_after=started_after,
         started_before=None,
     )
@@ -277,6 +278,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         {"field": "agent_id", "op": "eq", "value": str(agents.agent.id)},
         {"field": "origin", "op": "eq", "value": "imported"},
         {"field": "provider", "op": "eq", "value": "langfuse"},
+        {"field": "tag", "op": "eq", "value": "baseline"},
         {
             "field": "started_at",
             "op": "ge",
@@ -460,6 +462,7 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         "version": 2,
         "payload_blob_id": str(client.blob.id),
         "params": {"secret_value": "not-for-receipt"},
+        "tags": [],
     }
     assert result.event == "created"
     assert result.item["operation"] == "session_import"
@@ -535,65 +538,29 @@ async def test_session_import_rejects_non_file_without_upload(tmp_path: Path) ->
     assert client.uploads == []
 
 
-async def test_session_import_tag_requires_wait_before_mutation(tmp_path: Path) -> None:
-    """Import tagging waits for the task so it can identify created sessions."""
+async def test_session_import_sends_repeatable_tags_without_wait(
+    tmp_path: Path,
+) -> None:
+    """Import tags travel with asynchronous import work."""
     payload = tmp_path / "input.jsonl"
     payload.write_bytes(b'{"x":1}')
     client = StubImportClient()
 
-    with pytest.raises(CLIError) as error:
-        await sessions.import_sessions(
-            client,
-            payload,
-            importer="jsonl@2",
-            agent="assistant@3",
-            params=None,
-            tag="baseline",
-            media_type="application/jsonl",
-            wait=False,
-            interval=None,
-            timeout=None,
-        )
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant@3",
+        params=None,
+        tags=["baseline", "discovery"],
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
 
-    assert error.value.kind == "invalid_arguments"
-    assert "--tag requires --wait" in error.value.message
-    assert client.uploads == []
-    assert client.requests == []
-
-
-async def test_tag_imported_sessions_links_every_task_session() -> None:
-    """Import tagging resolves one tag and links all sessions from the task."""
-    task_id = uuid.uuid4()
-    tag = SimpleNamespace(id=uuid.uuid4(), name="baseline")
-    imported = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
-
-    class Tags:
-        def __init__(self) -> None:
-            self.links = []
-
-        async def iter(self, params):
-            assert params.filter.field == "name"
-            assert params.filter.value == "baseline"
-            yield tag
-
-        async def create_link(self, tag_id, request):
-            assert tag_id == tag.id
-            self.links.append(request)
-
-    class Sessions:
-        async def iter(self, params):
-            assert params.filter.field == "task_id"
-            assert params.filter.value == str(task_id)
-            for session in imported:
-                yield session
-
-    client = SimpleNamespace(tags=Tags(), sessions=Sessions())
-    count = await sessions._tag_imported_sessions(client, task_id, "baseline")
-
-    assert count == 2
-    assert [link.resource_id for link in client.tags.links] == [
-        session.id for session in imported
-    ]
+    assert client.requests[0].tags == ["baseline", "discovery"]
+    assert result.item["tags"] == ["baseline", "discovery"]
 
 
 def test_payload_read_error_suppresses_private_path_cause(
@@ -819,6 +786,10 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "jsonl@2",
                 "--agent",
                 "assistant@3",
+                "--tag",
+                "baseline",
+                "--tag",
+                "discovery",
                 "--media-type",
                 "application/jsonl",
             ]
@@ -832,6 +803,7 @@ def test_session_import_argv_registers_streaming_created_receipt(
     assert document["event"] == "created"
     assert document["item"]["job"]["id"] == str(client.job.id)
     assert client.uploads == [(b'{"x":1}', "application/jsonl", "payload.jsonl")]
+    assert client.requests[0].tags == ["baseline", "discovery"]
 
 
 @pytest.mark.parametrize(
