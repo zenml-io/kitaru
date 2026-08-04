@@ -14,6 +14,7 @@
 """Cohort and immutable cohort-version CLI commands."""
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.cohort import (
@@ -31,10 +32,13 @@ from kitaru.cli.registration import (
     list_params,
     page_result,
     parse_json_object,
-    parse_version_reference,
     resolve_asset,
     version_list_params,
 )
+from kitaru.cli.session_selection import (
+    get_cohort_version as resolve_cohort_version,
+)
+from kitaru.cli.session_selection import select_session_ids
 
 
 async def create_cohort(
@@ -44,11 +48,44 @@ async def create_cohort(
     agent: str,
     description: str | None,
     metadata: str | None,
+    sessions: list[str] | None = None,
+    sessions_file: Path | None = None,
+    tag: str | None = None,
+    cohort: str | None = None,
+    filter: str | None = None,
+    all_sessions: bool = False,
+    display_version: str | None = None,
 ) -> CommandResult:
-    """Create a cohort bound to one exact agent."""
+    """Create a cohort and optionally its first selected membership version."""
     parsed_metadata = parse_json_object(metadata, option="--metadata")
     resolved_agent = await resolve_asset(client.agents, agent, "Agent")
-    cohort = await client.cohorts.create(
+    has_selection = any(
+        (
+            bool(sessions),
+            sessions_file is not None,
+            tag is not None,
+            cohort is not None,
+            filter is not None,
+            all_sessions,
+        )
+    )
+    if display_version is not None and not has_selection:
+        raise CLIError(
+            "invalid_arguments",
+            "--display-version requires a session selector.",
+        )
+    selected_session_ids = None
+    if has_selection:
+        selected_session_ids = await select_session_ids(
+            client,
+            sessions,
+            sessions_file,
+            tag=tag,
+            cohort=cohort,
+            filter=filter,
+            all_sessions=all_sessions,
+        )
+    created_cohort = await client.cohorts.create(
         CohortCreateRequest(
             name=name,
             description=description,
@@ -56,7 +93,23 @@ async def create_cohort(
             metadata=parsed_metadata,
         )
     )
-    return CommandResult(item=cohort.model_dump(mode="json"))
+    if selected_session_ids is None:
+        return CommandResult(item=created_cohort.model_dump(mode="json"))
+    version = await client.cohorts.create_version(
+        created_cohort.id,
+        CohortVersionCreateRequest(
+            add_session_ids=selected_session_ids,
+            display_version=display_version,
+        ),
+    )
+    return CommandResult(
+        item={
+            "cohort": created_cohort.model_dump(mode="json"),
+            "version": version.model_dump(mode="json"),
+            "reference": f"{created_cohort.name}@{version.version}",
+            "session_count": len(selected_session_ids),
+        }
+    )
 
 
 async def list_cohorts(
@@ -180,39 +233,7 @@ async def get_cohort_version(
     client: Any, reference: str
 ) -> tuple[CohortResponse, CohortVersionResponse]:
     """Resolve a cohort version by UUID or exact server-assigned version."""
-    normalized = reference.strip()
-    if not normalized:
-        raise CLIError("invalid_arguments", "Cohort version reference cannot be blank.")
-    try:
-        version_id = uuid.UUID(normalized)
-    except ValueError:
-        version_id = None
-    if version_id is not None:
-        version = await client.cohort_versions.get(version_id)
-        cohort = await client.cohorts.get(version.cohort_id)
-        return cohort, version
-
-    parent_reference, requested = parse_version_reference(normalized, "Cohort")
-    cohort = await resolve_asset(client.cohorts, parent_reference, "Cohort")
-    version_number = cohort.latest_version if requested == "latest" else requested
-    matches = [
-        item
-        async for item in client.cohorts.iter_versions(cohort.id)
-        if item.version == version_number
-    ]
-    if not matches:
-        raise CLIError(
-            "not_found",
-            f"Cohort {cohort.name!r} has no version {version_number}.",
-        )
-    if len(matches) > 1:
-        raise CLIError(
-            "conflict",
-            f"Cohort {cohort.name!r} has multiple records for version "
-            f"{version_number}.",
-            details={"ids": [str(item.id) for item in matches]},
-        )
-    return cohort, matches[0]
+    return await resolve_cohort_version(client, reference)
 
 
 async def get_cohort_version_result(client: Any, reference: str) -> CommandResult:

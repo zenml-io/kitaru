@@ -54,6 +54,7 @@ class ImportCreate(FrozenModel):
     version: int | None = None
     payload_blob_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
 
 
 class EvaluationBatchCreate(FrozenModel):

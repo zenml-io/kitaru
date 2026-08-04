@@ -23,9 +23,7 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
     EvaluationResult,
 )
-from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse, JobStatus
-from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
@@ -34,6 +32,7 @@ from kitaru.cli.registration import (
     page_result,
     resolve_evaluator_configs,
 )
+from kitaru.cli.session_selection import select_session_ids
 
 _FAILED_TASK_STATUSES = {
     TaskStatus.FAILED,
@@ -45,104 +44,6 @@ _TERMINAL_TASK_STATUSES = {
     *_FAILED_TASK_STATUSES,
     TaskStatus.CANCELED,
 }
-
-
-def _read_session_file(path: Path) -> list[tuple[int, str]]:
-    """Read UTF-8 session UUID lines without accepting stdin or comments."""
-    if str(path) == "-":
-        raise CLIError(
-            "invalid_arguments", "--sessions-file does not accept stdin ('-')."
-        )
-    if not path.is_file():
-        raise CLIError(
-            "invalid_arguments",
-            "--sessions-file must be an existing regular UTF-8 text file.",
-        )
-    try:
-        content = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        raise CLIError(
-            "invalid_arguments", "--sessions-file must contain valid UTF-8 text."
-        ) from None
-    except OSError as error:
-        reason = error.strerror or type(error).__name__
-        raise CLIError(
-            "invalid_arguments", f"--sessions-file could not be read: {reason}."
-        ) from None
-    return [
-        (line_number, line.strip())
-        for line_number, line in enumerate(content.splitlines(), start=1)
-        if line.strip()
-    ]
-
-
-def _parse_session_ids(
-    values: list[str], sessions_file: Path | None
-) -> list[uuid.UUID]:
-    """Parse and deduplicate positional and file-based session UUIDs."""
-    sources = [(value, "SESSION") for value in values]
-    if sessions_file is not None:
-        sources.extend(
-            (value, f"--sessions-file line {line_number}")
-            for line_number, value in _read_session_file(sessions_file)
-        )
-    if not sources:
-        raise CLIError(
-            "invalid_arguments",
-            "Provide at least one SESSION or a nonempty --sessions-file.",
-        )
-
-    session_ids: list[uuid.UUID] = []
-    seen: set[uuid.UUID] = set()
-    for value, source in sources:
-        try:
-            session_id = uuid.UUID(value)
-        except ValueError as error:
-            raise CLIError(
-                "invalid_arguments", f"{source} must contain an exact UUID."
-            ) from error
-        if session_id in seen:
-            raise CLIError(
-                "invalid_arguments",
-                f"Session {session_id} was selected more than once.",
-            )
-        seen.add(session_id)
-        session_ids.append(session_id)
-    return session_ids
-
-
-async def _select_session_ids(
-    client: Any,
-    values: list[str],
-    sessions_file: Path | None,
-    *,
-    tag: str | None = None,
-    all_sessions: bool = False,
-) -> list[uuid.UUID]:
-    """Resolve one explicit, tag-based, or all-session selection."""
-    explicit = bool(values) or sessions_file is not None
-    modes = int(explicit) + int(tag is not None) + int(all_sessions)
-    if modes != 1:
-        raise CLIError(
-            "invalid_arguments",
-            "Select sessions using IDs/--sessions-file, --tag, or --all.",
-        )
-    if explicit:
-        return _parse_session_ids(values, sessions_file)
-    if tag is not None and not tag.strip():
-        raise CLIError("invalid_arguments", "--tag must not be empty.")
-    params = SessionListParams()
-    if tag is not None:
-        params = SessionListParams(
-            filter=FilterCondition(field="tag", op=FilterOp.EQ, value=tag.strip())
-        )
-    session_ids = [session.id async for session in client.sessions.iter(params)]
-    if not session_ids:
-        selection = f"tag {tag.strip()!r}" if tag is not None else "--all"
-        raise CLIError(
-            "invalid_arguments", f"No sessions matched the {selection} selection."
-        )
-    return session_ids
 
 
 def _task_metadata(task: TaskResponse) -> dict[str, Any]:
@@ -316,6 +217,9 @@ async def evaluate_sessions(
     *,
     sessions_file: Path | None,
     tag: str | None = None,
+    agent: str | None = None,
+    cohort: str | None = None,
+    filter: str | None = None,
     all_sessions: bool = False,
     evaluators: list[str],
     evaluator_params: list[str] | None,
@@ -327,11 +231,14 @@ async def evaluate_sessions(
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
-    session_ids = await _select_session_ids(
+    session_ids = await select_session_ids(
         client,
-        sessions or [],
+        sessions,
         sessions_file,
         tag=tag,
+        agent=agent,
+        cohort=cohort,
+        filter=filter,
         all_sessions=all_sessions,
     )
     (

@@ -2819,6 +2819,14 @@
             "title": "Payload Blob Id",
             "type": "string"
           },
+          "tags": {
+            "description": "Tags applied to every created session.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "version": {
             "anyOf": [
               {
@@ -2895,6 +2903,14 @@
             ],
             "description": "Source system named on the import.",
             "title": "Provider"
+          },
+          "tags": {
+            "description": "Tags applied to created sessions.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           }
         },
         "required": [
