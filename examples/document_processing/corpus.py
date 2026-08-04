@@ -106,3 +106,7 @@ def download_documents() -> None:
                     f"received {digest}"
                 )
             case.path.write_bytes(response.content)
+
+
+if __name__ == "__main__":
+    download_documents()

@@ -9,7 +9,7 @@ from kitaru_importer_langfuse import parse
 from pydantic_ai import BinaryContent
 
 from kitaru.api_models.v1.session import SessionResponse
-from kitaru.api_models.v1.session_node import NodeType
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.evaluator import SessionView
 from kitaru.task.importer import ParsedSession
 from kitaru.task.plugins import load_plugin_entrypoint
@@ -22,7 +22,9 @@ agent_module = importlib.import_module("examples.document_processing.agent")
 corpus_module = importlib.import_module("examples.document_processing.corpus")
 evaluator_module = importlib.import_module("examples.document_processing.evaluator")
 extractor_module = importlib.import_module("examples.document_processing.extractor")
+main_module = importlib.import_module("examples.document_processing.__main__")
 CASES = corpus_module.CASES
+PREPARED_TRACE_PATH = main_module.PREPARED_TRACE_PATH
 DocumentInput = agent_module.DocumentInput
 evaluate = evaluator_module.evaluate
 get_document_input = agent_module.get_document_input
@@ -142,6 +144,89 @@ def test_langfuse_trace_export_is_importable() -> None:
     assert session.nodes[0].children[0].provider == "openai"
 
 
+def test_prepared_trace_corpus_forms_useful_cohorts() -> None:
+    """Keep controls, extraction failures, and telemetry failures represented."""
+    sessions = [
+        item
+        for item in parse(
+            PREPARED_TRACE_PATH.read_bytes(),
+            {"source_instance": "nist-standards"},
+        )
+        if isinstance(item, ParsedSession)
+    ]
+    tags = {
+        session.external_id: set(session.metadata["langfuse.tags"])
+        for session in sessions
+    }
+
+    assert len(sessions) == 12
+    assert sum("control" in value for value in tags.values()) == 3
+    assert sum("extraction-edge" in value for value in tags.values()) == 7
+    assert sum("telemetry-edge" in value for value in tags.values()) == 2
+
+    retry = next(
+        session for session in sessions if session.external_id.endswith("ai-rmf-retry")
+    )
+    assert len(retry.inputs["turns"]) == 2
+
+    failed = next(
+        session
+        for session in sessions
+        if session.external_id.endswith("genai-provider-timeout")
+    )
+    assert failed.status.value == "failed"
+    assert failed.nodes[0].status is NodeStatus.FAILED
+
+    partial = next(
+        session
+        for session in sessions
+        if session.external_id.endswith("csf-missing-parent")
+    )
+    readiness = partial.metadata["replay_readiness"]
+    assert readiness["level"] == "partial"
+    assert readiness["graph_complete"] is False
+    assert "missing parent" in " ".join(readiness["reasons"])
+    generation = next(
+        node for node in partial.nodes if node.node_type is NodeType.LLM_CALL
+    )
+    assert generation.tokens is not None
+    assert generation.tokens.input_tokens == 1755
+    assert generation.tokens.output_tokens == 79
+
+
+def test_prepared_baselines_contain_measurable_failures() -> None:
+    """Keep every extraction edge case useful for field-level evaluation."""
+    sessions = [
+        item
+        for item in parse(
+            PREPARED_TRACE_PATH.read_bytes(),
+            {"source_instance": "nist-standards"},
+        )
+        if isinstance(item, ParsedSession)
+    ]
+    extraction_edges = [
+        session
+        for session in sessions
+        if "extraction-edge" in session.metadata["langfuse.tags"]
+    ]
+    scores = []
+    for session in extraction_edges:
+        result = evaluate(
+            SessionView(
+                session=SessionResponse.model_construct(
+                    inputs=session.inputs,
+                    outputs=session.outputs,
+                ),
+                nodes=[],
+            )
+        )
+        scores.append(result.score)
+
+    assert len(scores) == 7
+    assert all(score < 1 for score in scores)
+    assert set(scores) == {0.75}
+
+
 def test_evaluator_scores_each_labeled_field() -> None:
     """Report fractional accuracy for native and imported sessions."""
     case = CASES[0]
@@ -186,3 +271,25 @@ def test_registered_plugins_are_worker_compatible() -> None:
     )
     assert parse_inline_dependencies(importer_path) == []
     assert callable(load_plugin_entrypoint(importer_path, "parse", "Importer"))
+
+
+def test_runner_uses_the_public_cli_for_the_improvement_loop() -> None:
+    """Keep the canonical orchestration on supported CLI commands."""
+    runner = (EXAMPLE_DIR / "run.sh").read_text()
+
+    for command in (
+        "importer test",
+        "agent register",
+        "importer register",
+        "worker start",
+        "session import",
+        "session list",
+        "cohort create",
+        "cohort version create",
+        "evaluator test",
+        "evaluator register",
+        "experiment create",
+        "experiment run start",
+    ):
+        assert command in runner
+    assert '--agent "${agent_name}"' in runner
