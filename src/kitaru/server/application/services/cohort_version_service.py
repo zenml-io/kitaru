@@ -60,20 +60,38 @@ class CohortVersionService:
         self._sessions = session_repository
         self._analytics = analytics
 
-    async def _resolve_latest_members(self, cohort: Cohort) -> list[uuid.UUID]:
-        """Read the ordered member list of a cohort's latest version.
+    async def _resolve_base_members(
+        self, cohort: Cohort, baseline_id: uuid.UUID | None
+    ) -> list[uuid.UUID]:
+        """Read the ordered member list a membership delta applies to.
 
         Args:
-            cohort: Cohort to read the latest version of.
+            cohort: Cohort the new version belongs to.
+            baseline_id: Id of the base version, None reads the latest
+                version.
+
+        Raises:
+            CohortVersionIdNotFound: No cohort version has the baseline id.
+            ValidationError: The baseline belongs to a different cohort.
 
         Returns:
             Ordered member session ids, empty when the cohort has no
             version yet.
         """
-        if cohort.latest_version == 0:
-            return []
-        latest = await self._repository.get_by_number(cohort.id, cohort.latest_version)
-        return await self._repository.list_session_ids(latest.id)
+        if baseline_id is None:
+            if cohort.latest_version == 0:
+                return []
+            baseline = await self._repository.get_by_number(
+                cohort.id, cohort.latest_version
+            )
+        else:
+            baseline = await self._repository.get(baseline_id)
+            if baseline.cohort_id != cohort.id:
+                raise ValidationError(
+                    f"Cohort version {baseline_id} does not belong to cohort "
+                    f"{cohort.id}"
+                )
+        return await self._repository.list_session_ids(baseline.id)
 
     async def _validate_added_sessions(
         self, session_ids: Sequence[uuid.UUID], agent_id: uuid.UUID
@@ -101,30 +119,34 @@ class CohortVersionService:
     async def create_version(
         self, cohort_id: uuid.UUID, command: CohortVersionCreate, actor: AuthContext
     ) -> CohortVersion:
-        """Create a cohort version from a membership delta on the latest version.
+        """Create a cohort version from a membership delta on a base version.
 
-        The new member list is the latest version's list minus
-        ``remove_session_ids`` plus ``add_session_ids`` appended, or an empty
-        list when the cohort has no version yet.
+        The delta applies to the command's baseline version, or to the
+        latest version when the command has no baseline. The new member
+        list is the base version's list minus ``remove_session_ids`` plus
+        ``add_session_ids`` appended, or an empty list when the cohort has
+        no version yet.
 
         Args:
             cohort_id: Id of the cohort this version belongs to.
-            command: Membership delta and display version for the new
-                version.
+            command: Baseline, membership delta, and display version for
+                the new version.
             actor: Caller context.
 
         Raises:
             CohortNotFound: No cohort has this id.
-            ValidationError: The delta removes a session absent from the
-                base version, adds a session already present, repeats a
-                session id, or an added session is missing or belongs to a
-                different agent.
+            CohortVersionIdNotFound: No cohort version has the command's
+                baseline id.
+            ValidationError: The baseline belongs to a different cohort,
+                the delta removes a session absent from the base version,
+                adds a session already present, repeats a session id, or an
+                added session is missing or belongs to a different agent.
 
         Returns:
             Created cohort version.
         """
         cohort = await self._cohorts.get(cohort_id)
-        base_members = await self._resolve_latest_members(cohort)
+        base_members = await self._resolve_base_members(cohort, command.baseline_id)
         new_members = apply_membership_delta(
             base_members, command.add_session_ids, command.remove_session_ids
         )

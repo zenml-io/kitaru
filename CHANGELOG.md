@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Sessions and session nodes, managed via `/v1/sessions`, recording an agent run and its nested LLM calls, tool calls, and sub-agent calls.
 - Blobs, managed via `/v1/blobs`, content-addressed storage for plugin payloads and task inputs.
 - Plugins for evaluators and importers, managed via `/v1/evaluators` and `/v1/importers`, each versioned and backed by a script or package source.
-- Cohorts and cohort versions, managed via `/v1/cohorts` and `/v1/cohort-versions`, where a cohort names a group of sessions and each immutable version snapshots the membership used as experiment baselines.
+- Cohorts and cohort versions, managed via `/v1/cohorts` and `/v1/cohort-versions`, where a cohort names a group of sessions and each immutable version snapshots the membership used as experiment baselines. A new version applies a membership delta to a baseline version chosen via `baseline_id`, defaulting to the latest version.
 - Tags, managed via `/v1/tags`, linking to sessions, cohorts, experiments, and experiment runs.
 - Experiments and experiment runs, managed via `/v1/experiments` and `/v1/experiment-runs`, comparing agent versions against a cohort version.
 - Replays, managed via `/v1/replays`, re-running a session against a replay config with a per-tool lookup, passthrough, or override policy.

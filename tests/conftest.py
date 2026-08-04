@@ -2739,9 +2739,14 @@ class FakeCohortVersionRepository:
         Args:
             cohort_version_id: Id of the cohort version.
 
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
         Returns:
             Ordered member session ids.
         """
+        if cohort_version_id not in self._versions:
+            raise CohortVersionIdNotFound(cohort_version_id)
         return list(self._members.get(cohort_version_id, []))
 
     async def update(self, version: CohortVersion) -> CohortVersion:

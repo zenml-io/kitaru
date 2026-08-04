@@ -334,6 +334,25 @@ async def test_list_session_ids_preserves_order(setup: Setup) -> None:
     assert listed == session_ids
 
 
+async def test_list_session_ids_empty_version(setup: Setup) -> None:
+    """List an empty member list for a version without members."""
+    repository, _, owner_id, cohort_id, _, _ = setup
+    created = await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
+    )
+    assert await repository.list_session_ids(created.id) == []
+
+
+async def test_list_session_ids_not_found(setup: Setup) -> None:
+    """Raise for an unknown cohort version id."""
+    repository, _, _, _, _, _ = setup
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        CohortVersionIdNotFound, match=f"Cohort version {missing_id} was not found"
+    ):
+        await repository.list_session_ids(missing_id)
+
+
 async def test_update(setup: Setup) -> None:
     """Persist a display version change and renew the updated timestamp."""
     repository, _, owner_id, cohort_id, _, _ = setup

@@ -169,7 +169,8 @@ class CohortsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                cohort and 422 for an invalid or mismatched member list.
+                cohort or baseline version and 422 for an invalid or
+                mismatched member list.
 
         Returns:
             Created cohort version.

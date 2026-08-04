@@ -41,6 +41,7 @@ def cohort_version_create_to_command(
         Create command.
     """
     return CohortVersionCreate(
+        baseline_id=body.baseline_id,
         add_session_ids=body.add_session_ids,
         remove_session_ids=body.remove_session_ids,
         display_version=body.display_version,

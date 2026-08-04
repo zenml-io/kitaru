@@ -241,6 +241,126 @@ async def test_create_version_add_and_remove(
     assert version.session_count == 2
 
 
+async def test_create_version_from_baseline(
+    service: CohortVersionService,
+    repository: FakeCohortVersionRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Restore an older version's member list via a baseline with no delta."""
+    session_ids = [
+        await _make_session_id(session_repository, agent_id),
+        await _make_session_id(session_repository, agent_id),
+    ]
+    baseline = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=session_ids), actor=ACTOR
+    )
+    await service.create_version(
+        cohort_id,
+        CohortVersionCreate(remove_session_ids=[session_ids[0]]),
+        actor=ACTOR,
+    )
+    restored = await service.create_version(
+        cohort_id, CohortVersionCreate(baseline_id=baseline.id), actor=ACTOR
+    )
+    assert restored.version == 3
+    assert restored.session_count == 2
+    assert await repository.list_session_ids(restored.id) == session_ids
+
+
+async def test_create_version_from_baseline_with_delta(
+    service: CohortVersionService,
+    repository: FakeCohortVersionRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Apply the delta to the baseline's members instead of the latest's."""
+    first_id = await _make_session_id(session_repository, agent_id)
+    baseline = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=[first_id]), actor=ACTOR
+    )
+    second_id = await _make_session_id(session_repository, agent_id)
+    await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=[second_id]), actor=ACTOR
+    )
+    added_id = await _make_session_id(session_repository, agent_id)
+    version = await service.create_version(
+        cohort_id,
+        CohortVersionCreate(
+            baseline_id=baseline.id,
+            add_session_ids=[added_id],
+            remove_session_ids=[first_id],
+        ),
+        actor=ACTOR,
+    )
+    assert version.session_count == 1
+    assert await repository.list_session_ids(version.id) == [added_id]
+
+
+async def test_create_version_baseline_delta_checked_against_baseline(
+    service: CohortVersionService,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Reject removing a session in the latest version but not the baseline."""
+    first_id = await _make_session_id(session_repository, agent_id)
+    baseline = await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=[first_id]), actor=ACTOR
+    )
+    second_id = await _make_session_id(session_repository, agent_id)
+    await service.create_version(
+        cohort_id, CohortVersionCreate(add_session_ids=[second_id]), actor=ACTOR
+    )
+    with pytest.raises(
+        ValidationError, match="Cannot remove a session that is not in the base version"
+    ):
+        await service.create_version(
+            cohort_id,
+            CohortVersionCreate(
+                baseline_id=baseline.id, remove_session_ids=[second_id]
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_version_baseline_not_found(
+    service: CohortVersionService, cohort_id: uuid.UUID
+) -> None:
+    """Raise for an unknown baseline id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        CohortVersionIdNotFound, match=f"Cohort version {missing_id} was not found"
+    ):
+        await service.create_version(
+            cohort_id, CohortVersionCreate(baseline_id=missing_id), actor=ACTOR
+        )
+
+
+async def test_create_version_baseline_wrong_cohort(
+    service: CohortVersionService,
+    cohort_repository: FakeCohortRepository,
+    agent_id: uuid.UUID,
+    cohort_id: uuid.UUID,
+) -> None:
+    """Reject a baseline that belongs to a different cohort."""
+    other_cohort = await create_cohort(
+        cohort_repository, ACTOR.account.id, agent_id, name="other"
+    )
+    foreign = await service.create_version(
+        other_cohort.id, CohortVersionCreate(), actor=ACTOR
+    )
+    with pytest.raises(
+        ValidationError,
+        match=f"Cohort version {foreign.id} does not belong to cohort {cohort_id}",
+    ):
+        await service.create_version(
+            cohort_id, CohortVersionCreate(baseline_id=foreign.id), actor=ACTOR
+        )
+
+
 async def test_create_version_remove_nonmember(
     service: CohortVersionService, cohort_id: uuid.UUID
 ) -> None:

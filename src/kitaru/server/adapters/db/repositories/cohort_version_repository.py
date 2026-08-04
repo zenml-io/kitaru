@@ -154,16 +154,28 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         Args:
             cohort_version_id: Id of the cohort version.
 
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
         Returns:
             Ordered member session ids.
         """
+        # Read the version row and its links in one statement, so a delete
+        # committing between two separate reads cannot produce a silently
+        # empty member list.
         statement = (
-            select(CohortVersionSessionORM.session_id)
-            .where(CohortVersionSessionORM.cohort_version_id == cohort_version_id)
+            select(CohortVersionORM.id, CohortVersionSessionORM.session_id)
+            .outerjoin(
+                CohortVersionSessionORM,
+                CohortVersionSessionORM.cohort_version_id == CohortVersionORM.id,
+            )
+            .where(CohortVersionORM.id == cohort_version_id)
             .order_by(CohortVersionSessionORM.index)
         )
-        rows = (await self._session.scalars(statement)).all()
-        return list(rows)
+        rows = (await self._session.execute(statement)).all()
+        if not rows:
+            raise self._not_found(cohort_version_id)
+        return [session_id for _, session_id in rows if session_id is not None]
 
     async def update(self, version: CohortVersion) -> CohortVersion:
         """Persist changes to an existing cohort version.

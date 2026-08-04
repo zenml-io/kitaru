@@ -246,6 +246,26 @@ async def test_create_version(api_client: KitaruAPIClient) -> None:
     assert version.session_count == 2
 
 
+async def test_create_version_from_baseline(api_client: KitaruAPIClient) -> None:
+    """Create a version from an older baseline through the SDK."""
+    agent_id = await _make_agent(api_client)
+    session_ids = [await _make_session(api_client, agent_id) for _ in range(2)]
+    cohort = await api_client.cohorts.create(
+        CohortCreateRequest(name="cohort", agent_id=agent_id)
+    )
+    baseline = await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(add_session_ids=session_ids)
+    )
+    await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(remove_session_ids=[session_ids[0]])
+    )
+    restored = await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(baseline_id=baseline.id)
+    )
+    assert restored.version == 3
+    assert restored.session_count == 2
+
+
 async def test_list_versions(api_client: KitaruAPIClient) -> None:
     """List the versions of a cohort through the SDK."""
     agent_id = await _make_agent(api_client)

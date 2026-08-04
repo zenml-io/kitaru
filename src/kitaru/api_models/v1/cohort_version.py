@@ -23,6 +23,10 @@ from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
 class CohortVersionCreateRequest(RequestModel):
     """Cohort version create request."""
 
+    baseline_id: uuid.UUID | None = Field(
+        default=None,
+        description="Version the delta applies to, None uses the latest version.",
+    )
     add_session_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Sessions to add to the new version."
     )

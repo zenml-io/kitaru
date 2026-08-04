@@ -43,7 +43,6 @@ from kitaru.server.application.interfaces.api_key_repository import (
 )
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.auth import (
-    AccountPrincipal,
     AuthContext,
     TaskAuthContext,
     TaskPrincipal,
