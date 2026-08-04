@@ -2786,10 +2786,10 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
             ),
             ParameterSpec(
                 "--agent",
-                "reference",
+                "AGENT|AGENT@VERSION",
                 "option",
                 True,
-                "Exact AGENT@VERSION reference.",
+                "Exact agent, optionally with an imported source version.",
             ),
             ParameterSpec(
                 "--params", "JSON object", "option", False, "Importer parameters."
@@ -2907,6 +2907,14 @@ async def session_list(
     started_before: datetime | None = None,
 ) -> CommandResult:
     """List one server page of sessions."""
+    sessions.validate_session_list_options(
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
+        started_after=started_after,
+        started_before=started_before,
+    )
     async with _open_asset_client() as client:
         return await sessions.list_sessions(
             client,

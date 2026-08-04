@@ -41,6 +41,9 @@ from kitaru.server.domain.task import (
     TaskSpec,
 )
 
+AGENT_ID_ENV = "KITARU_AGENT_ID"
+AGENT_VERSION_ID_ENV = "KITARU_AGENT_VERSION_ID"
+
 
 class TaskSpecBuilder:
     """Task execution spec builder."""
@@ -121,7 +124,11 @@ class TaskSpecBuilder:
                 working_dir=run_spec.working_dir,
                 env=run_spec.env,
             ),
-            env=task.env,
+            env={
+                **task.env,
+                AGENT_ID_ENV: str(agent_version.agent_id),
+                AGENT_VERSION_ID_ENV: str(agent_version.id),
+            },
             secret_env=secret_env,
             details=AgentTaskDetails(inputs=task.inputs),
         )

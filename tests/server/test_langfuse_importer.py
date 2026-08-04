@@ -205,6 +205,7 @@ def test_imports_nested_trace_rows() -> None:
     assert batch.sessions[0].outputs == {"answer": "hi"}
     assert batch.sessions[0].source_metadata["langfuse.environments"] == ["production"]
     assert batch.sessions[0].source_metadata["langfuse.releases"] == ["release-1"]
+    assert batch.sessions[0].source_metadata["langfuse.tags"] == ["support"]
     assert batch.sessions[0].source_metadata["langfuse.versions"] == ["version-1"]
 
 

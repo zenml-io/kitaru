@@ -1,5 +1,6 @@
 """Capture PydanticAI baselines in Langfuse and export their traces."""
 
+import argparse
 import asyncio
 import json
 import os
@@ -64,7 +65,12 @@ async def capture_baselines(export_path: Path) -> Path:
                 trace_name="standards-document-extraction",
                 environment="baseline",
                 version="prompt-v1",
-                tags=["kitaru-example", "document-processing"],
+                tags=[
+                    "control",
+                    "document-processing",
+                    "kitaru-example",
+                    "replay-ready",
+                ],
                 metadata={
                     "document_id": case.document_id,
                     "source_url": case.url,
@@ -98,3 +104,14 @@ async def capture_baselines(export_path: Path) -> Path:
         + "\n"
     )
     return export_path
+
+
+def _get_args() -> argparse.Namespace:
+    """Parse the output path for optional trace generation."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", type=Path, help="Destination JSONL trace export.")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    asyncio.run(capture_baselines(_get_args().output))

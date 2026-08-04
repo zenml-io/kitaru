@@ -151,6 +151,12 @@ def _dict(value: Any) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _strings(value: Any) -> list[str]:
+    """Return non-empty strings from one scalar or list value."""
+    values = value if isinstance(value, list) else [value]
+    return [str(item) for item in values if item not in (None, "")]
+
+
 def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
     """Return the first non-empty value from Langfuse metadata layers."""
     metadata = _dict(record.get("metadata"))
@@ -719,6 +725,14 @@ class LangfuseJSONLImporter:
                 "langfuse.project_id": next(iter(project_ids), None),
                 "langfuse.session_id": source_id,
                 "langfuse.trace_ids": [turn.trace_id for turn in turns],
+                "langfuse.tags": sorted(
+                    {
+                        tag
+                        for _, observations in traces
+                        for record in observations
+                        for tag in _strings(_first(record, "traceTags", "tags"))
+                    }
+                ),
                 "langfuse.environments": sorted(
                     {
                         str(value)

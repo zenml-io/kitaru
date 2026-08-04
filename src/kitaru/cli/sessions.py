@@ -39,6 +39,7 @@ from kitaru.cli.registration import (
     list_params,
     page_result,
     parse_json_object,
+    resolve_asset,
 )
 from kitaru.client.exceptions import APIError
 
@@ -191,7 +192,11 @@ async def import_sessions(
     importer_parent, importer_version = await get_plugin_version(
         client.importers, importer, "Importer"
     )
-    agent_parent, agent_version = await get_agent_version(client, agent)
+    if "@" in agent:
+        agent_parent, agent_version = await get_agent_version(client, agent)
+    else:
+        agent_parent = await resolve_asset(client.agents, agent, "Agent")
+        agent_version = None
 
     blob = await client.blobs.upload(content, media_type=media_type, filename=path.name)
     blob_identity = _blob_metadata(blob)
@@ -205,8 +210,8 @@ async def import_sessions(
         "agent": {
             "id": str(agent_parent.id),
             "name": agent_parent.name,
-            "version_id": str(agent_version.id),
-            "version": agent_version.version,
+            "version_id": str(agent_version.id) if agent_version else None,
+            "version": agent_version.version if agent_version else None,
         },
         "blob": blob_identity,
     }
@@ -214,7 +219,7 @@ async def import_sessions(
         importer=importer_parent.name,
         version=importer_version.version,
         agent_id=agent_parent.id,
-        agent_version_id=agent_version.id,
+        agent_version_id=agent_version.id if agent_version else None,
         payload_blob_id=blob.id,
         params=parsed_params,
     )
@@ -286,8 +291,14 @@ async def list_sessions(
     started_before: datetime | None = None,
 ) -> CommandResult:
     """List one bounded server page of sessions."""
-    params = list_params("session", size=size, cursor=cursor, sort=sort, filter=filter)
-    assert isinstance(params, SessionListParams)
+    params = validate_session_list_options(
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
+        started_after=started_after,
+        started_before=started_before,
+    )
     conditions = []
     if params.filter is not None:
         conditions.append(params.filter)
@@ -308,17 +319,12 @@ async def list_sessions(
         conditions.append(
             FilterCondition(field="provider", op=FilterOp.EQ, value=provider)
         )
-    for option, field_operator, value in (
-        ("--started-after", FilterOp.GE, started_after),
-        ("--started-before", FilterOp.LT, started_before),
+    for field_operator, value in (
+        (FilterOp.GE, started_after),
+        (FilterOp.LT, started_before),
     ):
         if value is None:
             continue
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise CLIError(
-                "invalid_arguments",
-                f"{option} must include a timezone, such as Z or +02:00.",
-            )
         conditions.append(
             FilterCondition(field="started_at", op=field_operator, value=value)
         )
@@ -330,6 +336,30 @@ async def list_sessions(
         )
         params = params.model_copy(update={"filter": expression})
     return page_result(await client.sessions.list(params), size=size)
+
+
+def validate_session_list_options(
+    *,
+    size: int,
+    cursor: str | None,
+    sort: str,
+    filter: str | None,
+    started_after: datetime | None,
+    started_before: datetime | None,
+) -> SessionListParams:
+    """Validate session list options that do not require server access."""
+    params = list_params("session", size=size, cursor=cursor, sort=sort, filter=filter)
+    assert isinstance(params, SessionListParams)
+    for option, value in (
+        ("--started-after", started_after),
+        ("--started-before", started_before),
+    ):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise CLIError(
+                "invalid_arguments",
+                f"{option} must include a timezone, such as Z or +02:00.",
+            )
+    return params
 
 
 async def _get_agent_filter_id(client: Any, reference: str) -> uuid.UUID:

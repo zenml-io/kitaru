@@ -482,6 +482,37 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
     assert result.next_actions[-1] == "kitaru session list"
 
 
+async def test_session_import_accepts_agent_without_source_version(
+    tmp_path: Path,
+) -> None:
+    """Plain agents leave imported sessions unversioned."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    result = await sessions.import_sessions(
+        client,
+        payload,
+        importer="jsonl@2",
+        agent="assistant",
+        params=None,
+        media_type="application/jsonl",
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    [request] = client.requests
+    assert request.agent_id == client.agent.id
+    assert request.agent_version_id is None
+    assert result.item["agent"] == {
+        "id": str(client.agent.id),
+        "name": "assistant",
+        "version_id": None,
+        "version": None,
+    }
+
+
 @pytest.mark.parametrize(
     ("wait", "interval", "timeout"),
     [(False, 1.0, None), (False, None, 4.0), (True, float("nan"), None)],

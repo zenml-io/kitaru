@@ -632,7 +632,11 @@ async def test_agent_spec_merges_secrets_in_order_with_later_wins(
     )
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
     assert spec.timeout_seconds == 120
-    assert spec.env == {"KITARU_SESSION_NAME": "s"}
+    assert spec.env == {
+        "KITARU_AGENT_ID": str(agent.id),
+        "KITARU_AGENT_VERSION_ID": str(version.id),
+        "KITARU_SESSION_NAME": "s",
+    }
     assert spec.secret_env == {"KEY": "two"}
     assert spec.run_spec is not None
     assert spec.run_spec.command == "run.sh"
