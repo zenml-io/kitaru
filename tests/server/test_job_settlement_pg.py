@@ -22,7 +22,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from conftest import pg_session_with_engine, postgres_available
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -83,7 +83,7 @@ async def test_advance_job_serializes_concurrent_task_completions() -> None:
             AgentVersion(owner_id=owner.id, agent_id=agent.id)
         )
         job = await SQLJobRepository(seed_session).create(
-            Job(owner_id=owner.id, status=JobStatus.RUNNING)
+            Job(owner_id=owner.id, kind=JobKind.SESSION_RUN, status=JobStatus.RUNNING)
         )
 
         task_ids = []

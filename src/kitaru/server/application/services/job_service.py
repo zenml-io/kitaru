@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskOnFailure
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
@@ -205,16 +206,17 @@ class JobService:
         _ = actor
         await self._repository.delete(job_id)
 
-    async def create_job(self, actor: AuthContext) -> Job:
+    async def create_job(self, kind: JobKind, actor: AuthContext) -> Job:
         """Create an empty pending job owned by the caller.
 
         Args:
+            kind: Workflow creating the job.
             actor: Caller context.
 
         Returns:
             Created job.
         """
-        return await self._repository.create(Job(owner_id=actor.account.id))
+        return await self._repository.create(Job(owner_id=actor.account.id, kind=kind))
 
     async def add_task(self, task: Task) -> Task:
         """Append a task to an unsettled job.
@@ -261,7 +263,7 @@ class JobService:
         agent_version = await resolve_runnable_agent_version(
             command.agent_version_id, self._agent_versions
         )
-        job = await self.create_job(actor)
+        job = await self.create_job(JobKind.SESSION_RUN, actor)
         env = {SESSION_NAME_ENV: command.name} if command.name is not None else {}
         await self.add_task(
             AgentTask(
@@ -310,7 +312,7 @@ class JobService:
             await resolve_agent_id(
                 command.agent_version_id, agent.id, self._agent_versions
             )
-        job = await self.create_job(actor)
+        job = await self.create_job(JobKind.IMPORT, actor)
         await self.add_task(
             ImportTask(
                 job_id=job.id,
@@ -355,7 +357,7 @@ class JobService:
         for session_id in command.input_session_ids:
             if session_id not in stored:
                 raise ValidationError(f"Session {session_id} was not found")
-        job = await self.create_job(actor)
+        job = await self.create_job(JobKind.EVALUATION, actor)
         # The job was just created in this call and cannot have settled yet, so
         # each pair skips add_task's redundant per-iteration settled check.
         for session_id in command.input_session_ids:

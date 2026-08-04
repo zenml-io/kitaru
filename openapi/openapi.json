@@ -3119,6 +3119,17 @@
         "title": "ImporterVersionUpdateRequest",
         "type": "object"
       },
+      "JobKind": {
+        "description": "Job kind.",
+        "enum": [
+          "session_run",
+          "import",
+          "evaluation",
+          "replay"
+        ],
+        "title": "JobKind",
+        "type": "string"
+      },
       "JobResponse": {
         "description": "Job response.",
         "properties": {
@@ -3172,6 +3183,10 @@
             "title": "Id",
             "type": "string"
           },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind",
+            "description": "Kind of workflow that created the job."
+          },
           "owner_id": {
             "description": "Id of the owning account.",
             "format": "uuid",
@@ -3206,6 +3221,7 @@
           "updated",
           "owner_id",
           "id",
+          "kind",
           "status"
         ],
         "title": "JobResponse",
@@ -6032,6 +6048,8 @@
         "enum": [
           "session",
           "cohort",
+          "cohort_version",
+          "agent_version",
           "experiment",
           "experiment_run"
         ],
@@ -8028,7 +8046,7 @@
     },
     "/v1/agents/{agent_id}/versions": {
       "get": {
-        "description": "List the versions of an agent.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent version service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of agent versions.",
+        "description": "List the versions of an agent.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent version service.\n    actor: Caller context.\n    params: Agent version list params.\n\nReturns:\n    Page of agent versions.",
         "operationId": "list_agent_versions_v1_agents__agent_id__versions_get",
         "parameters": [
           {
@@ -8084,6 +8102,33 @@
               "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],
@@ -9017,7 +9062,7 @@
     },
     "/v1/cohorts/{cohort_id}/versions": {
       "get": {
-        "description": "List the versions of a cohort.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort version service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of cohort versions.",
+        "description": "List the versions of a cohort.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort version service.\n    actor: Caller context.\n    params: Cohort version list params.\n\nReturns:\n    Page of cohort versions.",
         "operationId": "list_cohort_versions_v1_cohorts__cohort_id__versions_get",
         "parameters": [
           {
@@ -9073,6 +9118,33 @@
               "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
             }
           }
         ],

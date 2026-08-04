@@ -31,6 +31,7 @@ from conftest import (
     postgres_available,
 )
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, TaskStatus, WorkerScope
 from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -129,7 +130,9 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
     stored_session = await SQLSessionRepository(session).create(
         Session(owner_id=owner.id, agent_id=agent.id, origin="recorded")
     )
-    job = await SQLJobRepository(session).create(Job(owner_id=owner.id))
+    job = await SQLJobRepository(session).create(
+        Job(owner_id=owner.id, kind=JobKind.SESSION_RUN)
+    )
     worker = await SQLWorkerRepository(session).register(
         Worker(
             owner_id=owner.id,

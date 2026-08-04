@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -136,7 +136,11 @@ async def test_finalize_run_if_drained_serializes_concurrent_settlements() -> No
         replay_ids = []
         for _ in range(2):
             job = await SQLJobRepository(seed_session).create(
-                Job(owner_id=owner.id, status=JobStatus.RUNNING)
+                Job(
+                    owner_id=owner.id,
+                    kind=JobKind.REPLAY,
+                    status=JobStatus.RUNNING,
+                )
             )
             baseline = await SQLSessionRepository(seed_session).create(
                 Session(
