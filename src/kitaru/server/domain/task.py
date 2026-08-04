@@ -40,7 +40,6 @@ from kitaru.server.domain.base import (
 from kitaru.server.domain.ids import uuid7
 
 __all__ = [
-    "IMPORT_TAGS_LABEL",
     "AgentTask",
     "AgentTaskDetails",
     "DuplicateEvaluationTask",
@@ -66,8 +65,6 @@ __all__ = [
     "TaskSpec",
     "WorkerScope",
 ]
-
-IMPORT_TAGS_LABEL = "import_tags"
 
 TERMINAL_TASK_STATUSES = frozenset(
     {
