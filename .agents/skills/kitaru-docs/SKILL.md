@@ -51,10 +51,9 @@ to that repository instead of adding that code here.
   non-LLM secret access, label it as the current low-level pattern instead of
   implying there is a dedicated Kitaru secret getter.
 - CLI command contracts live under `src/kitaru/cli/` and are available offline through `kitaru schema`; CLI reference publishing is deferred.
-- Current shipped stack-create types on CLI/MCP are `local`, `kubernetes`,
-  `vertex`, `sagemaker`, and `azureml`.
-- Advanced CLI/MCP stack creation supports `--extra` / structured `extra` plus
-  the remote-only `--async` / `async_mode` convenience flag.
+- Native MCP documentation must match `tests/mcp/snapshots/metrics.json`: 2 read-only tools, 5 standard tools, and 7 destructive tools. Keep third-party/provider MCP documentation separate and intact.
+- Current shipped stack-create types on the CLI are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. The native v2 MCP server does not expose stack management.
+- Advanced CLI stack creation supports `--extra` plus the remote-only `--async` convenience flag.
 - Public Python SDK `kitaru.create_stack(...)` remains local-only; keep that
   distinction explicit.
 - Document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as

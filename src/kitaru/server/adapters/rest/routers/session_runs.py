@@ -20,7 +20,11 @@ from fastapi import APIRouter, Depends, status
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_job_service,
+    reserve_idempotency,
+)
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.mapping.session_runs import (
     session_run_create_to_command,
@@ -36,6 +40,7 @@ async def create_session_run(
     body: SessionRunCreateRequest,
     service: Annotated[JobService, Depends(get_job_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    _idempotency: Annotated[None, Depends(reserve_idempotency)],
 ) -> JobResponse:
     """Run an agent version once, as a job holding one agent task.
 

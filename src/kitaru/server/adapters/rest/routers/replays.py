@@ -31,6 +31,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
     get_replay_service,
+    reserve_idempotency,
 )
 from kitaru.server.adapters.rest.mapping.replays import (
     replay_create_to_command,
@@ -49,6 +50,7 @@ async def create_replay(
     body: ReplayCreateRequest,
     service: Annotated[ReplayService, Depends(get_replay_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    _idempotency: Annotated[None, Depends(reserve_idempotency)],
 ) -> ReplayResponse:
     """Create a standalone replay of a recorded or imported session.
 

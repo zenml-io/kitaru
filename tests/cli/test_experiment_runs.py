@@ -130,6 +130,11 @@ class StubRunsClient:
             self.owner.experiment_lookups += 1
             yield self.owner.experiment
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.experiment_lookups += 1
+            return SimpleNamespace(items=[self.owner.experiment], next_cursor=None)
+
         async def get(self, experiment_id: uuid.UUID) -> Any:
             self.owner.experiment_lookups += 1
             assert experiment_id == self.owner.experiment.id
@@ -185,6 +190,10 @@ class StubRunsClient:
 
         async def iter(self):
             yield self.owner.agent
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
 
         async def get(self, agent_id: uuid.UUID) -> Any:
             assert agent_id == self.owner.agent.id

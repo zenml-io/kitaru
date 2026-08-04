@@ -13,10 +13,11 @@
 #  permissions and limitations under the License.
 """Replay configuration API models, shared by experiments, replays, and evaluations."""
 
+import uuid
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import DiscriminatedRequestModel, JsonValue, RequestModel
 
@@ -60,7 +61,14 @@ class ReplayOverride(RequestModel):
 class EvaluatorConfig(RequestModel):
     """Evaluator config."""
 
-    evaluator: str = Field(description="Evaluator name.")
+    evaluator: str | None = Field(default=None, description="Evaluator name.")
+    evaluator_version_id: uuid.UUID | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Immutable evaluator version id; intended for retry-stable requests."
+        ),
+    )
     version: int | None = Field(
         default=None,
         description="Evaluator version, an omitted value resolves to latest.",
@@ -68,6 +76,16 @@ class EvaluatorConfig(RequestModel):
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the evaluator."
     )
+
+    @model_validator(mode="after")
+    def _validate_identity(self) -> "EvaluatorConfig":
+        if (self.evaluator is None) == (self.evaluator_version_id is None):
+            raise ValueError(
+                "exactly one of evaluator or evaluator_version_id is required"
+            )
+        if self.evaluator is None and self.version is not None:
+            raise ValueError("version requires evaluator")
+        return self
 
 
 class StaticCase(RequestModel):

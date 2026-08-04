@@ -47,6 +47,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_run_service,
     get_experiment_service,
+    reserve_idempotency,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -81,6 +82,7 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
         services.experiment_run_service
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[reserve_idempotency] = lambda: None
     async with asgi_api_client(app) as client:
         yield client
 

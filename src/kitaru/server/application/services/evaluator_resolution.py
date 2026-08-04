@@ -50,14 +50,24 @@ async def resolve_evaluator_config(
         Resolved evaluator config carrying the concrete version and its id.
     """
     _ = actor
-    plugin = await resolve_plugin(
-        config.evaluator, PluginKind.EVALUATOR, plugin_repository
-    )
-    plugin_version = await resolve_plugin_version(
-        plugin, config.version, plugin_repository
-    )
+    if config.evaluator_version_id is not None:
+        plugin_version = await plugin_repository.get_version_by_id(
+            config.evaluator_version_id
+        )
+        plugin = await plugin_repository.get(plugin_version.plugin_id)
+        if plugin.kind is not PluginKind.EVALUATOR:
+            raise ValidationError("The selected plugin version is not an evaluator")
+    else:
+        if config.evaluator is None:
+            raise AssertionError("validated evaluator identity is missing")
+        plugin = await resolve_plugin(
+            config.evaluator, PluginKind.EVALUATOR, plugin_repository
+        )
+        plugin_version = await resolve_plugin_version(
+            plugin, config.version, plugin_repository
+        )
     return EvaluatorConfig(
-        evaluator=config.evaluator,
+        evaluator=plugin.name,
         version=plugin_version.version,
         params=config.params,
         evaluator_version_id=plugin_version.id,

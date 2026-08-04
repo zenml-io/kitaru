@@ -107,7 +107,7 @@ Classify each changed behavior into one or more areas:
 | Area | Typical paths | Evidence to record |
 |---|---|---|
 | CLI | `src/kitaru/cli/**` | Deterministic pytest, local smoke command, or manual waiver |
-| MCP | `src/kitaru/mcp/**`, `tests/mcp/**` | MCP pytest and/or smoke `fastmcp` command |
+| MCP | `src/kitaru/mcp/**`, `tests/mcp/**` | `tests/mcp`, `just mcp-schema-check`, and clean installed-wheel `just mcp-wheel-smoke` |
 | SDK primitives | `src/kitaru/**` core runtime/client/checkpoint/wait/replay code | Deterministic pytest plus local smoke flow if available |
 | Provider adapters | `src/kitaru/adapters/**`, provider examples | Provider area below, deterministic fake test if available, live/local provider check if required. OpenAI/Anthropic changes need exact-ref `llm-integration.yml` evidence or an explicit waiver; weekly-green `develop` is only a canary. |
 | Public examples | `examples/**` | Example pytest, local smoke command, help/import contract, or waiver |
@@ -258,7 +258,7 @@ Expected runtime: 3-5 minutes for local smoke. Remote-stack smoke adds remote ex
 - Does a full `uv sync --python 3.12 --extra local --extra llm --extra mcp` plus the adapter extras (`pydantic-ai`, `openai-agents`, `claude-agent-sdk`, `gemini`, `langgraph`)
 - Optionally, when `--remote-stack-smoke` / `KITARU_REMOTE_SMOKE=1` is set, logs into an operator-provided remote server, inspects the configured remote stacks, submits the private importable smoke flow, waits for success, reads execution/artifact/log evidence, and then continues into the normal local smoke path
 - Starts a local Kitaru server on `http://127.0.0.1:8383`
-- Exercises CLI, SDK flows (including replay), MCP tools, the adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions, and isolated Google ADK checks), and an end-to-end LLM flow
+- Exercises CLI, SDK flows (including replay), the adapter examples (PydanticAI, LangGraph, OpenAI Agents, Claude Agent SDK, Gemini Interactions, and isolated Google ADK checks), and an end-to-end LLM flow; native MCP release evidence comes from the separate schema and installed-wheel contracts
 - Tears down the server
 - Writes structured results to `smoke-results.json`, including skipped checks and skip reasons
 - In `--release` mode, fails if `timeout`/`gtimeout` is unavailable
@@ -365,10 +365,7 @@ How to run it (the pattern that worked well; adapt to the feature):
 2. **Fan out verification with a workflow** (this is a legitimate `ultracode`
    use; only run a workflow when the user has opted into multi-agent
    orchestration). Pass the dataset IDs as `args`. Good shape:
-   - One agent per surface (SDK / CLI / MCP) runs the *identical* query and
-     returns structured results. Kitaru's MCP server is **not** a connected MCP
-     tool; agents must drive it via fastmcp like the smoke test does:
-     `uv run --with fastmcp fastmcp call --command "uv run kitaru-mcp" --target <tool> --input-json '{...}' --json`.
+   - One verifier per applicable surface runs an equivalent bounded query and returns structured results. Drive the native MCP server with the locked `mcp` v2 client over stdio; do not use the deleted v1 `fastmcp` smoke command. Start in read-only mode unless the verification explicitly needs a reviewed standard or destructive operation.
    - A barrier, then adversarial verifiers in parallel: cross-surface
      consistency (do SDK/CLI/MCP agree exactly?), aggregation math (hand-sum the
      per-execution metadata and compare to the endpoint's SUM), replay/resume

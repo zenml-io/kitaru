@@ -13,9 +13,10 @@
 #  permissions and limitations under the License.
 """Evaluator config input model, shared by experiment and replay commands."""
 
+import uuid
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.base import FrozenModel
 
@@ -23,6 +24,17 @@ from kitaru.base import FrozenModel
 class EvaluatorConfigInput(FrozenModel):
     """Evaluator config awaiting resolution."""
 
-    evaluator: str
+    evaluator: str | None = None
+    evaluator_version_id: uuid.UUID | None = None
     version: int | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_identity(self) -> "EvaluatorConfigInput":
+        if (self.evaluator is None) == (self.evaluator_version_id is None):
+            raise ValueError(
+                "exactly one of evaluator or evaluator_version_id is required"
+            )
+        if self.evaluator is None and self.version is not None:
+            raise ValueError("version requires evaluator")
+        return self

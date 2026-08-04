@@ -1868,9 +1868,29 @@
         "description": "Evaluator config.",
         "properties": {
           "evaluator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Evaluator name.",
-            "title": "Evaluator",
-            "type": "string"
+            "title": "Evaluator"
+          },
+          "evaluator_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Immutable evaluator version id; intended for retry-stable requests.",
+            "title": "Evaluator Version Id"
           },
           "params": {
             "additionalProperties": true,
@@ -1891,9 +1911,6 @@
             "title": "Version"
           }
         },
-        "required": [
-          "evaluator"
-        ],
         "title": "EvaluatorConfig",
         "type": "object"
       },
@@ -4715,6 +4732,14 @@
             ],
             "description": "URL the dashboard is reachable at.",
             "title": "Dashboard Url"
+          },
+          "features": {
+            "description": "Backwards-compatible server capability identifiers.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Features",
+            "type": "array"
           },
           "id": {
             "anyOf": [
@@ -9583,6 +9608,25 @@
       "post": {
         "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, and 422 when the pair count exceeds the cap or an input\nsession does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_evaluations_v1_evaluations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10833,6 +10877,23 @@
               "title": "Experiment Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -11988,6 +12049,25 @@
       "post": {
         "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, and\n422 when the baseline session carries no agent version and none was\ngiven, the resolved agent version has no run spec, the tool policy uses\ncohort-version-scoped history, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_v1_replays_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -12423,6 +12503,25 @@
       "post": {
         "description": "Run an agent version once, as a job holding one agent task.\n\nClients observe HTTP 201 on success, 404 when no agent version has this\nid, and 422 when the agent version carries no run spec.\n\nArgs:\n    body: Session run create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_session_run_v1_session_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -13392,7 +13491,7 @@
     },
     "/v1/tasks/claim": {
       "post": {
-        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    settings: API settings for this process.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
+        "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
         "operationId": "claim_tasks_v1_tasks_claim_post",
         "requestBody": {
           "content": {

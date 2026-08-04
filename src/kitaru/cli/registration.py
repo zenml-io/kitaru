@@ -48,6 +48,11 @@ from kitaru.cli.config import build_api_client, resolve_credential
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
+from kitaru.client.references import (
+    ParentKind,
+    ReferenceResolutionError,
+    resolve_parent_resource,
+)
 from kitaru.source_refs import parse_python_source_ref
 
 _MAX_REQUIREMENT_LENGTH = 255
@@ -123,26 +128,21 @@ def page_result(page: Page[Any], *, size: int) -> CommandResult:
 
 
 async def resolve_asset(resource: Any, reference: str, label: str) -> Any:
-    """Resolve one parent by exact UUID or exact case-sensitive name."""
-    reference = reference.strip()
-    if not reference:
-        raise CLIError("invalid_arguments", f"{label} reference cannot be blank.")
+    """Resolve one parent through the shared bounded reference helper."""
     try:
-        asset_id = uuid.UUID(reference)
-    except ValueError:
-        asset_id = None
-    if asset_id is not None:
-        return await resource.get(asset_id)
-    matches = [item async for item in resource.iter() if item.name == reference]
-    if not matches:
-        raise CLIError("not_found", f"{label} {reference!r} was not found.")
-    if len(matches) > 1:
+        kind = ParentKind(label.lower())
+    except ValueError as error:
         raise CLIError(
-            "conflict",
-            f"More than one {label.lower()} has the exact name {reference!r}.",
-            details={"ids": [str(item.id) for item in matches]},
-        )
-    return matches[0]
+            "internal_error", f"Unsupported asset kind {label!r}."
+        ) from error
+    try:
+        return await resolve_parent_resource(resource, kind, reference)
+    except ReferenceResolutionError as error:
+        raise CLIError(
+            error.code,
+            error.message,
+            details=error.details,
+        ) from error
 
 
 def parse_version_reference(reference: str, label: str) -> tuple[str, int | str]:

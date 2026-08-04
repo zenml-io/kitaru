@@ -21,6 +21,35 @@ from typing import ClassVar
 import httpx
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+IDEMPOTENCY_KEY_MAX_LENGTH = 255
+
+
+def validate_idempotency_key(value: str) -> str:
+    """Validate a caller-provided idempotency key for safe header transport.
+
+    Args:
+        value: Candidate idempotency key.
+
+    Raises:
+        ValueError: The key is empty, too long, or contains spaces or
+            non-visible ASCII characters.
+
+    Returns:
+        The unchanged key.
+    """
+    if not value:
+        raise ValueError("Idempotency-Key must not be empty")
+    if len(value) > IDEMPOTENCY_KEY_MAX_LENGTH:
+        message = (
+            "Idempotency-Key must contain at most "
+            f"{IDEMPOTENCY_KEY_MAX_LENGTH} characters"
+        )
+        raise ValueError(message)
+    if any(not 0x21 <= ord(character) <= 0x7E for character in value):
+        raise ValueError(
+            "Idempotency-Key must contain visible ASCII characters without spaces"
+        )
+    return value
 
 
 class RetryTransport(httpx.AsyncBaseTransport):

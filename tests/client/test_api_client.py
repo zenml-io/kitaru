@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from kitaru.analytics.source import CLIENT_HEADER, AnalyticsSource
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import ENV_CREDENTIALS_PATH, CredentialStore
 from kitaru.client.exceptions import NotFoundError, ServerError
@@ -46,6 +47,16 @@ def mock_api_client(
         headers=client._http.headers,
     )
     return client
+
+
+async def test_client_source_sets_both_identity_headers() -> None:
+    """Use the additive analytics source for User-Agent and client identity."""
+    client = KitaruAPIClient("http://test", source=AnalyticsSource.MCP)
+    try:
+        assert client._http.headers["User-Agent"].startswith("kitaru-mcp/")
+        assert client._http.headers[CLIENT_HEADER].startswith("kitaru-mcp/")
+    finally:
+        await client.close()
 
 
 async def test_retries_transport_error() -> None:
@@ -80,6 +91,30 @@ async def test_retries_retryable_status_with_same_idempotency_key() -> None:
     assert len(requests) == 2
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
     assert len(keys) == 1
+
+
+async def test_explicit_idempotency_key_survives_retries() -> None:
+    """Preserve a caller-provided key across every transport attempt."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    response = await client.request(
+        "POST",
+        "/v1/accounts",
+        json={"name": "alice"},
+        idempotency_key="stable-request-id",
+    )
+    assert response.status_code == 200
+    assert [request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests] == [
+        "stable-request-id",
+        "stable-request-id",
+    ]
 
 
 async def test_no_retry_on_client_error() -> None:

@@ -99,3 +99,30 @@ def test_route_manifest_is_registered() -> None:
         "/v1/workers/{worker_id}/heartbeat",
     }
     assert paths == expected
+
+
+def test_idempotency_header_is_scoped_to_four_post_operations() -> None:
+    """Advertise request keys on exactly the four protected mutations."""
+    app = create_app(
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
+    )
+    protected: set[tuple[str, str]] = set()
+    for path, operations in app.openapi()["paths"].items():
+        for method, operation in operations.items():
+            parameters = operation.get("parameters", [])
+            if any(
+                parameter.get("in") == "header"
+                and parameter.get("name") == "Idempotency-Key"
+                for parameter in parameters
+            ):
+                protected.add((method.upper(), path))
+    assert protected == {
+        ("POST", "/v1/replays"),
+        ("POST", "/v1/evaluations"),
+        ("POST", "/v1/session-runs"),
+        ("POST", "/v1/experiments/{experiment_id}/runs"),
+    }

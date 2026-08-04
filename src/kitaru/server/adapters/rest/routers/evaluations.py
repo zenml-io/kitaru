@@ -30,6 +30,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_evaluation_service,
     get_job_service,
+    reserve_idempotency,
 )
 from kitaru.server.adapters.rest.mapping.evaluations import (
     evaluation_batch_create_to_command,
@@ -49,6 +50,7 @@ async def create_evaluations(
     body: EvaluationBatchCreateRequest,
     service: Annotated[JobService, Depends(get_job_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    _idempotency: Annotated[None, Depends(reserve_idempotency)],
 ) -> JobResponse:
     """Score every input session with every evaluator, as one job.
 

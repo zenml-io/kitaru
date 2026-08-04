@@ -60,7 +60,7 @@ from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.env import get_required_env
-from kitaru.transport import build_async_client
+from kitaru.transport import IDEMPOTENCY_KEY_HEADER, build_async_client
 
 
 class KitaruAPIClient:
@@ -74,6 +74,7 @@ class KitaruAPIClient:
         timeout: float = 30.0,
         retries: int = 3,
         pool_size: int = 20,
+        source: AnalyticsSource = AnalyticsSource.PYTHON,
     ) -> None:
         """Initialize the client.
 
@@ -87,13 +88,14 @@ class KitaruAPIClient:
             timeout: Request timeout in seconds.
             retries: Retry count for failed requests.
             pool_size: Connection pool size.
+            source: Analytics source used in client identity headers.
 
         Raises:
             ValueError: Both an API key and a credential store were supplied.
         """
         if api_key is not None and credential_store is not None:
             raise ValueError("api_key and credential_store are mutually exclusive")
-        identification = format_client_header(AnalyticsSource.PYTHON)
+        identification = format_client_header(source)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         self._auth: TokenAuth | None = None
         if api_key:
@@ -203,6 +205,8 @@ class KitaruAPIClient:
         content: bytes | AsyncIterable[bytes] | None = None,
         headers: dict[str, str] | None = None,
         authenticate: bool = True,
+        *,
+        idempotency_key: str | None = None,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
@@ -218,6 +222,8 @@ class KitaruAPIClient:
             headers: Additional request headers.
             authenticate: Whether to send the request through this client's
                 auth flow. The login endpoints send their own credential.
+            idempotency_key: Stable key supplied by the caller for this logical
+                mutation. The retry transport reuses it across attempts.
 
         Raises:
             APIError: The response has an error status code.
@@ -229,6 +235,9 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
+        if idempotency_key is not None:
+            headers = dict(headers or {})
+            headers[IDEMPOTENCY_KEY_HEADER] = idempotency_key
         response = await self._http.request(
             method,
             path,

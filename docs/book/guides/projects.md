@@ -142,8 +142,8 @@ For non-interactive processes on ZenML Pro/Cloud, set the connection and project
 explicitly:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_...
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=kat_...
 export KITARU_PROJECT=production
 ```
 
@@ -152,7 +152,7 @@ three variables, and there is no ambiguity about which server and project it
 will use. `KITARU_PROJECT` is for explicit project selection; local/OSS users
 should keep using the default project instead of setting a non-default project.
 
-If `KITARU_SERVER_URL` and `KITARU_AUTH_TOKEN` come from environment variables,
+If `KITARU_API_URL` and `KITARU_API_KEY` come from environment variables,
 Kitaru requires `KITARU_PROJECT` before project-scoped operations such as
 running, listing, replaying, or invoking executions. Auth-management commands
 are the exception because service accounts and API keys belong to the server,
@@ -208,26 +208,9 @@ The distinction is simple:
   and project creation/selection on ZenML Pro/Cloud. It still validates the
   server/auth pairing, but it does not require a project to already be selected.
 
-## MCP tools
+## MCP support
 
-The MCP server exposes read project tools everywhere, plus a switch tool for
-ZenML Pro/Cloud automation agents:
-
-- `kitaru_projects_list`
-- `kitaru_projects_current`
-- `kitaru_projects_show`
-- `kitaru_projects_use`
-
-It does **not** expose project create/delete tools in this first pass. Agents can
-inspect the current project on any Kitaru connection. Switching to a named
-project with `kitaru_projects_use` requires ZenML Pro/Cloud; durable project
-creation and deletion stay in the CLI and SDK.
-
-On ZenML Pro/Cloud, a useful agent instruction is:
-
-```text
-Check the current Kitaru project. If it is not production, switch to production before listing deployments.
-```
+The native v2 MCP server does not expose project inspection or switching. Select the desired CLI context before starting `kitaru-mcp`, or use `--server`/`--context`; restart the process after changing the connection.
 
 ## Precedence summary
 

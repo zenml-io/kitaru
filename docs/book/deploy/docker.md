@@ -339,8 +339,8 @@ For containers or CI jobs that need to talk to the server without running
 `kitaru login`:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=kat_abc123...
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=kat_abc123...
 export KITARU_PROJECT=my-project
 ```
 

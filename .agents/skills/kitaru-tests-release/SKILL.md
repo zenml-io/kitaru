@@ -74,11 +74,12 @@ for trusted manual or scheduled runs, not normal PR CI.
 
 ## MCP Tests
 
-- Keep MCP-only fixtures in `tests/mcp/conftest.py`.
-- Use mocked `KitaruClient` namespaces unless the test truly needs deeper integration.
-- Verify both delegation and serialized payload shape.
-- Cover file/module loading behavior with `tmp_path` and
-  `monkeypatch.syspath_prepend(...)` rather than real project files.
+- Synchronize with `uv sync --frozen --extra mcp` and run `just test tests/mcp`.
+- Keep handler tests typed and bounded; use resource-shaped fake `KitaruAPIClient` objects unless a protocol or real-server contract requires deeper integration.
+- Test capability filtering through `MCPServer.list_tools()`, not by calling decorated functions alone. The exact inventories are 2 tools in `read-only`, 5 in `standard`, and 7 in `destructive`.
+- Run `just mcp-schema-check` after any input/output model, registry, annotation, description, or MCP SDK change. Snapshot changes require explicit MCP API review.
+- Build the wheel and run `just mcp-wheel-smoke` after launcher, packaging, lifecycle, or optional-import changes. The smoke installs the same wheel once without extras and once with `[mcp]`, then negotiates stdio and exercises all modes.
+- Protected workflow tests must prove stable request-ID forwarding and older-server refusal. Import tests must preserve the four bounded preflight reads. Receipts cannot report stored versus replayed because typed resources discard response headers.
 
 ## Parallel Safety and Fixtures
 
@@ -119,13 +120,9 @@ When adding a new CLI command, MCP tool, or SDK feature:
 
 ## Python CI
 
-`.github/workflows/ci.yml` runs on push/PR to `develop`. PR jobs run lint,
-format check, YAML check, typos, type check, dependency audit, link check, base
-tests on Python 3.11/3.12/3.13, and additional test lanes with `kitaru[mcp]`
-installed on Python 3.11/3.12.
+`.github/workflows/ci.yml` runs on push/PR to `develop`. Base lanes cover Python 3.11–3.14 without resolving MCP. MCP lanes cover Python 3.11–3.14 with `kitaru[mcp]` plus shared connection/client contracts. A Python 3.12 installed-wheel lane builds one artifact, verifies base imports and missing-extra startup in a clean environment, then negotiates stdio, lists the 2/5/7 registries, calls a stubbed read, checks text/structured parity, and shuts down from a clean `[mcp]` install.
 
-Push jobs also run Docker server smoke and wheel-packaging checks because those
-paths may need trusted UI release credentials.
+Push jobs also run Docker server smoke and UI wheel-packaging checks because those paths may need trusted UI release credentials. The release workflow reruns the schema, source-suite, and clean installed-wheel contracts against the artifact it publishes.
 
 When changing Kitaru UI bundling, frontend smoke testing, Docker dashboard
 packaging, or release UI selection, read `FRONTEND-TESTING.md` first.

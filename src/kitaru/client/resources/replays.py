@@ -42,11 +42,14 @@ class ReplaysResource:
         """
         self._client = client
 
-    async def create(self, request: ReplayCreateRequest) -> ReplayResponse:
+    async def create(
+        self, request: ReplayCreateRequest, *, idempotency_key: str | None = None
+    ) -> ReplayResponse:
         """Create a standalone replay of a recorded or imported session.
 
         Args:
             request: Replay create request.
+            idempotency_key: Stable key for replaying this logical creation.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -61,6 +64,7 @@ class ReplaysResource:
             "POST",
             "/v1/replays",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ReplayResponse.model_validate(response.json())
 

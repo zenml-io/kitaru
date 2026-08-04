@@ -71,6 +71,26 @@ async def test_resolve_explicit_version(repository: FakePluginRepository) -> Non
     assert resolved.evaluator_version_id == first.id
 
 
+async def test_resolve_immutable_version_id_after_evaluator_rename(
+    repository: FakePluginRepository,
+) -> None:
+    """Resolve a retry-stable version id independently of the mutable name."""
+    plugin = await create_plugin(
+        repository, OWNER_ID, kind=PluginKind.EVALUATOR, name="accuracy"
+    )
+    version = await repository.create_version(plugin.id, SOURCE, display_version="v1")
+    plugin.name = "renamed"
+    await repository.update(plugin)
+
+    resolved = await resolve_evaluator_config(
+        EvaluatorConfigInput(evaluator_version_id=version.id), repository
+    )
+
+    assert resolved.evaluator == "renamed"
+    assert resolved.version == 1
+    assert resolved.evaluator_version_id == version.id
+
+
 async def test_resolve_missing_evaluator(repository: FakePluginRepository) -> None:
     """Raise when no evaluator plugin has the config's name."""
     config = EvaluatorConfigInput(evaluator="missing")

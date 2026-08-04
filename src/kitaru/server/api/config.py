@@ -91,6 +91,10 @@ class APISettings(Settings):
     ANALYTICS_OPT_IN: bool = True
     ANALYTICS_DEBUG: bool = False
 
+    IDEMPOTENCY_WAIT_TIMEOUT_SECONDS: float = Field(default=5.0, gt=0, le=60)
+    IDEMPOTENCY_RETENTION_HOURS: int = Field(default=24, ge=1, le=720)
+    IDEMPOTENCY_CLEANUP_BATCH_SIZE: int = Field(default=100, ge=1, le=10_000)
+
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = Field(
         default=None,
         validation_alias=_get_otel_alias("otel_exporter_otlp_endpoint"),

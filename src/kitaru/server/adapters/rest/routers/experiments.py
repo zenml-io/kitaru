@@ -30,7 +30,11 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
-from kitaru.server.adapters.rest.dependencies import authorize, get_experiment_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_experiment_service,
+    reserve_idempotency,
+)
 from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_create_to_command,
     experiment_run_to_response,
@@ -180,6 +184,7 @@ async def start_run(
     body: ExperimentRunCreateRequest,
     service: Annotated[ExperimentService, Depends(get_experiment_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    _idempotency: Annotated[None, Depends(reserve_idempotency)],
 ) -> ExperimentRunResponse:
     """Start an experiment run, fanning out one replay per cohort version session.
 

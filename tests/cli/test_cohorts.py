@@ -118,6 +118,11 @@ class StubCohortClient:
             self.owner.agent_lookups += 1
             yield self.owner.agent
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.agent_lookups += 1
+            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
+
     class _Cohorts:
         def __init__(self, owner: "StubCohortClient") -> None:
             self.owner = owner

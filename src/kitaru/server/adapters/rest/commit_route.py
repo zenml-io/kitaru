@@ -20,7 +20,16 @@ from fastapi import Request, Response
 from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kitaru.server.adapters.rest.idempotency import (
+    IDEMPOTENCY_STATUS_HEADER,
+    IDEMPOTENCY_STATUS_STORED,
+    IdempotencyExecution,
+    get_replay_safe_headers,
+)
+from kitaru.server.application.models.idempotency import IdempotencyStoredResponse
+
 _SESSION_STATE_ATTR = "db_session"
+_IDEMPOTENCY_STATE_ATTR = "idempotency_execution"
 
 
 def attach_request_session(request: Request, session: AsyncSession) -> None:
@@ -33,7 +42,31 @@ def attach_request_session(request: Request, session: AsyncSession) -> None:
     setattr(request.state, _SESSION_STATE_ATTR, session)
 
 
-def _get_request_session(request: Request) -> AsyncSession | None:
+def attach_idempotency_execution(
+    request: Request, execution: IdempotencyExecution
+) -> None:
+    """Attach an owned idempotency reservation for response completion.
+
+    Args:
+        request: Incoming request.
+        execution: Service, reservation, and actor context.
+    """
+    setattr(request.state, _IDEMPOTENCY_STATE_ATTR, execution)
+
+
+def _get_idempotency_execution(request: Request) -> IdempotencyExecution | None:
+    """Return an attached idempotency execution, if any.
+
+    Args:
+        request: Completed request.
+
+    Returns:
+        Execution attached by the opt-in dependency, or ``None``.
+    """
+    return getattr(request.state, _IDEMPOTENCY_STATE_ATTR, None)
+
+
+def get_attached_request_session(request: Request) -> AsyncSession | None:
     """Return the database session attached to the request, if any.
 
     Args:
@@ -60,7 +93,24 @@ class CommitRoute(APIRoute):
 
         async def commit_route_handler(request: Request) -> Response:
             response = await original_route_handler(request)
-            session = _get_request_session(request)
+            execution = _get_idempotency_execution(request)
+            if execution is not None:
+                body = getattr(response, "body", None)
+                if not isinstance(body, bytes):
+                    raise RuntimeError(
+                        "Idempotent routes must return a non-streaming byte response"
+                    )
+                await execution.service.complete(
+                    execution.reservation,
+                    IdempotencyStoredResponse(
+                        status_code=response.status_code,
+                        body=body,
+                        headers=get_replay_safe_headers(response.headers),
+                    ),
+                    actor=execution.actor,
+                )
+                response.headers[IDEMPOTENCY_STATUS_HEADER] = IDEMPOTENCY_STATUS_STORED
+            session = get_attached_request_session(request)
             if session is not None:
                 await session.commit()
             return response

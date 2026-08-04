@@ -45,6 +45,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "mcp>=2.0,<3",
+]
 cli = [
     "cyclopts>=4.22",
     "packaging>=24.0",
@@ -82,6 +85,7 @@ otel = [
 
 [project.scripts]
 kitaru = "kitaru.cli:main"
+kitaru-mcp = "kitaru.mcp_entrypoint:main"
 
 [project.urls]
 Homepage = "https://kitaru.ai"
@@ -174,6 +178,21 @@ name = "client and server are independent, both sit on the shared packages"
 type = "layers"
 layers = [
     "kitaru.client | kitaru.server",
+    "kitaru.api_models | kitaru.analytics | kitaru.transport",
+]
+
+[[tool.importlinter.contracts]]
+name = "MCP does not depend on optional frontends"
+type = "forbidden"
+source_modules = ["kitaru.mcp", "kitaru.mcp_entrypoint"]
+forbidden_modules = ["kitaru.cli", "kitaru.server"]
+
+[[tool.importlinter.contracts]]
+name = "MCP sits above the client and shared packages"
+type = "layers"
+layers = [
+    "kitaru.mcp | kitaru.mcp_entrypoint",
+    "kitaru.client",
     "kitaru.api_models | kitaru.analytics | kitaru.transport",
 ]
 

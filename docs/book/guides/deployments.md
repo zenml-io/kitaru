@@ -235,7 +235,7 @@ A useful way to keep the model straight:
 | Role | Needs source target? | Typical commands |
 |---|---|---|
 | Producer | Yes, for deploys | `kitaru deploy`, `kitaru flow tag`, `kitaru flow deployments list` |
-| Consumer | No | `kitaru invoke`, `KitaruClient().deployments.invoke(...)`, MCP `kitaru_deployments_invoke` |
+| Consumer | No | `kitaru invoke`, `KitaruClient().deployments.invoke(...)` |
 
 The producer knows `flows/research.py:research_agent`. The consumer only needs
 `research_agent` plus a selector such as `default`, `stable`, `canary`, or `v2`.
@@ -370,8 +370,8 @@ kitaru login https://kitaru.example.com --api-key KITARU_API_KEY_VALUE --project
 Or, in CI and other headless environments, with environment variables:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 
@@ -468,8 +468,7 @@ Invoke the stable route:
 }
 ```
 
-Use `kitaru_deployments_list` and `kitaru_deployments_get` before invoking when
-the assistant needs to discover available versions or confirm where a tag points.
+Use `kitaru flow deployments list` before invoking when an assistant needs to discover available versions or confirm where a tag points. The native v2 MCP server does not expose deployment operations.
 
 ## Auth: one workspace context, no deployment tokens
 
@@ -493,16 +492,15 @@ kitaru status
 For headless environments:
 
 ```bash
-export KITARU_SERVER_URL=https://kitaru.example.com
-export KITARU_AUTH_TOKEN=KITARU_API_KEY_VALUE
+export KITARU_API_URL=https://kitaru.example.com
+export KITARU_API_KEY=KITARU_API_KEY_VALUE
 export KITARU_PROJECT=production
 ```
 
 Once that context is configured, deployment invocation uses it automatically.
 A consumer invokes one route by flow name plus tag/version; Kitaru resolves that
 route to the saved snapshot. There is no long-lived per-version service and no
-extra per-deployment token to pass to `kitaru invoke`, `.invoke()`, or
-`kitaru_deployments_invoke`.
+extra per-deployment token to pass to `kitaru invoke` or `.invoke()`.
 
 ## A practical checklist
 

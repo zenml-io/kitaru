@@ -33,6 +33,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_job_service,
     get_task_service,
+    reserve_idempotency,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -64,6 +65,7 @@ async def api_client(
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[reserve_idempotency] = lambda: None
     async with asgi_api_client(app) as client:
         yield client
 

@@ -14,10 +14,11 @@
 """FastAPI dependency providers."""
 
 from collections.abc import AsyncGenerator
+from datetime import timedelta
 from importlib.metadata import version
 from typing import Annotated, NamedTuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
@@ -63,6 +64,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.idempotency_repository import (
+    SQLIdempotencyRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
@@ -84,7 +88,17 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
-from kitaru.server.adapters.rest.commit_route import attach_request_session
+from kitaru.server.adapters.rest.commit_route import (
+    attach_idempotency_execution,
+    attach_request_session,
+    get_attached_request_session,
+)
+from kitaru.server.adapters.rest.idempotency import (
+    IDEMPOTENCY_KEY_HEADER,
+    IdempotencyExecution,
+    IdempotencyReplay,
+    build_idempotency_request,
+)
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
 from kitaru.server.application.models.auth import (
@@ -113,6 +127,9 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.idempotency_service import (
+    IdempotencyService,
+)
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
@@ -129,7 +146,9 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.plugin import PluginKind
+from kitaru.transport import IDEMPOTENCY_KEY_MAX_LENGTH, validate_idempotency_key
 
 CSRF_HEADER = "X-CSRF-Token"
 KITARU_VERSION = version("kitaru")
@@ -970,3 +989,65 @@ async def authorize_task_only(
             detail="A task credential is required on this route.",
         )
     return context
+
+
+async def reserve_idempotency(
+    request: Request,
+    actor: Annotated[AuthContext, Depends(authorize)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias=IDEMPOTENCY_KEY_HEADER, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+    ] = None,
+) -> None:
+    """Reserve a supplied idempotency key for an opted-in route.
+
+    Missing keys preserve the existing non-idempotent behavior. Supplied keys
+    are scoped to the authenticated actor and canonical route before the
+    mutation handler runs.
+
+    Args:
+        request: Incoming request.
+        actor: Authenticated account caller.
+        settings: API settings controlling wait and retention bounds.
+        idempotency_key: Optional caller-provided request key.
+
+    Raises:
+        ValidationError: The header is duplicated or contains invalid bytes.
+        IdempotencyReplay: A matching completed response already exists.
+    """
+    values = request.headers.getlist(IDEMPOTENCY_KEY_HEADER)
+    if not values:
+        return
+    if len(values) != 1:
+        raise ValidationError("Idempotency-Key must be provided exactly once")
+    if idempotency_key is None:
+        raise ValidationError("Idempotency-Key must not be empty")
+    try:
+        validate_idempotency_key(idempotency_key)
+    except ValueError as error:
+        raise ValidationError(str(error)) from error
+
+    session = get_attached_request_session(request)
+    if session is None:
+        raise RuntimeError("Authenticated idempotent request has no database session")
+    service = IdempotencyService(
+        repository=SQLIdempotencyRepository(session),
+        wait_timeout_seconds=settings.IDEMPOTENCY_WAIT_TIMEOUT_SECONDS,
+        retention=timedelta(hours=settings.IDEMPOTENCY_RETENTION_HOURS),
+        cleanup_batch_size=settings.IDEMPOTENCY_CLEANUP_BATCH_SIZE,
+    )
+    idempotency_request = await build_idempotency_request(request, idempotency_key)
+    decision = await service.begin(idempotency_request, actor=actor)
+    if decision.response is not None:
+        raise IdempotencyReplay(decision.response)
+    if decision.reservation is None:
+        raise RuntimeError("Idempotency execution decision has no reservation")
+    attach_idempotency_execution(
+        request,
+        IdempotencyExecution(
+            service=service,
+            reservation=decision.reservation,
+            actor=actor,
+        ),
+    )

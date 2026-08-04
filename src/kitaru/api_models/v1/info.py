@@ -50,3 +50,7 @@ class ServerInfoResponse(ResponseModel):
         default=None,
         description="Control plane API the server accepts credentials from.",
     )
+    features: list[str] = Field(
+        default_factory=list,
+        description="Backwards-compatible server capability identifiers.",
+    )

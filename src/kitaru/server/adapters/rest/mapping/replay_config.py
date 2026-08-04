@@ -185,5 +185,8 @@ def evaluator_config_input(config: WireEvaluatorConfig) -> EvaluatorConfigInput:
         Evaluator config awaiting resolution.
     """
     return EvaluatorConfigInput(
-        evaluator=config.evaluator, version=config.version, params=config.params
+        evaluator=config.evaluator,
+        evaluator_version_id=config.evaluator_version_id,
+        version=config.version,
+        params=config.params,
     )

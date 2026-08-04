@@ -132,6 +132,11 @@ class StubImportClient:
             self.owner.lookup_calls.append("importer")
             yield self.owner.importer
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.lookup_calls.append("importer")
+            return SimpleNamespace(items=[self.owner.importer], next_cursor=None)
+
         async def get_version(self, parent_id: uuid.UUID, version: int) -> Any:
             assert parent_id == self.owner.importer.id
             assert version == self.owner.importer_version.version
@@ -144,6 +149,11 @@ class StubImportClient:
         async def iter(self):
             self.owner.lookup_calls.append("agent")
             yield self.owner.agent
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.lookup_calls.append("agent")
+            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
 
         async def iter_versions(self, parent_id: uuid.UUID):
             assert parent_id == self.owner.agent.id

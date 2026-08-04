@@ -33,6 +33,10 @@ from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.rest.idempotency import (
+    IdempotencyReplay,
+    build_replay_response,
+)
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -75,6 +79,10 @@ from kitaru.server.domain.base import (
     QueryTimeoutError,
     ValidationError,
 )
+from kitaru.server.domain.idempotency import (
+    IdempotencyMismatch,
+    IdempotencyRequestInProgress,
+)
 
 
 def _register_domain_exception_handlers(app: FastAPI) -> None:
@@ -88,6 +96,40 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     Args:
         app: FastAPI application that will serve the v1 API.
     """
+
+    @app.exception_handler(IdempotencyReplay)
+    async def idempotency_replay(request: Request, exc: IdempotencyReplay) -> Response:
+        _ = request
+        return build_replay_response(exc.response)
+
+    @app.exception_handler(IdempotencyMismatch)
+    async def idempotency_mismatch(
+        request: Request, exc: IdempotencyMismatch
+    ) -> JSONResponse:
+        _ = request
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": str(exc),
+                "code": "idempotency_mismatch",
+                "retryable": False,
+            },
+        )
+
+    @app.exception_handler(IdempotencyRequestInProgress)
+    async def idempotency_in_progress(
+        request: Request, exc: IdempotencyRequestInProgress
+    ) -> JSONResponse:
+        _ = request
+        return JSONResponse(
+            status_code=425,
+            content={
+                "detail": str(exc),
+                "code": "request_in_progress",
+                "retryable": True,
+            },
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
 
     @app.exception_handler(ForbiddenError)
     async def forbidden(request: Request, exc: ForbiddenError) -> JSONResponse:

@@ -109,6 +109,76 @@ async def test_create_experiment(client: httpx.AsyncClient) -> None:
     assert uuid.UUID(body["id"])
 
 
+async def test_create_experiment_by_immutable_evaluator_version_id(
+    client: httpx.AsyncClient, plugin_repository: FakePluginRepository
+) -> None:
+    """Accept a retry-stable evaluator version id and keep response compatibility."""
+    plugin = await plugin_repository.get_by_name(PluginKind.EVALUATOR, "accuracy")
+    version = await plugin_repository.get_version(plugin.id, 1)
+    plugin.name = "renamed"
+    await plugin_repository.update(plugin)
+
+    response = await client.post(
+        "/v1/experiments",
+        json={
+            "name": "exp1",
+            "evaluators": [{"evaluator_version_id": str(version.id)}],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["evaluators"] == [
+        {"evaluator": "renamed", "version": 1, "params": {}}
+    ]
+
+
+async def test_create_experiment_rejects_ambiguous_evaluator_identity(
+    client: httpx.AsyncClient, plugin_repository: FakePluginRepository
+) -> None:
+    """Reject ambiguous, missing, and wrong-kind immutable version identities."""
+    evaluator = await plugin_repository.get_by_name(PluginKind.EVALUATOR, "accuracy")
+    evaluator_version = await plugin_repository.get_version(evaluator.id, 1)
+    for config in (
+        {
+            "evaluator": "accuracy",
+            "evaluator_version_id": str(evaluator_version.id),
+        },
+        {"evaluator_version_id": str(evaluator_version.id), "version": 1},
+    ):
+        response = await client.post(
+            "/v1/experiments",
+            json={"name": str(uuid.uuid4()), "evaluators": [config]},
+        )
+        assert response.status_code == 422
+
+    response = await client.post(
+        "/v1/experiments",
+        json={
+            "name": "missing-version",
+            "evaluators": [{"evaluator_version_id": str(uuid.uuid4())}],
+        },
+    )
+    assert response.status_code == 404
+
+    importer = await create_plugin(
+        plugin_repository,
+        ACCOUNT.id,
+        kind=PluginKind.IMPORTER,
+        name="not-an-evaluator",
+    )
+    importer_version = await plugin_repository.create_version(
+        importer.id, SOURCE, display_version="v1"
+    )
+    response = await client.post(
+        "/v1/experiments",
+        json={
+            "name": "wrong-kind",
+            "evaluators": [{"evaluator_version_id": str(importer_version.id)}],
+        },
+    )
+    assert response.status_code == 422
+
+
 async def test_create_experiment_unknown_evaluator(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when an evaluator config names an unknown evaluator."""
     response = await client.post(

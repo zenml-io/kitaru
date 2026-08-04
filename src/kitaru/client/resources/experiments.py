@@ -156,13 +156,18 @@ class ExperimentsResource:
         await self._client.request("DELETE", f"/v1/experiments/{experiment_id}")
 
     async def start_run(
-        self, experiment_id: uuid.UUID, request: ExperimentRunCreateRequest
+        self,
+        experiment_id: uuid.UUID,
+        request: ExperimentRunCreateRequest,
+        *,
+        idempotency_key: str | None = None,
     ) -> ExperimentRunResponse:
         """Start an experiment run, fanning out one replay per cohort version session.
 
         Args:
             experiment_id: Id of the experiment.
             request: Experiment run create request.
+            idempotency_key: Stable key for replaying this logical creation.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -176,5 +181,6 @@ class ExperimentsResource:
             "POST",
             f"/v1/experiments/{experiment_id}/runs",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ExperimentRunResponse.model_validate(response.json())

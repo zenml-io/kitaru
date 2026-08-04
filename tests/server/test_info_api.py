@@ -16,7 +16,7 @@
 import httpx
 
 from conftest import control_plane_settings, local_settings
-from kitaru.api_models.v1.info import AuthScheme
+from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 
@@ -56,3 +56,15 @@ async def test_control_plane_api_url_drops_its_trailing_slash() -> None:
 
     assert payload["auth_scheme"] == AuthScheme.CONTROL_PLANE.value
     assert payload["control_plane_api_url"] == "https://cp.example.com"
+    assert payload["features"] == ["idempotency.v1"]
+
+
+def test_server_info_defaults_features_for_older_payloads() -> None:
+    """Parse an older server response that predates feature discovery."""
+    response = ServerInfoResponse.model_validate(
+        {
+            "version": "1.0.0",
+            "auth_scheme": "none",
+        }
+    )
+    assert response.features == []

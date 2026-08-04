@@ -38,7 +38,7 @@ with `kitaru status`. If you are just trying Kitaru locally, run them as-is.
 - **Run a durable prospect-research sweep with typed qualification and HITL approval:** `examples/end_to_end/prospect_scout/prospector.py`
 - **Wrap a Claude Agent SDK audit with checkpoints, partial replay, and wait/resume:** `examples/end_to_end/compliance_review/`
 - **Build a sandboxed, credential-isolated, profile-gated agent harness platform (the stage-by-stage starter kit):** `examples/end_to_end/agent_harness_platform/` — see also the [docs tour](https://docs.zenml.io/user-guides/agents-guide/).
-- **Explore Kitaru through MCP tools:** `examples/features/mcp/mcp_query_tools.py`
+- **Connect a coding agent to Kitaru's read-only v2 MCP server:** `examples/v2/mcp/`
 
 ## Install the extras you need
 
@@ -60,7 +60,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | Google ADK adapter examples | `UV_PROJECT_ENVIRONMENT=.venv-google-adk uv run --python 3.12 --no-dev --extra google-adk ...`; keep using the isolated no-dev ADK environment while local/dev extras remain intentionally blocked |
 | Coding agent example | `uv sync --extra local` + model alias / provider credentials |
 | Compliance review example | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret |
-| MCP query tools example | `uv sync --extra local --extra mcp` |
+| Native v2 MCP configuration example | `uv sync --extra mcp` |
 
 ## How the examples are organized
 
@@ -81,7 +81,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 - [end_to_end/prospect_scout/README.md](end_to_end/prospect_scout/README.md) — durable prospect-research sweep: one checkpoint per company (crash-resumable via `kitaru executions retry`), enum-typed PydanticAI qualification, `kitaru.wait()` shortlist approval, and per-prospect outreach drafts
 - [end_to_end/compliance_review/README.md](end_to_end/compliance_review/README.md) — Claude Agent SDK document audit in three runnable stages: crash-resilient turns, sequential domain checkpoints with partial replay, and durable wait/resume conversation
 - [end_to_end/agent_harness_platform/README.md](end_to_end/agent_harness_platform/README.md) — stage-by-stage starter kit for an internal agent harness platform: durable PydanticAI agent → DockerSandbox → skills as markdown → credential proxy → typed services → HITL via `kitaru.wait()`. See the [docs tour](https://docs.zenml.io/user-guides/agents-guide/) for the polished surface.
-- [features/mcp/README.md](features/mcp/README.md) — inspect flows with the Kitaru MCP server
+- [v2/mcp/README.md](v2/mcp/README.md) — configure the native v2 MCP server in read-only mode
 
 ## Core workflow basics
 
@@ -126,7 +126,7 @@ uv venv && source .venv/bin/activate   # Create and activate a virtual environme
 | [News scout](end_to_end/news_scout/scout.py) | `cd examples/end_to_end/news_scout && uv run python scout.py` | `uv sync --extra local --extra pydantic-ai --extra llm` + `ANTHROPIC_API_KEY` locally (or a `news-scout-keys` secret for remote stacks) | PydanticAI agent with `checkpoint_strategy="calls"` — every model/tool call is its own Kitaru checkpoint; `publish_report` promotes the agent output to a named `final_report` artifact; `ImageSettings.secret_environment_from` attaches the provider-keys secret automatically when the active stack is remote | [Examples index](https://docs.zenml.io/kitaru/getting-started/examples) | — |
 | [Prospect scout](end_to_end/prospect_scout/prospector.py) | `cd examples/end_to_end/prospect_scout && uv run python prospector.py` | `uv sync --extra local --extra pydantic-ai` + `OPENAI_API_KEY` (`EXA_API_KEY` optional; `PROSPECT_SCOUT_MODEL=test` runs keyless) | Durable research sweep — one checkpoint per company so `kitaru executions retry` resumes a crashed run without repeating finished searches; enum-typed PydanticAI qualification; `kitaru.wait()` shortlist approval before per-prospect outreach drafts | [Wait and Resume](https://docs.zenml.io/kitaru/guides/wait-and-resume) | — |
 | [Compliance review](end_to_end/compliance_review/README.md) | `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` | `uv sync --extra local --extra claude-agent-sdk` + local `ANTHROPIC_API_KEY` or remote `anthropic` secret | Three runnable Claude Agent SDK stages: checkpointed turns, sequential domain checkpoints with partial replay, and durable wait/resume conversation | [Replay and Overrides](https://docs.zenml.io/kitaru/guides/replay-and-overrides) | — |
-| [MCP query tools](features/mcp/mcp_query_tools.py) | `uv run python examples/features/mcp/mcp_query_tools.py` | `uv sync --extra local --extra mcp` | Query executions and artifacts through the Kitaru MCP server | [Execution Management](https://docs.zenml.io/kitaru/guides/execution-management) | — |
+| [Native v2 MCP configuration](v2/mcp/README.md) | Configure `.mcp.json.example` in an MCP client | `uv sync --extra mcp` | Inspect the v2 registry and activity surface with a read-only server | [MCP Server](../docs/book/agent-native/mcp-server.md) | `tests/mcp/test_installed_contract.py` |
 
 ## Recommended learning path
 
@@ -158,7 +158,7 @@ If you are new to Kitaru, this is the smoothest path:
 24. `cd examples/end_to_end/coding_agent && uv run python agent.py "Your task"` *(full agent with tools + HITL)*
 25. `cd examples/end_to_end/news_scout && uv run python scout.py` *(granular-checkpoint agent with 4 tools, dashboard-readable final_report artifact)*
 26. `uv run python examples/end_to_end/compliance_review/stage_1_single_turn.py` *(Claude Agent SDK audit; walk through Stage 1, Stage 2, and conversational Stage 4 to see checkpointing, replay, and wait/resume in turn)*
-27. `uv run python examples/features/mcp/mcp_query_tools.py`
+27. Configure `examples/v2/mcp/.mcp.json.example` and inspect one page with the read-only native MCP server
 
 If you prefer the hosted docs view, start with the
 [Examples page](https://docs.zenml.io/kitaru/getting-started/examples).

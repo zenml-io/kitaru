@@ -17,10 +17,24 @@ from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.rest.commit_route import CommitRoute, attach_request_session
+from kitaru.server.adapters.rest.commit_route import (
+    CommitRoute,
+    attach_idempotency_execution,
+    attach_request_session,
+)
+from kitaru.server.adapters.rest.idempotency import IdempotencyExecution
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.idempotency import (
+    IdempotencyActorScope,
+    IdempotencyRequest,
+    IdempotencyReservation,
+    IdempotencyStoredResponse,
+)
+from kitaru.server.application.services.idempotency_service import IdempotencyService
+from kitaru.server.domain.account import Account
 
 _SCOPE: dict[str, Any] = {
     "type": "http",
@@ -147,3 +161,73 @@ async def test_commit_route_without_session_returns_response() -> None:
     await app(scope, receive, send)
 
     assert events == ["response_sent"]
+
+
+async def test_commit_route_completes_exact_safe_response_before_commit() -> None:
+    """Persist exact response bytes and safe headers in the request transaction."""
+    events: list[str] = []
+    captured: list[IdempotencyStoredResponse] = []
+    actor = AuthContext(account=Account(name="owner"))
+    reservation = IdempotencyReservation(
+        record_id=actor.account.id,
+        actor=IdempotencyActorScope(
+            account_id=actor.account.id,
+            principal_kind="account",
+            principal_identity=str(actor.account.id),
+        ),
+        request=IdempotencyRequest(
+            method="POST",
+            route="/items",
+            caller_key="request-1",
+            fingerprint="a" * 64,
+        ),
+    )
+
+    class RecordingService:
+        async def complete(
+            self,
+            owned: IdempotencyReservation,
+            response: IdempotencyStoredResponse,
+            actor: AuthContext,
+        ) -> None:
+            assert owned == reservation
+            captured.append(response)
+            events.append("completed")
+
+    router = APIRouter(route_class=CommitRoute)
+
+    async def dependencies(request: Request) -> AsyncGenerator[None, None]:
+        attach_request_session(request, cast(AsyncSession, _RecordingSession(events)))
+        attach_idempotency_execution(
+            request,
+            IdempotencyExecution(
+                service=cast(IdempotencyService, RecordingService()),
+                reservation=reservation,
+                actor=actor,
+            ),
+        )
+        yield
+
+    @router.post("/items", dependencies=[Depends(dependencies)])
+    async def create_item() -> Response:
+        return Response(
+            content=b'{"id":"stable"}',
+            status_code=201,
+            media_type="application/json",
+            headers={"Set-Cookie": "secret=value", "X-Request-ID": "trace"},
+        )
+
+    app = FastAPI()
+    app.include_router(router)
+    scope = {**_SCOPE, "method": "POST", "path": "/items", "raw_path": b"/items"}
+    receive, send = _drive(scope, events)
+    await app(scope, receive, send)
+
+    assert events == ["completed", "committed", "response_sent"]
+    assert captured == [
+        IdempotencyStoredResponse(
+            status_code=201,
+            body=b'{"id":"stable"}',
+            headers={"content-type": "application/json"},
+        )
+    ]
