@@ -59,7 +59,7 @@ it.
 ```bash
 pip install "kitaru[cli,pydantic-ai]"
 docker compose up -d          # server, from this repo — or your team's server
-kitaru login --local
+export KITARU_API_URL=http://localhost:8000
 kitaru agent register support-agent --command "python support.py"
 ```
 
@@ -81,13 +81,13 @@ support = KitaruAgent(agent, agent_id=AGENT_ID)
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-Already tracing elsewhere? Import instead of wrapping — same result:
+Already tracing elsewhere? Import instead of wrapping — same result. The
+Langfuse, Braintrust, and OpenTelemetry importers are built in:
 
-```python
-blob = await client.blobs.upload(Path("langfuse-export.jsonl").read_bytes())
-await client.imports.create(ImportCreateRequest(
-    importer="langfuse", agent_id=AGENT_ID, payload_blob_id=blob.id,
-))
+```bash
+kitaru session import langfuse-export.jsonl \
+  --importer langfuse@latest --agent support-agent \
+  --tag imported-baseline --wait
 ```
 
 Every run is now a session you can replay. Define what "good" means once
@@ -139,19 +139,22 @@ wire a framework directly.
 ### Drive it from your coding agent
 
 Kitaru observes your production agents; your coding assistant is how you
-talk to Kitaru. Every step is scriptable — a CLI with `--output json`
-(`kitaru agent register`, `kitaru evaluator test`, `kitaru worker start`,
-`kitaru job watch`) and a typed async Python client — so Claude Code,
-Codex, or Cursor can triage a failing session, write the evaluator, run
-the experiment, and report the diff while you review.
+talk to Kitaru. Every step is scriptable — an MCP server
+(`pip install "kitaru[mcp]"`, tools gated read-only → standard →
+destructive), a CLI with `--output json` covering the whole loop
+(`kitaru session import`, `kitaru session evaluate --tag`,
+`kitaru experiment run start --wait`), and a typed async Python client —
+so Claude Code, Codex, or Cursor can triage a failing session, write the
+evaluator, run the experiment, and report the diff while you review.
 
 ### Self-hosted, by design
 
-One FastAPI + Postgres server on your infrastructure — and no code
-executes on it. Replays, imports, and evaluations run on **workers** in
-your own environment: your virtualenv, your credentials, your network.
-Traces don't leave your systems. Apache 2.0, no mandatory SaaS control
-plane.
+One FastAPI + Postgres server on your infrastructure — published Docker
+image and Helm chart included — and no code executes on it. Replays,
+imports, and evaluations run on **workers** in your own environment: your
+virtualenv, your credentials, your network. Workers hold your API key
+only long enough to trade it for short-lived scoped tokens. Traces don't
+leave your systems. Apache 2.0, no mandatory SaaS control plane.
 
 ## 🌱 Where ZenML fits
 
