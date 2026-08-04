@@ -128,7 +128,7 @@ jobs:
           KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
       - name: Build server image
         run: >-
-          docker build -f docker/dev.Dockerfile --target runtime
+          docker build -f docker/dev-server.Dockerfile --target runtime
           -t kitaru-ci-server .
       - name: Start PostgreSQL
         run: |

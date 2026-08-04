@@ -7,11 +7,13 @@ main project `CLAUDE.md` links here for Docker-specific guidance.
 
 | Dockerfile | Image | Kitaru source |
 |---|---|---|
-| `dev.Dockerfile` | Development server | Local repository source |
+| `dev-client.Dockerfile` | Development client | Local repository source |
+| `dev-server.Dockerfile` | Development server | Local repository source |
 | `release-client.Dockerfile` | Release client | Published PyPI wheel |
 | `release-server.Dockerfile` | Release server | Published PyPI wheel |
 
-All three builds resolve dependencies from the committed `uv.lock`. The release
+All development and release builds resolve dependencies from the committed
+`uv.lock`. The release
 builds then install the matching published Kitaru wheel without resolving its
 dependencies again. This keeps container releases reproducible while allowing
 the Python package and container publishing processes to be recovered or run
@@ -23,8 +25,25 @@ that are incompatible with the lockfile.
 
 ## Stages
 
-`dev.Dockerfile` uses `base`, `builder`, and `runtime` stages. It installs the
-local project with the `server` and `otel` extras.
+`dev-client.Dockerfile` installs the locked local project non-editably and
+produces the `client` target.
+
+`dev-server.Dockerfile` separates dependency installation from the two server
+runtime modes:
+
+| Stage | Purpose |
+|---|---|
+| `pre-builder` | Installs locked `server` and `otel` dependencies without the project |
+| `common-runtime` | Installs local source editably for bind-mounted development |
+| `local-runtime` | Runs uvicorn with source reload enabled |
+| `builder` | Installs local source non-editably for the self-contained image |
+| `runtime` | Runs the self-contained development server without copied sources |
+
+Set `INSTALL_DEBUG_TOOLS=true` when building the server to add curl, Git,
+network diagnostics, and the PostgreSQL client. Debug tools are omitted by
+default. Every development runtime sets
+`KITARU_SERVER_ANALYTICS_DEBUG=true` so opted-in development events use the
+analytics debug service instead of polluting the production analytics namespace.
 
 Both release Dockerfiles use these stages:
 
@@ -44,8 +63,18 @@ Build from the repository root. A release build must use a repository checkout
 whose version and lockfile match the published package version.
 
 ```bash
-# Development server from local source
-docker build -f docker/dev.Dockerfile --target runtime -t kitaru-server-dev .
+# Development client from local source
+docker build -f docker/dev-client.Dockerfile --target client \
+  -t kitaru-client-dev .
+
+# Self-contained development server from local source
+docker build -f docker/dev-server.Dockerfile --target runtime \
+  -t kitaru-server-dev .
+
+# Reloading server for a source bind mount
+docker build -f docker/dev-server.Dockerfile --target local-runtime \
+  --build-arg INSTALL_DEBUG_TOOLS=true -t kitaru-server-local .
+docker run --rm -p 8000:8000 -v "$PWD/src:/app/src" kitaru-server-local
 
 # Release client from the matching published package
 docker build -f docker/release-client.Dockerfile --target client \

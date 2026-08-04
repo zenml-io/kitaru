@@ -28,15 +28,16 @@ def app() -> FastAPI:
     Returns:
         Configured FastAPI application.
     """
-    return create_app(APISettings())
+    settings = APISettings()
+    logging.basicConfig(level=settings.LOG_LEVEL)
+    return create_app(settings)
 
 
 def main() -> None:
     """Run the API server."""
     settings = APISettings()
-    logging.basicConfig(level=settings.LOG_LEVEL)
     uvicorn.run(
-        create_app(settings),
+        app(settings),
         host=settings.HOST,
         port=settings.PORT,
         log_level=settings.LOG_LEVEL.lower(),

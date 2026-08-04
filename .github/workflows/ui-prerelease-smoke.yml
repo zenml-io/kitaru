@@ -79,7 +79,7 @@ jobs:
         if: ${{ inputs.docker-smoke }}
         working-directory: kitaru
         run: >-
-          docker build -f docker/dev.Dockerfile --target runtime
+          docker build -f docker/dev-server.Dockerfile --target runtime
           -t kitaru-ui-prerelease-smoke .
       - name: Start PostgreSQL
         if: ${{ inputs.docker-smoke }}
