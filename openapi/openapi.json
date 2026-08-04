@@ -826,8 +826,7 @@
         "enum": [
           "none",
           "local",
-          "control_plane",
-          "cloud"
+          "control_plane"
         ],
         "title": "AuthScheme",
         "type": "string"

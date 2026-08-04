@@ -23,7 +23,8 @@ Note: Ensure you have OCI support enabled in your Helm client.
 
 This chart offers a multitude of configuration options. For detailed
 information, check the default [`values.yaml`](values.yaml) file. For full
-details of the configuration options, refer to the [Kitaru documentation](https://docs.zenml.io/getting-started/deploying-kitaru/deploy-with-helm).
+details of the configuration options, refer to the
+[Kitaru documentation](https://docs.zenml.io/kitaru/).
 
 ### PostgreSQL TLS
 

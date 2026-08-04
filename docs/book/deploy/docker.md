@@ -7,10 +7,9 @@ icon: docker
 
 Self-host the Kitaru server so your agents run, replay, and diff on infrastructure
 you control. The server stores every run's durable checkpoints and serves the
-dashboard your team and coding agents use to inspect and replay them. The container
-image is published at
-[`zenmldocker/kitaru-server`](https://hub.docker.com/r/zenmldocker/kitaru-server) and works
-with Docker, Docker Compose, or any container orchestration platform.
+dashboard your team and coding agents use to inspect and replay them. The
+container image is published as `zenmldocker/kitaru-server` and works with
+Docker, Docker Compose, or any container orchestration platform.
 
 ## Quick start
 
