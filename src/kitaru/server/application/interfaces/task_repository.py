@@ -195,7 +195,8 @@ class TaskRepository(Protocol):
             now: Current time.
 
         Returns:
-            Cancel request time by id for every stamped task.
+            Cancel request time of the task, falling back to its job's, by id
+            for every stamped task.
         """
         ...
 

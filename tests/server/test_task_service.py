@@ -349,6 +349,39 @@ async def test_backstop_stamps_live_siblings_and_cancels_pending_ones(
     assert await services.task_service.list_unpropagated_cancel_job_ids() == []
 
 
+async def test_heartbeat_stops_a_sibling_before_the_backstop_runs(
+    services: JobAndTaskServices,
+) -> None:
+    """An aborting failure reaches a live sibling on its next heartbeat."""
+    job_id = await _pending_job(services)
+    failing = await _claimable_agent_task(
+        services, job_id, on_failure=TaskOnFailure.ABORT
+    )
+    sibling = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    worker_actor = build_worker_actor(ACTOR.account, worker.id)
+    await services.task_service.claim_tasks(10, actor=worker_actor)
+
+    assert (
+        await services.task_service.heartbeat_worker(
+            worker.id, [sibling.id], actor=worker_actor
+        )
+        == []
+    )
+
+    await services.task_service.update_task(
+        failing.id,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
+    )
+
+    # The sibling's own row is still unstamped, the job carries the request.
+    assert (await services.tasks.get(sibling.id)).cancel_requested_at is None
+    assert await services.task_service.heartbeat_worker(
+        worker.id, [sibling.id], actor=worker_actor
+    ) == [sibling.id]
+
+
 async def test_backstop_settles_the_job_once_it_drains(
     services: JobAndTaskServices,
 ) -> None:

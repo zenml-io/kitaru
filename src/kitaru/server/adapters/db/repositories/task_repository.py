@@ -21,6 +21,7 @@ from sqlalchemy import ColumnElement, func, not_, or_, select, update
 
 from kitaru.api_models.v1.task import TaskKind, TaskStatus, WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import (
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
     TERMINAL_STATUS_VALUES,
@@ -332,7 +333,9 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
 
         Writes only the heartbeat column, so a stamp cannot overwrite fields
         concurrent writers committed since the caller last read the tasks.
-        Rows are locked in id order.
+        Task rows are locked in id order. The owning job row is joined for
+        its own cancel request, which reaches a task before the sweep stamps
+        it, and joining leaves that row unlocked.
 
         Args:
             task_ids: Candidate task ids.
@@ -340,7 +343,8 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             now: Current time.
 
         Returns:
-            Cancel request time by id for every stamped task.
+            Cancel request time of the task, falling back to its job's, by id
+            for every stamped task.
         """
         if not task_ids:
             return {}
@@ -356,9 +360,12 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         statement = (
             update(TaskORM)
-            .where(TaskORM.id.in_(locked))
+            .where(TaskORM.id.in_(locked), JobORM.id == TaskORM.job_id)
             .values(heartbeat_at=now, updated=now)
-            .returning(TaskORM.id, TaskORM.cancel_requested_at)
+            .returning(
+                TaskORM.id,
+                func.coalesce(TaskORM.cancel_requested_at, JobORM.cancel_requested_at),
+            )
             .execution_options(synchronize_session=False)
         )
         rows = (await self._session.execute(statement)).all()

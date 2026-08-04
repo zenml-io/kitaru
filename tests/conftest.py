@@ -4671,6 +4671,9 @@ class FakeTaskRepository:
         """
         self._tasks: dict[uuid.UUID, Task] = {}
         self._sessions = sessions
+        # Assigned after construction, since the fake job repository takes
+        # this repository in its own constructor.
+        self.jobs: FakeJobRepository | None = None
 
     def _check_evaluator_pair(self, task: Task) -> None:
         """Mirror the unique (job_id, input_session_id, plugin_version_id) key.
@@ -4942,7 +4945,8 @@ class FakeTaskRepository:
             now: Current time.
 
         Returns:
-            Cancel request time by id for every stamped task.
+            Cancel request time of the task, falling back to its job's, by id
+            for every stamped task.
         """
         stamped: dict[uuid.UUID, datetime | None] = {}
         for task_id in task_ids:
@@ -4960,6 +4964,10 @@ class FakeTaskRepository:
                 }
             )
             stamped[task_id] = task.cancel_requested_at
+            if stamped[task_id] is None and self.jobs is not None:
+                owner = (await self.jobs.get_many([task.job_id])).get(task.job_id)
+                if owner is not None:
+                    stamped[task_id] = owner.cancel_requested_at
         return stamped
 
     async def lock_by_jobs(
@@ -5277,6 +5285,7 @@ def _build_task_substrate() -> TaskSubstrate:
     workers = FakeWorkerRepository()
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
+    tasks.jobs = jobs
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,

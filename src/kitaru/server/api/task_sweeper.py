@@ -103,7 +103,7 @@ async def _read_candidates(
 async def sweep_once(
     database: DatabaseService, settings: APISettings, analytics: AnalyticsClient
 ) -> None:
-    """Rescue stale tasks and propagate pending job cancels, one item per transaction.
+    """Propagate pending job cancels and rescue stale tasks, one item per transaction.
 
     A candidate another replica already holds is skipped and picked up on a
     later tick. A failing item logs and leaves the remaining items to run.
@@ -115,14 +115,11 @@ async def sweep_once(
     """
     now = datetime.now(UTC)
     task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
-    for task_id in task_ids:
-        await _run_unit(
-            database,
-            settings,
-            analytics,
-            partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
-            f"stale task {task_id}",
-        )
+    # Propagate first. The rescue chooses between canceling and requeuing by
+    # reading the task's own cancel_requested_at, so a stale task of a
+    # canceling job whose stamp has not landed yet is requeued instead of
+    # canceled, burning a retry attempt and leaving a window for a worker to
+    # claim it.
     for job_id in job_ids:
         await _run_unit(
             database,
@@ -130,6 +127,14 @@ async def sweep_once(
             analytics,
             partial(TaskService.propagate_job_cancel, job_id=job_id),
             f"cancel propagation for job {job_id}",
+        )
+    for task_id in task_ids:
+        await _run_unit(
+            database,
+            settings,
+            analytics,
+            partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
+            f"stale task {task_id}",
         )
 
 

@@ -139,8 +139,8 @@ class TaskService:
         """Stamp the heartbeat on the tasks the caller still owns.
 
         A reported task the caller no longer owns, that no longer exists, that
-        already reached a terminal status, or whose cancellation was
-        requested comes back for the worker to stop.
+        already reached a terminal status, or whose cancellation was requested
+        on the task or on its job comes back for the worker to stop.
 
         Args:
             worker_id: Id of the reporting worker.

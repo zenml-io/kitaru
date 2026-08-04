@@ -53,6 +53,7 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
+from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.account import Account
@@ -78,6 +79,7 @@ class Setup(NamedTuple):
     """Task repository under test, plus rows a task can reference."""
 
     tasks: TaskRepository
+    jobs: JobRepository
     owner_id: uuid.UUID
     job_id: uuid.UUID
     agent_id: uuid.UUID
@@ -144,6 +146,7 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
     )
     return Setup(
         tasks=SQLTaskRepository(session),
+        jobs=SQLJobRepository(session),
         owner_id=owner.id,
         job_id=job.id,
         agent_id=agent.id,
@@ -160,10 +163,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each task repository implementation with a ready job to attach to."""
     if request.param == "fake":
         jobs = FakeJobRepository()
+        tasks = FakeTaskRepository()
+        tasks.jobs = jobs
         owner_id = uuid.uuid4()
         job = await create_job(jobs, owner_id)
         yield Setup(
-            tasks=FakeTaskRepository(),
+            tasks=tasks,
+            jobs=jobs,
             owner_id=owner_id,
             job_id=job.id,
             agent_id=uuid.uuid4(),
@@ -530,6 +536,32 @@ async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
     assert reloaded_completed.heartbeat_at != now
     assert reloaded_completed.status is TaskStatus.COMPLETED
     assert reloaded_completed.result == [{"name": "exact_match", "score": 1.0}]
+
+
+async def test_stamp_heartbeats_falls_back_to_the_jobs_cancel_request(
+    setup: Setup,
+) -> None:
+    """Report a job-level cancel request the task row does not carry yet."""
+    start = datetime.now(UTC)
+    task = _agent_task(setup)
+    task.claim(setup.worker_id, start)
+    task.start(start)
+    stored = await setup.tasks.create(task)
+    assert stored.cancel_requested_at is None
+
+    now = datetime.now(UTC)
+    assert await setup.tasks.stamp_heartbeats([stored.id], setup.worker_id, now) == {
+        stored.id: None
+    }
+
+    job = await setup.jobs.get(setup.job_id)
+    job.request_cancel(now)
+    await setup.jobs.update(job)
+
+    stamped = await setup.tasks.stamp_heartbeats([stored.id], setup.worker_id, now)
+    assert stamped == {stored.id: job.cancel_requested_at}
+    # The stamp is read through, not written onto the task row.
+    assert (await setup.tasks.get(stored.id)).cancel_requested_at is None
 
 
 async def test_claim_pending_skip_locked_never_double_claims() -> None:
