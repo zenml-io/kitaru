@@ -40,8 +40,8 @@ keywords = [
     "observability",
 ]
 dependencies = [
-    "pydantic>=2",
-    "httpx>=0.27",
+    "pydantic>=2,<3",
+    "httpx>=0.27,<1",
 ]
 
 [project.optional-dependencies]

@@ -33,7 +33,7 @@ from conftest import (
     create_worker,
 )
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.server.application.events import Event, TaskTerminal
@@ -118,6 +118,17 @@ async def test_create_session_run_creates_a_pending_job_with_one_agent_task(
     assert task.env == {"KITARU_SESSION_NAME": "run-1"}
 
 
+async def test_create_session_run_stamps_the_job_kind_session_run(
+    services: JobAndTaskServices,
+) -> None:
+    """A session run's job carries the session_run kind."""
+    version_id = await _runnable_agent_version(services)
+    job = await services.job_service.create_session_run(
+        SessionRunCreate(agent_version_id=version_id, inputs=None), actor=ACTOR
+    )
+    assert job.kind is JobKind.SESSION_RUN
+
+
 async def test_create_session_run_without_a_name_sets_no_session_name_env(
     services: JobAndTaskServices,
 ) -> None:
@@ -179,6 +190,30 @@ async def test_create_import_resolves_latest_version_by_default(
     assert isinstance(task, ImportTask)
     assert task.plugin_version_id == v2.id
     assert task.plugin_version_id != v1.id
+
+
+async def test_create_import_stamps_the_job_kind_import(
+    services: JobAndTaskServices,
+) -> None:
+    """An import's job carries the import kind."""
+    plugin = await create_plugin(
+        services.plugins, ACTOR.account.id, PluginKind.IMPORTER, name="csv"
+    )
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="run"),
+        display_version=None,
+    )
+    payload = await create_blob(services.blobs, ACTOR.account.id, content=b"csv-data")
+    agent = await create_agent(services.agents, ACTOR.account.id)
+
+    job = await services.job_service.create_import(
+        ImportCreate(
+            importer="csv", agent_id=agent.id, payload_blob_id=payload.id, params={}
+        ),
+        actor=ACTOR,
+    )
+    assert job.kind is JobKind.IMPORT
 
 
 async def test_create_import_stamps_the_agent_version_on_its_task(
@@ -314,6 +349,24 @@ async def test_create_evaluations_makes_one_continue_task_per_pair(
     assert all(isinstance(task, EvaluationTask) for task in tasks)
     assert all(task.on_failure is TaskOnFailure.CONTINUE for task in tasks)
     assert all(task.kind is TaskKind.EVALUATOR for task in tasks)
+
+
+async def test_create_evaluations_stamps_the_job_kind_evaluation(
+    services: JobAndTaskServices,
+) -> None:
+    """An evaluation batch's job carries the evaluation kind."""
+    await _evaluator_version(services, "accuracy")
+    session = await create_session(
+        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+    )
+    job = await services.job_service.create_evaluations(
+        EvaluationBatchCreate(
+            input_session_ids=[session.id],
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    assert job.kind is JobKind.EVALUATION
 
 
 async def test_add_task_conflicts_on_a_settled_job(
@@ -539,6 +592,22 @@ async def test_list_jobs_filters_by_status(services: JobAndTaskServices) -> None
     )
     assert len(items) == 1
     assert items[0].status is JobStatus.COMPLETED
+
+
+async def test_list_jobs_filters_by_kind(services: JobAndTaskServices) -> None:
+    """List jobs filters by kind."""
+    await create_job(services.jobs, ACTOR.account.id, kind=JobKind.SESSION_RUN)
+    await create_job(services.jobs, ACTOR.account.id, kind=JobKind.REPLAY)
+    items, _ = await services.job_service.list_jobs(
+        JobFilter(
+            expression=FilterCondition(
+                field="kind", op=FilterOp.EQ, value=JobKind.REPLAY
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert len(items) == 1
+    assert items[0].kind is JobKind.REPLAY
 
 
 async def test_list_job_tasks_requires_an_existing_job(

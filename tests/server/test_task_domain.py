@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.server.domain.job import IllegalJobStatusTransition, Job
 from kitaru.server.domain.task import (
@@ -342,7 +342,7 @@ def test_with_staleness_reports_the_effective_status() -> None:
 
 def test_job_lifecycle() -> None:
     """A job starts once, settles once, and keeps its first cancel request."""
-    job = Job(owner_id=uuid.uuid4())
+    job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN)
     job.start(NOW)
     assert job.status is JobStatus.RUNNING
     assert job.started_at == NOW
@@ -357,6 +357,6 @@ def test_job_lifecycle() -> None:
 
 def test_job_settle_rejects_a_non_terminal_status() -> None:
     """Settlement only writes terminal job statuses."""
-    job = Job(owner_id=uuid.uuid4())
+    job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN)
     with pytest.raises(IllegalJobStatusTransition):
         job.settle(JobStatus.RUNNING, None, NOW)

@@ -18,7 +18,7 @@ from collections import deque
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
@@ -250,11 +250,14 @@ def make_worker_registration_response(
 
 
 def make_job_response(
-    status: JobStatus = JobStatus.RUNNING, **overrides: Any
+    kind: JobKind = JobKind.SESSION_RUN,
+    status: JobStatus = JobStatus.RUNNING,
+    **overrides: Any,
 ) -> JobResponse:
     """Build a job response with sane defaults.
 
     Args:
+        kind: Job kind.
         status: Job status.
         overrides: Additional fields to override on the response.
 
@@ -264,6 +267,7 @@ def make_job_response(
     fields = {
         "id": uuid.uuid4(),
         "owner_id": OWNER_ID,
+        "kind": kind,
         "status": status,
         "created": _now(),
         "updated": _now(),

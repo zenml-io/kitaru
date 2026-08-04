@@ -16,7 +16,7 @@
 import uuid
 
 from kitaru.server.application.events import EventDispatcher, JobSettled
-from kitaru.server.domain.job import Job, JobStatus
+from kitaru.server.domain.job import Job, JobKind, JobStatus
 
 
 async def test_dispatch_runs_handlers_in_registration_order() -> None:
@@ -32,7 +32,9 @@ async def test_dispatch_runs_handlers_in_registration_order() -> None:
 
     dispatcher.register(JobSettled, first)
     dispatcher.register(JobSettled, second)
-    job = Job(owner_id=uuid.uuid4(), status=JobStatus.COMPLETED)
+    job = Job(
+        owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN, status=JobStatus.COMPLETED
+    )
 
     await dispatcher.dispatch(JobSettled(job))
 

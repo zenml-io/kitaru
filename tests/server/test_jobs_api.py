@@ -26,7 +26,7 @@ from conftest import (
     create_agent_task,
     create_job,
 )
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_worker,
@@ -77,6 +77,7 @@ async def test_get_job(client: httpx.AsyncClient, services: JobAndTaskServices) 
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(job.id)
+    assert body["kind"] == "session_run"
     assert body["status"] == "pending"
 
 
@@ -107,6 +108,23 @@ async def test_list_jobs_filters_by_status(
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["status"] == "completed"
+
+
+async def test_list_jobs_filters_by_kind(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """List jobs filters by kind."""
+    await create_job(services.jobs, ACCOUNT.id, kind=JobKind.SESSION_RUN)
+    await create_job(services.jobs, ACCOUNT.id, kind=JobKind.REPLAY)
+
+    filter_expression = {"field": "kind", "op": "eq", "value": "replay"}
+    response = await client.get(
+        "/v1/jobs", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["kind"] == "replay"
 
 
 async def test_list_job_tasks(

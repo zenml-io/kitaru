@@ -274,6 +274,28 @@ async def test_create_link_distinct_resource_types(setup: Setup) -> None:
     assert link.resource_type == TagResourceType.COHORT
 
 
+async def test_create_link_distinct_version_resource_types(setup: Setup) -> None:
+    """Allow the same resource id under different resource types."""
+    repository, owner_id = setup
+    tag = await repository.create(Tag(owner_id=owner_id, name="prod"))
+    resource_id = uuid.uuid4()
+    await repository.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.COHORT_VERSION,
+            resource_id=resource_id,
+        )
+    )
+    link = await repository.create_link(
+        TagLink(
+            tag_id=tag.id,
+            resource_type=TagResourceType.AGENT_VERSION,
+            resource_id=resource_id,
+        )
+    )
+    assert link.resource_type == TagResourceType.AGENT_VERSION
+
+
 async def test_delete_link(setup: Setup) -> None:
     """Delete a tag link by tag and resource."""
     repository, owner_id = setup

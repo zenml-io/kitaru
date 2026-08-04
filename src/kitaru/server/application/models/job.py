@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 
 from pydantic import Field
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
@@ -30,6 +30,7 @@ class JobFilter(ListFilter):
     """Job list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "kind": FilterField(value_type=JobKind, ops=EQUALITY_OPS),
         "status": FilterField(value_type=JobStatus, ops=EQUALITY_OPS),
     }
 

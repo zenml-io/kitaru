@@ -41,7 +41,7 @@ from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
@@ -1502,17 +1502,21 @@ async def create_agent(
 class FakeAgentVersionRepository:
     """In-memory agent version repository."""
 
-    def __init__(self, agents: FakeAgentRepository) -> None:
+    def __init__(
+        self, agents: FakeAgentRepository, tags: "FakeTagRepository | None" = None
+    ) -> None:
         """Initialize the repository.
 
         Args:
             agents: Fake agent repository sharing the version counter. Also
                 wired back onto the agent repository so its delete can check
                 for versions.
+            tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._agents = agents
         self._agents._agent_versions = self
         self._versions: dict[uuid.UUID, AgentVersion] = {}
+        self._tags = tags
 
     async def create(self, agent_version: AgentVersion) -> AgentVersion:
         """Persist a new agent version.
@@ -1569,6 +1573,30 @@ class FakeAgentVersionRepository:
             raise AgentVersionNotFound(agent_version_id)
         return agent_version.agent_id
 
+    def _agent_version_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
+        """Resolve the ids of agent versions linked to a tag by name.
+
+        Args:
+            tag_name: Name of the tag to resolve.
+
+        Returns:
+            Ids of agent versions linked to the tag.
+        """
+        if self._tags is None:
+            return set()
+        tag_id = next(
+            (tag.id for tag in self._tags._tags.values() if tag.name == tag_name),
+            None,
+        )
+        if tag_id is None:
+            return set()
+        return {
+            link.resource_id
+            for link in self._tags._links.values()
+            if link.tag_id == tag_id
+            and link.resource_type == TagResourceType.AGENT_VERSION
+        }
+
     async def query(
         self, agent_version_filter: AgentVersionFilter
     ) -> tuple[list[AgentVersion], str | None]:
@@ -1587,8 +1615,34 @@ class FakeAgentVersionRepository:
                 for version in versions
                 if version.agent_id == agent_version_filter.agent_id
             ]
+        if agent_version_filter.expression is not None:
+            resolvers = {"tag": self._evaluate_tag_condition}
+            versions = [
+                version
+                for version in versions
+                if _evaluate_filter_expression(
+                    version, agent_version_filter.expression, resolvers
+                )
+            ]
         page, next_cursor = _paginate_fake(versions, agent_version_filter)
         return [version.model_copy() for version in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, agent_version: AgentVersion, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against an agent version.
+
+        Args:
+            agent_version: Agent version to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the agent version has a matching tag.
+        """
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(
+            agent_version.id in self._agent_version_ids_tagged(name) for name in names
+        )
 
     async def update(self, agent_version: AgentVersion) -> AgentVersion:
         """Persist changes to an existing agent version.
@@ -2632,6 +2686,7 @@ class FakeCohortVersionRepository:
         cohorts: FakeCohortRepository,
         sessions: FakeSessionRepository,
         experiment_runs: "FakeExperimentRunRepository | None" = None,
+        tags: FakeTagRepository | None = None,
     ) -> None:
         """Initialize the repository.
 
@@ -2643,11 +2698,13 @@ class FakeCohortVersionRepository:
                 ``cohort_version_id`` filter.
             experiment_runs: Fake experiment run repository, consulted by
                 delete to check for an in-use version.
+            tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._cohorts = cohorts
         self._sessions = sessions
         self._sessions._cohort_versions = self
         self._experiment_runs = experiment_runs
+        self._tags = tags
         self._versions: dict[uuid.UUID, CohortVersion] = {}
         self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
 
@@ -2714,6 +2771,30 @@ class FakeCohortVersionRepository:
                 return stored.model_copy()
         raise CohortVersionNotFound(cohort_id, version)
 
+    def _cohort_version_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
+        """Resolve the ids of cohort versions linked to a tag by name.
+
+        Args:
+            tag_name: Name of the tag to resolve.
+
+        Returns:
+            Ids of cohort versions linked to the tag.
+        """
+        if self._tags is None:
+            return set()
+        tag_id = next(
+            (tag.id for tag in self._tags._tags.values() if tag.name == tag_name),
+            None,
+        )
+        if tag_id is None:
+            return set()
+        return {
+            link.resource_id
+            for link in self._tags._links.values()
+            if link.tag_id == tag_id
+            and link.resource_type == TagResourceType.COHORT_VERSION
+        }
+
     async def query(
         self, version_filter: CohortVersionFilter
     ) -> tuple[list[CohortVersion], str | None]:
@@ -2730,8 +2811,32 @@ class FakeCohortVersionRepository:
             for version in self._versions.values()
             if version.cohort_id == version_filter.cohort_id
         ]
+        if version_filter.expression is not None:
+            resolvers = {"tag": self._evaluate_tag_condition}
+            versions = [
+                v
+                for v in versions
+                if _evaluate_filter_expression(v, version_filter.expression, resolvers)
+            ]
         page, next_cursor = _paginate_fake(versions, version_filter)
         return [version.model_copy() for version in page], next_cursor
+
+    def _evaluate_tag_condition(
+        self, version: CohortVersion, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a tag filter condition against a cohort version.
+
+        Args:
+            version: Cohort version to evaluate.
+            condition: Validated tag condition.
+
+        Returns:
+            Whether the cohort version has a matching tag.
+        """
+        names = condition.value if condition.op is FilterOp.IN else (condition.value,)
+        return any(
+            version.id in self._cohort_version_ids_tagged(name) for name in names
+        )
 
     async def list_session_ids(self, cohort_version_id: uuid.UUID) -> list[uuid.UUID]:
         """List a version's member session ids, in order.
@@ -2739,9 +2844,14 @@ class FakeCohortVersionRepository:
         Args:
             cohort_version_id: Id of the cohort version.
 
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
         Returns:
             Ordered member session ids.
         """
+        if cohort_version_id not in self._versions:
+            raise CohortVersionIdNotFound(cohort_version_id)
         return list(self._members.get(cohort_version_id, []))
 
     async def update(self, version: CohortVersion) -> CohortVersion:
@@ -4818,6 +4928,7 @@ def _is_stale_before(task: Task, bound: datetime) -> bool:
 async def create_job(
     repository: FakeJobRepository,
     owner_id: uuid.UUID,
+    kind: JobKind = JobKind.SESSION_RUN,
     status: JobStatus = JobStatus.PENDING,
 ) -> Job:
     """Store a job in the fake repository.
@@ -4825,12 +4936,13 @@ async def create_job(
     Args:
         repository: Fake job repository.
         owner_id: Id of the owning account.
+        kind: Job kind.
         status: Job status.
 
     Returns:
         Stored job.
     """
-    return await repository.create(Job(owner_id=owner_id, status=status))
+    return await repository.create(Job(owner_id=owner_id, kind=kind, status=status))
 
 
 async def create_agent_task(
@@ -5134,7 +5246,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     replays = FakeReplayRepository()
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
-        cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs
+        cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags
     )
     session_nodes = FakeSessionNodeRepository(
         sessions=sessions, cohort_versions=cohort_versions

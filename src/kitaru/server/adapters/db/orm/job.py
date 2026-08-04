@@ -19,7 +19,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -28,9 +28,11 @@ from kitaru.server.adapters.db.orm.base import (
 from kitaru.server.adapters.db.orm.orm_utils import foreign_key_name, index_name
 from kitaru.server.domain.job import Job
 
+KIND_LENGTH = 32
 STATUS_LENGTH = 32
 
 JOB_OWNER_ID_FOREIGN_KEY = foreign_key_name("job", ["owner_id"])
+JOB_KIND_INDEX = index_name("job", ["kind"])
 JOB_STATUS_INDEX = index_name("job", ["status"])
 
 
@@ -42,10 +44,12 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=JOB_OWNER_ID_FOREIGN_KEY
         ),
+        Index(JOB_KIND_INDEX, "kind"),
         Index(JOB_STATUS_INDEX, "status"),
     )
 
     owner_id: Mapped[uuid.UUID]
+    kind: Mapped[str] = mapped_column(String(KIND_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
@@ -67,6 +71,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return cls(
             id=job.id,
             owner_id=job.owner_id,
+            kind=job.kind.value,
             status=job.status.value,
             cancel_requested_at=job.cancel_requested_at,
             started_at=job.started_at,
@@ -95,6 +100,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return Job(
             id=self.id,
             owner_id=self.owner_id,
+            kind=JobKind(self.kind),
             status=JobStatus(self.status),
             cancel_requested_at=self.cancel_requested_at,
             started_at=self.started_at,

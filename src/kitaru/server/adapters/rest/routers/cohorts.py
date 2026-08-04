@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 
-from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import (
     CohortCreateRequest,
     CohortListParams,
@@ -27,6 +27,7 @@ from kitaru.api_models.v1.cohort import (
 )
 from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
+    CohortVersionListParams,
     CohortVersionResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
@@ -184,10 +185,11 @@ async def create_cohort_version(
 ) -> CohortVersionResponse:
     """Create a new version of a cohort from a membership delta.
 
-    Clients observe HTTP 201 on success, 404 when no cohort has this id, and
-    422 when the delta removes a session absent from the base version, adds
-    a session already present, repeats a session id, or an added session is
-    missing or belongs to a different agent.
+    Clients observe HTTP 201 on success, 404 when no cohort has this id or
+    no cohort version has the baseline id, and 422 when the baseline belongs
+    to a different cohort, the delta removes a session absent from the base
+    version, adds a session already present, repeats a session id, or an
+    added session is missing or belongs to a different agent.
 
     Args:
         cohort_id: Id of the cohort.
@@ -208,7 +210,7 @@ async def list_cohort_versions(
     cohort_id: uuid.UUID,
     service: Annotated[CohortVersionService, Depends(get_cohort_version_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    params: Annotated[ListParams, Query()],
+    params: Annotated[CohortVersionListParams, Query()],
 ) -> Page[CohortVersionResponse]:
     """List the versions of a cohort.
 
@@ -219,7 +221,7 @@ async def list_cohort_versions(
         cohort_id: Id of the cohort.
         service: Cohort version service.
         actor: Caller context.
-        params: List params.
+        params: Cohort version list params.
 
     Returns:
         Page of cohort versions.

@@ -159,6 +159,7 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
@@ -168,6 +169,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.create_index("ix_job_kind", ["kind"], unique=False)
         batch_op.create_index("ix_job_status", ["status"], unique=False)
 
     op.create_table(
@@ -922,6 +924,7 @@ def downgrade() -> None:
 
     op.drop_table("plugin")
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.drop_index("ix_job_kind")
         batch_op.drop_index("ix_job_status")
 
     op.drop_table("job")

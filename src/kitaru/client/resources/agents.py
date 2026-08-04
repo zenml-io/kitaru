@@ -25,9 +25,10 @@ from kitaru.api_models.v1.agent import (
 )
 from kitaru.api_models.v1.agent_version import (
     AgentVersionCreateRequest,
+    AgentVersionListParams,
     AgentVersionResponse,
 )
-from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.base import Page
 from kitaru.client.resources.pagination import iterate_pages
 
 if TYPE_CHECKING:
@@ -177,13 +178,13 @@ class AgentsResource:
         return AgentVersionResponse.model_validate(response.json())
 
     async def list_versions(
-        self, agent_id: uuid.UUID, params: ListParams | None = None
+        self, agent_id: uuid.UUID, params: AgentVersionListParams | None = None
     ) -> Page[AgentVersionResponse]:
         """List the versions of an agent.
 
         Args:
             agent_id: Id of the agent.
-            params: List params.
+            params: Agent version list params.
 
         Raises:
             APIError: The request failed.
@@ -191,7 +192,7 @@ class AgentsResource:
         Returns:
             Page of agent versions.
         """
-        params = params or ListParams()
+        params = params or AgentVersionListParams()
         response = await self._client.request(
             "GET",
             f"/v1/agents/{agent_id}/versions",
@@ -200,13 +201,13 @@ class AgentsResource:
         return Page[AgentVersionResponse].model_validate(response.json())
 
     async def iter_versions(
-        self, agent_id: uuid.UUID, params: ListParams | None = None
+        self, agent_id: uuid.UUID, params: AgentVersionListParams | None = None
     ) -> AsyncIterator[AgentVersionResponse]:
         """Iterate over every version of an agent.
 
         Args:
             agent_id: Id of the agent.
-            params: List params.
+            params: Agent version list params.
 
         Raises:
             APIError: The request failed.
@@ -215,7 +216,7 @@ class AgentsResource:
             Async iterator over every version of the agent.
         """
         async for item in iterate_pages(
-            params or ListParams(),
+            params or AgentVersionListParams(),
             lambda page_params: self.list_versions(agent_id, page_params),
         ):
             yield item
