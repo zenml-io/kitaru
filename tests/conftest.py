@@ -4646,6 +4646,18 @@ class FakeJobRepository:
         if self._tasks is not None:
             self._tasks.cascade_job_delete(job_id)
 
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+        """
+        for job_id in sorted(job_ids):
+            await self.delete(job_id)
+
 
 class FakeTaskRepository:
     """In-memory task repository."""

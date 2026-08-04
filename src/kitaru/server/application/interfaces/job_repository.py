@@ -152,3 +152,17 @@ class JobRepository(Protocol):
             JobNotFound: No job has this id.
         """
         ...
+
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        The jobs' task rows are locked in id order across all jobs before
+        the job rows, which are deleted in ascending id order.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+        """
+        ...

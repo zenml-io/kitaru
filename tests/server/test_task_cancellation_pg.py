@@ -466,3 +466,116 @@ async def test_cancel_propagation_skips_a_job_another_sweep_holds() -> None:
         async with session_factory() as verify_session:
             task = await SQLTaskRepository(verify_session).get(TASK_LOW_ID)
             assert task.cancel_requested_at is None
+
+
+async def test_job_cancel_survives_concurrent_job_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A job cancel and a concurrent job delete lock task rows in one order.
+
+    Regression test for a lock-order deadlock: the job delete used to lock
+    the job row first and let the delete's cascade lock the task rows
+    unordered after it, while the cancellation path locks every task row
+    before the job row. A cancel holding the task rows while a delete held
+    the job row made the two transactions wait on each other, and PostgreSQL
+    killed one of them. The delete now locks the task rows in id order
+    before the job row.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    async with pg_session_with_engine() as (seed_session, engine):
+        now = datetime.now(UTC)
+        owner = await SQLAccountRepository(seed_session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(seed_session).create(
+            Agent(owner_id=owner.id, name="agent")
+        )
+        agent_version = await SQLAgentVersionRepository(seed_session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        worker = await SQLWorkerRepository(seed_session).register(
+            Worker(
+                owner_id=owner.id,
+                name="worker",
+                scope=WorkerScope(),
+                runtime=WorkerRuntime(platform="bare"),
+                last_seen_at=now,
+            )
+        )
+        job = await SQLJobRepository(seed_session).create(
+            Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.RUNNING)
+        )
+        for task_id in (TASK_LOW_ID, TASK_HIGH_ID):
+            await SQLTaskRepository(seed_session).create(
+                AgentTask(
+                    id=task_id,
+                    job_id=job.id,
+                    agent_version_id=agent_version.id,
+                    status=TaskStatus.RUNNING,
+                    attempt=1,
+                    worker_id=worker.id,
+                    claimed_at=now,
+                    heartbeat_at=now,
+                    started_at=now,
+                )
+            )
+        await seed_session.commit()
+
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+        canceler_past_task_statements = asyncio.Event()
+        deleter_blocked = asyncio.Event()
+
+        real_cancel_pending = SQLTaskRepository.cancel_pending
+
+        async def paused_cancel_pending(
+            self: SQLTaskRepository, job_ids: Sequence[uuid.UUID], now: datetime
+        ) -> list[Task]:
+            canceled = await real_cancel_pending(self, job_ids, now)
+            canceler_past_task_statements.set()
+            await asyncio.wait_for(deleter_blocked.wait(), timeout=20)
+            return canceled
+
+        monkeypatch.setattr(SQLTaskRepository, "cancel_pending", paused_cancel_pending)
+
+        async def cancel_job() -> str:
+            async with session_factory() as session:
+                transitions = _build_transitions(session)
+                try:
+                    await transitions.cancel_job(job.id)
+                    await session.commit()
+                    return "ok"
+                except Exception as exc:
+                    await session.rollback()
+                    return type(exc).__name__
+
+        async def delete_job() -> str:
+            await asyncio.wait_for(canceler_past_task_statements.wait(), timeout=20)
+            async with session_factory() as session:
+                try:
+                    await SQLJobRepository(session).delete(job.id)
+                    await session.commit()
+                    return "ok"
+                except Exception as exc:
+                    await session.rollback()
+                    return type(exc).__name__
+
+        async def release_canceler() -> None:
+            await asyncio.wait_for(canceler_past_task_statements.wait(), timeout=20)
+            # Give the deleter a moment to reach its first task row lock.
+            await asyncio.sleep(0.05)
+            await _wait_for_lock_wait(session_factory, deleter_blocked)
+
+        results = await asyncio.wait_for(
+            asyncio.gather(cancel_job(), delete_job(), release_canceler()),
+            timeout=30,
+        )
+        assert results[:2] == ["ok", "ok"]
+
+        async with session_factory() as verify_session:
+            assert await SQLJobRepository(verify_session).get_many([job.id]) == {}
+            remaining = await SQLTaskRepository(verify_session).get_many(
+                [TASK_LOW_ID, TASK_HIGH_ID]
+            )
+            assert remaining == {}

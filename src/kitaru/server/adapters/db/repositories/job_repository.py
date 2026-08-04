@@ -224,10 +224,46 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
     async def delete(self, job_id: uuid.UUID) -> None:
         """Delete a job by id, cascading its tasks.
 
+        The job's task rows are locked in id order before the job row, since
+        the delete's cascade would otherwise lock them unordered after it.
+
         Args:
             job_id: Id of the job.
 
         Raises:
             JobNotFound: No job has this id.
         """
+        await self._lock_task_rows([job_id])
         await self._delete_row(job_id)
+
+    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Delete many jobs by id, cascading their tasks.
+
+        The jobs' task rows are locked in id order across all jobs before
+        the job rows, which are deleted in ascending id order.
+
+        Args:
+            job_ids: Ids of the jobs.
+
+        Raises:
+            JobNotFound: A job id matches no job.
+        """
+        if not job_ids:
+            return
+        await self._lock_task_rows(job_ids)
+        for job_id in sorted(job_ids):
+            await self._delete_row(job_id)
+
+    async def _lock_task_rows(self, job_ids: Sequence[uuid.UUID]) -> None:
+        """Lock the jobs' task rows in id order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+        """
+        statement = (
+            select(TaskORM.id)
+            .where(TaskORM.job_id.in_(list(job_ids)))
+            .order_by(TaskORM.id.asc())
+            .with_for_update()
+        )
+        await self._session.execute(statement)

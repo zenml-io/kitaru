@@ -189,8 +189,8 @@ class ExperimentRunService:
     ) -> None:
         """Delete an experiment run and its jobs.
 
-        Each job delete cascades its tasks and replay row, so the run row's
-        own delete has nothing left to cascade.
+        The job deletes cascade their tasks and replay rows, so the run
+        row's own delete has nothing left to cascade.
 
         Args:
             experiment_run_id: Id of the run.
@@ -201,6 +201,6 @@ class ExperimentRunService:
         """
         _ = actor
         await self._repository.get(experiment_run_id)
-        for replay in await self._replays.list_by_experiment_run(experiment_run_id):
-            await self._jobs.delete(replay.job_id)
+        replays = await self._replays.list_by_experiment_run(experiment_run_id)
+        await self._jobs.delete_many([replay.job_id for replay in replays])
         await self._repository.delete(experiment_run_id)
