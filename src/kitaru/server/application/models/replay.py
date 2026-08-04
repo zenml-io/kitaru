@@ -23,7 +23,12 @@ from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, ReplayOverride, ToolPolicy
-from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
+from kitaru.server.filtering import (
+    EQUALITY_OPS,
+    NULLABLE_OPS,
+    SCOPE_OPS,
+    FilterField,
+)
 
 
 class ReplayFilter(ListFilter):
@@ -34,6 +39,9 @@ class ReplayFilter(ListFilter):
             value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
         ),
         "baseline_session_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "result_session_id": FilterField(
+            value_type=uuid.UUID, ops=SCOPE_OPS | NULLABLE_OPS
+        ),
         "status": FilterField(value_type=ReplayStatus, ops=EQUALITY_OPS),
     }
 

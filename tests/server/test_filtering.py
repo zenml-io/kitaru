@@ -14,16 +14,39 @@
 """Tests for filter expression validation."""
 
 import uuid
+import warnings
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 from pydantic import AwareDatetime
+from sqlalchemy import not_, select
+from sqlalchemy.dialects import postgresql
 
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.server.adapters.db.filtering import FilterBinding
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_scope_condition_binding,
+    compile_filter_expression,
+)
+from kitaru.server.adapters.db.orm.account import AccountORM
+from kitaru.server.adapters.db.orm.agent import AgentORM
+from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
+from kitaru.server.adapters.db.orm.cohort import CohortORM
+from kitaru.server.adapters.db.orm.device import DeviceORM
+from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.experiment import ExperimentORM
+from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
+from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.secret import SecretORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.tag import TagORM
+from kitaru.server.adapters.db.orm.task import TaskORM
+from kitaru.server.adapters.db.orm.worker import WorkerORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     ACCOUNT_FILTER_BINDINGS,
 )
@@ -99,6 +122,7 @@ from kitaru.server.filtering import (
     FilterCondition,
     FilterExpression,
     FilterField,
+    NotExpression,
     OrExpression,
     validate_filter_expression,
 )
@@ -407,3 +431,131 @@ def test_narrowed_bindings_cover_filterable_fields(
 ) -> None:
     """Keep every narrowing filter's fields within its repository's bindings."""
     assert set(filter_class.filterable_fields) <= set(bindings)
+
+
+_BINDING_ORM_CLASSES: Mapping[type[ListFilter], type[Any]] = {
+    AccountFilter: AccountORM,
+    AgentFilter: AgentORM,
+    ApiKeyFilter: ApiKeyORM,
+    CohortFilter: CohortORM,
+    DeviceFilter: DeviceORM,
+    EvaluationFilter: EvaluationORM,
+    ExperimentFilter: ExperimentORM,
+    ExperimentRunFilter: ExperimentRunORM,
+    JobFilter: JobORM,
+    ReplayFilter: ReplayORM,
+    SecretFilter: SecretORM,
+    SessionFilter: SessionORM,
+    TagFilter: TagORM,
+    TaskFilter: TaskORM,
+    WorkerFilter: WorkerORM,
+}
+
+
+def _sample_value(field: str, spec: FilterField, op: FilterOp) -> Any:
+    """Build a value of the right shape for a field and operator.
+
+    Args:
+        field: Name of the filterable field.
+        spec: Declaration of the field.
+        op: Operator the value is for.
+
+    Returns:
+        A value the validator accepts, or ``None`` for ``is_null``.
+    """
+    if op is FilterOp.IS_NULL:
+        return None
+    scalar: Any = uuid.uuid4()
+    if spec.value_type is str:
+        scalar = "probe"
+    elif spec.value_type is bool:
+        scalar = True
+    elif spec.value_type is int:
+        scalar = 1
+    elif spec.value_type is Decimal:
+        scalar = Decimal("1.5")
+    elif spec.value_type is AwareDatetime:
+        scalar = datetime(2026, 1, 1, tzinfo=UTC)
+    elif isinstance(spec.value_type, type) and issubclass(spec.value_type, StrEnum):
+        scalar = next(iter(spec.value_type))
+    return [scalar] if op is FilterOp.IN else scalar
+
+
+@pytest.mark.parametrize(("filter_class", "bindings"), _EXACT_BINDING_PAIRS)
+def test_every_declared_op_compiles_to_sql(
+    filter_class: type[ListFilter], bindings: Mapping[str, FilterBinding]
+) -> None:
+    """Compile every field and operator a filter declares, plain and negated.
+
+    Runs without a database, which is what makes it the guard that holds on a
+    pull request, where the Postgres suites skip. It catches a binding that
+    cannot compile an operator its field advertises, and a transposed binding,
+    which fails the same-table check when this module imports the repository.
+
+    The FROM assertion is defensive rather than load-bearing: SQLAlchemy
+    auto-correlates a subquery against the enclosing select, so a binding that
+    dropped its explicit correlate() would still pass.
+    """
+    orm_class = _BINDING_ORM_CLASSES[filter_class]
+    for field, spec in filter_class.filterable_fields.items():
+        for op in sorted(spec.ops, key=lambda value: value.value):
+            condition = FilterCondition(
+                field=field, op=op, value=_sample_value(field, spec, op)
+            )
+            validated = validate_filter_expression(
+                condition, filter_class.filterable_fields
+            )
+            for expression in (validated, NotExpression(operand=validated)):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    statement = select(orm_class).where(
+                        compile_filter_expression(expression, bindings)
+                    )
+                    compiled = str(statement.compile(dialect=postgresql.dialect()))
+                cartesian = [
+                    warning
+                    for warning in caught
+                    if "cartesian" in str(warning.message).lower()
+                ]
+                assert not cartesian, (
+                    f"{field}/{op.value} left {orm_class.__name__} uncorrelated"
+                )
+                outer_from = compiled.split("WHERE")[0]
+                assert outer_from.count("FROM") == 1, (
+                    f"{field}/{op.value} pulled a second table into the outer FROM"
+                )
+
+
+def test_scope_binding_compiles_to_exists_not_in() -> None:
+    """Compile a scope condition to a correlated EXISTS rather than an IN.
+
+    The shape is the semantics. Under ``not`` an IN subquery becomes NOT IN,
+    which evaluates to null and drops the row whenever the local column is
+    null, so a nullable reference silently loses exactly the rows a negated
+    filter should return. NOT EXISTS is false rather than null there.
+    """
+    binding = build_scope_condition_binding(
+        local_column=EvaluationORM.task_id,
+        related_key=TaskORM.id,
+        scope_column=TaskORM.job_id,
+    )
+    condition = FilterCondition(field="job_id", op=FilterOp.EQ, value=uuid.uuid4())
+    negated = select(EvaluationORM).where(not_(binding(condition)))
+    compiled = str(negated.compile(dialect=postgresql.dialect()))
+    assert "NOT (EXISTS" in compiled
+    assert "NOT IN" not in compiled
+
+
+def test_scope_binding_rejects_transposed_columns() -> None:
+    """Reject a scope binding whose key and scope columns span two tables.
+
+    All three arguments are uuid columns, so a transposition type-checks and
+    yields a query that runs and returns the wrong rows. The bindings are built
+    at import, so this turns that into a startup failure.
+    """
+    with pytest.raises(ValueError, match="same table"):
+        build_scope_condition_binding(
+            local_column=EvaluationORM.task_id,
+            related_key=TaskORM.id,
+            scope_column=EvaluationORM.session_id,
+        )
