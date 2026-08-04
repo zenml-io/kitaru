@@ -22,13 +22,14 @@ from pydantic import Field
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import STRING_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField
 
 
 class CohortFilter(ListFilter):
     """Cohort list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
     }

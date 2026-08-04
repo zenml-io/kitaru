@@ -31,6 +31,7 @@ class ExperimentRunFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "experiment_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "cohort_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
+        "agent_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "status": FilterField(value_type=ExperimentRunStatus, ops=EQUALITY_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
     }

@@ -41,6 +41,7 @@ from kitaru.server.domain.experiment_run import (
 EXPERIMENT_RUN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "experiment_id": ExperimentRunORM.experiment_id,
     "cohort_version_id": ExperimentRunORM.cohort_version_id,
+    "agent_version_id": ExperimentRunORM.agent_version_id,
     "status": ExperimentRunORM.status,
     "tag": build_tag_condition_binding(
         TagResourceType.EXPERIMENT_RUN, ExperimentRunORM.id
