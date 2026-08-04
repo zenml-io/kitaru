@@ -39,7 +39,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import evaluations, registration
+from kitaru.cli import evaluations, registration, session_selection
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -342,7 +342,7 @@ def test_sessions_file_rejects_non_uuid_nonblank_lines(
     sessions_file.write_text(content, encoding="utf-8")
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], sessions_file)
+        session_selection.parse_session_ids([], sessions_file)
 
     assert error.value.kind == "invalid_arguments"
 
@@ -357,7 +357,7 @@ def test_sessions_file_accepts_utf8_crlf_and_combines_with_positionals(
     sessions_file = tmp_path / "sessions.txt"
     sessions_file.write_bytes(f"{first}\r\n\r\n  {second}  \r\n".encode())
 
-    assert evaluations._parse_session_ids([str(positional)], sessions_file) == [
+    assert session_selection.parse_session_ids([str(positional)], sessions_file) == [
         positional,
         first,
         second,
@@ -372,7 +372,7 @@ def test_sessions_file_rejects_stdin_and_missing_files(
     path = Path("-") if file_value == "-" else tmp_path / file_value
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], path)
+        session_selection.parse_session_ids([], path)
 
     assert error.value.kind == "invalid_arguments"
 
@@ -383,7 +383,7 @@ def test_sessions_file_rejects_invalid_utf8(tmp_path: Path) -> None:
     sessions_file.write_bytes(b"\xff\xfe")
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], sessions_file)
+        session_selection.parse_session_ids([], sessions_file)
 
     assert error.value.kind == "invalid_arguments"
     assert error.value.__suppress_context__ is True
@@ -403,7 +403,7 @@ def test_sessions_file_read_error_suppresses_private_path_cause(
     monkeypatch.setattr(Path, "read_text", fail_read)
 
     with pytest.raises(CLIError) as error:
-        evaluations._read_session_file(sessions_file)
+        session_selection.read_session_file(sessions_file)
 
     rendered = "".join(
         traceback.format_exception(
@@ -523,7 +523,7 @@ async def test_evaluate_sessions_all_is_explicit_and_exclusive() -> None:
     assert client.sessions.params.filter is None
     assert result.item["session_count"] == 1
 
-    with pytest.raises(CLIError, match="--tag, or --all"):
+    with pytest.raises(CLIError, match="--filter, or --all"):
         await evaluations.evaluate_sessions(
             client,
             [str(uuid.uuid4())],

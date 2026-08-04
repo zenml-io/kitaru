@@ -35,14 +35,17 @@ def test_handler_parameters_match_command_schema() -> None:
     for function, spec in app_module._FUNCTION_SPECS.items():
         local_parameters = spec.parameters[len(app_module._GLOBAL_PARAMETERS) :]
         schema_names = [_normalize_parameter_name(item) for item in local_parameters]
+        handler_names = list(inspect.signature(function).parameters)
+        if "all_sessions" in handler_names:
+            schema_names = [
+                "all_sessions" if name == "all" else name for name in schema_names
+            ]
         if spec.path == ("worker", "start"):
             # The singular public --selector option intentionally maps to the
             # plural handler parameter that receives its repeatable values.
             schema_names = [
                 "selectors" if name == "selector" else name for name in schema_names
             ]
-        handler_names = list(inspect.signature(function).parameters)
-
         assert len(schema_names) == len(set(schema_names)), spec.command
         assert set(schema_names) == set(handler_names), spec.command
 

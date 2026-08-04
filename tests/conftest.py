@@ -5233,6 +5233,7 @@ async def create_import_task(
     agent_id: uuid.UUID | None = None,
     agent_version_id: uuid.UUID | None = None,
     params: dict[str, Any] | None = None,
+    labels: dict[str, str] | None = None,
     on_failure: TaskOnFailure = TaskOnFailure.ABORT,
 ) -> ImportTask:
     """Store an importer task in the fake repository.
@@ -5245,6 +5246,7 @@ async def create_import_task(
         agent_id: Agent imported sessions are created under.
         agent_version_id: Agent version recorded on the imported sessions.
         params: Parameters passed to the importer.
+        labels: Task-selection and execution labels.
         on_failure: Effect of a hard failure on the job.
 
     Returns:
@@ -5261,6 +5263,7 @@ async def create_import_task(
         agent_id=agent_id if agent_id is not None else uuid.uuid4(),
         agent_version_id=agent_version_id,
         params=params if params is not None else {},
+        labels=labels if labels is not None else {},
         on_failure=on_failure,
     )
     stored = await repository.create(task)
