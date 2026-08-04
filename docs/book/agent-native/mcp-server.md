@@ -5,40 +5,81 @@ icon: plug
 
 # Drive it from your coding agent
 
-Everything in the Kitaru loop is scriptable: registration, workers, and
-jobs each have a CLI command, and the whole record → replay → improve
-loop is a typed async Python client over a plain REST API. Which means the
-agent you already code with can drive it — inspect a failing session,
-write the evaluator, start the replay, and read the diff back, while you
-review.
+Everything in the Kitaru loop is scriptable: the CLI covers the whole
+record → replay → improve journey, a typed async Python client sits over
+a plain REST API, and an MCP server exposes the same loop as typed
+tools. Which means the agent you already code with can drive it —
+inspect a failing session, write the evaluator, start the experiment,
+and read the diff back, while you review.
 
 The division of labor: **Kitaru observes your production agents; your
 coding assistant is how you talk to Kitaru.**
 
-## Point your assistant at Kitaru
+## The MCP server
 
-Give the assistant the connection and the surfaces:
+Kitaru ships an MCP server, so assistants that speak MCP — Claude Code,
+Cursor, and friends — get typed, bounded tools instead of shelling out:
+
+```bash
+pip install "kitaru[mcp]"
+```
+
+Then register it with your assistant (`.mcp.json` for Claude Code):
+
+```json
+{
+  "mcpServers": {
+    "kitaru": {
+      "command": "kitaru-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+The server connects to Kitaru the way the CLI does — `--server URL` or
+`--context NAME` (mutually exclusive), falling back to `KITARU_API_URL`
+and then your active CLI context; credentials come from `KITARU_API_KEY`
+or the stored credential for that server.
+
+Tools are gated by a **capability mode** — `read-only` (the default),
+`standard`, or `destructive` — set with `--mode` or `KITARU_MCP_MODE`.
+Tools above the current mode aren't just blocked; they're never
+registered, so the assistant doesn't even see them:
+
+| Tool | Mode | What it does |
+|---|---|---|
+| `kitaru_registry_read` | read-only | Read agents, evaluators, importers, and their versions |
+| `kitaru_activity_read` | read-only | Read sessions, runs, jobs, and their children |
+| `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
+| `kitaru_experiments_manage` | standard | Create or update experiments |
+| `kitaru_workflow_start` | standard | Start an asynchronous workflow and return immediately |
+| `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
+| `kitaru_delete` | destructive | Delete a cohort, experiment, version, or run |
+
+Start assistants in `read-only`, move to `standard` when you want them
+building cohorts and starting runs, and reserve `destructive` for
+sessions where you're watching.
+
+## The other surfaces
+
+Give the assistant the connection:
 
 ```bash
 export KITARU_API_URL="http://localhost:8000"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-* **CLI** — `kitaru agent list`, `kitaru evaluator register`,
-  `kitaru worker start`, `kitaru job watch`. Every command takes
-  `--output json` and a `--non-interactive` flag, so assistant-driven
-  invocations parse cleanly. `kitaru schema` dumps the command tree for
-  the assistant to learn.
-* **Python client** — `KitaruAPIClient.from_env()` reaches everything the
-  CLI doesn't cover yet: sessions, replays, cohorts, evaluations,
-  experiments. Your assistant writes the same snippets these docs show.
+* **CLI** — the full journey has commands: `kitaru session import`,
+  `kitaru session evaluate`, `kitaru cohort create`,
+  `kitaru experiment run start`, plus registration, workers, and jobs.
+  Commands take `--output json`, so assistant-driven invocations parse
+  cleanly.
+* **Python client** — `KitaruAPIClient.from_env()` reaches everything,
+  including single-session replays. Your assistant writes the same
+  snippets these docs show.
 * **REST** — the server's OpenAPI schema at `/docs` on your server, when
   the assistant wants the raw contract.
-
-<!-- TODO(v2-launch): the v1 `kitaru-mcp` server and the `kitaru[mcp]`
-     extra do not exist in v2 yet. Restore an MCP section here when the
-     v2 MCP surface ships; until then the CLI + client are the
-     assistant-facing surfaces. -->
 
 ## Prompts that work
 
@@ -68,9 +109,9 @@ shape coding assistants are good at.
 
 ## Guardrails worth setting
 
-* Give the assistant a **read-mostly key posture**: creating replays and
+* Give the assistant a **read-mostly posture**: creating replays and
   evaluators is cheap and reversible; deleting sessions or cohorts is
-  not. Review deletes yourself.
+  not. Over MCP that's the capability mode; review deletes yourself.
 * Keep a worker running under *your* control. The assistant creating a
   replay doesn't execute anything — your worker does, in the environment
   you configured. That separation is the safety property; preserve it.

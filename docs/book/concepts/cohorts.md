@@ -42,10 +42,20 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+The CLI form is two commands:
+
+```bash
+kitaru cohort create refund-regression --agent support-agent
+kitaru cohort version create refund-regression \
+  --add-session <id> --add-session <id> --display-version week-32
+```
+
 The first version starts from an empty list; each later version is the
-previous list minus `remove_session_ids` plus `add_session_ids`. Versions
-are server-numbered, and `display_version` carries whatever you call the
-snapshot.
+previous list minus `remove_session_ids` plus `add_session_ids`. The
+delta applies to the latest version by default — pass `baseline_id` to
+branch from an earlier one. Versions are server-numbered,
+`display_version` carries whatever you call the snapshot, and versions
+can be tagged and filtered by tag like sessions.
 
 Immutability is the point. When an experiment run reports "12 of 14
 sessions improved," that claim stays checkable forever, because cohort

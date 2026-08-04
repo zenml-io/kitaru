@@ -131,7 +131,15 @@ it's your calibration set for every future evaluator version.
 
 Evaluators run against stored sessions, so day one of a new evaluator
 can cover months of history — recorded and
-[imported](import-langfuse-traces.md) alike:
+[imported](import-langfuse-traces.md) alike. From the CLI, select by
+tag or take everything:
+
+```bash
+kitaru session evaluate --tag imported-baseline \
+  --evaluator refund-quality@latest --wait
+```
+
+Or from the client, with explicit IDs:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest

@@ -38,10 +38,15 @@ your command as-is, in the working directory and environment the agent
 version declares — plus the [secrets](../deploy/secrets.md) it references.
 
 The worker hands each subprocess its context through environment
-variables: `KITARU_API_URL` and `KITARU_API_KEY` for API access,
+variables: `KITARU_API_URL` and a `KITARU_TASK_TOKEN` — a bearer token
+scoped to that one task and attempt, with your broader `KITARU_API_KEY`
+deliberately stripped from the child environment — plus
 `KITARU_TASK_ID` to link the recorded session to the task, and
-`KITARU_REPLAY_ID` when the run is a replay — which is how the adapter
-knows to apply overrides and answer tool calls from the recording.
+`KITARU_REPLAY_ID` when the run is a replay, which is how the adapter
+knows to apply overrides and answer tool calls from the recording. The
+worker itself authenticates once with your API key and holds a
+worker-scoped token it renews on its own; see
+[Authentication & API keys](../deploy/authentication.md).
 
 ## Scoping workers
 

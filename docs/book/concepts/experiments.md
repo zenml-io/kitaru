@@ -59,6 +59,21 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+The same two steps from the CLI — the change as JSON on the experiment,
+the population and code on the run:
+
+```bash
+kitaru experiment create cheaper-model \
+  --evaluator refund-check@latest \
+  --override '{"model": {"openai:gpt-5.4": "openai:gpt-5-nano"}}' \
+  --tool-policy '{"default": {"type": "history", "scope": "cohort_version", "on_miss": "fail"}}'
+
+kitaru experiment run start cheaper-model \
+  --cohort-version <cohort-version-id> \
+  --agent support-agent@1 \
+  --evaluate-baselines --wait
+```
+
 Starting a run fans out **one replay per session** in the cohort version.
 [Workers](workers.md) in your environment execute them; the run's
 `progress` counts replays through `pending → evaluating → completed`
@@ -98,6 +113,7 @@ gating CI on a frozen cohort version — is in
 
 A failed replay fails the run: the comparison the experiment exists for
 cannot be produced for that session, and the numbers never silently shrink
-their denominator. Cancel a run with
-`POST /v1/experiment-runs/{id}/cancel` (or `client` equivalent); already
-finished replays keep their results.
+their denominator. Watch a run with `kitaru experiment run watch <run>`,
+inspect its jobs with `kitaru experiment run jobs <run>`, and cancel with
+`kitaru experiment run cancel <run>`; already finished replays keep their
+results.

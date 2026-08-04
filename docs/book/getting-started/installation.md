@@ -30,10 +30,11 @@ pip install "kitaru[cli,pydantic-ai]"
 
 | Extra | What it adds |
 |---|---|
-| `cli` | The `kitaru` command — login, registration, workers, jobs |
+| `cli` | The `kitaru` command — the full loop: import, evaluate, cohorts, experiments, workers, jobs |
 | `pydantic-ai` | The PydanticAI adapter that records your agent's runs |
 | `worker` | Run a worker in this environment (`kitaru worker start`) |
 | `server` | Run the Kitaru server itself from this package |
+| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/mcp-server.md) |
 
 The plain `kitaru` package is the SDK alone — the async client and the
 API models — which is all a production service needs to record sessions.
@@ -53,19 +54,22 @@ The server listens on `http://localhost:8000`. For a shared deployment —
 your own Postgres, real auth, TLS — see
 [Run the Server](../deploy/README.md).
 
-## Log in
+## Connect
 
-```bash
-kitaru login --local          # http://localhost:8000
-kitaru status
-```
-
-`kitaru login <url>` connects to a shared server instead. For
-non-interactive use (CI, production services), create an API key and set
-two environment variables — the SDK, the CLI, and workers all read them:
+The local Compose server accepts local requests without a login, so
+pointing your environment at it is enough:
 
 ```bash
 export KITARU_API_URL="http://localhost:8000"
+kitaru status
+```
+
+Against a shared server, log in instead — `kitaru login <url>` — or, for
+non-interactive use (CI, production services), create an API key and set
+two environment variables that the SDK, the CLI, and workers all read:
+
+```bash
+export KITARU_API_URL="https://kitaru.your-team.example"
 export KITARU_API_KEY="KITKEY_..."
 ```
 

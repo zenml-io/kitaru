@@ -38,6 +38,7 @@
 
 * [Run the Server](deploy/README.md)
   * [Docker](deploy/docker.md)
+  * [Helm](deploy/helm.md)
 * [Workers in production](deploy/workers.md)
 * [Authentication & API keys](deploy/authentication.md)
 * [Secrets](deploy/secrets.md)

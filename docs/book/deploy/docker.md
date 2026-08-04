@@ -21,9 +21,6 @@ docker compose up -d
 curl http://localhost:8000/health
 ```
 
-<!-- TODO(v2-launch): replace build-from-source with the published v2
-     server image name and tag once it exists. -->
-
 The shipped Compose file runs with `KITARU_SERVER_AUTH_SCHEME: none` —
 fine on your laptop, not for a shared server. For a team deployment, set
 the auth scheme to `local` and provide real keys (see below and
@@ -59,13 +56,27 @@ Database migrations run automatically at startup
 (`KITARU_SERVER_SKIP_DB_MIGRATION=true` disables that when you manage
 migrations yourself).
 
-## Without Compose
+## The published image
 
-Any container runtime works — the image's entrypoint is
-`python -m kitaru.server.api.main`, it listens on port 8000, and all
-state lives in Postgres. Point `KITARU_SERVER_DB_HOST` at your database,
-put TLS in front with your usual ingress or reverse proxy, and scale
-horizontally if needed — the server is stateless between requests.
+For anything beyond a laptop, use the published server image instead of
+building from source:
+
+```bash
+docker run -d -p 8000:8000 \
+  -e KITARU_SERVER_DB_HOST=your-postgres-host \
+  -e KITARU_SERVER_DB_USER=... -e KITARU_SERVER_DB_PWD=... \
+  -e KITARU_SERVER_AUTH_SCHEME=local \
+  -e KITARU_SERVER_JWT_SIGNING_KEY=... \
+  -e KITARU_SERVER_SECRET_ENCRYPTION_KEY=... \
+  zenmldocker/kitaru-server:latest
+```
+
+Any container runtime works — the server listens on port 8000, runs as a
+non-root user, and all state lives in Postgres. Put TLS in front with
+your usual ingress or reverse proxy, and scale horizontally if needed —
+the server is stateless between requests. On Kubernetes, use the
+[Helm chart](helm.md), which wraps this same image with migrations,
+ingress, and secrets handled.
 
 Workers are deployed separately, in the environments your agents live
 in — see [Workers in production](workers.md).

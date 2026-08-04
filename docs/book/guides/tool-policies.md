@@ -35,7 +35,13 @@ policy = ToolPolicy(
 
 A policy travels with a replay or an
 [experiment](../concepts/experiments.md); the adapter enforces it inside
-your re-running agent at the tool boundary.
+your re-running agent at the tool boundary. On the CLI, the same
+structure goes to `kitaru experiment create --tool-policy` as JSON:
+
+```bash
+--tool-policy '{"default": {"type": "history", "scope": "baseline", "on_miss": "fail"},
+                "tools": {"get_current_time": {"type": "passthrough"}}}'
+```
 
 ## The four policies
 
@@ -105,6 +111,11 @@ key for the live call and asks the server for a match within the policy's
 scope. Exact-argument matching is the point — a call with different
 arguments is a different call, and pretending otherwise would corrupt the
 world your fork runs in.
+
+One edge case: a tool call whose arguments can't be serialized to
+canonical JSON gets no cache key at all. No lookup can match it, so on
+replay it always takes the `on_miss` path — one more reason to keep tool
+arguments JSON-clean.
 
 ## Choosing a posture
 

@@ -41,9 +41,22 @@ async def main() -> None:
 A good starting population is one week of traffic plus every session that
 ever triggered an incident. [Imported sessions](import-langfuse-traces.md)
 qualify exactly like recorded ones — your Langfuse history from before
-Kitaru existed is admissible evidence.
+Kitaru existed is admissible evidence, and if you imported it with
+`--tag`, the tag *is* your selection
+(`kitaru session list --filter '{"field": "tag", "op": "eq", "value": "imported-baseline"}'`).
 
 ## 2. Freeze it into a cohort version
+
+From the CLI:
+
+```bash
+kitaru cohort create refund-regression --agent support-agent
+kitaru cohort version create refund-regression \
+  --add-session <id> --add-session <id> \
+  --display-version week-32
+```
+
+Or from the client, straight from the selection above:
 
 ```python
 from kitaru.api_models.v1.cohort import CohortCreateRequest
@@ -94,7 +107,26 @@ The `history` policy scoped to `cohort_version` answers tool calls from
 any recording in the cohort, and `on_miss="fail"` keeps 50 replays from
 touching a single live system.
 
+The CLI form takes the override and tool policy as JSON:
+
+```bash
+kitaru experiment create cheaper-model \
+  --evaluator refund-check@latest --evaluator tone-judge@latest \
+  --override '{"model": {"openai:gpt-5.4": "openai:gpt-5-nano"}}' \
+  --tool-policy '{"default": {"type": "history", "scope": "cohort_version", "on_miss": "fail"}}'
+```
+
 ## 4. Run it and read it
+
+```bash
+kitaru experiment run start cheaper-model \
+  --cohort-version <cohort-version-id> \
+  --agent support-agent@2 \
+  --evaluate-baselines \
+  --wait --timeout 1800
+```
+
+Or from the client:
 
 ```python
 from kitaru.api_models.v1.experiment_run import ExperimentRunCreateRequest
@@ -151,15 +183,21 @@ point: each one is a concrete recorded run you can
 
 The cohort that caught a failure becomes the gate that keeps it caught.
 In CI: register the PR's code as an agent version, start a run against
-the frozen cohort version, wait for it, and fail the build if the pass
-rate drops below the baseline's. A worker with
-`kitaru worker start --job-id ...` (or a long-running worker pool
-scoped to `--kinds evaluator` plus your agents' environment) executes the
-suite; `kitaru job watch` gives CI its exit code per job.
+the frozen cohort version, and fail the build on the result:
 
-<!-- TODO(v2-launch): a first-class `kitaru experiment run --wait` CLI verb
-     for CI gating is planned but not in the current CLI — verify before
-     publish and update this section to the shipped form. -->
+```bash
+kitaru agent version register support-agent --command "python support.py"
+kitaru experiment run start cheaper-model \
+  --cohort-version <cohort-version-id> \
+  --agent support-agent@<new-version> \
+  --evaluate-baselines --wait --timeout 1800
+```
+
+`--wait` blocks until the run settles and exits nonzero on failure, so
+the command doubles as the CI gate; `--output jsonl` streams progress in
+a form your pipeline can parse. A worker executes the suite — either a
+long-running pool, or one started in the CI job itself
+(`kitaru worker start`).
 
 Keep two shapes: a small cohort per PR (the incidents plus a dozen
 representative runs), and the wide week-of-traffic sweep nightly. When a

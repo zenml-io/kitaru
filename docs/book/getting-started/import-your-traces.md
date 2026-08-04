@@ -20,19 +20,12 @@ Imports execute on a [worker](../concepts/workers.md) in your environment.
 The export file is parsed by your worker, not by anything outside your
 infrastructure.
 
-## 1. Register the importer
+## 1. Register the agent the traces belong to
 
-An importer is a plugin — Kitaru ships one for Langfuse JSONL exports:
-
-```bash
-kitaru importer register langfuse \
-  --package "kitaru-importer-langfuse==0.21.0" \
-  --entrypoint "kitaru_importer_langfuse:parse" \
-  --provider langfuse
-```
-
-<!-- TODO(v2-launch): confirm the published package name and pin for the
-     Langfuse importer before publish. -->
+The Langfuse importer is **built in** — every Kitaru server ships with
+default importers for `langfuse`, `braintrust`, and `otlp`
+(OpenTelemetry) exports. There is nothing to install or register for
+those formats.
 
 Register the agent these traces belong to, if you haven't:
 
@@ -40,49 +33,42 @@ Register the agent these traces belong to, if you haven't:
 kitaru agent register support-agent --command "python support.py"
 ```
 
-## 2. Upload the export and start the import
+## 2. Import the export
 
 Export your traces from Langfuse as JSONL (trace, observation, and
-ingestion-event records are all understood), then:
-
-```python
-import asyncio
-from pathlib import Path
-
-from kitaru.client import KitaruAPIClient
-from kitaru.api_models.v1.imports import ImportCreateRequest
-
-async def main() -> None:
-    client = KitaruAPIClient.from_env()
-
-    payload = Path("langfuse-export.jsonl").read_bytes()
-    blob = await client.blobs.upload(
-        payload, media_type="application/x-ndjson", filename="langfuse-export.jsonl"
-    )
-
-    job = await client.imports.create(
-        ImportCreateRequest(
-            importer="langfuse",
-            agent_id=AGENT_ID,
-            payload_blob_id=blob.id,
-            params={"source_instance": "my-langfuse-project"},
-        )
-    )
-    print(job.id)
-
-asyncio.run(main())
-```
-
-With a worker running (`kitaru worker start`), watch it finish:
+ingestion-event records are all understood), start a
+[worker](../concepts/workers.md) in another terminal
+(`kitaru worker start`), then:
 
 ```bash
-kitaru job watch <job-id>
+kitaru session import langfuse-export.jsonl \
+  --importer langfuse@latest \
+  --agent support-agent \
+  --tag imported-baseline \
+  --media-type application/x-ndjson \
+  --wait
 ```
 
-The task's result reports what happened: sessions `created`, `skipped`,
+`--tag` labels every session this import creates, so later steps can
+select them as a group — `kitaru session evaluate --tag
+imported-baseline ...` — without copying IDs around. (Tagging happens
+once the import completes, which is why `--tag` requires `--wait`.)
+
+The final receipt reports what happened: sessions `created`, `skipped`,
 and `failed`, with samples of the failures. Each imported trace becomes
 one session (`origin: imported`) with its observations as nodes — model
 calls with token usage and cost, tool calls with arguments and results.
+List them:
+
+```bash
+kitaru session list --agent support-agent --origin imported
+```
+
+The same import is two calls on the
+[Python client](../concepts/agents-and-sessions.md) when you'd rather
+script it — upload the export with `client.blobs.upload(...)`, then
+create the import with `client.imports.create(ImportCreateRequest(
+importer="langfuse", agent_id=..., payload_blob_id=...))`.
 
 ## Re-runs are safe
 

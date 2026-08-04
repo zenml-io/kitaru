@@ -98,14 +98,22 @@ asyncio.run(main())
 ```
 
 Node payloads (inputs, outputs) are returned only when you ask
-(`include_payloads=True`); listings stay cheap by default.
+(`include_payloads=True`); listings stay cheap by default. The CLI
+mirrors both reads:
+
+```bash
+kitaru session list --agent support-agent --origin recorded
+kitaru session nodes <session-id> --include-payloads
+```
 
 Sessions attach to the rest of the system by reference: a
 [cohort version](cohorts.md) pins a set of session ids, an
 [evaluation](evaluators.md) row scores one session, and a
 [replay](replay.md) points at its baseline session and produces a result
-session. Tags (`kitaru`'s generic labels) group sessions ad hoc before they
-graduate into a cohort.
+session. **Tags** group sessions ad hoc before they graduate into a
+cohort — apply one to a whole import with
+`kitaru session import --tag ...`, then select on it anywhere
+(`kitaru session evaluate --tag ...`, or a `tag` filter on any list).
 
 ## Where sessions come from
 

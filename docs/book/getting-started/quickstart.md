@@ -12,7 +12,7 @@ thing changed, and read what the change did. One sitting, one ticket:
 
 > Refund order #4821 — the card reader was double-charged.
 
-You need a running server and a login — two commands, covered in
+You need a running server and a connection — two commands, covered in
 [Installation](installation.md). Already collecting traces in Langfuse or
 elsewhere? You can skip wrapping entirely and start from
 [Import your traces](import-your-traces.md) — everything from
@@ -144,6 +144,11 @@ kitaru evaluator test refund_check_evaluator.py --entrypoint evaluate
 kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
+
+(Three evaluators come built in — `cost`, `latency`, and
+`tool-call-patterns` — cheap signals for triaging sessions before you
+write anything. The one you just wrote is the kind that encodes *your*
+definition of good.)
 
 ## 5. Start a worker
 

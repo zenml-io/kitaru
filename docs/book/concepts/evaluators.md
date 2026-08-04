@@ -60,6 +60,12 @@ is just an evaluator that calls a model inside `evaluate` — same contract,
 same rows. The walkthrough is in
 [Write an evaluator](../guides/write-an-evaluator.md).
 
+Three evaluators come **built in** on every server — `cost`, `latency`,
+and `tool-call-patterns` (does the session repeat calls to the same
+tool?). They make no model calls; they're cheap signals for triaging
+which sessions deserve a closer look, available as `cost@latest` before
+you've registered anything.
+
 ## The evaluation row
 
 One evaluation is one named result for one session. The data type is
@@ -106,7 +112,18 @@ anything.
 
 ## Running evaluators in batch
 
-Score existing sessions without replaying anything:
+Score existing sessions without replaying anything. From the CLI, select
+by IDs, by tag, or everything:
+
+```bash
+kitaru session evaluate --tag imported-baseline \
+  --evaluator refund-check@latest --evaluator cost@latest \
+  --wait
+```
+
+Exactly one selection is required — explicit session IDs (arguments or
+`--sessions-file`), `--tag`, or `--all` — and an empty match is an
+error, not a silent no-op. The client form:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest

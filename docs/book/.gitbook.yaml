@@ -59,4 +59,3 @@ redirects:
   stacks/sagemaker-stacks: deploy/README.md
   stacks/azureml-stacks: deploy/README.md
   stacks/log-store: deploy/README.md
-  deploy/helm: deploy/README.md

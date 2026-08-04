@@ -6,9 +6,9 @@ icon: file-import
 # Import Langfuse traces
 
 [Import your traces](../getting-started/import-your-traces.md) covers the
-happy path — register the Langfuse importer, upload an export, watch the
-job. This guide is the full contract: what the importer understands, how
-re-runs dedup, and how to write an importer for any other format.
+happy path — one `kitaru session import` against the built-in Langfuse
+importer. This guide is the full contract: what the importer understands,
+how re-runs dedup, and how to write an importer for any other format.
 
 ## How an import executes
 
@@ -18,6 +18,21 @@ the importer's code and your payload, and runs the parse **in your
 environment** — the server never parses your data. Each parsed trace
 becomes one [session](../concepts/agents-and-sessions.md) with
 `origin: imported`, its observations ingested as nodes in batches.
+
+The CLI wraps the upload and the job in one command:
+
+```bash
+kitaru session import langfuse-export.jsonl \
+  --importer langfuse@latest \
+  --agent support-agent \
+  --params '{"source_instance": "my-langfuse-project"}' \
+  --media-type application/x-ndjson \
+  --tag imported-baseline --wait
+```
+
+`--tag` labels the created sessions once the import completes (so it
+requires `--wait`); downstream commands select on it. On the Python
+client the same import is explicit:
 
 ```python
 from kitaru.api_models.v1.imports import ImportCreateRequest
@@ -38,9 +53,15 @@ it's what lets a later replay default to the right version. The task's
 result carries the stats: sessions `created`, `skipped`, `failed`, with
 up to 20 failure samples (line number, external id, error).
 
-## The Langfuse importer
+## The built-in importers
 
-The shipped importer parses **Langfuse JSONL exports** — up to 50 MiB per
+Every Kitaru server seeds three importers at startup — `langfuse`,
+`braintrust`, and `otlp` (OpenTelemetry JSON/JSONL/NDJSON exports) —
+versioned in step with the server, so `--importer langfuse@latest`
+always resolves. Their code ships inside the `kitaru` package and runs
+on your worker like any other importer; there is nothing to register.
+
+The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per
 payload — and understands three record shapes: `trace`, `observation`,
 and raw `ingestion_event` lines. Traces map to sessions; observations map
 to nodes with their parent relationships, timings, model names, token

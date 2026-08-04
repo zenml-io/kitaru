@@ -42,6 +42,12 @@ kitaru worker start
 | `KITARU_WORKER_HEARTBEAT_INTERVAL` | 10s | Liveness reporting cadence |
 | `KITARU_WORKER_BLOB_CACHE_ROOT` / `PAYLOAD_CACHE_ROOT` | `~/.cache/kitaru/...` | Plugin-code and payload caches, keyed by content hash |
 
+The API key is used once, to register: the worker receives a
+worker-scoped token it renews on its own, and each task subprocess gets
+a further-narrowed per-task token — with the API key stripped from its
+environment. Details in
+[Authentication & API keys](authentication.md).
+
 ## Fleet patterns
 
 **One general worker per agent environment.** The simplest useful fleet:
@@ -87,4 +93,8 @@ own checkout as the agent environment.
 * **Subprocess environments**: evaluator and importer plugins run via
   `uv` in isolated per-plugin environments, cached by content hash;
   agent tasks run the agent version's command in the worker's own
-  environment plus the version's [secrets](secrets.md).
+  environment plus the version's [secrets](secrets.md). Built-in
+  plugins (the `langfuse`/`braintrust`/`otlp` importers and
+  `cost`/`latency`/`tool-call-patterns` evaluators) are pinned to the
+  installed Kitaru version itself, so they run without reaching a
+  package index — including in air-gapped worker images.

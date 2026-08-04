@@ -27,10 +27,17 @@ to your model providers or your tools.
 
 Between them sits the **job/task** layer. Commands like "replay this
 session," "import this export," or "score these sessions" create a job
-holding one or more tasks. Workers claim tasks (scoped by kind or label),
-heartbeat while running them, and report results. Crashed workers lose
-their claim; the server requeues or fails the task, so no replay is ever
-silently stranded. `kitaru job watch <id>` follows any of it live.
+holding one or more tasks — every job carries its kind (`session_run`,
+`import`, `evaluation`, `replay`), so `kitaru job` listings filter
+cleanly. Workers claim tasks (scoped by kind or label), heartbeat while
+running them, and report results. Crashed workers lose their claim; the
+server requeues or fails the task, so no replay is ever silently
+stranded. `kitaru job watch <id>` follows any of it live.
+
+Writes are safe to retry: the client stamps every create request with an
+idempotency key and reuses it across retries, and the server stores the
+outcome — a replay or evaluation request that times out on the wire and
+gets retried never becomes two replays.
 
 ## How a replay actually works
 
@@ -66,6 +73,8 @@ fetch the evaluator's code once.
 Auth is deliberately simple: [API keys](../deploy/authentication.md)
 (`KITKEY_` prefix) or a login token, one trusted team per deployment.
 Ownership records who created a resource; it does not gate access.
+Workers and their task subprocesses never hold your key for long — they
+operate on short-lived tokens scoped to one worker or one task.
 
 ## Where Kitaru sits in your stack
 

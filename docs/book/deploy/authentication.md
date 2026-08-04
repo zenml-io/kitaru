@@ -61,6 +61,25 @@ Keys can be deactivated (`update` with `active=False`) and deleted;
 `last_used` on the key tells you which ones are dead. Give each consumer
 its own named key so revocation is surgical.
 
+## Workers and tasks get scoped tokens
+
+An API key is the only long-lived credential a worker ever holds — and it
+uses it once, to register. From there the credentials narrow at each
+step:
+
+* Registering (`kitaru worker start`) returns a **worker token**, a
+  bearer token scoped to that one worker, which the worker renews on its
+  own by re-registering under the same name.
+* Each claimed task comes with a **task token** scoped to that single
+  task and attempt, carrying an explicit allowlist of the sessions and
+  blobs the task may touch. The worker hands *that* to your agent
+  subprocess as `KITARU_TASK_TOKEN` — your broad API key is stripped
+  from the child environment.
+
+So the process running arbitrary agent code holds a credential that can
+write its own session and nothing else, and it expires with the attempt.
+None of this needs configuration; it's how workers authenticate.
+
 ## Accounts for the team
 
 Accounts are created through the API. An account created without a
