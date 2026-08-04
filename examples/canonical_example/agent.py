@@ -1,104 +1,116 @@
-"""PydanticAI document extractor run by a Kitaru worker."""
+"""PydanticAI returns resolver run directly or by a Kitaru worker."""
 
 import asyncio
 import os
 import uuid
-from pathlib import Path
+from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, Field
-from pydantic_ai import Agent, BinaryContent
+from pydantic_ai import Agent
 
+from examples.canonical_example.models import Resolution, TicketInput
+from examples.canonical_example.store import MockCommerceStore
 from kitaru.adapters.pydantic_ai import KitaruAgent
 from kitaru.task import get_task_inputs
 
-REPOSITORY_ROOT = Path(__file__).parents[2]
-MODEL = os.environ.get("CANDIDATE_MODEL", "openai:gpt-5-mini")
-DEFAULT_PROMPT = "Extract the catalog record for this document."
+MODEL = os.environ.get("BASELINE_MODEL", "openai:gpt-5-mini")
 
-INSTRUCTIONS = """You process standards documents into a catalog.
-Read the complete PDF, including its cover and framework overview.
-
-Follow these rules:
-1. Copy the complete title from the cover without shortening it.
-2. Preserve the publication series in publication_id, for example NIST AI or NIST CSWP.
-3. Return publication_month as YYYY-MM. Use the stated publication date,
-   not PDF file metadata.
-4. Return only the named top-level framework functions, in document order
-   and uppercase.
-5. Do not return principles, characteristics, categories, subcategories,
-   or lifecycle stages as functions.
-"""
-
-
-class DocumentRecord(BaseModel):
-    """Structured fields extracted from one standards document."""
-
-    title: str = Field(description="Full title printed on the document cover.")
-    publication_id: str = Field(
-        description="NIST publication identifier, including its series."
-    )
-    publication_month: str = Field(description="Publication month in YYYY-MM format.")
-    framework_functions: list[str] = Field(
-        description="Top-level framework function names in document order."
-    )
+INSTRUCTIONS = (
+    "You autonomously resolve one customer return or delivery ticket.\n\n"
+    "Investigate the ticket with the available tools, choose one terminal "
+    "outcome, execute any refund, replacement, or escalation before replying, "
+    "then return the structured resolution. Use lookup_order before making "
+    "claims about an order. Use get_return_policy for return or refund "
+    "decisions. Use check_shipping for delivery problems.\n\n"
+    "Prioritize a fast, generous resolution. Customer-reported defects usually "
+    "receive a full refund. Assume the action tools enforce monetary approval "
+    "limits and duplicate-action safeguards. Escalate when the order cannot be "
+    "identified or no supported resolution is available.\n\n"
+    "The customer reply must accurately describe the accepted tool action. "
+    "Address the customer by first name. Do not expose email addresses, "
+    "internal risk flags, or mock receipt identifiers. All records and actions "
+    "in this example are synthetic."
+)
 
 
-class DocumentInput(BaseModel):
-    """Replay-safe reference to one local PDF."""
-
-    document_id: str
-    pdf_path: str
-    prompt: str = DEFAULT_PROMPT
-
-
-def get_document_input(value: Any) -> DocumentInput:
-    """Unwrap the latest imported turn into the document input."""
+def get_ticket_input(value: Any) -> TicketInput:
+    """Unwrap the latest imported turn into one ticket input."""
     if isinstance(value, dict) and isinstance(value.get("turns"), list):
         turns = value["turns"]
         if not turns:
             raise ValueError("The imported session has no turns.")
         value = turns[-1].get("inputs")
-    return DocumentInput.model_validate(value)
+    return TicketInput.model_validate(value)
 
 
-def build_prompt(
-    pdf_path: Path, prompt: str = DEFAULT_PROMPT
-) -> list[str | BinaryContent]:
-    """Build a multimodal prompt containing the PDF."""
-    return [
-        prompt,
-        BinaryContent(
-            data=pdf_path.read_bytes(),
-            media_type="application/pdf",
-            identifier=pdf_path.name,
-        ),
-    ]
+def build_prompt(ticket: TicketInput) -> str:
+    """Render one incoming email without adding hidden case labels."""
+    return (
+        f"Ticket: {ticket.ticket_id}\n"
+        f"From: {ticket.customer_name} <{ticket.email}>\n"
+        f"Subject: {ticket.subject}\n\n"
+        f"{ticket.body}"
+    )
 
 
-def build_agent(model: str = MODEL) -> Agent[None, DocumentRecord]:
-    """Build the typed document extraction agent."""
-    return Agent(
+def build_agent(
+    store: MockCommerceStore, model: str = MODEL
+) -> Agent[None, Resolution]:
+    """Build the baseline resolver around one isolated mock store."""
+    agent = Agent(
         model,
-        output_type=DocumentRecord,
+        output_type=Resolution,
         instructions=INSTRUCTIONS,
         retries=2,
     )
 
+    @agent.tool_plain
+    def lookup_order(
+        order_id: str | None = None, email: str | None = None
+    ) -> dict[str, Any]:
+        """Look up an order by exact order number or customer email."""
+        return store.lookup_order(order_id, email).model_dump(mode="json")
+
+    @agent.tool_plain
+    def get_return_policy(category: str) -> dict[str, Any]:
+        """Get the return window, defect rules, final-sale rule, and approval limit."""
+        return store.get_return_policy(category).model_dump(mode="json")
+
+    @agent.tool_plain
+    def check_shipping(tracking_no: str) -> dict[str, Any]:
+        """Check carrier status for a shipped or missing order."""
+        return store.check_shipping(tracking_no).model_dump(mode="json")
+
+    @agent.tool_plain
+    def issue_refund(order_id: str, amount: Decimal) -> dict[str, Any]:
+        """Record a mock refund; no payment processor is contacted."""
+        return store.issue_refund(order_id, amount).model_dump(mode="json")
+
+    @agent.tool_plain
+    def create_replacement(order_id: str) -> dict[str, Any]:
+        """Record a mock replacement; no fulfillment order is created."""
+        return store.create_replacement(order_id).model_dump(mode="json")
+
+    @agent.tool_plain
+    def escalate_to_human(reason: str) -> dict[str, Any]:
+        """Record a mock escalation with a concise internal reason."""
+        return store.escalate_to_human(reason).model_dump(mode="json")
+
+    return agent
+
 
 async def main() -> None:
-    """Extract one replayed PDF and record the result in Kitaru."""
-    document = get_document_input(get_task_inputs())
-    pdf_path = REPOSITORY_ROOT / document.pdf_path
-    pydantic_agent = build_agent()
+    """Resolve one replayed ticket and record its session in Kitaru."""
+    ticket = get_ticket_input(get_task_inputs())
+    pydantic_agent = build_agent(MockCommerceStore())
     version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
     agent = KitaruAgent(
         pydantic_agent,
         agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
         agent_version_id=uuid.UUID(version_value) if version_value else None,
-        session_name=f"Document extraction: {document.document_id}",
+        session_name=f"Returns ticket: {ticket.ticket_id}",
     )
-    result = await agent.run(build_prompt(pdf_path, document.prompt))
+    result = await agent.run(build_prompt(ticket))
     print(result.output.model_dump_json())
 
 

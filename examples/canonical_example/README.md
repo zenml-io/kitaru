@@ -1,170 +1,132 @@
+# Resolve returns tickets with Kitaru
+
+This example runs an autonomous returns agent against ten synthetic customer emails. The agent investigates each order, checks the relevant policy or shipment, records a mock action, and drafts the reply. Langfuse captures the real PydanticAI executions, and Kitaru imports them as replayable sessions.
+
+All customers, orders, shipments, and actions are synthetic. Refund and replacement tools only modify an in-memory store.
+
+Run every command from `examples/canonical_example`.
+
 ## Optional Step 0: Generate real traces
 
-The example can generate its own Langfuse export. Copy the environment template
-and add your OpenAI and Langfuse credentials:
+Copy the environment template and add your OpenAI and Langfuse credentials:
 
 ```bash
 cp .env.example .env
 ```
 
-Generate 12 traces:
+Generate ten baseline traces:
 
 ```bash
 ./generate.sh
 ```
 
-The script downloads three public NIST PDFs and runs the document agent with
-four prompts per PDF. It writes the exported traces to
-`traces/langfuse-traces.jsonl`.
+The script makes real model calls and writes the Langfuse export to `traces/langfuse-traces.jsonl`. It does not connect to Kitaru or create Kitaru resources.
 
 ## Step 1: Start Kitaru locally
 
-Start PostgreSQL, the Kitaru API, and the dashboard with Docker Compose:
+Start PostgreSQL, the Kitaru API, and the dashboard:
 
 ```bash
 docker compose -f ../../docker-compose.yml up -d --build
 ```
 
-Install the Kitaru CLI from the repository and connect it to the local server:
+Install the dependencies and connect the CLI:
 
 ```bash
-uv sync --extra cli
+uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
 uv run kitaru login --local
 uv run kitaru status
 ```
 
-Open [http://localhost:8000](http://localhost:8000) to use the dashboard. The
-PostgreSQL volume keeps local data when the containers stop.
+Open [http://localhost:8000](http://localhost:8000) to use the dashboard.
 
-> **WIP:** The intended command is `kitaru login --local`, which will start the
-> local deployment when necessary. The current CLI only connects to a server
-> that is already running, so this example starts Docker Compose first.
+## Step 2: Register the baseline agent
 
-To stop the deployment without deleting its data:
+The PydanticAI entrypoint is `agent.py`. Each invocation resolves one incoming email without a human turn.
 
-```bash
-docker compose -f ../../docker-compose.yml down
-```
-
-## Step 2: Find, prepare, and register the agent
-
-This repository contains a PydanticAI document extraction agent in `agent.py`.
-Its relevant facts are:
-
-- **Purpose:** extract catalog fields from standards PDFs.
-- **Inputs:** a document ID and a repository-relative PDF path.
-- **Outputs:** title, publication identifier, publication month, and framework
-  functions.
-- **State:** stateless; each run reads one local PDF.
-- **Tools:** none.
+- **Purpose:** investigate and resolve returns, refunds, and missing shipments.
+- **Input:** one synthetic support email with a ticket ID, customer identity, subject, and body.
+- **Output:** action, amount, reason, and customer reply.
+- **State:** one isolated in-memory commerce store per invocation.
+- **Tools:** `lookup_order`, `get_return_policy`, `check_shipping`, `issue_refund`, `create_replacement`, and `escalate_to_human`.
 - **MCP servers:** none.
 - **Skills:** none.
 
-Kitaru supports PydanticAI, so the example provides a separate Kitaru entrypoint
-without changing the original agent behavior. Install the worker and PydanticAI
-dependencies:
-
-```bash
-uv sync --extra cli --extra worker --extra pydantic-ai
-```
-
-Register the agent and its first version:
+Register the baseline:
 
 ```bash
 uv run kitaru agent register \
-  document-agent \
+  returns-resolver \
   --entrypoint examples.canonical_example.agent:main \
-  --description "Purpose: extract catalog fields from standards PDFs. Inputs: document ID and repository-relative PDF path. Outputs: title, publication identifier, publication month, and framework functions. State: stateless; each run reads one local PDF." \
-  --display-version candidate-v1 \
+  --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
+  --display-version baseline-v1 \
   --working-dir ../.. \
-  --timeout-seconds 180
+  --timeout-seconds 180 \
+  --tool lookup_order \
+  --tool get_return_policy \
+  --tool check_shipping \
+  --tool issue_refund \
+  --tool create_replacement \
+  --tool escalate_to_human
 ```
 
-Confirm that Kitaru stored the agent:
-
-```bash
-uv run kitaru agent get document-agent
-```
-
-The registration creates the `document-agent` parent and version `1`. The
-version records the entrypoint and execution configuration used for later
-replays. Kitaru stores the registration on the server and does not add a YAML
-file or `.kitaru` directory to the repository. No worker or model call is
-required during registration.
+Registration creates the `returns-resolver` agent and version `1`.
 
 ## Step 3: Start a worker
 
-Open a second terminal in `examples/canonical_example` and start a worker in
-the current Python environment:
+Open a second terminal in this directory and keep the worker active:
 
 ```bash
 uv run --env-file .env kitaru worker start \
-  --name canonical-example-worker
+  --name returns-example-worker
 ```
 
-Keep this process running. The worker polls the local Kitaru server and runs
-jobs using the agent code and dependencies from this repository.
-
-In the first terminal, confirm that the worker is active:
+Confirm that Kitaru can see it:
 
 ```bash
 uv run kitaru worker list
 ```
 
-A job remains pending until a compatible worker claims it. Press `Ctrl+C` in
-the worker terminal when the example is complete.
+## Step 4: Import the baseline sessions
 
-## Step 4: Import sessions
-
-Import the Langfuse traces into the registered agent:
+Import the Langfuse traces under the exact baseline agent version:
 
 ```bash
 uv run kitaru session import \
   traces/langfuse-traces.jsonl \
   --importer langfuse@latest \
-  --agent document-agent \
-  --tag document-baseline \
-  --params '{"source_instance":"canonical-example"}' \
+  --agent returns-resolver@1 \
+  --tag returns-baseline \
+  --params '{"source_instance":"canonical-returns-example"}' \
   --media-type application/x-ndjson \
   --wait
 ```
 
-The worker converts the 12 source traces into Kitaru sessions and nodes. Each
-trace becomes one session because the generator assigns it a distinct Langfuse
-session ID.
+The importer preserves the LLM calls, tool calls, tool results, final resolution, source trace IDs, and baseline agent version.
 
-List the imported sessions:
+Check what the import produced:
 
 ```bash
 uv run kitaru session list \
-  --agent document-agent \
+  --tag returns-baseline \
   --origin imported \
   --size 20
 ```
 
-Import does not run evaluators. This keeps one upload from creating an
-unbounded evaluation queue.
-
 ## Step 5: Find useful starting points
 
-Run the built-in evaluators against every session from this import:
+Run Kitaru's deterministic evaluators across the imported baseline:
 
 ```bash
 uv run kitaru session evaluate \
-  --tag document-baseline \
+  --tag returns-baseline \
   --evaluator cost@latest \
   --evaluator latency@latest \
   --evaluator tool-call-patterns@latest \
   --wait
 ```
 
-The tag is the selection boundary. To evaluate every session in Kitaru instead, replace
-`--tag document-baseline` with `--all`.
-
-These evaluators make no model calls. They report recorded cost, elapsed time,
-and repeated tool usage. This document agent has no tools, so
-`tool-call-patterns` should report `no-tool-calls`. Cost and latency can still
-surface sessions worth reviewing first.
+These evaluators make no model calls. Cost and latency surface expensive tickets, while tool-call patterns expose repeated lookups and different investigation paths.
 
 List the stored results:
 

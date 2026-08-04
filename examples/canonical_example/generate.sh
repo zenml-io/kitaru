@@ -4,7 +4,7 @@ set -euo pipefail
 
 example_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "${example_dir}/../.." && pwd)"
-env_file="${example_dir}/.env"
+env_file="${KITARU_EXAMPLE_ENV_FILE:-${example_dir}/.env}"
 trace_file="${example_dir}/traces/langfuse-traces.jsonl"
 
 if [[ ! -f "${env_file}" ]]; then
@@ -14,12 +14,7 @@ fi
 
 cd "${repository_root}"
 
-printf '%s\n' 'Downloading three NIST PDFs'
-uv run --env-file "${env_file}" \
-  --extra pydantic-ai \
-  python -m examples.canonical_example.corpus
-
-printf '%s\n' 'Generating 12 PydanticAI traces in Langfuse'
+printf '%s\n' 'Generating 10 returns-resolution traces in Langfuse'
 uv run --env-file "${env_file}" \
   --extra pydantic-ai \
   --extra examples \

@@ -276,7 +276,7 @@ def test_canonical_example_uses_bundled_starting_point_evaluators() -> None:
     """Teach tag-based evaluation without discovery or ID plumbing."""
     readme = (CANONICAL_EXAMPLE_DIR / "README.md").read_text()
 
-    assert "--tag document-baseline" in readme
+    assert "--tag returns-baseline" in readme
     assert "kitaru evaluator list" not in readme
     assert "--sessions-file" not in readme
     for evaluator in ("cost@latest", "latency@latest", "tool-call-patterns@latest"):

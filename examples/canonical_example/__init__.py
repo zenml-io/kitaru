@@ -1,1 +1,1 @@
-"""Canonical Kitaru product journey."""
+"""Autonomous returns-resolution example for Kitaru."""
