@@ -5,26 +5,26 @@ import json
 import sys
 from pathlib import Path
 
-from kitaru_importer_langfuse import parse
 from pydantic_ai import BinaryContent
 
 from kitaru.api_models.v1.session import SessionResponse
-from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.importers.langfuse import parse
 from kitaru.task.evaluator import SessionView
-from kitaru.task.importer import ParsedSession
+from kitaru.task.importer import ParsedSession, flatten_nodes
 from kitaru.task.plugins import load_plugin_entrypoint
 from kitaru.worker.process import parse_inline_dependencies
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "document_processing"
+CANONICAL_EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "canonical_example"
 sys.path.insert(0, str(REPOSITORY_ROOT))
 agent_module = importlib.import_module("examples.document_processing.agent")
 corpus_module = importlib.import_module("examples.document_processing.corpus")
 evaluator_module = importlib.import_module("examples.document_processing.evaluator")
 extractor_module = importlib.import_module("examples.document_processing.extractor")
-main_module = importlib.import_module("examples.document_processing.__main__")
 CASES = corpus_module.CASES
-PREPARED_TRACE_PATH = main_module.PREPARED_TRACE_PATH
+TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
 DocumentInput = agent_module.DocumentInput
 evaluate = evaluator_module.evaluate
 get_document_input = agent_module.get_document_input
@@ -144,73 +144,42 @@ def test_langfuse_trace_export_is_importable() -> None:
     assert session.nodes[0].children[0].provider == "openai"
 
 
-def test_prepared_trace_corpus_forms_useful_cohorts() -> None:
-    """Keep controls, extraction failures, and telemetry failures represented."""
+def test_real_trace_corpus_is_replay_ready() -> None:
+    """Keep one real imported baseline for each pinned document."""
     sessions = [
         item
         for item in parse(
-            PREPARED_TRACE_PATH.read_bytes(),
+            TRACE_PATH.read_bytes(),
             {"source_instance": "nist-standards"},
         )
         if isinstance(item, ParsedSession)
     ]
-    tags = {
-        session.external_id: set(session.metadata["langfuse.tags"])
-        for session in sessions
+
+    assert len(sessions) == 3
+    assert {session.external_id.rsplit(":", 1)[-1] for session in sessions} == {
+        case.document_id for case in CASES
     }
-
-    assert len(sessions) == 12
-    assert sum("control" in value for value in tags.values()) == 3
-    assert sum("extraction-edge" in value for value in tags.values()) == 7
-    assert sum("telemetry-edge" in value for value in tags.values()) == 2
-
-    retry = next(
-        session for session in sessions if session.external_id.endswith("ai-rmf-retry")
-    )
-    assert len(retry.inputs["turns"]) == 2
-
-    failed = next(
-        session
+    assert all(session.inputs["turns"] for session in sessions)
+    assert all(
+        any(
+            node.node_type is NodeType.LLM_CALL for node in flatten_nodes(session.nodes)
+        )
         for session in sessions
-        if session.external_id.endswith("genai-provider-timeout")
     )
-    assert failed.status.value == "failed"
-    assert failed.nodes[0].status is NodeStatus.FAILED
-
-    partial = next(
-        session
-        for session in sessions
-        if session.external_id.endswith("csf-missing-parent")
-    )
-    readiness = partial.metadata["replay_readiness"]
-    assert readiness["level"] == "partial"
-    assert readiness["graph_complete"] is False
-    assert "missing parent" in " ".join(readiness["reasons"])
-    generation = next(
-        node for node in partial.nodes if node.node_type is NodeType.LLM_CALL
-    )
-    assert generation.tokens is not None
-    assert generation.tokens.input_tokens == 1755
-    assert generation.tokens.output_tokens == 79
 
 
-def test_prepared_baselines_contain_measurable_failures() -> None:
-    """Keep every extraction edge case useful for field-level evaluation."""
+def test_real_baselines_contain_measurable_differences() -> None:
+    """Keep the checked-in real export useful for comparison."""
     sessions = [
         item
         for item in parse(
-            PREPARED_TRACE_PATH.read_bytes(),
+            TRACE_PATH.read_bytes(),
             {"source_instance": "nist-standards"},
         )
         if isinstance(item, ParsedSession)
-    ]
-    extraction_edges = [
-        session
-        for session in sessions
-        if "extraction-edge" in session.metadata["langfuse.tags"]
     ]
     scores = []
-    for session in extraction_edges:
+    for session in sessions:
         result = evaluate(
             SessionView(
                 session=SessionResponse.model_construct(
@@ -222,9 +191,8 @@ def test_prepared_baselines_contain_measurable_failures() -> None:
         )
         scores.append(result.score)
 
-    assert len(scores) == 7
-    assert all(score < 1 for score in scores)
-    assert set(scores) == {0.75}
+    assert any(score < 1.0 for score in scores)
+    assert len(set(scores)) > 1
 
 
 def test_evaluator_scores_each_labeled_field() -> None:
@@ -261,35 +229,55 @@ def test_evaluator_scores_each_labeled_field() -> None:
 def test_registered_plugins_are_worker_compatible() -> None:
     """Keep both uploaded service artifacts dependency-free."""
     assert parse_inline_dependencies(EXAMPLE_DIR / "evaluator.py") == []
-    importer_path = (
-        REPOSITORY_ROOT
-        / "plugins"
-        / "langfuse"
-        / "src"
-        / "kitaru_importer_langfuse"
-        / "importer.py"
-    )
+    importer_path = REPOSITORY_ROOT / "src" / "kitaru" / "importers" / "langfuse.py"
     assert parse_inline_dependencies(importer_path) == []
     assert callable(load_plugin_entrypoint(importer_path, "parse", "Importer"))
 
 
-def test_runner_uses_the_public_cli_for_the_improvement_loop() -> None:
-    """Keep the canonical orchestration on supported CLI commands."""
-    runner = (EXAMPLE_DIR / "run.sh").read_text()
+def test_trace_generation_is_a_standalone_example_step() -> None:
+    """Keep real trace generation separate and retain its JSONL export."""
+    generator = (EXAMPLE_DIR / "generate.sh").read_text()
 
+    assert "examples.document_processing.corpus" in generator
+    assert "examples.document_processing.langfuse_capture" in generator
+    assert "langfuse-traces.jsonl" in generator
+    assert 'env_file="${example_dir}/.env"' in generator
+    env_example = (EXAMPLE_DIR / ".env.example").read_text()
+    assert "KITARU_API_URL=http://localhost:8000" in env_example
+
+
+def test_example_readme_teaches_the_complete_cli_journey() -> None:
+    """Keep all Kitaru operations visible in the local guide."""
+    readme = (EXAMPLE_DIR / "README.md").read_text()
+
+    assert "# Improve a document agent with the Kitaru CLI" in readme
     for command in (
-        "importer test",
-        "agent register",
-        "importer register",
+        "kitaru status",
+        "kitaru evaluator test",
+        "kitaru agent register",
+        "kitaru evaluator register",
         "worker start",
-        "session import",
-        "session list",
-        "cohort create",
-        "cohort version create",
-        "evaluator test",
-        "evaluator register",
-        "experiment create",
-        "experiment run start",
+        "kitaru session import",
+        "kitaru session list",
+        "kitaru session evaluate",
+        "kitaru cohort create",
+        "kitaru cohort version create",
+        "kitaru experiment create",
+        "kitaru experiment run start",
     ):
-        assert command in runner
-    assert '--agent "${agent_name}"' in runner
+        assert command in readme
+    assert "--importer langfuse@latest" in readme
+    assert "kitaru importer register" not in readme
+    assert "docker compose -f ../../docker-compose.yml up" in readme
+    assert "run.sh" not in readme
+
+
+def test_canonical_example_uses_bundled_starting_point_evaluators() -> None:
+    """Teach explicit bounded evaluation without plugin registration."""
+    readme = (CANONICAL_EXAMPLE_DIR / "README.md").read_text()
+
+    assert "kitaru evaluator list" in readme
+    assert "--sessions-file /tmp/kitaru-document-session-ids.txt" in readme
+    for evaluator in ("cost@1", "latency@1", "tool-call-patterns@1"):
+        assert f"--evaluator {evaluator}" in readme
+    assert "kitaru evaluator register" not in readme

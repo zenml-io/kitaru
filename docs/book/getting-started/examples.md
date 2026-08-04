@@ -1,68 +1,45 @@
 ---
-description: Import document traces, form cohorts, and improve an extractor.
+description: Import document traces, score baselines, and run an experiment.
 icon: flask
 ---
 
 # Example
 
-Kitaru has one canonical example. It starts with a prepared Langfuse export from
-a PydanticAI agent that extracts structured records from three public NIST PDFs.
-The export contains 12 sessions:
+Kitaru has one canonical example. A PydanticAI agent extracts structured fields
+from three public NIST PDFs. Langfuse records the real model calls. Kitaru then
+imports, scores, and replays the traces.
 
-- 3 correct controls
-- 7 extraction edge cases
-- 2 telemetry edge cases, including a failed call and an incomplete span graph
+The example teaches these CLI operations:
 
-The example uses Kitaru CLI commands to register the agent and Langfuse
-importer, run a worker, import the export, and create cohorts from trace tags.
-Trace import is the first required step.
+- Use the default Langfuse importer.
+- Test and register the example agent and evaluator.
+- Start a local worker for a remote Kitaru server.
+- Import a Langfuse JSONL export as Kitaru sessions.
+- Score the imported baseline sessions.
+- Create an immutable cohort version.
+- Create and run an experiment against an improved agent version.
 
-## Run the example
-
-From the Kitaru repository:
+## Start the example
 
 ```bash
-uv sync --extra cli --extra server --extra worker
+cd examples/document_processing
 cp .env.example .env
-docker compose up -d db server
-./examples/document_processing/run.sh --import-only
+uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
+docker compose -f ../../docker-compose.yml up -d --build db server
+./generate.sh
 ```
 
-The `.env` file is ignored by Git. This command does not call OpenAI or
-Langfuse. For another Kitaru server, set its URL and API key in `.env`:
+Add the OpenAI and Langfuse credentials to `.env` before you generate the
+traces. The local Kitaru server runs at `http://localhost:8000` without API-key
+authentication.
 
-```bash
-KITARU_API_URL=https://kitaru.example.com
-KITARU_API_KEY=...
-```
-
-To replay the extraction failures through a candidate agent, install PydanticAI,
-configure OpenAI, and run without `--import-only`:
-
-```bash
-uv sync --extra cli --extra server --extra worker --extra pydantic-ai
-# Set OPENAI_API_KEY in .env first.
-./examples/document_processing/run.sh
-```
-
-## Generate fresh traces
-
-Trace generation is optional step -1. It requires OpenAI and Langfuse
-credentials:
-
-```bash
-uv sync --extra cli --extra server --extra worker --extra pydantic-ai --extra examples
-# Set the OpenAI and Langfuse credentials in .env first.
-./examples/document_processing/run.sh --bootstrap-traces
-```
-
-Pass `--trace-export path/to/export.jsonl` to use another Langfuse JSON or JSONL
-export.
+Continue with `examples/document_processing/README.md`. The README shows each
+Kitaru CLI command directly.
 
 ## Follow the code
 
-[`examples/document_processing/run.sh`](https://github.com/zenml-io/kitaru/blob/develop/examples/document_processing/run.sh)
-orchestrates the example through CLI commands and JSON receipts. `corpus.py`
-pins the source documents and labels, `traces/langfuse-traces.jsonl` holds the
-prepared evidence, `langfuse_capture.py` implements optional trace generation,
-`agent.py` defines the candidate, and `evaluator.py` defines field accuracy.
+- `generate.sh` creates the real Langfuse export.
+- `traces/langfuse-traces.jsonl` contains the exported traces.
+- `agent.py` defines the improved document agent.
+- `evaluator.py` defines exact field-accuracy scoring.
+- `README.md` contains the complete CLI journey.

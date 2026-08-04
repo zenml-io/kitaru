@@ -1,6 +1,8 @@
 [files]
 extend-exclude = [
     "*.json",
+    "examples/document_processing/traces/*.jsonl",
+    "examples/canonical_example/traces/*.jsonl",
     "*.js",
     "*.ipynb",
     "uv.lock",
