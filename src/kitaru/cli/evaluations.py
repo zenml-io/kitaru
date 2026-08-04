@@ -23,7 +23,9 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
     EvaluationResult,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
@@ -106,6 +108,40 @@ def _parse_session_ids(
             )
         seen.add(session_id)
         session_ids.append(session_id)
+    return session_ids
+
+
+async def _select_session_ids(
+    client: Any,
+    values: list[str],
+    sessions_file: Path | None,
+    *,
+    tag: str | None = None,
+    all_sessions: bool = False,
+) -> list[uuid.UUID]:
+    """Resolve one explicit, tag-based, or all-session selection."""
+    explicit = bool(values) or sessions_file is not None
+    modes = int(explicit) + int(tag is not None) + int(all_sessions)
+    if modes != 1:
+        raise CLIError(
+            "invalid_arguments",
+            "Select sessions using IDs/--sessions-file, --tag, or --all.",
+        )
+    if explicit:
+        return _parse_session_ids(values, sessions_file)
+    if tag is not None and not tag.strip():
+        raise CLIError("invalid_arguments", "--tag must not be empty.")
+    params = SessionListParams()
+    if tag is not None:
+        params = SessionListParams(
+            filter=FilterCondition(field="tag", op=FilterOp.EQ, value=tag.strip())
+        )
+    session_ids = [session.id async for session in client.sessions.iter(params)]
+    if not session_ids:
+        selection = f"tag {tag.strip()!r}" if tag is not None else "--all"
+        raise CLIError(
+            "invalid_arguments", f"No sessions matched the {selection} selection."
+        )
     return session_ids
 
 
@@ -279,17 +315,25 @@ async def evaluate_sessions(
     sessions: list[str] | None,
     *,
     sessions_file: Path | None,
+    tag: str | None = None,
+    all_sessions: bool = False,
     evaluators: list[str],
     evaluator_params: list[str] | None,
     wait: bool,
     interval: float | None,
     timeout: float | None,
 ) -> CommandResult:
-    """Create one bounded evaluation job over explicit session/version pairs."""
+    """Create one evaluation job over selected session/version pairs."""
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
-    session_ids = _parse_session_ids(sessions or [], sessions_file)
+    session_ids = await _select_session_ids(
+        client,
+        sessions or [],
+        sessions_file,
+        tag=tag,
+        all_sessions=all_sessions,
+    )
     (
         configs,
         evaluator_identity,
