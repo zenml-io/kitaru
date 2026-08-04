@@ -3,16 +3,8 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-01T12:45:48.746706Z"
 exclude-newer-span = "P3D"
-
-[manifest]
-members = [
-    "kitaru",
-    "kitaru-importer-braintrust",
-    "kitaru-importer-langfuse",
-    "kitaru-importer-otlp",
-]
 
 [[package]]
 name = "alembic"
@@ -940,39 +932,6 @@ dev = [
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
 ]
-
-[[package]]
-name = "kitaru-importer-braintrust"
-version = "0.1.0"
-source = { editable = "plugins/braintrust" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "." }]
-
-[[package]]
-name = "kitaru-importer-langfuse"
-version = "0.1.0"
-source = { editable = "plugins/langfuse" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "." }]
-
-[[package]]
-name = "kitaru-importer-otlp"
-version = "0.1.0"
-source = { editable = "plugins/otlp" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
 name = "logfire-api"

@@ -18,6 +18,7 @@ import json
 import uuid
 from pathlib import Path
 
+import pytest
 from fakes import (
     FakeKitaruAPIClient,
     as_client,
@@ -222,3 +223,28 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert client.blobs.download_calls == [payload_blob_id]
     assert process.command == ("uv run --with pkg==2.0 python -m kitaru.task import")
+
+
+async def test_import_handler_reuses_installed_package(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exact importer package in the worker runs without a uv overlay."""
+    payload_content = b'{"sessions": []}'
+    payload_digest = _digest(payload_content)
+    payload_blob_id = uuid.uuid4()
+    plugin = PackagePluginSpec(
+        entrypoint="local.mod:parse", requirement="local-importer==1.0"
+    )
+    payload = PayloadSpec(blob_id=payload_blob_id, sha256=payload_digest)
+    task_id = uuid.uuid4()
+    spec = make_importer_spec(task_id, plugin=plugin, payload=payload)
+    client = FakeKitaruAPIClient()
+    client.blobs.content[payload_blob_id] = payload_content
+    ctx = _ctx(tmp_path, client)
+    monkeypatch.setattr("kitaru.worker.process.version", lambda name: "1.0")
+
+    process = await ImportHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert process.command.endswith("-m kitaru.task import")
+    assert "--with" not in process.command

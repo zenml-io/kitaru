@@ -33,6 +33,9 @@ from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -65,6 +68,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.default_plugins import ensure_default_plugins
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -195,9 +199,10 @@ def create_app(settings: APISettings) -> FastAPI:
                     repository=SQLAccountRepository(session),
                     password_hasher=BcryptPasswordHasher(),
                 )
-                await account_service.ensure_account(
+                account = await account_service.ensure_account(
                     settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
                 )
+                await ensure_default_plugins(SQLPluginRepository(session), account.id)
                 await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:

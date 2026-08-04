@@ -41,6 +41,19 @@ async def test_importers_persist_across_requests(client: httpx.AsyncClient) -> N
     assert response.json() == created
 
 
+async def test_local_server_provides_default_importers(
+    client: httpx.AsyncClient,
+) -> None:
+    """Provide package-backed importers after local startup."""
+    response = await client.get("/v1/importers")
+
+    assert response.status_code == 200
+    importers = {item["name"]: item for item in response.json()["items"]}
+    defaults = {"braintrust", "langfuse", "otlp"}
+    assert defaults <= importers.keys()
+    assert all(importers[name]["latest_version"] == 1 for name in defaults)
+
+
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
     response = await client.post("/v1/importers", json={"name": "langfuse-import"})

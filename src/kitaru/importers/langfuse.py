@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Langfuse JSONL trace importer."""
+"""Built-in Langfuse JSON and JSONL trace importer."""
 
 import hashlib
 import json
@@ -393,7 +393,7 @@ class LangfuseJSONLImporter:
         return ImporterDescriptor(
             id="langfuse",
             display_name="Langfuse JSONL",
-            version=version("kitaru-importer-langfuse"),
+            version=version("kitaru"),
             file_extensions=[".jsonl"],
             max_upload_bytes=MAX_UPLOAD_BYTES,
         )

@@ -41,6 +41,19 @@ async def test_evaluators_persist_across_requests(client: httpx.AsyncClient) -> 
     assert response.json() == created
 
 
+async def test_local_server_provides_starting_point_evaluators(
+    client: httpx.AsyncClient,
+) -> None:
+    """Provide deterministic evaluators after local startup."""
+    response = await client.get("/v1/evaluators")
+
+    assert response.status_code == 200
+    evaluators = {item["name"]: item for item in response.json()["items"]}
+    defaults = {"cost", "latency", "tool-call-patterns"}
+    assert defaults <= evaluators.keys()
+    assert all(evaluators[name]["latest_version"] == 1 for name in defaults)
+
+
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
     response = await client.post("/v1/evaluators", json={"name": "accuracy"})
