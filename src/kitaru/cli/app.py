@@ -2907,6 +2907,9 @@ async def session_list(
     started_before: datetime | None = None,
 ) -> CommandResult:
     """List one server page of sessions."""
+    registration.list_params(
+        "session", size=size, cursor=cursor, sort=sort, filter=filter
+    )
     async with _open_asset_client() as client:
         return await sessions.list_sessions(
             client,
