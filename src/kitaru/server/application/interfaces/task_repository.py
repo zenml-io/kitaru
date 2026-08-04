@@ -152,18 +152,32 @@ class TaskRepository(Protocol):
         """
         ...
 
-    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
-        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+    async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
+        """Lock one task by id if it is still in flight and older than a cutoff.
 
-        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent sweeps
-        take disjoint tasks.
+        The row is locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
+        sweeps take disjoint tasks. Staleness is re-checked on the locked
+        row because the candidate read ran unlocked.
+
+        Args:
+            task_id: Id of the candidate task.
+            cutoff: Bound the last heartbeat must be older than.
+
+        Returns:
+            Locked stale task, or ``None`` when it is contended or no longer
+            stale.
+        """
+        ...
+
+    async def list_stale_ids(self, cutoff: datetime, limit: int) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks whose last heartbeat is older than a cutoff.
 
         Args:
             cutoff: Bound the last heartbeat must be older than.
-            limit: Maximum number of tasks to lock.
+            limit: Maximum number of ids to read.
 
         Returns:
-            Locked stale tasks.
+            Ids of the stale tasks in ascending order.
         """
         ...
 
@@ -182,6 +196,18 @@ class TaskRepository(Protocol):
 
         Returns:
             Cancel request time by id for every stamped task.
+        """
+        ...
+
+    async def lock_by_jobs(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Lock the jobs' non-terminal task rows in id order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the rows.
         """
         ...
 

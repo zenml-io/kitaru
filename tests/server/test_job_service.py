@@ -456,10 +456,19 @@ async def test_settlement_precedence_failed_over_canceled_over_completed(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
-    # Abort propagation only stamps the still-claimed sibling, it does not
-    # settle the job until every task reaches a terminal status.
+    # The report stamps the job alone. It does not settle the job until every
+    # task reaches a terminal status, and it leaves the sibling row untouched
+    # for the sweep's propagation backstop.
     job_after = await services.jobs.get(job.id)
     assert job_after.status is JobStatus.RUNNING
+    assert job_after.cancel_requested_at is not None
+
+    sibling_after = await services.tasks.get(sibling.id)
+    assert sibling_after.status is TaskStatus.CLAIMED
+    assert sibling_after.cancel_requested_at is None
+
+    assert await services.task_service.list_unpropagated_cancel_job_ids() == [job.id]
+    await services.task_service.propagate_job_cancel(job.id)
 
     sibling_after = await services.tasks.get(sibling.id)
     assert sibling_after.status is TaskStatus.CLAIMED

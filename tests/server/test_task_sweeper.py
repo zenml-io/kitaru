@@ -14,14 +14,142 @@
 """Tests for the background stale-task sweep loop."""
 
 import asyncio
+import uuid
+from collections.abc import AsyncGenerator
+from datetime import datetime
+from typing import Any, cast
 
 import pytest
+from asyncpg.exceptions import LockNotAvailableError
+from sqlalchemy.exc import DBAPIError
 
-from conftest import local_settings
+from conftest import build_job_and_task_services, local_settings
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
+
+
+def _lock_not_available_error() -> DBAPIError:
+    """Build a database error chained like a driver-reported NOWAIT failure."""
+    adapter_error = Exception("adapter error")
+    adapter_error.__cause__ = LockNotAvailableError("could not obtain lock")
+    return DBAPIError("SELECT task", None, adapter_error)
+
+
+class _RecordingSession:
+    """Session double recording the commits and rollbacks a sweep unit drives."""
+
+    def __init__(self) -> None:
+        """Initialize the counters."""
+        self.commits = 0
+        self.rollbacks = 0
+
+    async def commit(self) -> None:
+        """Record a commit."""
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        """Record a rollback."""
+        self.rollbacks += 1
+
+
+class _StubDatabase:
+    """Database service double yielding one recording session per call."""
+
+    def __init__(self) -> None:
+        """Initialize the session log."""
+        self.sessions: list[_RecordingSession] = []
+
+    async def get_async_session(self) -> AsyncGenerator[Any, None]:
+        """Yield a fresh recording session.
+
+        Yields:
+            Recording session double.
+        """
+        session = _RecordingSession()
+        self.sessions.append(session)
+        yield session
+
+
+def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) -> None:
+    """Bind the sweeper's per-transaction service build to one fake-backed service.
+
+    Args:
+        monkeypatch: Patcher for the sweeper module.
+        service: Service every sweep unit runs against.
+    """
+    monkeypatch.setattr(
+        task_sweeper, "get_server_analytics", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(task_sweeper, "get_task_service", lambda *args: service)
+
+
+async def test_sweep_once_continues_after_a_failing_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An item that raises is rolled back and the remaining items still run."""
+    services = build_job_and_task_services()
+    first, second = uuid.uuid4(), uuid.uuid4()
+    swept: list[uuid.UUID] = []
+
+    async def failing_sweep(
+        self: TaskService, task_id: uuid.UUID, now: datetime
+    ) -> None:
+        swept.append(task_id)
+        if task_id == first:
+            raise RuntimeError("boom")
+
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [first, second], []
+
+    monkeypatch.setattr(TaskService, "sweep_stale_task", failing_sweep)
+    monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
+    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    database = _StubDatabase()
+
+    await task_sweeper.sweep_once(
+        cast(DatabaseService, database),
+        local_settings(),
+        AnalyticsClient(enabled=False),
+    )
+
+    assert swept == [first, second]
+    assert [session.rollbacks for session in database.sessions] == [1, 0]
+    assert [session.commits for session in database.sessions] == [0, 1]
+
+
+async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A contended NOWAIT acquisition rolls back that job alone."""
+    services = build_job_and_task_services()
+    held, free = uuid.uuid4(), uuid.uuid4()
+    propagated: list[uuid.UUID] = []
+
+    async def failing_propagate(self: TaskService, job_id: uuid.UUID) -> None:
+        propagated.append(job_id)
+        if job_id == held:
+            raise _lock_not_available_error()
+
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [], [held, free]
+
+    monkeypatch.setattr(TaskService, "propagate_job_cancel", failing_propagate)
+    monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
+    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    database = _StubDatabase()
+
+    await task_sweeper.sweep_once(
+        cast(DatabaseService, database),
+        local_settings(),
+        AnalyticsClient(enabled=False),
+    )
+
+    assert propagated == [held, free]
+    assert [session.rollbacks for session in database.sessions] == [1, 0]
+    assert [session.commits for session in database.sessions] == [0, 1]
 
 
 async def test_start_task_sweeper_returns_none_when_interval_is_zero() -> None:

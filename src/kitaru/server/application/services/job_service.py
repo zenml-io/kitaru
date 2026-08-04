@@ -233,17 +233,6 @@ class JobService:
         """
         return await add_task(task, self._repository, self._tasks)
 
-    async def advance_job(self, job_id: uuid.UUID) -> None:
-        """Propagate an abort failure and settle the job once its tasks drain.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            JobNotFound: No job has this id.
-        """
-        await self._transitions.advance_job(job_id)
-
     async def create_session_run(
         self, command: SessionRunCreate, actor: AuthContext
     ) -> Job:

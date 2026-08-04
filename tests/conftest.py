@@ -4546,6 +4546,34 @@ class FakeJobRepository:
         """
         return await self.get_many(job_ids)
 
+    async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        Args:
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        if self._tasks is None:
+            return []
+        owing: list[uuid.UUID] = []
+        for job_id in sorted(self._jobs):
+            job = self._jobs[job_id]
+            if job.cancel_requested_at is None or job.settled:
+                continue
+            tasks = await self._tasks.list_by_job(job_id)
+            if any(
+                not task.terminal
+                and (
+                    task.cancel_requested_at is None
+                    or task.status is TaskStatus.PENDING
+                )
+                for task in tasks
+            ):
+                owing.append(job_id)
+        return owing[:limit]
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 
@@ -4854,26 +4882,42 @@ class FakeTaskRepository:
             claimed.append(await self.update(claimed_task))
         return claimed
 
-    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
-        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+    async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
+        """Lock one task by id if it is still in flight and older than a cutoff.
+
+        Args:
+            task_id: Id of the candidate task.
+            cutoff: Bound the last heartbeat must be older than.
+
+        Returns:
+            Locked stale task, or ``None`` when it is no longer stale.
+        """
+        task = self._tasks.get(task_id)
+        if task is None or task.status not in (TaskStatus.CLAIMED, TaskStatus.RUNNING):
+            return None
+        if not _is_stale_before(task, cutoff):
+            return None
+        return task.model_copy()
+
+    async def list_stale_ids(self, cutoff: datetime, limit: int) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks whose last heartbeat is older than a cutoff.
 
         Args:
             cutoff: Bound the last heartbeat must be older than.
-            limit: Maximum number of tasks to lock.
+            limit: Maximum number of ids to read.
 
         Returns:
-            Locked stale tasks.
+            Ids of the stale tasks in ascending order.
         """
         stale = sorted(
             (
-                task
+                task.id
                 for task in self._tasks.values()
                 if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
                 and _is_stale_before(task, cutoff)
             ),
-            key=lambda task: task.id,
         )
-        return [task.model_copy() for task in stale[:limit]]
+        return stale[:limit]
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
@@ -4905,6 +4949,21 @@ class FakeTaskRepository:
             )
             stamped[task_id] = task.cancel_requested_at
         return stamped
+
+    async def lock_by_jobs(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Lock the jobs' non-terminal task rows in id order.
+
+        Row locking has no in-memory counterpart, a single process never
+        contends with itself.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the rows.
+        """
+        _ = job_ids, nowait
 
     async def stamp_cancel_requested(
         self, job_ids: Sequence[uuid.UUID], now: datetime

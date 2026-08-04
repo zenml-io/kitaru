@@ -138,10 +138,9 @@ class ExperimentRunService:
     ) -> None:
         """Move a running run to canceling, leaving an already canceling run alone.
 
-        Locks the run row and nothing else, so the caller commits and releases
-        it before the cancellation takes any task or job lock. Finalization
-        reads the canceling status to settle the run as canceled, so the run
-        has to carry it before its jobs drain.
+        Locks the run row and nothing else. Finalization reads the canceling
+        status to settle the run as canceled, so the run has to carry it
+        before its jobs drain.
 
         Args:
             experiment_run_id: Id of the run.
@@ -163,15 +162,8 @@ class ExperimentRunService:
     ) -> tuple[ExperimentRun, ReplayStatusCounts]:
         """Cancel every unsettled job of a canceling run in two passes.
 
-        The first pass stamps every job's cancel request and takes only
-        task and job locks: pending tasks move straight to canceled and
-        claimed or running tasks are stamped for their worker or the sweep
-        to settle. The second pass settles every drained job in one bulk
-        read and one bulk write, and its ``JobsSettled`` drives the replay
-        settlement and run finalization, all in the task, job, replay, run
-        lock order. By then every stamped task row is held, so no reporter
-        is partway through that order and the tail locks cannot invert
-        against one.
+        Locks the jobs' live task rows, then their job rows, then the replay
+        and run rows the settlement of the second pass reaches.
 
         Args:
             experiment_run_id: Id of the run.

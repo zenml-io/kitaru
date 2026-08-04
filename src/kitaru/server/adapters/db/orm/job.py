@@ -16,7 +16,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -34,6 +34,11 @@ STATUS_LENGTH = 32
 JOB_OWNER_ID_FOREIGN_KEY = foreign_key_name("job", ["owner_id"])
 JOB_KIND_INDEX = index_name("job", ["kind"])
 JOB_STATUS_INDEX = index_name("job", ["status"])
+# Partial index covering the sweep's cancel propagation scan, which reads only
+# the few jobs a cancel request ever reached.
+JOB_CANCEL_REQUESTED_AT_INDEX = index_name("job", ["cancel_requested_at"])
+
+CANCEL_REQUESTED_PREDICATE = "cancel_requested_at IS NOT NULL"
 
 
 class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -46,6 +51,11 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(JOB_KIND_INDEX, "kind"),
         Index(JOB_STATUS_INDEX, "status"),
+        Index(
+            JOB_CANCEL_REQUESTED_AT_INDEX,
+            "cancel_requested_at",
+            postgresql_where=text(CANCEL_REQUESTED_PREDICATE),
+        ),
     )
 
     owner_id: Mapped[uuid.UUID]

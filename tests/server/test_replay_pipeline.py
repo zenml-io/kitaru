@@ -350,6 +350,10 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
+    job_after = await services.jobs.get(bundle.replay.job_id)
+    assert job_after.cancel_requested_at is not None
+    await services.task_service.propagate_job_cancel(bundle.replay.job_id)
+
     baseline_after = await services.tasks.get(baseline_task.id)
     assert baseline_after.status is TaskStatus.CLAIMED
     assert baseline_after.cancel_requested_at is not None
@@ -406,6 +410,8 @@ async def test_baseline_evaluator_failure_fails_the_replay(
         TaskUpdate(status=TaskStatus.FAILED, error="scoring failed"),
         actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
+
+    await services.task_service.propagate_job_cancel(bundle.replay.job_id)
 
     agent_after = await services.tasks.get(agent_task.id)
     assert agent_after.cancel_requested_at is not None

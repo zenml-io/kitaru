@@ -421,20 +421,44 @@ async def test_claim_pending_job_pin(setup: Setup) -> None:
 
 
 async def test_claim_stale(setup: Setup) -> None:
-    """Lock in-flight tasks whose last heartbeat predates the cutoff."""
+    """Lock one in-flight task whose last heartbeat predates the cutoff."""
     task = await setup.tasks.create(_agent_task(setup))
     claimed = await setup.tasks.claim_pending(
         WorkerScope(), setup.worker_id, 10, datetime.now(UTC) - timedelta(hours=1)
     )
     assert len(claimed) == 1
 
-    stale = await setup.tasks.claim_stale(datetime.now(UTC), 10)
-    assert [t.id for t in stale] == [task.id]
+    stale = await setup.tasks.claim_stale(task.id, datetime.now(UTC))
+    assert stale is not None
+    assert stale.id == task.id
 
     not_yet_stale = await setup.tasks.claim_stale(
-        datetime.now(UTC) - timedelta(hours=2), 10
+        task.id, datetime.now(UTC) - timedelta(hours=2)
     )
-    assert not_yet_stale == []
+    assert not_yet_stale is None
+
+
+async def test_list_stale_ids(setup: Setup) -> None:
+    """Read the ids of in-flight tasks whose last heartbeat predates the cutoff."""
+    task = await setup.tasks.create(_agent_task(setup))
+    await setup.tasks.claim_pending(
+        WorkerScope(), setup.worker_id, 10, datetime.now(UTC) - timedelta(hours=1)
+    )
+
+    assert await setup.tasks.list_stale_ids(datetime.now(UTC), 10) == [task.id]
+    assert (
+        await setup.tasks.list_stale_ids(datetime.now(UTC) - timedelta(hours=2), 10)
+        == []
+    )
+
+
+async def test_lock_by_jobs(setup: Setup) -> None:
+    """Lock the job's non-terminal task rows without altering them."""
+    task = await setup.tasks.create(_agent_task(setup))
+    await setup.tasks.lock_by_jobs([setup.job_id])
+    await setup.tasks.lock_by_jobs([setup.job_id], nowait=True)
+    await setup.tasks.lock_by_jobs([])
+    assert await setup.tasks.get(task.id) == task
 
 
 async def test_stamp_cancel_requested_skips_terminal_tasks(setup: Setup) -> None:

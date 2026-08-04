@@ -90,11 +90,7 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         Returns:
             Stored cohort.
         """
-        row = await self._session.get(
-            self.orm_class, cohort_id, with_for_update=exclusive
-        )
-        if row is None:
-            raise CohortNotFound(cohort_id)
+        row = await self._get_row(cohort_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(

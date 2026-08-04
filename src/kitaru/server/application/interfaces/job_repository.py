@@ -88,6 +88,21 @@ class JobRepository(Protocol):
         """
         ...
 
+    async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        A live task owes the stamp when it carries no cancel request of its
+        own, or when it is still pending and has to move straight to
+        canceled. Rows are read without locking.
+
+        Args:
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        ...
+
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.
 

@@ -112,11 +112,7 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         Returns:
             Stored experiment.
         """
-        row = await self._session.get(
-            self.orm_class, experiment_id, with_for_update=exclusive
-        )
-        if row is None:
-            raise ExperimentNotFound(experiment_id)
+        row = await self._get_row(experiment_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(

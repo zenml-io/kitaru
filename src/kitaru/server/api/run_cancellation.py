@@ -50,11 +50,9 @@ async def cancel_run(
 ) -> tuple[ExperimentRun, ReplayStatusCounts]:
     """Mark a run canceling, then cancel its jobs in a second transaction.
 
-    Marking the run touches only the run row and commits, so the second
-    transaction never holds the run row lock while reaching for a task row.
-    That transaction takes its locks in the task, job, replay, run order the
-    reporting and claiming paths take. Doing all of it at once deadlocks
-    against a worker reporting one of those tasks.
+    The first transaction locks the run row alone and commits, so the second
+    takes its task, job, replay, and run locks in that order without already
+    holding the run row.
 
     A run left canceling by a failure part way through is finished by calling
     this again, because marking an already canceling run is a no-op.

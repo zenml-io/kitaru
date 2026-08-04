@@ -23,6 +23,7 @@ from kitaru.api_models.v1.task import TaskKind, TaskStatus, WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.task import (
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
+    TERMINAL_STATUS_VALUES,
     TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
@@ -30,14 +31,12 @@ from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import (
-    TERMINAL_TASK_STATUSES,
     DuplicateEvaluationTask,
     Task,
     TaskNotFound,
 )
 
 IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
-TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
 
 _LAST_SEEN = func.coalesce(TaskORM.heartbeat_at, TaskORM.claimed_at)
 
@@ -147,11 +146,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         Returns:
             Stored task.
         """
-        row = await self._session.get(
-            self.orm_class, task_id, with_for_update=exclusive
-        )
-        if row is None:
-            raise TaskNotFound(task_id)
+        row = await self._get_row(task_id, exclusive=exclusive)
         return row.to_domain()
 
     async def get_many(self, task_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Task]:
@@ -285,25 +280,50 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         await self._flush()
         return [row.to_domain() for row in rows]
 
-    async def claim_stale(self, cutoff: datetime, limit: int) -> list[Task]:
-        """Lock in-flight tasks whose last heartbeat is older than a cutoff.
+    async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
+        """Lock one task by id if it is still in flight and older than a cutoff.
+
+        The row is locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
+        sweeps take disjoint tasks. Staleness is re-checked on the locked
+        row because the candidate read ran unlocked.
 
         Args:
+            task_id: Id of the candidate task.
             cutoff: Bound the last heartbeat must be older than.
-            limit: Maximum number of tasks to lock.
 
         Returns:
-            Locked stale tasks.
+            Locked stale task, or ``None`` when it is contended or no longer
+            stale.
         """
         statement = (
             select(TaskORM)
+            .where(
+                TaskORM.id == task_id,
+                TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
+                cutoff > _LAST_SEEN,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        return row.to_domain() if row is not None else None
+
+    async def list_stale_ids(self, cutoff: datetime, limit: int) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks whose last heartbeat is older than a cutoff.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the stale tasks in ascending order.
+        """
+        statement = (
+            select(TaskORM.id)
             .where(TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES), cutoff > _LAST_SEEN)
             .order_by(TaskORM.id.asc())
             .limit(limit)
-            .with_for_update(skip_locked=True)
         )
-        rows = (await self._session.scalars(statement)).all()
-        return [row.to_domain() for row in rows]
+        return list((await self._session.scalars(statement)).all())
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
@@ -344,6 +364,32 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         rows = (await self._session.execute(statement)).all()
         await self._session.flush()
         return {task_id: cancel_requested_at for task_id, cancel_requested_at in rows}
+
+    async def lock_by_jobs(
+        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+    ) -> None:
+        """Lock the jobs' non-terminal task rows in id order.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds one of the rows.
+
+        Raises:
+            DBAPIError: ``nowait`` is set and a row is held elsewhere.
+        """
+        if not job_ids:
+            return
+        statement = (
+            select(TaskORM.id)
+            .where(
+                TaskORM.job_id.in_(list(job_ids)),
+                not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
+            )
+            .order_by(TaskORM.id.asc())
+            .with_for_update(nowait=nowait)
+        )
+        await self._session.execute(statement)
 
     async def stamp_cancel_requested(
         self, job_ids: Sequence[uuid.UUID], now: datetime

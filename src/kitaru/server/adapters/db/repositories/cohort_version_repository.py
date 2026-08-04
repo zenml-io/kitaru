@@ -120,11 +120,7 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         Returns:
             Stored cohort version.
         """
-        row = await self._session.get(
-            self.orm_class, cohort_version_id, with_for_update=exclusive
-        )
-        if row is None:
-            raise CohortVersionIdNotFound(cohort_version_id)
+        row = await self._get_row(cohort_version_id, exclusive=exclusive)
         return row.to_domain()
 
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:

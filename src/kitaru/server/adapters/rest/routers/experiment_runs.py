@@ -144,7 +144,6 @@ async def list_experiment_run_jobs(
 @router.post("/{experiment_run_id}/cancel")
 async def cancel_experiment_run(
     experiment_run_id: uuid.UUID,
-    service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     cancel: Annotated[RunCanceler, Depends(get_run_canceler)],
 ) -> ExperimentRunResponse:
@@ -155,7 +154,6 @@ async def cancel_experiment_run(
 
     Args:
         experiment_run_id: Id of the run.
-        service: Experiment run service.
         actor: Caller context.
         cancel: Run cancellation flow, committed across its own transactions.
 
