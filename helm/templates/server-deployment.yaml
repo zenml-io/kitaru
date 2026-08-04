@@ -177,6 +177,13 @@ spec:
                   name: {{ .Values.server.database.encryptionKeySecretRef.name }}
                   key: {{ .Values.server.database.encryptionKeySecretRef.key }}
             {{- end }}
+            {{- if and (not .Values.server.pro.enabled) (eq .Values.server.auth.authScheme "local") .Values.server.auth.defaultAccount.passwordSecretRef }}
+            - name: KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.server.auth.defaultAccount.passwordSecretRef.name }}
+                  key: {{ .Values.server.auth.defaultAccount.passwordSecretRef.key }}
+            {{- end }}
             {{- range .Values.server.environmentSecretKeyRefs }}
             - name: {{ .name }}
               valueFrom:

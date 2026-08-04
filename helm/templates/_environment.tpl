@@ -66,7 +66,10 @@ dashboard_url: {{ .Kitaru.pro.dashboardURL }}/workspaces/{{ .Kitaru.pro.workspac
 
 {{- else }}
 
-auth_scheme: {{ .Kitaru.authType | default .Kitaru.auth.authType | quote }}
+auth_scheme: {{ .Kitaru.auth.authScheme | quote }}
+{{- if and (eq .Kitaru.auth.authScheme "local") .Kitaru.auth.defaultAccount.name }}
+default_account_name: {{ .Kitaru.auth.defaultAccount.name | quote }}
+{{- end }}
 {{- if .Kitaru.auth.authCookieName }}
 auth_cookie_name: {{ .Kitaru.auth.authCookieName | quote }}
 {{- end }}
@@ -171,6 +174,9 @@ Returns:
 {{- define "kitaru.serverSecretConfigurationAttrs" -}}
 {{- if .Kitaru.database.password }}
 db_pwd: {{ .Kitaru.database.password | quote }}
+{{- end }}
+{{- if and (not .Kitaru.pro.enabled) (eq .Kitaru.auth.authScheme "local") .Kitaru.auth.defaultAccount.password (not .Kitaru.auth.defaultAccount.passwordSecretRef) }}
+default_account_password: {{ .Kitaru.auth.defaultAccount.password | quote }}
 {{- end }}
 {{- end }}
 

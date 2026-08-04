@@ -51,7 +51,7 @@ server:
 
   # The URL where the Kitaru dashboard is reachable.
   #
-  # This value is overridden if the `kitaru.pro.enabled` value is set.
+  # This value is overridden if the `server.pro.enabled` value is set.
   dashboardURL:
 
   # Flag to enable/disable the tracking process of the analytics
@@ -66,8 +66,28 @@ server:
     # local - Local authentication
     # control_plane - ZenML Pro control plane authentication
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
-    authType: local
+    # This value is overridden if the `server.pro.enabled` value is set.
+    authScheme: local
+
+    # Settings for the default account created when the server starts for the
+    # first time. These settings are only used when server.auth.authScheme
+    # is `local`.
+    #
+    # The password is only applied when the account is first created. Changing
+    # it here after the first deployment does not change the account password.
+    defaultAccount:
+      # The name of the default account.
+      name: default
+
+      # The initial password of the default account. For production
+      # deployments, use passwordSecretRef instead.
+      password:
+
+      # Reference to an existing Kubernetes secret containing the initial
+      # default account password. If set, password above is ignored.
+      passwordSecretRef:
+        # name:
+        # key:
 
     # The secret key used to sign JWT tokens. This should be set to
     # a random string with a recommended length of at least 32 characters, e.g.:
@@ -89,12 +109,12 @@ server:
 
     # The issuer of the JWT tokens.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    # This value is overridden if the `server.pro.enabled` value is set.
     jwtIssuer:
 
     # The audience of the JWT tokens.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    # This value is overridden if the `server.pro.enabled` value is set.
     jwtAudience:
 
     # The lifetime of JWT tokens in seconds.
@@ -103,7 +123,7 @@ server:
     # The name of the http-only cookie used to store the JWT tokens used to
     # authenticate web clients.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    # This value is overridden if the `server.pro.enabled` value is set.
     authCookieName:
 
     # The domain of the http-only cookie used to store the JWT tokens used to
@@ -115,21 +135,21 @@ server:
     # not specified, all origins are allowed. Set this when the Kitaru dashboard
     # is hosted on a different domain than the Kitaru server.
     #
-    # This value is overridden if the `kitaru.pro.enabled` value is set.
+    # This value is overridden if the `server.pro.enabled` value is set.
     corsAllowOrigins:
       - "*"
 
     # The maximum number of failed authentication attempts allowed for an OAuth
     # 2.0 device before the device is locked.
     #
-    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
     # `none`.
     maxFailedDeviceAuthAttempts: 3
 
     # The timeout in seconds after which a pending OAuth 2.0 device
     # authorization request expires.
     #
-    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
     # `none`.
     deviceAuthTimeoutSeconds: 300
 
@@ -137,29 +157,29 @@ server:
     # device authorization endpoint for the status of a pending device
     # authorization request.
     #
-    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
     # `none`.
     deviceAuthPollingIntervalSeconds: 5
 
     # The time in minutes that an OAuth 2.0 device is allowed to be used to
     # authenticate with the Kitaru server. If not set or if
-    # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
+    # `server.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
     # using an OAuth 2.0 device.
     #
-    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
     # `none`.
     deviceExpirationMinutes:
 
     # The time in minutes that a trusted OAuth 2.0 device is allowed to be used
     # to authenticate with the Kitaru server. If not set or if
-    # `kitaru.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
+    # `server.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
     # be used indefinitely. This controls the expiration time of the JWT tokens
     # issued to clients after they have authenticated with the Kitaru server
     # using an OAuth 2.0 device that was previously trusted by the user.
     #
-    # This value is ignored if the `kitaru.auth.authType` is set to `cloud` or
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
     # `none`.
     trustedDeviceExpirationMinutes:
 
@@ -238,7 +258,7 @@ server:
     # container image. Can be provided as an inline value or as a Kubernetes
     # secret reference.
     #
-    # NOTE: it is recommended to use the `kitaru.certificates` option instead to
+    # NOTE: it is recommended to use the `server.certificates` option instead to
     # configure the CA certificate globally. This option only applies to the
     # PostgreSQL database.
     sslCa:
