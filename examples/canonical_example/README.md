@@ -158,8 +158,7 @@ uv run kitaru session evaluate \
   --wait
 ```
 
-The tag is the selection boundary. You do not need to list sessions or copy
-their IDs. To evaluate every session in Kitaru instead, replace
+The tag is the selection boundary. To evaluate every session in Kitaru instead, replace
 `--tag document-baseline` with `--all`.
 
 These evaluators make no model calls. They report recorded cost, elapsed time,
@@ -172,6 +171,3 @@ List the stored results:
 ```bash
 uv run kitaru evaluation list --size 100
 ```
-
-Each evaluator remains a separate column and signal. Kitaru does not combine
-them into one score or decide whether a session is good.
