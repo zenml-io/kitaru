@@ -26,6 +26,7 @@ from kitaru.worker.handlers.base import materialize_blob
 from kitaru.worker.process import (
     TaskProcess,
     build_process_env,
+    filter_uninstalled_requirements,
     get_python_run_command,
     parse_inline_dependencies,
 )
@@ -73,7 +74,7 @@ class ImportHandler:
             payload_path = await materialize_blob(
                 ctx, ctx.payload_cache, details.payload.blob_id, details.payload.sha256
             )
-            dependencies = [details.plugin.requirement]
+            dependencies = filter_uninstalled_requirements([details.plugin.requirement])
         env["KITARU_TASK_PAYLOAD_PATH"] = str(payload_path)
         command = get_python_run_command("kitaru.task", ["import"], dependencies)
         return TaskProcess(

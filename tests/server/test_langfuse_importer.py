@@ -18,7 +18,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from kitaru_importer_langfuse import LangfuseJSONLImporter, parse
 
 from kitaru.importers import (
     ImportContext,
@@ -27,6 +26,7 @@ from kitaru.importers import (
     NodeType,
     SessionStatus,
 )
+from kitaru.importers.langfuse import LangfuseJSONLImporter, parse
 from kitaru.task.importer import ParsedSession
 
 

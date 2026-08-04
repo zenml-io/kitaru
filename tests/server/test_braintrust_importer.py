@@ -17,9 +17,8 @@ import json
 from decimal import Decimal
 from typing import Any
 
-from kitaru_importer_braintrust import BraintrustProjectLogImporter, parse
-
 from kitaru.importers import ImportContext, NodeType, SessionStatus
+from kitaru.importers.braintrust import BraintrustProjectLogImporter, parse
 from kitaru.task.importer import ParsedSession
 
 

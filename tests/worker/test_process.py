@@ -17,7 +17,9 @@ import asyncio
 import sys
 import time
 import uuid
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -25,6 +27,7 @@ from kitaru.worker.process import (
     TailBuffer,
     TaskProcess,
     build_process_env,
+    filter_uninstalled_requirements,
     get_python_run_command,
     parse_inline_dependencies,
     run_task_process,
@@ -257,3 +260,40 @@ def test_get_python_run_command_with_dependencies() -> None:
     assert command == (
         "uv run --with 'requests<3' --with 'rich>=13' python -m kitaru.task import"
     )
+
+
+def test_filter_uninstalled_requirements_reuses_exact_installed_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exact package already in the worker environment needs no uv overlay."""
+    monkeypatch.setattr("kitaru.worker.process.version", lambda name: "0.1.0")
+
+    missing = filter_uninstalled_requirements(["local-importer==0.1.0"])
+
+    assert missing == []
+
+
+def test_filter_uninstalled_requirements_keeps_absent_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absent package remains available for uv to resolve."""
+
+    def _missing(name: str) -> str:
+        raise PackageNotFoundError(name)
+
+    monkeypatch.setattr("kitaru.worker.process.version", _missing)
+
+    requirement = "external-importer==1.2.3"
+    assert filter_uninstalled_requirements([requirement]) == [requirement]
+
+
+def test_filter_uninstalled_requirements_keeps_package_extras(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An installed base package does not prove its extra is installed."""
+    installed_version = Mock(return_value="1.0")
+    monkeypatch.setattr("kitaru.worker.process.version", installed_version)
+
+    requirement = "external-importer[otel]==1.0"
+    assert filter_uninstalled_requirements([requirement]) == [requirement]
+    installed_version.assert_not_called()

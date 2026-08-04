@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Braintrust project-log and UI JSON importer."""
+"""Built-in Braintrust project-log and UI JSON importer."""
 
 import hashlib
 import json
@@ -304,7 +304,7 @@ class BraintrustProjectLogImporter:
         return ImporterDescriptor(
             id="braintrust",
             display_name="Braintrust project logs",
-            version=version("kitaru-importer-braintrust"),
+            version=version("kitaru"),
             file_extensions=[".json", ".jsonl", ".ndjson"],
             max_upload_bytes=MAX_UPLOAD_BYTES,
         )

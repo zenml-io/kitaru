@@ -11,19 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-#
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-#
-# [tool.kitaru.importer]
-# id = "otlp-json"
-# display_name = "OpenTelemetry OTLP JSON"
-# version = "0.1.0"
-# file_extensions = [".json", ".jsonl", ".ndjson"]
-# max_upload_bytes = 67108864
-# ///
-"""OpenTelemetry OTLP JSON trace importer."""
+"""Built-in OpenTelemetry OTLP JSON trace importer."""
 
 import hashlib
 import json
@@ -32,6 +20,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +45,6 @@ from kitaru.importers import (
 )
 from kitaru.task.importer import ParsedSession
 
-VERSION = "0.1.0"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 _TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
 _SPAN_ID = re.compile(r"^[0-9a-fA-F]{16}$")
@@ -846,7 +834,7 @@ class OTLPJSONImporter:
         return ImporterDescriptor(
             id="otlp-json",
             display_name="OpenTelemetry OTLP JSON",
-            version=VERSION,
+            version=version("kitaru"),
             file_extensions=[".json", ".jsonl", ".ndjson"],
             max_upload_bytes=MAX_UPLOAD_BYTES,
         )
