@@ -18,11 +18,16 @@ import uuid
 from pydantic import Field
 
 from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class CohortVersionCreateRequest(RequestModel):
     """Cohort version create request."""
 
+    baseline_id: uuid.UUID | None = Field(
+        default=None,
+        description="Version the delta applies to, None uses the latest version.",
+    )
     add_session_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Sessions to add to the new version."
     )
@@ -40,6 +45,10 @@ class CohortVersionUpdateRequest(RequestModel):
     display_version: str | None = Field(
         default=None, description="New human-readable designator."
     )
+
+
+class CohortVersionListParams(FilterableListParams):
+    """Cohort version list params."""
 
 
 class CohortVersionResponse(OwnedResponseModel):

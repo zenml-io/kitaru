@@ -18,6 +18,7 @@ import uuid
 from pydantic import Field, PositiveInt
 
 from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.filter import FilterableListParams
 
 
 class RunSpec(RequestModel):
@@ -74,6 +75,10 @@ class AgentVersionUpdateRequest(RequestModel):
     capabilities: AgentCapabilities | None = Field(
         default=None, description="New agent capabilities."
     )
+
+
+class AgentVersionListParams(FilterableListParams):
+    """Agent version list params."""
 
 
 class AgentVersionResponse(OwnedResponseModel):

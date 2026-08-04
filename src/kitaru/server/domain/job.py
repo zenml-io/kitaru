@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
 
@@ -72,6 +72,7 @@ class Job(DomainModel):
 
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
+    kind: JobKind
     status: JobStatus = JobStatus.PENDING
     cancel_requested_at: datetime | None = None
     started_at: datetime | None = None

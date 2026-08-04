@@ -27,7 +27,7 @@ from conftest import (
     postgres_available,
 )
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -120,7 +120,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 
         async def make_job_id() -> uuid.UUID:
             job = await jobs_repository.create(
-                Job(owner_id=owner.id, status=JobStatus.PENDING)
+                Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
             )
             return job.id
 

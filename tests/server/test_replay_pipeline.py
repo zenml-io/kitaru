@@ -37,7 +37,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
@@ -231,6 +231,25 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         bundle.replay.id, actor=ACTOR
     )
     assert final_bundle.result_session_id == result_session.id
+
+
+async def test_standalone_replay_stamps_the_job_kind_replay(
+    services: ReplayServices,
+) -> None:
+    """A standalone replay's job carries the replay kind."""
+    agent_version = await _agent_version_with_run_spec(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.kind is JobKind.REPLAY
 
 
 async def test_evaluate_baselines_skips_already_scored_pairs(
@@ -496,6 +515,37 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
         assert agent_task.env == {"KITARU_REPLAY_ID": str(bundle.replay.id)}
         assert agent_task.labels == {"agent_version": str(agent_version.id)}
         assert agent_task.on_failure is TaskOnFailure.ABORT
+
+
+async def test_start_run_stamps_the_job_kind_replay(
+    services: ReplayServices,
+) -> None:
+    """A run's fanned-out replay jobs carry the replay kind."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id for session in sessions]
+    )
+
+    run, _ = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    for bundle in bundles:
+        job = await services.jobs.get(bundle.replay.job_id)
+        assert job.kind is JobKind.REPLAY
 
 
 async def test_start_run_evaluate_baselines_skips_already_scored_sessions(

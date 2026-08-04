@@ -184,6 +184,21 @@ async def test_create_tag_link_distinct_resource_types(service: TagService) -> N
     assert link.resource_type == TagResourceType.COHORT
 
 
+async def test_create_tag_link_distinct_version_resource_types(
+    service: TagService,
+) -> None:
+    """Allow the same resource id under different resource types."""
+    created = await service.create_tag(name="prod", actor=ACTOR)
+    resource_id = uuid.uuid4()
+    await service.create_tag_link(
+        created.id, TagResourceType.COHORT_VERSION, resource_id, actor=ACTOR
+    )
+    link = await service.create_tag_link(
+        created.id, TagResourceType.AGENT_VERSION, resource_id, actor=ACTOR
+    )
+    assert link.resource_type == TagResourceType.AGENT_VERSION
+
+
 async def test_delete_tag_link(service: TagService) -> None:
     """Delete a tag link by type and id."""
     created = await service.create_tag(name="prod", actor=ACTOR)
