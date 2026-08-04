@@ -206,7 +206,7 @@ CASES = (
                 "like a refund."
             ),
         ),
-        expected_action=ResolutionAction.REJECT,
+        expected_action=ResolutionAction.ESCALATE,
     ),
     TicketCase(
         scenario="outside-window",
@@ -220,7 +220,7 @@ CASES = (
                 "Please refund it."
             ),
         ),
-        expected_action=ResolutionAction.REJECT,
+        expected_action=ResolutionAction.ESCALATE,
     ),
     TicketCase(
         scenario="approval-threshold",

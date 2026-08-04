@@ -191,8 +191,10 @@ def test_real_baselines_contain_measurable_differences() -> None:
         )
         scores.append(result.score)
 
-    assert any(score < 1.0 for score in scores)
-    assert len(set(scores)) > 1
+    assert all(score is not None for score in scores)
+    numeric_scores = [score for score in scores if score is not None]
+    assert any(score < 1.0 for score in numeric_scores)
+    assert len(set(numeric_scores)) > 1
 
 
 def test_evaluator_scores_each_labeled_field() -> None:
@@ -221,9 +223,11 @@ def test_evaluator_scores_each_labeled_field() -> None:
 
     assert evaluate(passing).score == 1.0
     assert evaluate(passing).passed is True
-    assert evaluate(failing).score == 0.75
-    assert evaluate(failing).passed is False
-    assert "title" in evaluate(failing).explanation
+    failing_result = evaluate(failing)
+    assert failing_result.score == 0.75
+    assert failing_result.passed is False
+    assert failing_result.explanation is not None
+    assert "title" in failing_result.explanation
 
 
 def test_registered_plugins_are_worker_compatible() -> None:

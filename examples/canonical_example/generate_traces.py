@@ -93,7 +93,6 @@ async def generate_traces(export_path: Path) -> Path:
                 metadata={
                     "ticket_id": ticket.ticket_id,
                     "scenario": case.scenario,
-                    "expected_action": case.expected_action.value,
                     "agent_release": "baseline-v1",
                 },
             ),

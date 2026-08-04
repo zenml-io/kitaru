@@ -27,7 +27,11 @@ def test_fixture_corpus_covers_ten_distinct_resolution_scenarios() -> None:
     assert len(CASES) == 10
     assert len({case.scenario for case in CASES}) == 10
     assert len({case.ticket.ticket_id for case in CASES}) == 10
-    assert {case.expected_action for case in CASES} == set(ResolutionAction)
+    assert {case.expected_action for case in CASES} == {
+        ResolutionAction.REFUND,
+        ResolutionAction.REPLACEMENT,
+        ResolutionAction.ESCALATE,
+    }
     assert all(case.ticket.email.endswith("@example.test") for case in CASES)
 
 
@@ -109,6 +113,16 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
     assert {
         session.inputs["turns"][-1]["inputs"]["ticket_id"] for session in sessions
     } == {case.ticket.ticket_id for case in CASES}
+    expected_actions = {
+        case.ticket.ticket_id: case.expected_action.value for case in CASES
+    }
+    mismatches = {
+        session.inputs["turns"][-1]["inputs"]["ticket_id"]
+        for session in sessions
+        if session.outputs["action"]
+        != expected_actions[session.inputs["turns"][-1]["inputs"]["ticket_id"]]
+    }
+    assert mismatches == {"ticket-004", "ticket-007"}
     for session in sessions:
         nodes = flatten_nodes(session.nodes)
         assert any(node.node_type is NodeType.LLM_CALL for node in nodes)
@@ -156,3 +170,4 @@ def test_trace_export_has_no_real_email_domains() -> None:
         trace = json.loads(line)
         assert "@example.test" in json.dumps(trace)
         assert "@gmail.com" not in json.dumps(trace)
+        assert "expected_action" not in json.dumps(trace)

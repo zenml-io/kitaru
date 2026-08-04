@@ -6,13 +6,17 @@ All customers, orders, shipments, and actions are synthetic. Refund and replacem
 
 Run every command from `examples/canonical_example`.
 
-## Optional Step 0: Generate real traces
-
-Copy the environment template and add your OpenAI and Langfuse credentials:
+Copy the local environment template before choosing either path:
 
 ```bash
 cp .env.example .env
 ```
+
+The template already points the CLI at `http://localhost:8000`. Model and Langfuse credentials are only required when regenerating the traces.
+
+## Optional Step 0: Generate real traces
+
+Add your OpenAI and Langfuse credentials to `.env`.
 
 Generate ten baseline traces:
 
@@ -34,8 +38,8 @@ Install the dependencies and connect the CLI:
 
 ```bash
 uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
-uv run kitaru login --local
-uv run kitaru status
+uv run --env-file .env kitaru login --local
+uv run --env-file .env kitaru status
 ```
 
 Open [http://localhost:8000](http://localhost:8000) to use the dashboard.
@@ -55,7 +59,7 @@ The PydanticAI entrypoint is `agent.py`. Each invocation resolves one incoming e
 Register the baseline:
 
 ```bash
-uv run kitaru agent register \
+uv run --env-file .env kitaru agent register \
   returns-resolver \
   --entrypoint examples.canonical_example.agent:main \
   --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
@@ -84,7 +88,7 @@ uv run --env-file .env kitaru worker start \
 Confirm that Kitaru can see it:
 
 ```bash
-uv run kitaru worker list
+uv run --env-file .env kitaru worker list
 ```
 
 ## Step 4: Import the baseline sessions
@@ -92,7 +96,7 @@ uv run kitaru worker list
 Import the Langfuse traces under the exact baseline agent version:
 
 ```bash
-uv run kitaru session import \
+uv run --env-file .env kitaru session import \
   traces/langfuse-traces.jsonl \
   --importer langfuse@latest \
   --agent returns-resolver@1 \
@@ -107,7 +111,7 @@ The importer preserves the LLM calls, tool calls, tool results, final resolution
 Check what the import produced:
 
 ```bash
-uv run kitaru session list \
+uv run --env-file .env kitaru session list \
   --tag returns-baseline \
   --origin imported \
   --size 20
@@ -118,7 +122,7 @@ uv run kitaru session list \
 Run Kitaru's deterministic evaluators across the imported baseline:
 
 ```bash
-uv run kitaru session evaluate \
+uv run --env-file .env kitaru session evaluate \
   --tag returns-baseline \
   --evaluator cost@latest \
   --evaluator latency@latest \
@@ -131,5 +135,5 @@ These evaluators make no model calls. Cost and latency surface expensive tickets
 List the stored results:
 
 ```bash
-uv run kitaru evaluation list --size 100
+uv run --env-file .env kitaru evaluation list --size 100
 ```
