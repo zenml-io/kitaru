@@ -296,7 +296,7 @@ time. Regenerate the command if the producer moves the tag later.
 
 Snapshot-backed invocation (`kitaru invoke`,
 `KitaruClient().deployments.invoke(...)`, and `kitaru flow deployments curl`)
-depends on server workload-manager support. The official `zenmldocker/kitaru`
+depends on server workload-manager support. The official `zenmldocker/kitaru-server`
 image already enables this. If you run a custom image or plain ZenML server
 setup, preserve or configure workload-manager support explicitly (for example via
 `ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE`).

@@ -7,30 +7,29 @@ icon: docker
 
 Self-host the Kitaru server so your agents run, replay, and diff on infrastructure
 you control. The server stores every run's durable checkpoints and serves the
-dashboard your team and coding agents use to inspect and replay them. The container
-image is published at
-[`zenmldocker/kitaru`](https://hub.docker.com/r/zenmldocker/kitaru) and works
-with Docker, Docker Compose, or any container orchestration platform.
+dashboard your team and coding agents use to inspect and replay them. The
+container image is published as `zenmldocker/kitaru-server` and works with
+Docker, Docker Compose, or any container orchestration platform.
 
 ## Quick start
 
 Start a server with sensible defaults:
 
 ```bash
-docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 zenmldocker/kitaru:latest
+docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 zenmldocker/kitaru-server:latest
 ```
 
 {% hint style="warning" %}
 **Apple Silicon (M-series) Macs:** The published image is currently amd64-only.
 Keep `--platform linux/amd64` on every `docker run`, `docker pull`, or Docker
-Compose service that uses `zenmldocker/kitaru:*`. Without it, Docker will fail
+Compose service that uses `zenmldocker/kitaru-server:*`. Without it, Docker will fail
 with `no matching manifest for linux/arm64/v8`.
 
 On Intel/AMD hosts, you can omit the flag if you prefer.
 {% endhint %}
 
 {% hint style="info" %}
-Use a version-pinned tag (e.g. `zenmldocker/kitaru:0.2.0`) that matches your
+Use a version-pinned tag (e.g. `zenmldocker/kitaru-server:0.2.0`) that matches your
 client SDK version to avoid API incompatibilities. The official image already
 includes the Kitaru UI bundled with that Kitaru release.
 {% endhint %}
@@ -68,7 +67,7 @@ docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     -e ZENML_SERVER_AUTO_ACTIVATE=1 \
     -e ZENML_DEFAULT_USER_NAME=admin \
     -e ZENML_DEFAULT_USER_PASSWORD=password \
-    zenmldocker/kitaru:latest
+    zenmldocker/kitaru-server:latest
 ```
 
 {% hint style="warning" %}
@@ -119,7 +118,7 @@ Snapshot-backed deployment execution (`kitaru invoke`,
 `KitaruClient().deployments.invoke(...)`, and
 `kitaru flow deployments curl`) requires server workload-manager support.
 
-The official `zenmldocker/kitaru` image already enables this with:
+The official `zenmldocker/kitaru-server` image already enables this with:
 
 ```text
 ZENML_SERVER_WORKLOAD_MANAGER_IMPLEMENTATION_SOURCE=zenml.zen_server.pipeline_execution.in_memory_workload_manager.InMemoryWorkloadManager
@@ -161,7 +160,7 @@ Mount a host directory or Docker volume at the default data path:
 ```bash
 docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     -v kitaru-data:/zenml/.zenconfig/local_stores/default_zen_store \
-    zenmldocker/kitaru:latest
+    zenmldocker/kitaru-server:latest
 ```
 {% endtab %}
 
@@ -170,7 +169,7 @@ docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
 mkdir kitaru-data
 docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     --mount type=bind,source=$PWD/kitaru-data,target=/zenml/.zenconfig/local_stores/default_zen_store \
-    zenmldocker/kitaru:latest
+    zenmldocker/kitaru-server:latest
 ```
 {% endtab %}
 {% endtabs %}
@@ -213,7 +212,7 @@ Then start the Kitaru server pointing at it:
 docker run -d --platform linux/amd64 --name kitaru-server -p 8080:8080 \
     --add-host host.docker.internal:host-gateway \
     --env ZENML_STORE_URL=mysql://root:password@host.docker.internal:3306/kitaru \
-    zenmldocker/kitaru:latest
+    zenmldocker/kitaru-server:latest
 ```
 
 The server automatically runs database migrations on first startup.
@@ -252,7 +251,7 @@ services:
       retries: 5
 
   kitaru:
-    image: zenmldocker/kitaru:latest
+    image: zenmldocker/kitaru-server:latest
     platform: linux/amd64
     ports:
       - "8080:8080"

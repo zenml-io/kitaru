@@ -1,12 +1,14 @@
+---
 services:
   server:
     build:
       context: ./
-      dockerfile: ./docker/dev.Dockerfile
-      target: runtime
+      dockerfile: ./docker/dev-server.Dockerfile
+      target: local-runtime
+      args:
+        INSTALL_DEBUG_TOOLS: true
     container_name: kitaru_server
-    ports:
-      - "8000:8000"
+    ports: [8000:8000]
     depends_on:
       db:
         condition: service_healthy
@@ -20,29 +22,26 @@ services:
       KITARU_SERVER_JWT_SIGNING_KEY: dev
       KITARU_SERVER_SECRET_ENCRYPTION_KEY: dev
       KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD: password
+    volumes: [./src:/app/src]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      test: [CMD, curl, -f, http://localhost:8000/health/live]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     restart: on-failure
-
   db:
     image: postgres:16-alpine
     container_name: kitaru_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    ports: [5433:5432]
     environment:
       POSTGRES_PASSWORD: password
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
+      test: [CMD, pg_isready, -U, postgres]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
-
 volumes:
   postgres_data:

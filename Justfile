@@ -2,7 +2,7 @@
 # Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
 # workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
 ZENML_SERVER_TAG := "0.96.1"
-DOCKER_REPO := "zenmldocker/kitaru"
+DOCKER_REPO := "zenmldocker/kitaru-server"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
 UI_BUNDLE_ROOT := ".kitaru-ui-bundles"

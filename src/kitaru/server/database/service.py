@@ -14,11 +14,13 @@
 """Database service and migration bootstrap."""
 
 import logging
+import ssl
 from collections.abc import AsyncGenerator
 
 import sqlalchemy
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -27,7 +29,7 @@ from sqlalchemy.sql import text
 
 from kitaru.server.adapters.db.analytics import register_analytics_listeners
 from kitaru.server.adapters.db.pagination import LIST_QUERY_TIMEOUT_INFO_KEY
-from kitaru.server.config import Settings, get_settings
+from kitaru.server.config import DatabaseSSLMode, Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +48,7 @@ class DatabaseService:
         """
         self.settings = settings or get_settings()
         logger.info("Initializing async database engine.")
-        self.engine = create_async_engine(
-            self.generate_database_uri(self.settings), echo=False
-        )
+        self.engine = self.create_async_engine(self.settings)
         register_analytics_listeners()
 
     async def cleanup(self) -> None:
@@ -91,10 +91,7 @@ class DatabaseService:
         """
         resolved = settings or get_settings()
         database_name = cls.application_database_name(resolved)
-        engine = create_async_engine(
-            cls.generate_database_uri(resolved, use_default_db=True),
-            echo=False,
-        )
+        engine = cls.create_async_engine(resolved, use_default_db=True)
         try:
             async with engine.execution_options(
                 isolation_level="AUTOCOMMIT"
@@ -135,6 +132,66 @@ class DatabaseService:
                 return database
         return settings.DB_NAME
 
+    @staticmethod
+    def _build_ssl_context(settings: Settings) -> ssl.SSLContext | bool:
+        """Build the asyncpg SSL connection argument.
+
+        Args:
+            settings: Database connection settings.
+
+        Returns:
+            False when SSL is disabled, otherwise a configured SSL context.
+        """
+        if settings.DB_SSL_MODE is DatabaseSSLMode.DISABLE:
+            return False
+
+        if settings.DB_SSL_MODE is DatabaseSSLMode.REQUIRE:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        else:
+            context = ssl.create_default_context(
+                purpose=ssl.Purpose.SERVER_AUTH,
+                cafile=settings.DB_SSL_CA,
+            )
+            context.check_hostname = settings.DB_SSL_MODE is DatabaseSSLMode.VERIFY_FULL
+
+        if settings.DB_SSL_CERT and settings.DB_SSL_KEY:
+            context.load_cert_chain(
+                certfile=settings.DB_SSL_CERT,
+                keyfile=settings.DB_SSL_KEY,
+            )
+
+        return context
+
+    @classmethod
+    def create_async_engine(
+        cls,
+        settings: Settings,
+        *,
+        use_default_db: bool = False,
+    ) -> AsyncEngine:
+        """Create a configured asynchronous database engine.
+
+        Args:
+            settings: Database connection settings.
+            use_default_db: Connect to the PostgreSQL maintenance database.
+
+        Returns:
+            Configured asynchronous database engine.
+        """
+        return create_async_engine(
+            cls.generate_database_uri(
+                settings,
+                use_default_db=use_default_db,
+            ),
+            connect_args={"ssl": cls._build_ssl_context(settings)},
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+            echo=False,
+        )
+
     @classmethod
     def generate_database_uri(
         cls, settings: Settings, use_default_db: bool = False
@@ -161,6 +218,20 @@ class DatabaseService:
 
         if settings.DATABASE_URL:
             url = sqlalchemy.engine.url.make_url(settings.DATABASE_URL)
+            ssl_query_keys = {
+                "ssl",
+                "sslmode",
+                "sslcert",
+                "sslkey",
+                "sslrootcert",
+            }
+            configured_ssl_keys = ssl_query_keys.intersection(url.query)
+            if configured_ssl_keys:
+                keys = ", ".join(sorted(configured_ssl_keys))
+                raise ValueError(
+                    "Configure PostgreSQL SSL with KITARU_SERVER_DB_SSL_* "
+                    f"settings, not DATABASE_URL query parameters: {keys}"
+                )
             if use_default_db:
                 url = url.set(database=_DEFAULT_DATABASE)
             return url

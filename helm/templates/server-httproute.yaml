@@ -1,0 +1,58 @@
+{{- if .Values.server.gateway.enabled -}}
+{{- $fullName := include "kitaru.fullname" . -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "kitaru.labels" . | nindent 4 }}
+  {{- with .Values.server.gateway.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    - name: {{ required "gateway.gatewayRef.name is required when gateway.enabled=true" .Values.server.gateway.gatewayRef.name | quote }}
+      {{- if .Values.server.gateway.gatewayRef.namespace }}
+      namespace: {{ .Values.server.gateway.gatewayRef.namespace | quote }}
+      {{- end }}
+      {{- if .Values.server.gateway.sectionName }}
+      sectionName: {{ .Values.server.gateway.sectionName | quote }}
+      {{- end }}
+  {{- if .Values.server.gateway.host }}
+  hostnames:
+    - {{ .Values.server.gateway.host | quote }}
+  {{- end }}
+  rules:
+    # Long-lived SSE streaming endpoints. Envoy applies a 15s
+    # wall-clock request timeout by default which kills SSE responses;
+    # setting both timeouts to 0s disables that cap.
+    #
+    # The match combines the `/api/v1/runs/` path prefix with an
+    # exact `Accept: text/event-stream` header. Gateway API doesn't
+    # support per-segment regex, so anything under the runs tree
+    # that sends this header (in practice: the SSE stream endpoint,
+    # plus any client that manually sets the header) bypasses the
+    # request timeout. Browsers' `EventSource` and the Kitaru client
+    # are the expected callers.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ printf "%s/api/v1/runs/" (trimSuffix "/" (.Values.server.gateway.path | default "/")) | quote }}
+          headers:
+            - name: Accept
+              value: text/event-stream
+      timeouts:
+        request: "0s"
+        backendRequest: "0s"
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ .Values.server.service.port }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.server.gateway.path | default "/" | quote }}
+      backendRefs:
+        - name: {{ $fullName }}
+          port: {{ .Values.server.service.port }}
+{{- end }}
