@@ -535,6 +535,67 @@ async def test_session_import_rejects_non_file_without_upload(tmp_path: Path) ->
     assert client.uploads == []
 
 
+async def test_session_import_tag_requires_wait_before_mutation(tmp_path: Path) -> None:
+    """Import tagging waits for the task so it can identify created sessions."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            tag="baseline",
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert "--tag requires --wait" in error.value.message
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_tag_imported_sessions_links_every_task_session() -> None:
+    """Import tagging resolves one tag and links all sessions from the task."""
+    task_id = uuid.uuid4()
+    tag = SimpleNamespace(id=uuid.uuid4(), name="baseline")
+    imported = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
+
+    class Tags:
+        def __init__(self) -> None:
+            self.links = []
+
+        async def iter(self, params):
+            assert params.filter.field == "name"
+            assert params.filter.value == "baseline"
+            yield tag
+
+        async def create_link(self, tag_id, request):
+            assert tag_id == tag.id
+            self.links.append(request)
+
+    class Sessions:
+        async def iter(self, params):
+            assert params.filter.field == "task_id"
+            assert params.filter.value == str(task_id)
+            for session in imported:
+                yield session
+
+    client = SimpleNamespace(tags=Tags(), sessions=Sessions())
+    count = await sessions._tag_imported_sessions(client, task_id, "baseline")
+
+    assert count == 2
+    assert [link.resource_id for link in client.tags.links] == [
+        session.id for session in imported
+    ]
+
+
 def test_payload_read_error_suppresses_private_path_cause(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
