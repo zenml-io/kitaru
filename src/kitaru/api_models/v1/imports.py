@@ -15,7 +15,7 @@
 
 import uuid
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.base import JsonValue, RequestModel, ResponseModel
 
@@ -41,6 +41,20 @@ class ImportCreateRequest(RequestModel):
     params: dict[str, JsonValue] = Field(
         default_factory=dict, description="Parameters passed to the importer."
     )
+    tags: list[str] = Field(
+        default_factory=list, description="Tags applied to every created session."
+    )
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, value: list[str]) -> list[str]:
+        """Normalize tag names and reject blank or duplicate values."""
+        normalized = [tag.strip() for tag in value]
+        if any(not tag for tag in normalized):
+            raise ValueError("tags must not contain blank names")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("tags must be unique")
+        return normalized
 
 
 class ImportFailure(ResponseModel):

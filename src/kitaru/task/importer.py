@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import MAX_IMPORT_FAILURES, ImportFailure, ImportStats
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -35,6 +36,13 @@ from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeBatchRequest,
     SessionNodeCreateRequest,
+)
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagListParams,
+    TagResourceType,
+    TagResponse,
 )
 from kitaru.api_models.v1.task import ImportTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
@@ -257,6 +265,28 @@ def _resolve_parser(details: ImportTaskDetails) -> Parser:
         raise SessionImportError(str(exc)) from exc
 
 
+async def _get_or_create_tag(client: KitaruAPIClient, name: str) -> TagResponse:
+    """Resolve an exact tag name, creating it when absent."""
+    params = TagListParams(
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=name)
+    )
+    async for tag in client.tags.iter(params):
+        return tag
+    try:
+        return await client.tags.create(TagCreateRequest(name=name))
+    except APIError as error:
+        if error.status_code != httpx.codes.CONFLICT:
+            raise
+    async for tag in client.tags.iter(params):
+        return tag
+    raise SessionImportError(f"Tag {name!r} could not be resolved after creation.")
+
+
+async def _resolve_tags(client: KitaruAPIClient, names: list[str]) -> list[TagResponse]:
+    """Resolve every import tag before creating sessions."""
+    return [await _get_or_create_tag(client, name) for name in names]
+
+
 async def run(client: KitaruAPIClient, task_id: str) -> None:
     """Run the import flow: parse the payload and ingest sessions and nodes.
 
@@ -275,6 +305,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         raise SessionImportError(f"Task {task_id} is not an importer task")
     parser = _resolve_parser(details)
     payload = Path(get_required_env("KITARU_TASK_PAYLOAD_PATH")).read_bytes()
+    tags = await _resolve_tags(client, details.tags)
 
     created = 0
     skipped = 0
@@ -318,6 +349,14 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                     batch = nodes[start : start + NODE_BATCH_SIZE]
                     await client.sessions.ingest_nodes(
                         session.id, SessionNodeBatchRequest(nodes=batch)
+                    )
+                for tag in tags:
+                    await client.tags.create_link(
+                        tag.id,
+                        TagLinkCreateRequest(
+                            resource_type=TagResourceType.SESSION,
+                            resource_id=session.id,
+                        ),
                     )
             except APIError as exc:
                 _record_failure(

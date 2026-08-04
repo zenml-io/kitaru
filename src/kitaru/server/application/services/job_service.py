@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Job use cases and the job-and-task composition the command endpoints run."""
 
+import json
 import uuid
 
 from kitaru.api_models.v1.task import TaskOnFailure
@@ -46,7 +47,13 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import Job, JobAlreadySettled
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import (
+    IMPORT_TAGS_LABEL,
+    AgentTask,
+    EvaluationTask,
+    ImportTask,
+    Task,
+)
 
 AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
@@ -319,6 +326,7 @@ class JobService:
                 agent_id=agent.id,
                 agent_version_id=command.agent_version_id,
                 params=command.params,
+                labels={IMPORT_TAGS_LABEL: json.dumps(command.tags)},
             )
         )
         return job
