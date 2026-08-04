@@ -154,7 +154,9 @@ async def client(
         agent_version_repository=agent_version_repository,
     )
     node_service = SessionNodeService(
-        repository=node_repository, session_repository=session_repository
+        repository=node_repository,
+        session_repository=session_repository,
+        task_repository=task_repository,
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
@@ -851,7 +853,9 @@ def _build_task_scoped_app(
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
-        repository=node_repository, session_repository=session_repository
+        repository=node_repository,
+        session_repository=session_repository,
+        task_repository=task_repository,
     )
     app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
         repository=evaluation_repository, session_repository=session_repository

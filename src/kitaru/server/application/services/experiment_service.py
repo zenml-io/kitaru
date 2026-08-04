@@ -386,7 +386,11 @@ class ExperimentService:
             Created run and its replay counts by status.
         """
         experiment = await self._repository.get(experiment_id, exclusive=True)
-        cohort_version = await self._cohort_versions.get(command.cohort_version_id)
+        # Locked so a concurrent delete of this version cannot land between
+        # the read and the run row that references it.
+        cohort_version = await self._cohort_versions.get(
+            command.cohort_version_id, exclusive=True
+        )
         if cohort_version.session_count == 0:
             raise ValidationError(f"Cohort version {cohort_version.id} has no sessions")
         agent_version = await resolve_runnable_agent_version(

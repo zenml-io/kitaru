@@ -20,6 +20,7 @@ from importlib.metadata import version
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DBAPIError
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
@@ -31,6 +32,7 @@ from kitaru.analytics.source import (
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.errors import is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -126,6 +128,24 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def domain_error(request: Request, exc: DomainError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+def _register_deadlock_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for a deadlock-canceled transaction.
+
+    Clients receive HTTP 503 with the usual ``detail`` message. Any other
+    database error propagates unchanged.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(DBAPIError)
+    async def deadlock(request: Request, exc: DBAPIError) -> JSONResponse:
+        _ = request
+        if not is_deadlock(exc):
+            raise exc
+        return JSONResponse(status_code=503, content={"detail": "Deadlock detected"})
 
 
 def _register_token_grant_exception_handler(app: FastAPI) -> None:
@@ -236,6 +256,7 @@ def create_app(settings: APISettings) -> FastAPI:
     # Replaced with a live client at startup under the control plane scheme.
     app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
+    _register_deadlock_exception_handler(app)
     _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_source)
     # FastAPIInstrumentor registers its middleware last, which makes the

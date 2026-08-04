@@ -22,11 +22,9 @@ from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.task import (
-    LabelSelector,
     TaskKind,
     TaskOnFailure,
     TaskStatus,
-    WorkerScope,
 )
 from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
@@ -49,7 +47,6 @@ __all__ = [
     "ImportTaskDetails",
     "InvalidTaskEnv",
     "InvalidTaskResult",
-    "LabelSelector",
     "PackagePluginSpec",
     "PayloadSpec",
     "PluginSpec",
@@ -63,7 +60,6 @@ __all__ = [
     "TaskResultSessionMissing",
     "TaskRunSpec",
     "TaskSpec",
-    "WorkerScope",
 ]
 
 TERMINAL_TASK_STATUSES = frozenset(

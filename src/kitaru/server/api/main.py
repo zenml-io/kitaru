@@ -37,7 +37,7 @@ def main() -> None:
     """Run the API server."""
     settings = APISettings()
     uvicorn.run(
-        app(settings),
+        app(),
         host=settings.HOST,
         port=settings.PORT,
         log_level=settings.LOG_LEVEL.lower(),

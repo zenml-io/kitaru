@@ -32,6 +32,7 @@ from kitaru.server.application.models.session import (
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.resource_access import (
+    check_task_attempt,
     check_task_session_read,
     check_task_session_write,
 )
@@ -274,6 +275,7 @@ class SessionService:
         """
         session = await self._repository.get(session_id, exclusive=True)
         check_task_session_write(session_id, session.task_id, actor)
+        await check_task_attempt(actor, self._tasks)
         fields = command.model_fields_set
         if {"status", "outputs", "error", "ended_at"} & fields:
             previous_status = session.status

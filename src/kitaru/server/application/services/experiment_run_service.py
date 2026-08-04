@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.server.application.interfaces.experiment_run_repository import (
     ExperimentRunRepository,
 )
@@ -132,15 +133,14 @@ class ExperimentRunService:
             )
         )
 
-    async def cancel_run(
+    async def mark_run_canceling(
         self, experiment_run_id: uuid.UUID, actor: AuthContext
-    ) -> tuple[ExperimentRun, ReplayStatusCounts]:
-        """Request cancellation of a running experiment run.
+    ) -> None:
+        """Move a running run to canceling, leaving an already canceling run alone.
 
-        Every non-settled replay's job is canceled the way job cancellation
-        works: pending tasks move straight to canceled, claimed and running
-        tasks are stamped for their worker or the sweep to settle. A run
-        whose jobs are already fully drained finalizes within this call.
+        Locks the run row and nothing else. Finalization reads the canceling
+        status to settle the run as canceled, so the run has to carry it
+        before its jobs drain.
 
         Args:
             experiment_run_id: Id of the run.
@@ -149,21 +149,37 @@ class ExperimentRunService:
         Raises:
             ExperimentRunNotFound: No run has this id.
             IllegalExperimentRunStatusTransition: The run is not running.
+        """
+        _ = actor
+        run = await self._repository.get(experiment_run_id, exclusive=True)
+        if run.status is ExperimentRunStatus.CANCELING:
+            return
+        run.cancel()
+        await self._repository.update(run)
+
+    async def cancel_run_jobs(
+        self, experiment_run_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[ExperimentRun, ReplayStatusCounts]:
+        """Cancel every unsettled job of a canceling run in two passes.
+
+        Locks the jobs' live task rows, then their job rows, then the replay
+        and run rows the settlement of the second pass reaches.
+
+        Args:
+            experiment_run_id: Id of the run.
+            actor: Caller context.
+
+        Raises:
+            ExperimentRunNotFound: No run has this id.
 
         Returns:
             Run carrying the cancel request, and its replay counts by status.
         """
         _ = actor
-        run = await self._repository.get(experiment_run_id, exclusive=True)
-        run.cancel()
-        await self._repository.update(run)
-        for replay in await self._replays.list_by_experiment_run(experiment_run_id):
-            if replay.settled:
-                continue
-            job = await self._jobs.get(replay.job_id, exclusive=True)
-            if job.settled:
-                continue
-            await self._transitions.cancel_job(job)
+        replays = await self._replays.list_by_experiment_run(experiment_run_id)
+        job_ids = [replay.job_id for replay in replays if not replay.settled]
+        await self._transitions.request_jobs_cancel(job_ids)
+        await self._transitions.settle_jobs_if_drained(job_ids)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts
@@ -173,8 +189,8 @@ class ExperimentRunService:
     ) -> None:
         """Delete an experiment run and its jobs.
 
-        Each job delete cascades its tasks and replay row, so the run row's
-        own delete has nothing left to cascade.
+        The job deletes cascade their tasks and replay rows, so the run
+        row's own delete has nothing left to cascade.
 
         Args:
             experiment_run_id: Id of the run.
@@ -185,6 +201,6 @@ class ExperimentRunService:
         """
         _ = actor
         await self._repository.get(experiment_run_id)
-        for replay in await self._replays.list_by_experiment_run(experiment_run_id):
-            await self._jobs.delete(replay.job_id)
+        replays = await self._replays.list_by_experiment_run(experiment_run_id)
+        await self._jobs.delete_many([replay.job_id for replay in replays])
         await self._repository.delete(experiment_run_id)

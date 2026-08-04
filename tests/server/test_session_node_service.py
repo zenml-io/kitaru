@@ -46,6 +46,7 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.session_node import SessionNodeParentNotFound
+from kitaru.server.domain.task import AgentTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -63,13 +64,22 @@ def node_repository() -> FakeSessionNodeRepository:
 
 
 @pytest.fixture
+def task_repository() -> FakeTaskRepository:
+    """Provide a fake task repository."""
+    return FakeTaskRepository()
+
+
+@pytest.fixture
 def service(
     node_repository: FakeSessionNodeRepository,
     session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
 ) -> SessionNodeService:
     """Provide a session node service backed by the fake repositories."""
     return SessionNodeService(
-        repository=node_repository, session_repository=session_repository
+        repository=node_repository,
+        session_repository=session_repository,
+        task_repository=task_repository,
     )
 
 
@@ -469,10 +479,15 @@ async def test_ingest_nodes_denies_a_task_principal_for_its_input_session(
 
 
 async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
-    service: SessionNodeService, session_repository: FakeSessionRepository
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
 ) -> None:
     """Allow a task principal to ingest nodes into the session it owns."""
-    task_id = uuid.uuid4()
+    task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
+    )
+    task_id = task.id
     session = await create_session(
         session_repository,
         uuid.uuid4(),

@@ -20,8 +20,7 @@ from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, UniqueCons
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from kitaru.api_models.v1.task import WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,

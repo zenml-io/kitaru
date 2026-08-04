@@ -76,7 +76,9 @@ async def client(
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
     )
     node_service = SessionNodeService(
-        repository=node_repository, session_repository=session_repository
+        repository=node_repository,
+        session_repository=session_repository,
+        task_repository=FakeTaskRepository(),
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service

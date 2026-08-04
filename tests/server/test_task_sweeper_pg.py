@@ -113,7 +113,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     """A replay's job settling through the sweep still settles the replay.
 
     The sweep abandons the stale agent task exactly like the claim path
-    would, and the resulting JobSettled event must still reach the same
+    would, and the resulting JobsSettled event must still reach the same
     replay-settlement subscriber a request wires, proving the background
     tick shares the request's event dispatcher composition rather than
     running the transition without it.

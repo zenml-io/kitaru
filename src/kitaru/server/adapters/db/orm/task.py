@@ -40,7 +40,13 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     index_name,
     unique_constraint_name,
 )
-from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import (
+    TERMINAL_TASK_STATUSES,
+    AgentTask,
+    EvaluationTask,
+    ImportTask,
+    Task,
+)
 
 KIND_LENGTH = 16
 STATUS_LENGTH = 16
@@ -65,6 +71,8 @@ TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
 TASK_PENDING_ID_INDEX = index_name("task", ["id"])
 TASK_PENDING_LABELS_INDEX = index_name("task", ["labels"])
 TASK_STALENESS_INDEX = index_name("task", ["heartbeat_at", "claimed_at"])
+
+TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
 
 PENDING_PREDICATE = "status = 'pending'"
 IN_FLIGHT_PREDICATE = "status IN ('claimed', 'running')"

@@ -23,8 +23,7 @@ from conftest import (
     asgi_api_client,
     local_settings,
 )
-from kitaru.api_models.v1.task import WorkerScope
-from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
+from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime, WorkerScope
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,

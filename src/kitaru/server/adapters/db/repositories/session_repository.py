@@ -184,11 +184,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored session.
         """
-        row = await self._session.get(
-            self.orm_class, session_id, with_for_update=exclusive
-        )
-        if row is None:
-            raise SessionNotFound(session_id)
+        row = await self._get_row(session_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(

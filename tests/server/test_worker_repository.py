@@ -21,8 +21,7 @@ import pytest
 
 from conftest import FakeWorkerRepository, pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.task import LabelSelector, WorkerScope
-from kitaru.api_models.v1.worker import WorkerRuntime
+from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )

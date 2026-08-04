@@ -19,7 +19,7 @@ from typing import Any
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from kitaru.api_models.v1.task import WorkerScope
+from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.worker.heartbeat import DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 RUN_POLL_INTERVAL_SECONDS = 2.0

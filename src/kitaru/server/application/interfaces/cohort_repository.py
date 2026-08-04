@@ -37,11 +37,13 @@ class CohortRepository(Protocol):
         """
         ...
 
-    async def get(self, cohort_id: uuid.UUID) -> Cohort:
+    async def get(self, cohort_id: uuid.UUID, exclusive: bool = False) -> Cohort:
         """Load a cohort by id.
 
         Args:
             cohort_id: Id of the cohort.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             CohortNotFound: No cohort has this id.

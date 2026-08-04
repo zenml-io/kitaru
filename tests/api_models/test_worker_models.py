@@ -11,12 +11,13 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for task API models."""
+"""Tests for worker API models."""
 
 import pytest
 from pydantic import ValidationError
 
-from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import LabelSelector, WorkerScope
 
 
 def test_empty_kinds_rejected() -> None:

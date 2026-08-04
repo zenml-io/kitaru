@@ -39,6 +39,7 @@ from kitaru.server.application.models.task import (
     TaskPolicy,
     TaskUpdate,
 )
+from kitaru.server.application.services.resource_access import check_task_attempt
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.task import (
@@ -74,7 +75,7 @@ class TaskService:
             repository: Task repository.
             worker_repository: Worker repository.
             session_repository: Session repository.
-            job_repository: Job repository, for the owning job's owner id.
+            job_repository: Job repository.
             spec_builder: Task execution spec builder.
             transitions: Task transition dispatch.
             policy: Task execution policy.
@@ -90,10 +91,7 @@ class TaskService:
     async def claim_tasks(
         self, max_tasks: int, actor: WorkerAuthContext
     ) -> list[ClaimedTask]:
-        """Sweep stale tasks, then claim pending tasks matching the worker's scope.
-
-        The sweep runs first so a task whose worker died is back in the queue
-        before this claim reads it.
+        """Claim pending tasks matching the worker's scope.
 
         Args:
             max_tasks: Maximum number of tasks to claim.
@@ -112,17 +110,17 @@ class TaskService:
         worker = await self._workers.get(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
-        await self.sweep_stale_tasks(now)
         claimed = await self._repository.claim_pending(
             worker.scope, worker_id, max_tasks, now
         )
-        owners = await self._jobs.get_many(list({task.job_id for task in claimed}))
-        started_jobs: set[uuid.UUID] = set()
+        job_ids = sorted({task.job_id for task in claimed})
+        owners = await self._jobs.get_many(job_ids)
+        # Start the jobs in ascending id order so this transaction locks job
+        # rows in the order the cancellation path locks them in.
+        for job_id in job_ids:
+            await self._transitions.start_job(job_id)
         results: list[ClaimedTask] = []
         for task in claimed:
-            if task.job_id not in started_jobs:
-                await self._transitions.start_job(task.job_id)
-                started_jobs.add(task.job_id)
             results.append(
                 ClaimedTask(
                     task=task,
@@ -141,8 +139,8 @@ class TaskService:
         """Stamp the heartbeat on the tasks the caller still owns.
 
         A reported task the caller no longer owns, that no longer exists, that
-        already reached a terminal status, or whose cancellation was
-        requested comes back for the worker to stop.
+        already reached a terminal status, or whose cancellation was requested
+        on the task or on its job comes back for the worker to stop.
 
         Args:
             worker_id: Id of the reporting worker.
@@ -233,6 +231,7 @@ class TaskService:
             actor.principal.task_id != task_id
         ):
             raise TaskAccessDenied(task_id)
+        await check_task_attempt(actor, self._repository)
         task = await self._repository.get(task_id)
         return await self._spec_builder.build_spec(task)
 
@@ -290,30 +289,75 @@ class TaskService:
             raise IllegalTaskStatusTransition(task_id, task.status, command.status)
         return await self._apply_status(task, transition)
 
-    async def sweep_stale_tasks(self, now: datetime) -> None:
-        """Settle or requeue in-flight tasks that stopped heartbeating.
+    async def list_stale_task_ids(self, now: datetime) -> list[uuid.UUID]:
+        """Read the ids of in-flight tasks that stopped heartbeating.
+
+        Takes no lock.
 
         Args:
             now: Current time.
+
+        Returns:
+            Ids of the stale tasks in ascending order.
         """
         cutoff = now - timedelta(seconds=self._policy.heartbeat_timeout_seconds)
-        stale = await self._repository.claim_stale(
+        return await self._repository.list_stale_ids(
             cutoff, self._policy.sweep_batch_limit
         )
-        for task in stale:
-            if task.cancel_requested_at is not None:
-                await self._apply_status(task, partial(Task.cancel, now=now))
-            elif task.attempt < self._policy.retry_limit:
-                await self._unlink_result_session(task)
-                await self._apply_status(task, Task.requeue)
-            else:
-                error = (
-                    f"Task stopped reporting after {task.attempt} attempts "
-                    "and was abandoned"
-                )
-                await self._apply_status(
-                    task, partial(Task.abandon, error=error, now=now)
-                )
+
+    async def sweep_stale_task(self, task_id: uuid.UUID, now: datetime) -> None:
+        """Settle or requeue one in-flight task that stopped heartbeating.
+
+        Locks the task row, then the result session row a requeue frees, then
+        the job row. A task another sweep holds, or one that resumed
+        reporting, is left alone.
+
+        Args:
+            task_id: Id of the candidate task.
+            now: Current time.
+        """
+        cutoff = now - timedelta(seconds=self._policy.heartbeat_timeout_seconds)
+        task = await self._repository.claim_stale(task_id, cutoff)
+        if task is None:
+            return
+        if task.cancel_requested_at is not None:
+            await self._apply_status(task, partial(Task.cancel, now=now))
+        elif task.attempt < self._policy.retry_limit:
+            await self._unlink_result_session(task)
+            await self._apply_status(task, Task.requeue)
+        else:
+            error = (
+                f"Task stopped reporting after {task.attempt} attempts "
+                "and was abandoned"
+            )
+            await self._apply_status(task, partial(Task.abandon, error=error, now=now))
+
+    async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
+        """Read the ids of canceling jobs whose live tasks still owe the stamp.
+
+        Takes no lock.
+
+        Returns:
+            Ids of the canceling jobs in ascending order.
+        """
+        return await self._jobs.list_unpropagated_cancel_ids(
+            self._policy.sweep_batch_limit
+        )
+
+    async def propagate_job_cancel(self, job_id: uuid.UUID) -> None:
+        """Carry a job's cancel request to its live tasks and settle it if drained.
+
+        Locks the job's live task rows in one id-ordered acquisition, then
+        the job row.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            DBAPIError: Another transaction holds one of the task rows.
+        """
+        await self._transitions.request_jobs_cancel([job_id], nowait=True)
+        await self._transitions.settle_job_if_drained(job_id)
 
     async def _apply_status(
         self, task: Task, transition: Callable[[Task], None]
@@ -332,9 +376,9 @@ class TaskService:
     def _with_staleness(self, task: Task, now: datetime) -> Task:
         """Return a task carrying the status the next sweep would write.
 
-        Nothing sweeps while no worker claims, so a read reports what the
-        stored row will become rather than the attempt that stopped
-        reporting.
+        A read between the heartbeat timeout and the sweep tick that acts on
+        it reports what the stored row will become rather than the attempt
+        that stopped reporting.
 
         Args:
             task: Stored task.
