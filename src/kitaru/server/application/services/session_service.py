@@ -19,6 +19,7 @@ from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
@@ -42,6 +43,7 @@ from kitaru.server.domain.session import (
     SessionAgentMismatch,
     SessionAgentRequired,
     SessionAgentVersionMismatch,
+    SessionBaselineNotFound,
     SessionStatus,
     SessionStatusCannotBeCleared,
 )
@@ -61,6 +63,7 @@ class SessionService:
         repository: SessionRepository,
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
+        replay_repository: ReplayRepository,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -70,11 +73,13 @@ class SessionService:
             task_repository: Task repository, for the create-time task link.
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
+            replay_repository: Replay repository, for the baseline lookup.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
+        self._replays = replay_repository
         self._analytics = analytics
 
     async def create_session(
@@ -229,6 +234,39 @@ class SessionService:
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
         return session
+
+    async def get_baseline_session(
+        self, session_id: uuid.UUID, actor: AuthContext
+    ) -> Session:
+        """Get the baseline session a replayed session was produced from.
+
+        The link runs from the session's producing task to the replay owning
+        that task's job. A session with no producing task, or one whose task
+        belongs to a job that is not a replay, has no baseline.
+
+        Args:
+            session_id: Id of the replayed session.
+            actor: Caller context.
+
+        Raises:
+            SessionNotFound: No session has this id, or the baseline it
+                resolves to is gone.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
+            SessionBaselineNotFound: The session was not produced by a replay.
+
+        Returns:
+            Baseline session the replay ran against.
+        """
+        session = await self._repository.get(session_id)
+        check_task_session_read(session_id, session.task_id, actor)
+        if session.task_id is None:
+            raise SessionBaselineNotFound(session_id)
+        task = await self._tasks.get(session.task_id)
+        replay = await self._replays.get_by_job_id(task.job_id)
+        if replay is None:
+            raise SessionBaselineNotFound(session_id)
+        return await self._repository.get(replay.baseline_session_id)
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext

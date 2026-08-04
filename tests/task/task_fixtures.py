@@ -27,6 +27,7 @@ from collections.abc import AsyncGenerator
 from typing import NamedTuple
 
 from conftest import (
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     JobAndTaskServices,
     asgi_api_client,
@@ -86,6 +87,7 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
         repository=services.sessions,
         task_repository=services.tasks,
         agent_version_repository=services.agent_versions,
+        replay_repository=FakeReplayRepository(),
     )
     app = create_app(
         APISettings(

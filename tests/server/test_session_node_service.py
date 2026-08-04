@@ -22,6 +22,7 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -90,6 +91,7 @@ def session_service(session_repository: FakeSessionRepository) -> SessionService
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
+        replay_repository=FakeReplayRepository(),
     )
 
 

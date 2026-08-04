@@ -23,6 +23,7 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -74,6 +75,7 @@ async def client(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
+        replay_repository=FakeReplayRepository(),
     )
     node_service = SessionNodeService(
         repository=node_repository,
