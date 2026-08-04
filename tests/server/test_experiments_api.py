@@ -64,7 +64,11 @@ def experiment_repository(services: ReplayServices) -> FakeExperimentRepository:
 async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed experiment services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_experiment_service] = lambda: (
         services.experiment_service

@@ -51,7 +51,11 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed device service."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_device_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)

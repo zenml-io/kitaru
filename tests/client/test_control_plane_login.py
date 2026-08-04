@@ -33,7 +33,7 @@ from conftest import (
     local_settings,
 )
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.auth import TokenProvider
+from kitaru.client.auth import CredentialStoreTokenSource
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.control_plane_auth import control_plane_login
 from kitaru.client.credential_store import CredentialStore
@@ -201,10 +201,10 @@ async def test_stored_control_plane_entry_renews_the_session_token(
         api_client, SERVER_URL, credential_store, api_key="ZENPROKEY_abc"
     )
     credential_store.clear_token(SERVER_URL)
-    provider = TokenProvider(SERVER_URL, credential_store, api_client.auth)
+    source = CredentialStoreTokenSource(SERVER_URL, credential_store, api_client.auth)
 
-    token = await provider.get_token()
-    await provider.close()
+    token = await source.fetch_token()
+    await source.close()
 
     assert token is not None
     assert len(authorizer.received_credentials) == 2

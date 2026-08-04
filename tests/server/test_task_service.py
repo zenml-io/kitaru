@@ -26,6 +26,8 @@ from conftest import (
     FakeTaskRepository,
     JobAndTaskServices,
     build_job_and_task_services,
+    build_task_actor,
+    build_worker_actor,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -135,7 +137,9 @@ async def _claimable_import_task(
 async def test_claim_tasks_not_found(services: JobAndTaskServices) -> None:
     """Claiming against an unknown worker id conflicts."""
     with pytest.raises(WorkerNotFound):
-        await services.task_service.claim_tasks(uuid.uuid4(), 10, actor=ACTOR)
+        await services.task_service.claim_tasks(
+            10, actor=build_worker_actor(ACTOR.account, uuid.uuid4())
+        )
 
 
 async def test_claim_tasks_orders_by_id_and_respects_max(
@@ -147,7 +151,9 @@ async def test_claim_tasks_orders_by_id_and_respects_max(
         await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
 
-    claimed = await services.task_service.claim_tasks(worker.id, 2, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        2, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 2
     assert [item.task.status for item in claimed] == [TaskStatus.CLAIMED] * 2
     assert claimed[0].task.attempt == 1
@@ -161,7 +167,9 @@ async def test_claim_starts_the_job_once(services: JobAndTaskServices) -> None:
     await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
 
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     job = await services.jobs.get(job_id)
     assert job.status.value == "running"
     assert job.started_at is not None
@@ -176,7 +184,9 @@ async def test_claim_scope_kind_filter(services: JobAndTaskServices) -> None:
         services.workers, ACTOR.account.id, scope=WorkerScope(kinds=[TaskKind.IMPORTER])
     )
 
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 1
     assert claimed[0].task.id == import_task.id
     assert claimed[0].task.kind is TaskKind.IMPORTER
@@ -192,7 +202,9 @@ async def test_claim_scope_job_pin(services: JobAndTaskServices) -> None:
         services.workers, ACTOR.account.id, scope=WorkerScope(job_id=job_id)
     )
 
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert [item.task.id for item in claimed] == [pinned.id]
 
 
@@ -210,7 +222,9 @@ async def test_claim_scope_required_selector(services: JobAndTaskServices) -> No
         ),
     )
 
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert [item.task.id for item in claimed] == [labeled.id]
 
 
@@ -230,7 +244,9 @@ async def test_claim_scope_non_required_selector_matches_unlabeled(
         ),
     )
 
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert {item.task.id for item in claimed} == {matching.id, unlabeled.id}
 
 
@@ -239,7 +255,9 @@ async def test_claim_sweeps_stale_tasks_first(services: JobAndTaskServices) -> N
     job_id = await _pending_job(services)
     stale = await _claimable_agent_task(services, job_id)
     stuck_worker = await create_worker(services.workers, ACTOR.account.id, name="stuck")
-    claimed = await services.task_service.claim_tasks(stuck_worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, stuck_worker.id)
+    )
     assert len(claimed) == 1
 
     stored = await services.tasks.get(stale.id)
@@ -248,7 +266,7 @@ async def test_claim_sweeps_stale_tasks_first(services: JobAndTaskServices) -> N
 
     other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
     reclaimed = await services.task_service.claim_tasks(
-        other_worker.id, 10, actor=ACTOR
+        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
     )
     assert len(reclaimed) == 1
     assert reclaimed[0].task.id == stale.id
@@ -262,13 +280,17 @@ async def test_sweep_abandons_at_the_retry_cap(services: JobAndTaskServices) -> 
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
     for _ in range(services.task_service._policy.retry_limit):
-        claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+        claimed = await services.task_service.claim_tasks(
+            10, actor=build_worker_actor(ACTOR.account, worker.id)
+        )
         assert len(claimed) == 1
         stored = await services.tasks.get(task.id)
         stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
         await services.tasks.update(stored)
 
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.ABANDONED
 
@@ -280,7 +302,9 @@ async def test_sweep_cancels_a_cancel_requested_stale_task(
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     stored = await services.tasks.get(task.id)
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
@@ -288,7 +312,9 @@ async def test_sweep_cancels_a_cancel_requested_stale_task(
     await services.tasks.update(stored)
 
     other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
-    await services.task_service.claim_tasks(other_worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
+    )
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.CANCELED
 
@@ -300,7 +326,9 @@ async def test_sweep_requeue_unlinks_the_result_session(
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
@@ -312,7 +340,9 @@ async def test_sweep_requeue_unlinks_the_result_session(
     await services.tasks.update(stored)
 
     other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
-    await services.task_service.claim_tasks(other_worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
+    )
 
     reloaded_task = await services.tasks.get(task.id)
     assert isinstance(reloaded_task, AgentTask)
@@ -332,7 +362,9 @@ async def test_sweep_stale_tasks_works_outside_the_claim_path() -> None:
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     stored = await services.tasks.get(task.id)
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
@@ -353,11 +385,13 @@ async def test_heartbeat_stamps_owned_reported_tasks(
     job_id = await _pending_job(services)
     await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     task_id = claimed[0].task.id
 
     cancel_ids = await services.task_service.heartbeat_worker(
-        worker.id, [task_id], actor=ACTOR
+        worker.id, [task_id], actor=build_worker_actor(ACTOR.account, worker.id)
     )
     assert cancel_ids == []
     stored = await services.tasks.get(task_id)
@@ -372,7 +406,9 @@ async def test_heartbeat_returns_cancel_requested_missing_and_reassigned(
     await _claimable_agent_task(services, job_id)
     await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     cancel_requested_id = claimed[0].task.id
     reassigned_id = claimed[1].task.id
     missing_id = uuid.uuid4()
@@ -389,7 +425,7 @@ async def test_heartbeat_returns_cancel_requested_missing_and_reassigned(
     cancel_ids = await services.task_service.heartbeat_worker(
         worker.id,
         [cancel_requested_id, reassigned_id, missing_id],
-        actor=ACTOR,
+        actor=build_worker_actor(ACTOR.account, worker.id),
     )
     assert set(cancel_ids) == {cancel_requested_id, reassigned_id, missing_id}
 
@@ -399,9 +435,13 @@ async def test_heartbeat_reports_terminal_tasks(services: JobAndTaskServices) ->
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
@@ -413,11 +453,13 @@ async def test_heartbeat_reports_terminal_tasks(services: JobAndTaskServices) ->
     session.status = SessionStatus.COMPLETED
     await services.sessions.update(session)
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
 
     cancel_ids = await services.task_service.heartbeat_worker(
-        worker.id, [task.id], actor=ACTOR
+        worker.id, [task.id], actor=build_worker_actor(ACTOR.account, worker.id)
     )
     assert cancel_ids == [task.id]
 
@@ -427,7 +469,11 @@ async def test_update_task_requires_status(services: JobAndTaskServices) -> None
     job_id = await _pending_job(services)
     task = await create_agent_task(services.tasks, job_id)
     with pytest.raises(TaskUpdateRequiresStatus):
-        await services.task_service.update_task(task.id, TaskUpdate(), actor=ACTOR)
+        await services.task_service.update_task(
+            task.id,
+            TaskUpdate(),
+            actor=build_task_actor(ACTOR.account, task.id, 0, uuid.uuid4()),
+        )
 
 
 async def test_update_task_attempt_fencing(services: JobAndTaskServices) -> None:
@@ -435,16 +481,16 @@ async def test_update_task_attempt_fencing(services: JobAndTaskServices) -> None
     job_id = await _pending_job(services)
     await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     task_id = claimed[0].task.id
 
     with pytest.raises(TaskAttemptMismatch):
         await services.task_service.update_task(
-            task_id, TaskUpdate(status=TaskStatus.RUNNING, attempt=0), actor=ACTOR
-        )
-    with pytest.raises(TaskAttemptMismatch):
-        await services.task_service.update_task(
-            task_id, TaskUpdate(status=TaskStatus.RUNNING), actor=ACTOR
+            task_id,
+            TaskUpdate(status=TaskStatus.RUNNING),
+            actor=build_task_actor(ACTOR.account, task_id, 0, worker.id),
         )
 
 
@@ -455,14 +501,20 @@ async def test_agent_completion_requires_a_completed_result_session(
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
 
     with pytest.raises(TaskResultSessionMissing):
         await services.task_service.update_task(
-            task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+            task.id,
+            TaskUpdate(status=TaskStatus.COMPLETED),
+            actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
         )
 
     session = await create_session(
@@ -475,13 +527,17 @@ async def test_agent_completion_requires_a_completed_result_session(
 
     with pytest.raises(TaskResultSessionNotCompleted):
         await services.task_service.update_task(
-            task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+            task.id,
+            TaskUpdate(status=TaskStatus.COMPLETED),
+            actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
         )
 
     session.status = SessionStatus.COMPLETED
     await services.sessions.update(session)
     completed = await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
     assert completed.status is TaskStatus.COMPLETED
 
@@ -492,9 +548,13 @@ async def test_update_task_rejects_an_oversized_result() -> None:
     job_id = await _pending_job(services)
     task = await _claimable_import_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     await services.task_service.update_task(
-        task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
     )
 
     with pytest.raises(TaskResultTooLarge):
@@ -502,10 +562,9 @@ async def test_update_task_rejects_an_oversized_result() -> None:
             task.id,
             TaskUpdate(
                 status=TaskStatus.COMPLETED,
-                attempt=1,
                 result={"created": 0, "padding": "x" * 100},
             ),
-            actor=ACTOR,
+            actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
         )
 
 
@@ -516,7 +575,9 @@ async def test_get_task_and_list_tasks_report_effective_status(
     job_id = await _pending_job(services)
     task = await _claimable_agent_task(services, job_id)
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     stored = await services.tasks.get(task.id)
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)

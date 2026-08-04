@@ -71,6 +71,8 @@ class APISettings(Settings):
     JWT_ISSUER: str = "kitaru"
     JWT_AUDIENCE: str = "kitaru"
     JWT_LIFETIME_SECONDS: int = 3600
+    WORKER_TOKEN_LIFETIME_SECONDS: int = 3600
+    TASK_TOKEN_EXPIRY_LEEWAY_SECONDS: int = 300
     AUTH_COOKIE_NAME: str = ""
     AUTH_COOKIE_DOMAIN: str = ""
     AUTH_COOKIE_SECURE: bool | None = None
@@ -125,10 +127,7 @@ class APISettings(Settings):
         Returns:
             The validated settings object.
         """
-        if (
-            self.AUTH_SCHEME in (AuthScheme.LOCAL, AuthScheme.CONTROL_PLANE)
-            and not self.JWT_SIGNING_KEY
-        ):
+        if not self.JWT_SIGNING_KEY:
             raise ValueError("Set KITARU_SERVER_JWT_SIGNING_KEY")
         if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             if not self.CONTROL_PLANE_API_URL:

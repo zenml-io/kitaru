@@ -65,7 +65,7 @@ async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> N
     )
     ctx = _ctx(tmp_path, FakeKitaruAPIClient())
 
-    process = await AgentHandler().prepare(ctx, task_id, spec)
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert process.command == "run.sh --flag"
     assert process.working_dir == "/srv/agent"
@@ -82,7 +82,7 @@ async def test_agent_handler_omits_inputs_over_the_env_byte_threshold(
     spec = make_agent_spec(task_id, inputs=huge_inputs)
     ctx = _ctx(tmp_path, FakeKitaruAPIClient())
 
-    process = await AgentHandler().prepare(ctx, task_id, spec)
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert "KITARU_TASK_INPUTS" not in process.env
 
@@ -98,11 +98,12 @@ async def test_agent_handler_merges_extras_and_secrets(tmp_path: Path) -> None:
     )
     ctx = _ctx(tmp_path, FakeKitaruAPIClient())
 
-    process = await AgentHandler().prepare(ctx, task_id, spec)
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert process.env["RUN_VAR"] == "1"
     assert process.env["KITARU_REPLAY_ID"] == "replay-1"
     assert process.env["PROVIDER_KEY"] == "secret"
+    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
 
 
 async def test_evaluation_handler_script_plugin_materializes_and_sets_path(
@@ -120,13 +121,14 @@ async def test_evaluation_handler_script_plugin_materializes_and_sets_path(
     client.blobs.content[blob_id] = content
     ctx = _ctx(tmp_path, client)
 
-    process = await EvaluationHandler().prepare(ctx, task_id, spec)
+    process = await EvaluationHandler().prepare(ctx, task_id, spec, "task-token")
 
     plugin_path = Path(process.env["KITARU_TASK_PLUGIN_PATH"])
     assert plugin_path.read_bytes() == content
     assert client.blobs.download_calls == [blob_id]
     assert process.working_dir is None
     assert process.command == ("uv run --with numpy python -m kitaru.task evaluate")
+    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
 
 
 async def test_evaluation_handler_package_plugin_skips_materialization(
@@ -139,7 +141,7 @@ async def test_evaluation_handler_package_plugin_skips_materialization(
     client = FakeKitaruAPIClient()
     ctx = _ctx(tmp_path, client)
 
-    process = await EvaluationHandler().prepare(ctx, task_id, spec)
+    process = await EvaluationHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert client.blobs.download_calls == []
@@ -158,7 +160,7 @@ async def test_evaluation_handler_reuses_cached_plugin(tmp_path: Path) -> None:
 
     task_id = uuid.uuid4()
     spec = make_evaluator_spec(task_id, plugin=plugin)
-    await EvaluationHandler().prepare(ctx, task_id, spec)
+    await EvaluationHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert client.blobs.download_calls == []
 
@@ -186,11 +188,12 @@ async def test_import_handler_script_plugin_materializes_code_and_payload(
     client.blobs.content[payload_blob_id] = payload_content
     ctx = _ctx(tmp_path, client)
 
-    process = await ImportHandler().prepare(ctx, task_id, spec)
+    process = await ImportHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert Path(process.env["KITARU_TASK_PLUGIN_PATH"]).read_bytes() == code_content
     assert Path(process.env["KITARU_TASK_PAYLOAD_PATH"]).read_bytes() == payload_content
     assert set(client.blobs.download_calls) == {code_blob_id, payload_blob_id}
+    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
     # The payload is cached under the payload cache root, the plugin under
     # the code cache root, never the other's directory.
     assert "payloads" in process.env["KITARU_TASK_PAYLOAD_PATH"]
@@ -214,7 +217,7 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
     client.blobs.content[payload_blob_id] = payload_content
     ctx = _ctx(tmp_path, client)
 
-    process = await ImportHandler().prepare(ctx, task_id, spec)
+    process = await ImportHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert client.blobs.download_calls == [payload_blob_id]

@@ -29,6 +29,7 @@ from conftest import (
 from kitaru.api_models.v1.job import JobStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
+    authorize_with_worker,
     get_job_service,
     get_task_service,
 )
@@ -52,11 +53,18 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed job and task services."""
     app = create_app(
-        APISettings(DB_HOST="localhost", SECRET_ENCRYPTION_KEY="test-encryption-key")
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
     )
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    app.dependency_overrides[authorize_with_worker] = lambda: AuthContext(
+        account=ACCOUNT
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

@@ -384,6 +384,42 @@ async def test_query_filters_by_cohort_version(setup: Setup) -> None:
     assert [run.id for run in runs] == [matching.id]
 
 
+async def test_query_filters_by_agent_version(setup: Setup) -> None:
+    """Filter runs by agent version id."""
+    (
+        repository,
+        owner_id,
+        make_experiment_id,
+        make_cohort_version_id,
+        make_agent_version_id,
+    ) = setup
+    experiment_id = await make_experiment_id()
+    cohort_version_id = await make_cohort_version_id()
+    agent_version_id = await make_agent_version_id()
+    matching = await repository.create(
+        _run(owner_id, experiment_id, cohort_version_id, agent_version_id, number=1)
+    )
+    await repository.create(
+        _run(
+            owner_id,
+            experiment_id,
+            cohort_version_id,
+            await make_agent_version_id(),
+            number=2,
+        )
+    )
+
+    runs, next_cursor = await repository.query(
+        ExperimentRunFilter(
+            expression=FilterCondition(
+                field="agent_version_id", op=FilterOp.EQ, value=agent_version_id
+            )
+        )
+    )
+    assert next_cursor is None
+    assert [run.id for run in runs] == [matching.id]
+
+
 async def test_get_max_number(setup: Setup) -> None:
     """Read the highest run number, 0 when the experiment has no runs."""
     (

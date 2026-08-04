@@ -251,7 +251,7 @@ async def test_session_token_without_external_id_rejected(
         api_key_repository=api_key_repository,
         password_hasher=FakePasswordHasher(),
     )
-    token, _ = auth_service.issue_token(AuthContext(account=account))
+    token = auth_service.issue_token(AuthContext(account=account)).token
 
     response = await client.get(
         "/v1/api-keys", headers={"Authorization": f"Bearer {token}"}

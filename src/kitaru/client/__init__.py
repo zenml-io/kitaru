@@ -14,7 +14,13 @@
 """Public SDK surface."""
 
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.auth import TokenProvider
+from kitaru.client.auth import (
+    CredentialStoreTokenSource,
+    RenewingTokenAuth,
+    StaticTokenAuth,
+    TokenAuth,
+    TokenSource,
+)
 from kitaru.client.client import KitaruClient
 from kitaru.client.control_plane import (
     ControlPlaneLoginError,
@@ -46,16 +52,20 @@ __all__ = [
     "ControlPlaneLoginError",
     "ControlPlaneSession",
     "CredentialStore",
+    "CredentialStoreTokenSource",
     "DeviceLoginError",
     "KitaruAPIClient",
     "KitaruClient",
     "KitaruClientError",
     "KitaruSyncClient",
     "NotFoundError",
+    "RenewingTokenAuth",
     "ServerCredentials",
     "ServerError",
+    "StaticTokenAuth",
+    "TokenAuth",
     "TokenGrantError",
-    "TokenProvider",
+    "TokenSource",
     "ValidationError",
     "control_plane_login",
     "device_login",

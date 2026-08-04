@@ -83,15 +83,16 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
             json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
         )
     ).json()
-    worker = (
+    registration = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     task = claimed["tasks"][0]["task"]
@@ -163,15 +164,16 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     ).json()
     assert replay["status"] == "pending"
 
-    worker = (
+    registration = (
         await client.post(
             "/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"worker_id": worker["id"], "max_tasks": 10}
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     assert claimed["tasks"][0]["task"]["kind"] == "agent"

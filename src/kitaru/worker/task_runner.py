@@ -32,7 +32,12 @@ from kitaru.api_models.v1.task import (
     TaskUpdateRequest,
     TaskWithSpec,
 )
-from kitaru.client.exceptions import APIError
+from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.exceptions import (
+    APIError,
+    AuthenticationError,
+    AuthorizationError,
+)
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
 from kitaru.worker.process import run_task_process
@@ -46,6 +51,10 @@ _LABELS: dict[TaskKind, str] = {
     TaskKind.EVALUATOR: "Evaluator",
     TaskKind.IMPORTER: "Importer",
 }
+
+# A task token rejected with one of these means the attempt is dead, either
+# superseded by a new claim or expired, not that the worker itself lost auth.
+_STALE_TOKEN_ERRORS = (AuthenticationError, AuthorizationError)
 
 
 class TaskRunner:
@@ -76,11 +85,11 @@ class TaskRunner:
         task, spec = claimed.task, claimed.spec
         attempt = task.attempt
         label = _LABELS[spec.kind]
+        token = claimed.token.get_secret_value()
+        client = self._ctx.client.with_token(token)
 
         running = await self._update(
-            task.id,
-            attempt,
-            TaskUpdateRequest(status=TaskStatus.RUNNING, attempt=attempt),
+            client, task.id, attempt, TaskUpdateRequest(status=TaskStatus.RUNNING)
         )
         if running is None:
             return task
@@ -91,10 +100,10 @@ class TaskRunner:
 
         handler = HANDLERS[spec.kind]
         try:
-            process = await handler.prepare(self._ctx, task.id, spec)
+            process = await handler.prepare(self._ctx, task.id, spec, token)
         except Exception as exc:
             return await self._fail(
-                task, attempt, f"Failed to prepare the {label} process: {exc}"
+                client, task, attempt, f"Failed to prepare the {label} process: {exc}"
             )
 
         with tempfile.TemporaryDirectory(prefix="kitaru-task-") as work_dir:
@@ -105,17 +114,26 @@ class TaskRunner:
             result = await run_task_process(process, canceled)
 
             if result.returncode == 0:
-                return await self._succeed(task, spec, attempt, label, result_path)
+                return await self._succeed(
+                    client, task, spec, attempt, label, result_path
+                )
             if result.returncode is not None:
                 return await self._fail_exit(
-                    task, attempt, label, result.returncode, result.tail, result_path
+                    client,
+                    task,
+                    attempt,
+                    label,
+                    result.returncode,
+                    result.tail,
+                    result_path,
                 )
             if canceled.is_set():
                 logger.info("Task %s canceled by the server.", task.id)
                 updated = await self._update(
+                    client,
                     task.id,
                     attempt,
-                    TaskUpdateRequest(status=TaskStatus.CANCELED, attempt=attempt),
+                    TaskUpdateRequest(status=TaskStatus.CANCELED),
                 )
                 return updated if updated is not None else task
             logger.info(
@@ -125,16 +143,16 @@ class TaskRunner:
                 f"Task timed out after {spec.timeout_seconds} seconds.", result.tail
             )
             updated = await self._update(
+                client,
                 task.id,
                 attempt,
-                TaskUpdateRequest(
-                    status=TaskStatus.TIMED_OUT, attempt=attempt, error=error
-                ),
+                TaskUpdateRequest(status=TaskStatus.TIMED_OUT, error=error),
             )
             return updated if updated is not None else task
 
     async def _succeed(
         self,
+        client: KitaruAPIClient,
         task: TaskResponse,
         spec: TaskSpecResponse,
         attempt: int,
@@ -144,6 +162,7 @@ class TaskRunner:
         """Read the result file, if any, and complete the task.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Task the transition is fenced by.
             spec: Execution spec of the task.
             attempt: Attempt the transition is fenced by.
@@ -164,17 +183,21 @@ class TaskRunner:
                     f"{label} process wrote a result larger than "
                     f"{MAX_RESULT_BYTES} bytes."
                 )
-                return await self._fail(task, attempt, error)
+                return await self._fail(client, task, attempt, error)
             try:
                 result_value = json.loads(result_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 return await self._fail(
-                    task, attempt, f"{label} process wrote an invalid JSON result."
+                    client,
+                    task,
+                    attempt,
+                    f"{label} process wrote an invalid JSON result.",
                 )
-        return await self._complete(task, spec, attempt, label, result_value)
+        return await self._complete(client, task, spec, attempt, label, result_value)
 
     async def _fail_exit(
         self,
+        client: KitaruAPIClient,
         task: TaskResponse,
         attempt: int,
         label: str,
@@ -185,6 +208,7 @@ class TaskRunner:
         """Fail a task for a nonzero exit, attaching a readable result as diagnostic.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Task the transition is fenced by.
             attempt: Attempt the transition is fenced by.
             label: Process label used in the error message.
@@ -204,21 +228,24 @@ class TaskRunner:
         error = _with_tail(f"{label} process exited with code {returncode}.", tail)
         result_value = _read_diagnostic_result(result_path)
         updated = await self._update(
+            client,
             task.id,
             attempt,
             TaskUpdateRequest(
                 status=TaskStatus.FAILED,
-                attempt=attempt,
                 error=error,
                 result=result_value,
             ),
         )
         return updated if updated is not None else task
 
-    async def _fail(self, task: TaskResponse, attempt: int, error: str) -> TaskResponse:
+    async def _fail(
+        self, client: KitaruAPIClient, task: TaskResponse, attempt: int, error: str
+    ) -> TaskResponse:
         """Fail a task with an error and no result.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Task the transition is fenced by.
             attempt: Attempt the transition is fenced by.
             error: Error message.
@@ -228,14 +255,16 @@ class TaskRunner:
         """
         logger.info("Task %s failed: %s", task.id, error)
         updated = await self._update(
+            client,
             task.id,
             attempt,
-            TaskUpdateRequest(status=TaskStatus.FAILED, attempt=attempt, error=error),
+            TaskUpdateRequest(status=TaskStatus.FAILED, error=error),
         )
         return updated if updated is not None else task
 
     async def _complete(
         self,
+        client: KitaruAPIClient,
         task: TaskResponse,
         spec: TaskSpecResponse,
         attempt: int,
@@ -245,6 +274,7 @@ class TaskRunner:
         """Complete a task, resolving a 409 into a precise failure.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Task the transition is fenced by.
             spec: Execution spec of the task.
             attempt: Attempt the transition is fenced by.
@@ -255,29 +285,42 @@ class TaskRunner:
             Task carrying the transition the runner was able to write.
         """
         try:
-            updated = await self._ctx.client.tasks.update(
+            updated = await client.tasks.update(
                 task.id,
-                TaskUpdateRequest(
-                    status=TaskStatus.COMPLETED, attempt=attempt, result=result_value
-                ),
+                TaskUpdateRequest(status=TaskStatus.COMPLETED, result=result_value),
             )
             logger.info("Task %s completed.", task.id)
             return updated
         except APIError as exc:
-            if exc.status_code != 409:
-                logger.warning("Failed to complete task %s: %s", task.id, exc)
+            if exc.status_code == 409:
+                return await self._resolve_completion_conflict(
+                    client, task, spec, attempt, label
+                )
+            if isinstance(exc, _STALE_TOKEN_ERRORS):
+                logger.info(
+                    "Task %s attempt %s token was rejected while completing.",
+                    task.id,
+                    attempt,
+                )
                 return task
-            return await self._resolve_completion_conflict(task, spec, attempt, label)
+            logger.warning("Failed to complete task %s: %s", task.id, exc)
+            return task
         except httpx.TransportError as exc:
             logger.warning("Failed to complete task %s: %s", task.id, exc)
             return task
 
     async def _resolve_completion_conflict(
-        self, task: TaskResponse, spec: TaskSpecResponse, attempt: int, label: str
+        self,
+        client: KitaruAPIClient,
+        task: TaskResponse,
+        spec: TaskSpecResponse,
+        attempt: int,
+        label: str,
     ) -> TaskResponse:
         """Fetch the task after a rejected completion and fail it precisely.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Task the transition is fenced by.
             spec: Execution spec of the task.
             attempt: Attempt the completion was fenced by.
@@ -289,8 +332,23 @@ class TaskRunner:
             failure.
         """
         try:
-            current = await self._ctx.client.tasks.get(task.id)
-        except (APIError, httpx.TransportError) as exc:
+            current = await client.tasks.get(task.id)
+        except APIError as exc:
+            if isinstance(exc, _STALE_TOKEN_ERRORS):
+                logger.info(
+                    "Task %s attempt %s token was rejected while resolving a "
+                    "completion conflict.",
+                    task.id,
+                    attempt,
+                )
+            else:
+                logger.warning(
+                    "Failed to fetch task %s after a completion conflict: %s",
+                    task.id,
+                    exc,
+                )
+            return task
+        except httpx.TransportError as exc:
             logger.warning(
                 "Failed to fetch task %s after a completion conflict: %s", task.id, exc
             )
@@ -303,15 +361,16 @@ class TaskRunner:
                 attempt,
             )
             return current
-        error = await self._build_completion_error(current, spec.kind, label)
-        return await self._fail(current, attempt, error)
+        error = await self._build_completion_error(client, current, spec.kind, label)
+        return await self._fail(client, current, attempt, error)
 
     async def _build_completion_error(
-        self, task: TaskResponse, kind: TaskKind, label: str
+        self, client: KitaruAPIClient, task: TaskResponse, kind: TaskKind, label: str
     ) -> str:
         """Build the precise error a rejected completion failed with.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task: Freshly fetched task, still on the attempt being reported.
             kind: Kind of the task.
             label: Process label used in the fallback error message.
@@ -328,7 +387,7 @@ class TaskRunner:
                 )
             return f"{label} process exited successfully without writing a result."
         try:
-            session = await self._ctx.client.sessions.get(task.result_session_id)
+            session = await client.sessions.get(task.result_session_id)
         except (APIError, httpx.TransportError) as exc:
             logger.warning(
                 "Failed to fetch session %s: %s", task.result_session_id, exc
@@ -339,11 +398,16 @@ class TaskRunner:
         return f"{label} process exited successfully without writing a result."
 
     async def _update(
-        self, task_id: uuid.UUID, attempt: int, request: TaskUpdateRequest
+        self,
+        client: KitaruAPIClient,
+        task_id: uuid.UUID,
+        attempt: int,
+        request: TaskUpdateRequest,
     ) -> TaskResponse | None:
         """Apply a status transition, logging and swallowing any failure.
 
         Args:
+            client: Task-token client scoped to this task and attempt.
             task_id: Id of the task being transitioned.
             attempt: Attempt the transition is fenced by.
             request: Task update request.
@@ -353,11 +417,19 @@ class TaskRunner:
             request failed.
         """
         try:
-            return await self._ctx.client.tasks.update(task_id, request)
+            return await client.tasks.update(task_id, request)
         except APIError as exc:
             if exc.status_code == 409:
                 logger.info(
                     "Task %s attempt %s is stale, skipping the %s transition.",
+                    task_id,
+                    attempt,
+                    request.status,
+                )
+            elif isinstance(exc, _STALE_TOKEN_ERRORS):
+                logger.info(
+                    "Task %s attempt %s token was rejected, skipping the %s "
+                    "transition.",
                     task_id,
                     attempt,
                     request.status,

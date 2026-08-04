@@ -14,7 +14,7 @@
 """SQL job repository."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select
 
@@ -94,6 +94,18 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
         if row is None:
             raise JobNotFound(job_id)
         return row.to_domain()
+
+    async def get_many(self, job_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Job]:
+        """Bulk-load jobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            job_ids: Ids of the jobs to load.
+
+        Returns:
+            Stored jobs keyed by id.
+        """
+        rows = await self._load_by_ids(job_ids)
+        return {job_id: row.to_domain() for job_id, row in rows.items()}
 
     async def query(self, job_filter: JobFilter) -> tuple[list[Job], str | None]:
         """Query jobs matching a filter.

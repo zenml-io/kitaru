@@ -21,6 +21,8 @@ import pytest
 from conftest import (
     ReplayServices,
     build_replay_services,
+    build_task_actor,
+    build_worker_actor,
     create_agent,
     create_agent_version,
     create_blob,
@@ -39,7 +41,9 @@ from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+)
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
@@ -142,10 +146,14 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert agent_task.on_failure is TaskOnFailure.ABORT
 
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 1
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
     result_session = await create_session(
@@ -164,7 +172,9 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     await services.tasks.update(stored_agent_task)
 
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.COMPLETED, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.COMPLETED),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
     replay_after = await services.replays.get(bundle.replay.id)
@@ -180,19 +190,22 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert eval_task.plugin_version_id == evaluator.id
     assert eval_task.on_failure is TaskOnFailure.ABORT
 
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 1
     await services.task_service.update_task(
-        eval_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        eval_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, eval_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
         eval_task.id,
         TaskUpdate(
             status=TaskStatus.COMPLETED,
-            attempt=1,
             result=[{"name": "accuracy", "score": 0.9}],
         ),
-        actor=ACTOR,
+        actor=build_task_actor(ACTOR.account, eval_task.id, 1, worker.id),
     )
 
     evaluations, _ = await services.evaluations.query(
@@ -238,18 +251,21 @@ async def test_evaluate_baselines_skips_already_scored_pairs(
         on_failure=TaskOnFailure.CONTINUE,
     )
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     await services.task_service.update_task(
-        prior_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
         prior_task.id,
         TaskUpdate(
             status=TaskStatus.COMPLETED,
-            attempt=1,
             result=[{"name": "accuracy", "score": 1.0}],
         ),
-        actor=ACTOR,
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
     )
 
     bundle = await services.replay_service.create_replay(
@@ -299,16 +315,20 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
     baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
 
     worker = await create_worker(services.workers, ACTOR.account.id)
-    claimed = await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     assert len(claimed) == 2
 
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
         agent_task.id,
-        TaskUpdate(status=TaskStatus.FAILED, attempt=1, error="boom"),
-        actor=ACTOR,
+        TaskUpdate(status=TaskStatus.FAILED, error="boom"),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
     baseline_after = await services.tasks.get(baseline_task.id)
@@ -316,7 +336,9 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
     assert baseline_after.cancel_requested_at is not None
 
     await services.task_service.update_task(
-        baseline_task.id, TaskUpdate(status=TaskStatus.CANCELED, attempt=1), actor=ACTOR
+        baseline_task.id,
+        TaskUpdate(status=TaskStatus.CANCELED),
+        actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
 
     job_after = await services.jobs.get(bundle.replay.job_id)
@@ -351,21 +373,27 @@ async def test_baseline_evaluator_failure_fails_the_replay(
     baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
 
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     await services.task_service.update_task(
-        baseline_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        baseline_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
         baseline_task.id,
-        TaskUpdate(status=TaskStatus.FAILED, attempt=1, error="scoring failed"),
-        actor=ACTOR,
+        TaskUpdate(status=TaskStatus.FAILED, error="scoring failed"),
+        actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
 
     agent_after = await services.tasks.get(agent_task.id)
     assert agent_after.cancel_requested_at is not None
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.CANCELED, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.CANCELED),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
     job_after = await services.jobs.get(bundle.replay.job_id)
@@ -499,18 +527,21 @@ async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
         on_failure=TaskOnFailure.CONTINUE,
     )
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
     await services.task_service.update_task(
-        prior_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
         prior_task.id,
         TaskUpdate(
             status=TaskStatus.COMPLETED,
-            attempt=1,
             result=[{"name": "accuracy", "score": 1.0}],
         ),
-        actor=ACTOR,
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
     )
 
     cohort_version = await _cohort_version(
@@ -721,7 +752,9 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
     )
     replay = bundles[0].replay
     worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     canceling_run, _ = await services.experiment_run_service.cancel_run(
         run.id, actor=ACTOR
@@ -736,10 +769,14 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
     assert agent_task.cancel_requested_at is not None
 
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
     await services.task_service.update_task(
-        agent_task.id, TaskUpdate(status=TaskStatus.CANCELED, attempt=1), actor=ACTOR
+        agent_task.id,
+        TaskUpdate(status=TaskStatus.CANCELED),
+        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
     final_run, counts = await services.experiment_run_service.get_run(
@@ -779,7 +816,9 @@ async def test_finalize_precedence_canceling_beats_failure(
     worker = await create_worker(services.workers, ACTOR.account.id)
     # Claim both agent tasks so cancel_run only stamps cancel_requested_at,
     # leaving their terminal status to this test's simulated transitions.
-    await services.task_service.claim_tasks(worker.id, 10, actor=ACTOR)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
 
     await services.experiment_run_service.cancel_run(run.id, actor=ACTOR)
 
@@ -793,18 +832,24 @@ async def test_finalize_precedence_canceling_beats_failure(
     task_b = tasks_b[0]
 
     await services.task_service.update_task(
-        task_a.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task_a.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task_a.id, 1, worker.id),
     )
     await services.task_service.update_task(
         task_a.id,
-        TaskUpdate(status=TaskStatus.FAILED, attempt=1, error="crashed"),
-        actor=ACTOR,
+        TaskUpdate(status=TaskStatus.FAILED, error="crashed"),
+        actor=build_task_actor(ACTOR.account, task_a.id, 1, worker.id),
     )
     await services.task_service.update_task(
-        task_b.id, TaskUpdate(status=TaskStatus.RUNNING, attempt=1), actor=ACTOR
+        task_b.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, task_b.id, 1, worker.id),
     )
     await services.task_service.update_task(
-        task_b.id, TaskUpdate(status=TaskStatus.CANCELED, attempt=1), actor=ACTOR
+        task_b.id,
+        TaskUpdate(status=TaskStatus.CANCELED),
+        actor=build_task_actor(ACTOR.account, task_b.id, 1, worker.id),
     )
 
     final_run, counts = await services.experiment_run_service.get_run(
