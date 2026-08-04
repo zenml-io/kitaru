@@ -33,5 +33,4 @@ def import_create_to_command(body: ImportCreateRequest) -> ImportCreate:
         version=body.version,
         payload_blob_id=body.payload_blob_id,
         params=body.params,
-        tags=body.tags,
     )
