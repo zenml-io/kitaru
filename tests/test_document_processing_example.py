@@ -273,11 +273,12 @@ def test_example_readme_teaches_the_complete_cli_journey() -> None:
 
 
 def test_canonical_example_uses_bundled_starting_point_evaluators() -> None:
-    """Teach explicit bounded evaluation without plugin registration."""
+    """Teach tag-based evaluation without discovery or ID plumbing."""
     readme = (CANONICAL_EXAMPLE_DIR / "README.md").read_text()
 
-    assert "kitaru evaluator list" in readme
-    assert "--sessions-file /tmp/kitaru-document-session-ids.txt" in readme
-    for evaluator in ("cost@1", "latency@1", "tool-call-patterns@1"):
+    assert "--tag document-baseline" in readme
+    assert "kitaru evaluator list" not in readme
+    assert "--sessions-file" not in readme
+    for evaluator in ("cost@latest", "latency@latest", "tool-call-patterns@latest"):
         assert f"--evaluator {evaluator}" in readme
     assert "kitaru evaluator register" not in readme

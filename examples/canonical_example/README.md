@@ -123,6 +123,7 @@ uv run kitaru session import \
   traces/langfuse-traces.jsonl \
   --importer langfuse@latest \
   --agent document-agent \
+  --tag document-baseline \
   --params '{"source_instance":"canonical-example"}' \
   --media-type application/x-ndjson \
   --wait
@@ -146,35 +147,20 @@ unbounded evaluation queue.
 
 ## Step 5: Find useful starting points
 
-The local server provides three deterministic evaluators with Kitaru. Confirm
-that they are available:
-
-```bash
-uv run kitaru evaluator list
-```
-
-Select a bounded sample of 12 imported sessions and write their IDs to a text
-file:
-
-```bash
-uv run kitaru --output json session list \
-  --agent document-agent \
-  --origin imported \
-  --size 12 \
-  | jq -r '.items[].id' \
-  > /tmp/kitaru-document-session-ids.txt
-```
-
-Run the built-in evaluators against that sample:
+Run the built-in evaluators against every session from this import:
 
 ```bash
 uv run kitaru session evaluate \
-  --sessions-file /tmp/kitaru-document-session-ids.txt \
-  --evaluator cost@1 \
-  --evaluator latency@1 \
-  --evaluator tool-call-patterns@1 \
+  --tag document-baseline \
+  --evaluator cost@latest \
+  --evaluator latency@latest \
+  --evaluator tool-call-patterns@latest \
   --wait
 ```
+
+The tag is the selection boundary. You do not need to list sessions or copy
+their IDs. To evaluate every session in Kitaru instead, replace
+`--tag document-baseline` with `--all`.
 
 These evaluators make no model calls. They report recorded cost, elapsed time,
 and repeated tool usage. This document agent has no tools, so
