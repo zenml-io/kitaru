@@ -193,9 +193,7 @@ def test_contract_environment_isolates_selected_credentials_and_cleans_up(
         payload = json.loads(isolated_path.read_text(encoding="utf-8"))
         assert list(payload) == [selected_server]
         assert payload[selected_server]["api_key"] == "KITKEY_selected"
-        task_env = build_process_env(
-            uuid.uuid4(), {}, {}, {}, token="task-token"
-        )
+        task_env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
         assert task_env["KITARU_TASK_TOKEN"] == "task-token"
         assert "KITARU_CREDENTIALS_PATH" not in task_env
         if os.name == "posix":
