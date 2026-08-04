@@ -24,11 +24,11 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeSessionRepository,
+    FakeTagRepository,
     FakeTaskRepository,
     asgi_api_client,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest
-from kitaru.api_models.v1.base import ListParams
 from kitaru.api_models.v1.cohort import (
     CohortCreateRequest,
     CohortListParams,
@@ -37,11 +37,17 @@ from kitaru.api_models.v1.cohort import (
 )
 from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
+    CohortVersionListParams,
     CohortVersionResponse,
     CohortVersionUpdateRequest,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagResourceType,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -51,6 +57,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_cohort_service,
     get_cohort_version_service,
     get_session_service,
+    get_tag_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -61,6 +68,7 @@ from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
 )
 from kitaru.server.application.services.session_service import SessionService
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -79,8 +87,9 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     agent_repository = FakeAgentRepository()
     session_repository = FakeSessionRepository()
     cohort_repository = FakeCohortRepository()
+    tag_repository = FakeTagRepository()
     cohort_version_repository = FakeCohortVersionRepository(
-        cohorts=cohort_repository, sessions=session_repository
+        cohorts=cohort_repository, sessions=session_repository, tags=tag_repository
     )
     app.dependency_overrides[get_agent_service] = lambda: AgentService(
         repository=agent_repository
@@ -97,6 +106,9 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         repository=cohort_version_repository,
         cohort_repository=cohort_repository,
         session_repository=session_repository,
+    )
+    app.dependency_overrides[get_tag_service] = lambda: TagService(
+        repository=tag_repository
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
@@ -246,6 +258,26 @@ async def test_create_version(api_client: KitaruAPIClient) -> None:
     assert version.session_count == 2
 
 
+async def test_create_version_from_baseline(api_client: KitaruAPIClient) -> None:
+    """Create a version from an older baseline through the SDK."""
+    agent_id = await _make_agent(api_client)
+    session_ids = [await _make_session(api_client, agent_id) for _ in range(2)]
+    cohort = await api_client.cohorts.create(
+        CohortCreateRequest(name="cohort", agent_id=agent_id)
+    )
+    baseline = await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(add_session_ids=session_ids)
+    )
+    await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(remove_session_ids=[session_ids[0]])
+    )
+    restored = await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest(baseline_id=baseline.id)
+    )
+    assert restored.version == 3
+    assert restored.session_count == 2
+
+
 async def test_list_versions(api_client: KitaruAPIClient) -> None:
     """List the versions of a cohort through the SDK."""
     agent_id = await _make_agent(api_client)
@@ -271,6 +303,33 @@ async def test_list_versions(api_client: KitaruAPIClient) -> None:
     assert [item.id for item in page.items] == [v2.id, v1.id]
 
 
+async def test_list_versions_filters_by_tag(api_client: KitaruAPIClient) -> None:
+    """List versions filtered by tag through the SDK."""
+    agent_id = await _make_agent(api_client)
+    cohort = await api_client.cohorts.create(
+        CohortCreateRequest(name="cohort", agent_id=agent_id)
+    )
+    tagged = await api_client.cohorts.create_version(
+        cohort.id, CohortVersionCreateRequest()
+    )
+    await api_client.cohorts.create_version(cohort.id, CohortVersionCreateRequest())
+    tag = await api_client.tags.create(TagCreateRequest(name="smoke-test"))
+    await api_client.tags.create_link(
+        tag.id,
+        TagLinkCreateRequest(
+            resource_type=TagResourceType.COHORT_VERSION, resource_id=tagged.id
+        ),
+    )
+
+    page = await api_client.cohorts.list_versions(
+        cohort.id,
+        CohortVersionListParams(
+            filter=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
+        ),
+    )
+    assert [item.id for item in page.items] == [tagged.id]
+
+
 async def test_iter_versions(api_client: KitaruAPIClient) -> None:
     """Iterate every version of a cohort across pages through the SDK."""
     agent_id = await _make_agent(api_client)
@@ -285,7 +344,7 @@ async def test_iter_versions(api_client: KitaruAPIClient) -> None:
     collected = [
         item.id
         async for item in api_client.cohorts.iter_versions(
-            cohort.id, ListParams(size=1)
+            cohort.id, CohortVersionListParams(size=1)
         )
     ]
 

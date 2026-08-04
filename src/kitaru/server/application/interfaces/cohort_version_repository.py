@@ -95,6 +95,9 @@ class CohortVersionRepository(Protocol):
         Args:
             cohort_version_id: Id of the cohort version.
 
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
         Returns:
             Ordered member session ids.
         """

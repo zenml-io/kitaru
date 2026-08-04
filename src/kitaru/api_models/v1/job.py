@@ -33,10 +33,20 @@ class JobStatus(StrEnum):
     CANCELED = "canceled"
 
 
+class JobKind(StrEnum):
+    """Job kind."""
+
+    SESSION_RUN = "session_run"
+    IMPORT = "import"
+    EVALUATION = "evaluation"
+    REPLAY = "replay"
+
+
 class JobResponse(OwnedResponseModel):
     """Job response."""
 
     id: uuid.UUID = Field(description="Job id.")
+    kind: JobKind = Field(description="Kind of workflow that created the job.")
     status: JobStatus = Field(description="Job status.")
     cancel_requested_at: datetime | None = Field(
         default=None, description="Time cancellation was requested."

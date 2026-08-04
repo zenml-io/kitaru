@@ -26,9 +26,10 @@ from kitaru.api_models.v1.agent import (
 )
 from kitaru.api_models.v1.agent_version import (
     AgentVersionCreateRequest,
+    AgentVersionListParams,
     AgentVersionResponse,
 )
-from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.base import Page
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -217,7 +218,7 @@ async def list_agent_versions(
     agent_id: uuid.UUID,
     service: Annotated[AgentVersionService, Depends(get_agent_version_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-    params: Annotated[ListParams, Query()],
+    params: Annotated[AgentVersionListParams, Query()],
 ) -> Page[AgentVersionResponse]:
     """List the versions of an agent.
 
@@ -228,7 +229,7 @@ async def list_agent_versions(
         agent_id: Id of the agent.
         service: Agent version service.
         actor: Caller context.
-        params: List params.
+        params: Agent version list params.
 
     Returns:
         Page of agent versions.

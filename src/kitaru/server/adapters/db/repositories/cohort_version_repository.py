@@ -14,10 +14,16 @@
 """SQL cohort version repository."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select, update
 
+from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.filtering import (
+    FilterBinding,
+    build_tag_condition_binding,
+    compile_filter_expression,
+)
 from kitaru.server.adapters.db.orm.cohort import CohortORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
@@ -37,6 +43,12 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionInUse,
     CohortVersionNotFound,
 )
+
+COHORT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "tag": build_tag_condition_binding(
+        TagResourceType.COHORT_VERSION, CohortVersionORM.id
+    ),
+}
 
 
 class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
@@ -143,6 +155,12 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         statement = select(CohortVersionORM).where(
             CohortVersionORM.cohort_id == version_filter.cohort_id
         )
+        if version_filter.expression is not None:
+            statement = statement.where(
+                compile_filter_expression(
+                    version_filter.expression, COHORT_VERSION_FILTER_BINDINGS
+                )
+            )
         rows, next_cursor = await paginate(
             self._session, statement, version_filter, id_column=CohortVersionORM.id
         )
@@ -154,16 +172,28 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         Args:
             cohort_version_id: Id of the cohort version.
 
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
         Returns:
             Ordered member session ids.
         """
+        # Read the version row and its links in one statement, so a delete
+        # committing between two separate reads cannot produce a silently
+        # empty member list.
         statement = (
-            select(CohortVersionSessionORM.session_id)
-            .where(CohortVersionSessionORM.cohort_version_id == cohort_version_id)
+            select(CohortVersionORM.id, CohortVersionSessionORM.session_id)
+            .outerjoin(
+                CohortVersionSessionORM,
+                CohortVersionSessionORM.cohort_version_id == CohortVersionORM.id,
+            )
+            .where(CohortVersionORM.id == cohort_version_id)
             .order_by(CohortVersionSessionORM.index)
         )
-        rows = (await self._session.scalars(statement)).all()
-        return list(rows)
+        rows = (await self._session.execute(statement)).all()
+        if not rows:
+            raise self._not_found(cohort_version_id)
+        return [session_id for _, session_id in rows if session_id is not None]
 
     async def update(self, version: CohortVersion) -> CohortVersion:
         """Persist changes to an existing cohort version.

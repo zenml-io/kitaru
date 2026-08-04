@@ -20,11 +20,12 @@ from kitaru.api_models.v1.agent_version import (
     AgentCapabilities as WireAgentCapabilities,
 )
 from kitaru.api_models.v1.agent_version import (
+    AgentVersionListParams,
     AgentVersionResponse,
     AgentVersionUpdateRequest,
 )
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
-from kitaru.api_models.v1.base import ListParams
+from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
     AgentVersionUpdate,
@@ -131,19 +132,22 @@ def agent_version_to_response(agent_version: AgentVersion) -> AgentVersionRespon
 
 
 def agent_version_list_params_to_filter(
-    agent_id: uuid.UUID, params: ListParams
+    agent_id: uuid.UUID, params: AgentVersionListParams
 ) -> AgentVersionFilter:
     """Convert list params to the application filter scoped to one agent.
 
     Args:
         agent_id: Id of the agent whose versions to list.
-        params: List params.
+        params: Agent version list params.
 
     Returns:
         Agent version filter.
     """
     return AgentVersionFilter(
         agent_id=agent_id,
+        expression=filter_to_expression(params.filter)
+        if params.filter is not None
+        else None,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

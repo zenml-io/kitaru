@@ -13,17 +13,19 @@
 #  permissions and limitations under the License.
 """Tests for the agent version routes."""
 
+import json
 import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
 
-from conftest import FakeAgentRepository, FakeAgentVersionRepository
+from conftest import FakeAgentRepository, FakeAgentVersionRepository, FakeTagRepository
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
     get_agent_version_service,
+    get_tag_service,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -32,6 +34,7 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
+from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -44,8 +47,25 @@ def agent_repository() -> FakeAgentRepository:
 
 
 @pytest.fixture
+def tag_repository() -> FakeTagRepository:
+    """Provide the fake tag repository backing the app."""
+    return FakeTagRepository()
+
+
+@pytest.fixture
+def agent_version_repository(
+    agent_repository: FakeAgentRepository,
+    tag_repository: FakeTagRepository,
+) -> FakeAgentVersionRepository:
+    """Provide the fake agent version repository backing the app, tag-aware."""
+    return FakeAgentVersionRepository(agent_repository, tags=tag_repository)
+
+
+@pytest.fixture
 async def client(
     agent_repository: FakeAgentRepository,
+    tag_repository: FakeTagRepository,
+    agent_version_repository: FakeAgentVersionRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with fake-backed agent services."""
     app = create_app(
@@ -56,11 +76,11 @@ async def client(
         )
     )
     agent_service = AgentService(repository=agent_repository)
-    version_service = AgentVersionService(
-        repository=FakeAgentVersionRepository(agent_repository)
-    )
+    version_service = AgentVersionService(repository=agent_version_repository)
+    tag_service = TagService(repository=tag_repository)
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
+    app.dependency_overrides[get_tag_service] = lambda: tag_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -72,6 +92,29 @@ async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to version."""
     created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
+
+
+async def test_list_agent_versions_filters_by_tag(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Filter agent versions linked to a tag through tag_link."""
+    tagged = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
+    await client.post(f"/v1/agents/{agent_id}/versions", json={})
+
+    tag = (await client.post("/v1/tags", json={"name": "smoke-test"})).json()
+    await client.post(
+        f"/v1/tags/{tag['id']}/links",
+        json={"resource_type": "agent_version", "resource_id": tagged["id"]},
+    )
+
+    filter_expression = {"field": "tag", "op": "eq", "value": "smoke-test"}
+    response = await client.get(
+        f"/v1/agents/{agent_id}/versions",
+        params={"filter": json.dumps(filter_expression)},
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["id"] for item in items] == [tagged["id"]]
 
 
 async def test_get_agent_version(client: httpx.AsyncClient, agent_id: str) -> None:

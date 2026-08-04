@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Sequence
 
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import (
     EventDispatcher,
@@ -80,7 +80,9 @@ async def create_replay_pipeline(
     Returns:
         Created replay.
     """
-    job = await job_repository.create(Job(owner_id=actor.account.id))
+    job = await job_repository.create(
+        Job(owner_id=actor.account.id, kind=JobKind.REPLAY)
+    )
     replay = await replay_repository.create(
         Replay(
             owner_id=actor.account.id,
@@ -151,7 +153,7 @@ async def create_replay_pipelines(
     """
     if not baselines:
         return []
-    jobs = [Job(owner_id=actor.account.id) for _ in baselines]
+    jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in baselines]
     replays = [
         Replay(
             owner_id=actor.account.id,

@@ -17,7 +17,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from kitaru.api_models.v1.base import ListParams, Page
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import (
     CohortCreateRequest,
     CohortListParams,
@@ -26,6 +26,7 @@ from kitaru.api_models.v1.cohort import (
 )
 from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
+    CohortVersionListParams,
     CohortVersionResponse,
 )
 from kitaru.client.resources.pagination import iterate_pages
@@ -169,7 +170,8 @@ class CohortsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                cohort and 422 for an invalid or mismatched member list.
+                cohort or baseline version and 422 for an invalid or
+                mismatched member list.
 
         Returns:
             Created cohort version.
@@ -182,13 +184,13 @@ class CohortsResource:
         return CohortVersionResponse.model_validate(response.json())
 
     async def list_versions(
-        self, cohort_id: uuid.UUID, params: ListParams | None = None
+        self, cohort_id: uuid.UUID, params: CohortVersionListParams | None = None
     ) -> Page[CohortVersionResponse]:
         """List the versions of a cohort.
 
         Args:
             cohort_id: Id of the cohort.
-            params: List params.
+            params: Cohort version list params.
 
         Raises:
             APIError: The request failed.
@@ -196,7 +198,7 @@ class CohortsResource:
         Returns:
             Page of cohort versions.
         """
-        params = params or ListParams()
+        params = params or CohortVersionListParams()
         response = await self._client.request(
             "GET",
             f"/v1/cohorts/{cohort_id}/versions",
@@ -205,13 +207,13 @@ class CohortsResource:
         return Page[CohortVersionResponse].model_validate(response.json())
 
     async def iter_versions(
-        self, cohort_id: uuid.UUID, params: ListParams | None = None
+        self, cohort_id: uuid.UUID, params: CohortVersionListParams | None = None
     ) -> AsyncIterator[CohortVersionResponse]:
         """Iterate over every version of a cohort.
 
         Args:
             cohort_id: Id of the cohort.
-            params: List params.
+            params: Cohort version list params.
 
         Raises:
             APIError: The request failed.
@@ -220,7 +222,7 @@ class CohortsResource:
             Async iterator over every version of the cohort.
         """
         async for item in iterate_pages(
-            params or ListParams(),
+            params or CohortVersionListParams(),
             lambda page_params: self.list_versions(cohort_id, page_params),
         ):
             yield item

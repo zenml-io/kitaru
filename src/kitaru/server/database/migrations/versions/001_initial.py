@@ -159,6 +159,7 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
@@ -168,6 +169,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.create_index("ix_job_kind", ["kind"], unique=False)
         batch_op.create_index("ix_job_status", ["status"], unique=False)
 
     op.create_table(
@@ -458,6 +460,14 @@ def upgrade() -> None:
             "experiment_id", "number", name="uq_experiment_run_experiment_id_number"
         ),
     )
+    with op.batch_alter_table("experiment_run", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_experiment_run_agent_version_id", ["agent_version_id"], unique=False
+        )
+        batch_op.create_index(
+            "ix_experiment_run_cohort_version_id", ["cohort_version_id"], unique=False
+        )
+
     op.create_table(
         "session",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
@@ -892,6 +902,10 @@ def downgrade() -> None:
         batch_op.drop_index("ix_session_agent_id_started_at")
 
     op.drop_table("session")
+    with op.batch_alter_table("experiment_run", schema=None) as batch_op:
+        batch_op.drop_index("ix_experiment_run_cohort_version_id")
+        batch_op.drop_index("ix_experiment_run_agent_version_id")
+
     op.drop_table("experiment_run")
     op.drop_table("agent_version_secret")
     with op.batch_alter_table("tag_link", schema=None) as batch_op:
@@ -922,6 +936,7 @@ def downgrade() -> None:
 
     op.drop_table("plugin")
     with op.batch_alter_table("job", schema=None) as batch_op:
+        batch_op.drop_index("ix_job_kind")
         batch_op.drop_index("ix_job_status")
 
     op.drop_table("job")

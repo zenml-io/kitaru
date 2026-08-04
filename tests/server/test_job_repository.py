@@ -20,7 +20,7 @@ import pytest
 
 from conftest import FakeJobRepository, pg_session, postgres_available
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -47,17 +47,22 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         yield SQLJobRepository(session), owner.id
 
 
-def _job(owner_id: uuid.UUID, status: JobStatus = JobStatus.PENDING) -> Job:
+def _job(
+    owner_id: uuid.UUID,
+    kind: JobKind = JobKind.SESSION_RUN,
+    status: JobStatus = JobStatus.PENDING,
+) -> Job:
     """Build a job for repository tests.
 
     Args:
         owner_id: Id of the owning account.
+        kind: Job kind.
         status: Job status.
 
     Returns:
         Unstored job.
     """
-    return Job(owner_id=owner_id, status=status)
+    return Job(owner_id=owner_id, kind=kind, status=status)
 
 
 async def test_create_sets_timestamps(setup: Setup) -> None:
@@ -156,6 +161,23 @@ async def test_query_filters_by_status(setup: Setup) -> None:
     )
     assert next_cursor is None
     assert [job.id for job in jobs] == [completed.id]
+
+
+async def test_query_filters_by_kind(setup: Setup) -> None:
+    """Filter jobs by kind."""
+    repository, owner_id = setup
+    await repository.create(_job(owner_id, kind=JobKind.SESSION_RUN))
+    replay = await repository.create(_job(owner_id, kind=JobKind.REPLAY))
+
+    jobs, next_cursor = await repository.query(
+        JobFilter(
+            expression=FilterCondition(
+                field="kind", op=FilterOp.EQ, value=JobKind.REPLAY
+            )
+        )
+    )
+    assert next_cursor is None
+    assert [job.id for job in jobs] == [replay.id]
 
 
 async def test_query_walks_pages(setup: Setup) -> None:
