@@ -216,8 +216,12 @@ jobs:
           uv run ruff format --check .
       - name: Type check
         run: uv run ty check
-      - name: Test
-        run: uv run pytest --ignore=tests/mcp
+      - name: Check MCP schemas
+        run: uv run python scripts/report_mcp_schema.py --check
+      - name: Test base and MCP suites
+        run: |
+          uv run pytest --ignore=tests/mcp
+          uv run pytest tests/mcp tests/client/test_api_client.py tests/client/test_references.py tests/cli/test_config.py
       - name: Check migration consistency
         run: |
           uv sync --frozen --extra server --extra otel
@@ -258,6 +262,8 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+      - name: Test clean base and MCP wheel installations
+        run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
       - name: List build artifacts
         run: ls -lh dist/
 

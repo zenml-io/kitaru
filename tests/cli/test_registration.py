@@ -10,6 +10,7 @@ import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -75,6 +76,12 @@ class StubResource:
         """Yield configured parents."""
         for item in self.items:
             yield item
+
+    async def list(self, params: Any = None) -> Any:
+        """Return one configured bounded parent page."""
+        assert params is not None
+        assert params.size == 2
+        return SimpleNamespace(items=self.items[: params.size], next_cursor=None)
 
     async def get(self, item_id: uuid.UUID) -> StubModel:
         """Return one exact configured UUID."""

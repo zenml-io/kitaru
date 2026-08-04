@@ -20,7 +20,6 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from kitaru.api_models.v1.agent import AgentListParams
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
@@ -49,6 +48,11 @@ from kitaru.cli.registration import (
 )
 from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
+from kitaru.client.references import (
+    ParentKind,
+    ReferenceResolutionError,
+    resolve_parent,
+)
 
 
 def _read_payload(path: Path) -> bytes:
@@ -431,26 +435,16 @@ async def list_sessions(
 
 
 async def _get_agent_filter_id(client: Any, reference: str) -> uuid.UUID:
-    """Resolve a session agent filter with at most one bounded list request."""
+    """Resolve a session agent filter through the shared bounded helper."""
     try:
         return uuid.UUID(reference)
     except ValueError:
         pass
-    params = AgentListParams(
-        size=2,
-        filter=FilterCondition(field="name", op=FilterOp.EQ, value=reference),
-    )
-    page = await client.agents.list(params)
-    matches = [agent for agent in page.items if agent.name == reference]
-    if not matches:
-        raise CLIError("not_found", f"Agent {reference!r} was not found.")
-    if len(matches) > 1:
-        raise CLIError(
-            "conflict",
-            f"More than one agent has the exact name {reference!r}.",
-            details={"ids": [str(agent.id) for agent in matches]},
-        )
-    return matches[0].id
+    try:
+        agent = await resolve_parent(client, ParentKind.AGENT, reference)
+    except ReferenceResolutionError as error:
+        raise CLIError(error.code, error.message, details=error.details) from error
+    return agent.id
 
 
 async def get_session(client: Any, session_id: uuid.UUID) -> CommandResult:

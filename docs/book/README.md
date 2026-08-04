@@ -68,11 +68,7 @@ if __name__ == "__main__":
     # baseline reproduces the original; diff variant against it to isolate your change.
 ```
 
-`run(...)` returns a handle; `.wait()` blocks for the result and exposes
-`.exec_id`. `replay(exec_id, at="<checkpoint>", flow_overrides={...})`
-re-executes from that checkpoint, overriding flow inputs such as the model or
-prompt profile. The same loop is available over the [CLI](https://sdkdocs.kitaru.ai) and the
-[MCP server](agent-native/mcp-server.md) so a coding agent can drive it.
+`run(...)` returns a handle; `.wait()` blocks for the result and exposes `.exec_id`. `replay(exec_id, at="<checkpoint>", flow_overrides={...})` re-executes from that checkpoint, overriding flow inputs such as the model or prompt profile. The [CLI](https://sdkdocs.kitaru.ai) exposes the execution workflow, while the read-only-by-default [MCP server](agent-native/mcp-server.md) provides a compact v2 registry/activity interface and explicitly gated asynchronous triggers.
 
 See the [Quickstart](getting-started/quickstart.md) to install and run this
 yourself.

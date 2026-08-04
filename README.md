@@ -162,17 +162,16 @@ For raw-Python agents, `@flow` and `@checkpoint` around your calls give you
 the same recording without an adapter. Your model, your tools, your
 framework — Kitaru wraps them, not the other way around.
 
-### Drive it from your coding agent
+### Inspect it from your coding agent
 
-Everything in the loop is scriptable: each step has a CLI command
-(`kitaru executions list / logs / replay`) and an MCP tool, so Claude Code,
-Codex, or any MCP-capable agent can inspect traces, replay them, and read
-back the diff. Hook up the MCP server:
+Kitaru's optional v2 MCP server gives Claude Code, Codex, Cursor, and other MCP clients a compact typed interface for agents, sessions, cohorts, experiments, evaluators, replays, and asynchronous jobs. It starts in read-only mode with two tools; write and destructive tools are absent unless you explicitly select a broader mode.
 
 ```bash
-uv add "kitaru[mcp]"
-claude mcp add kitaru -- kitaru-mcp   # or point any agent's MCP config at `kitaru-mcp`
+uv add kitaru --extra mcp
+claude mcp add --scope project kitaru -- kitaru-mcp
 ```
+
+See the [MCP server guide](https://docs.zenml.io/kitaru/agent-native/mcp-server) before enabling standard or destructive mode.
 
 Claude Code users can also install the
 [kitaru-skills](https://github.com/zenml-io/kitaru-skills) plugin —
@@ -200,7 +199,7 @@ plane.
 | [Agents guide](https://docs.zenml.io/user-guides/agents-guide) | Run, replay, and improve production agents end to end |
 | [Examples](https://docs.zenml.io/kitaru/getting-started/examples) | Runnable workflows for every feature |
 | [Stacks](https://docs.zenml.io/kitaru/stacks) | Deploy to Kubernetes, AWS, GCP, or Azure |
-| [MCP server](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Query, replay, and manage executions from any MCP-capable agent |
+| [MCP server](https://docs.zenml.io/kitaru/agent-native/mcp-server) | Inspect and operate the Kitaru v2 API from a compact, read-only-by-default MCP server |
 
 ## 🌱 Origins
 

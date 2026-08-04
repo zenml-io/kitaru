@@ -129,7 +129,6 @@ Retrieve logs with:
 
 * `kitaru executions logs <exec_id>`
 * `KitaruClient().executions.logs(exec_id, ...)`
-* MCP `get_execution_logs`
 
 Configure the preferred backend destination with `kitaru log-store ...`.
 

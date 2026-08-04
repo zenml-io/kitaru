@@ -27,6 +27,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
 from kitaru.api_models.v1.worker import WorkerListParams
 from kitaru.cli.config import ResolvedTarget, resolve_credential
@@ -39,7 +40,7 @@ from kitaru.cli.output import (
     reset_output_context,
     set_output_context,
 )
-from kitaru.cli.registration import build_list_params, resolve_asset
+from kitaru.cli.registration import build_list_params
 from kitaru.client.credential_store import DIRECTORY_MODE, FILE_MODE, CredentialStore
 
 _ENV_MISSING = object()
@@ -387,9 +388,33 @@ async def list_workers(
 
 
 async def get_worker(client: Any, reference: str) -> CommandResult:
-    """Get a worker by exact UUID or exact case-sensitive name."""
-    item = await resolve_asset(client.workers, reference, "Worker")
-    return CommandResult(item=_worker_item(item))
+    """Get a worker by exact UUID or one bounded exact-name lookup."""
+    normalized = reference.strip()
+    if not normalized:
+        raise CLIError("invalid_arguments", "Worker reference cannot be blank.")
+    try:
+        worker_id = uuid.UUID(normalized)
+    except ValueError:
+        worker_id = None
+    if worker_id is not None:
+        item = await client.workers.get(worker_id)
+        return CommandResult(item=_worker_item(item))
+
+    params = WorkerListParams(
+        size=2,
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
+    )
+    page = await client.workers.list(params)
+    matches = [worker for worker in page.items if worker.name == normalized]
+    if not matches:
+        raise CLIError("not_found", f"Worker {normalized!r} was not found.")
+    if len(matches) > 1:
+        raise CLIError(
+            "conflict",
+            f"More than one worker has the exact name {normalized!r}.",
+            details={"ids": [str(worker.id) for worker in matches[:2]]},
+        )
+    return CommandResult(item=_worker_item(matches[0]))
 
 
 def _worker_item(worker: Any) -> dict[str, Any]:

@@ -11,341 +11,107 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Strict, non-secret local configuration and target resolution."""
-
-import json
-import os
-import re
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal
-from urllib.parse import urlsplit, urlunsplit
-
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+"""CLI compatibility adapters for neutral connection configuration."""
 
 from kitaru.cli.output import CLIError
-from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.credential_store import (
-    DIRECTORY_MODE,
-    FILE_MODE,
-    CredentialStore,
-    get_config_directory,
+from kitaru.client.connection import (
+    CONFIG_FILE_NAME,
+    CONFIG_KEYS,
+    CONTEXT_NAME_PATTERN,
+    ENV_CONFIG_PATH,
+    CLISettings,
+    ConfigurationMutationError,
+    ConnectionConfigurationError,
+    ContextConfig,
+    LocalConfig,
+    ResolvedCredential,
+    ResolvedTarget,
+    build_api_client,
+    get_config_path,
+    resolve_credential,
 )
-from kitaru.client.credentials import ServerCredentials
-
-ENV_CONFIG_PATH = "KITARU_CONFIG_PATH"
-CONFIG_FILE_NAME = "config.json"
-CONTEXT_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$")
-CONFIG_KEYS = ("cli.machine_mode",)
+from kitaru.client.connection import ConfigStore as _ConfigStore
+from kitaru.client.connection import resolve_target as _resolve_target
+from kitaru.client.connection import validate_context_name as _validate_context_name
+from kitaru.client.connection import validate_server_url as _validate_server_url
 
 
-class ContextConfig(BaseModel):
-    """One named server target."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    server_url: str
-
-
-class CLISettings(BaseModel):
-    """Persisted presentation preferences."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    machine_mode: bool = False
+def _get_cli_error(
+    error: ConnectionConfigurationError | ConfigurationMutationError,
+) -> CLIError:
+    """Translate one neutral configuration failure into the CLI contract."""
+    if isinstance(error, ConnectionConfigurationError):
+        return CLIError(
+            error.kind,
+            error.message,
+            details=error.details,
+            hint=error.hint,
+        )
+    return CLIError(error.kind, error.message)
 
 
-class LocalConfig(BaseModel):
-    """Versioned global CLI configuration document."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal[1] = 1
-    active_context: str | None = None
-    contexts: dict[str, ContextConfig] = Field(default_factory=dict)
-    cli: CLISettings = Field(default_factory=CLISettings)
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedTarget:
-    """Server URL selected for one invocation."""
-
-    server_url: str
-    source: Literal["explicit", "context", "environment", "active_context"]
-    context_name: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ResolvedCredential:
-    """Credential selected for one server without exposing it to output."""
-
-    source: Literal["environment", "stored", "none"]
-    api_key: str | None = None
-    stored: ServerCredentials | None = None
-
-
-class ConfigStore:
-    """Atomically persisted CLI configuration."""
-
-    def __init__(self, path: Path | None = None) -> None:
-        """Initialize the store.
-
-        Args:
-            path: Configuration path. Defaults to ``KITARU_CONFIG_PATH`` or
-                the Kitaru XDG configuration directory.
-        """
-        override = os.environ.get(ENV_CONFIG_PATH)
-        self.path = path or get_config_path()
-        self._secure_parent = path is None and override is None
-
-    @property
-    def manages_parent_directory(self) -> bool:
-        """Report whether the CLI owns the config file's parent directory."""
-        return self._secure_parent
+class ConfigStore(_ConfigStore):
+    """CLI-compatible configuration store backed by the neutral implementation."""
 
     def load(self) -> LocalConfig:
-        """Load and validate the current configuration.
-
-        Raises:
-            CLIError: The file is unreadable or invalid.
-
-        Returns:
-            Parsed configuration, or defaults when the file does not exist.
-        """
+        """Load configuration and expose failures as ``CLIError``."""
         try:
-            raw = self.path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return LocalConfig()
-        except OSError as error:
-            raise CLIError(
-                "invalid_configuration",
-                f"Cannot read CLI config at {self.path}: {error}",
-            ) from error
-        try:
-            payload = json.loads(raw)
-            config = LocalConfig.model_validate(payload)
-        except (ValueError, ValidationError) as error:
-            details = (
-                error.errors(include_url=False)
-                if isinstance(error, ValidationError)
-                else None
-            )
-            raise CLIError(
-                "invalid_configuration",
-                f"CLI config at {self.path} is invalid.",
-                details=details,
-                hint="Fix or remove the file, then retry.",
-            ) from error
-        self._validate_document(config)
-        return config
+            return super().load()
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
     def save(self, config: LocalConfig) -> None:
-        """Write a complete validated configuration atomically.
-
-        Args:
-            config: Configuration to persist.
-
-        Raises:
-            CLIError: Validation or persistence failed.
-        """
-        self._validate_document(config)
+        """Save configuration and expose failures as ``CLIError``."""
         try:
-            parent_existed = self.path.parent.exists()
-            self.path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
-            if os.name == "posix" and (self._secure_parent or not parent_existed):
-                os.chmod(self.path.parent, DIRECTORY_MODE)
-            handle, temporary = tempfile.mkstemp(
-                dir=self.path.parent, prefix=f".{self.path.name}."
-            )
-            try:
-                with os.fdopen(handle, "w", encoding="utf-8") as file:
-                    json.dump(
-                        config.model_dump(mode="json"),
-                        file,
-                        indent=2,
-                        sort_keys=True,
-                    )
-                    file.write("\n")
-                if os.name == "posix":
-                    os.chmod(temporary, FILE_MODE)
-                os.replace(temporary, self.path)
-            except OSError:
-                Path(temporary).unlink(missing_ok=True)
-                raise
-        except OSError as error:
-            raise CLIError(
-                "invalid_configuration",
-                f"Cannot write CLI config at {self.path}: {error}",
-            ) from error
+            super().save(config)
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
     def set_machine_mode(self, value: bool) -> LocalConfig:
-        """Persist the allowlisted machine-rendering preference.
-
-        Args:
-            value: New preference.
-
-        Returns:
-            Updated configuration.
-        """
-        config = self.load()
-        config.cli.machine_mode = value
-        self.save(config)
-        return config
+        """Set machine mode and expose failures as ``CLIError``."""
+        try:
+            return super().set_machine_mode(value)
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
     def add_context(
         self, name: str, server_url: str, *, activate: bool = False
     ) -> LocalConfig:
-        """Add or update a named server context.
-
-        Args:
-            name: Context name.
-            server_url: Server base URL.
-            activate: Whether to select this context.
-
-        Returns:
-            Updated configuration.
-        """
-        validate_context_name(name)
-        server_url = validate_server_url(server_url)
-        config = self.load()
-        config.contexts[name] = ContextConfig(server_url=server_url)
-        if activate:
-            config.active_context = name
-        self.save(config)
-        return config
+        """Add a context and expose failures as ``CLIError``."""
+        try:
+            return super().add_context(name, server_url, activate=activate)
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
     def use_context(self, name: str) -> LocalConfig:
-        """Select an existing context.
-
-        Args:
-            name: Context name.
-
-        Raises:
-            CLIError: The context does not exist.
-
-        Returns:
-            Updated configuration.
-        """
-        validate_context_name(name)
-        config = self.load()
-        if name not in config.contexts:
-            raise CLIError("invalid_configuration", f"Context {name!r} does not exist.")
-        config.active_context = name
-        self.save(config)
-        return config
+        """Select a context and expose failures as ``CLIError``."""
+        try:
+            return super().use_context(name)
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
     def remove_context(self, name: str, *, force: bool = False) -> LocalConfig:
-        """Remove a context without touching credentials.
-
-        Args:
-            name: Context name.
-            force: Clear the active pointer when removing the selected context.
-
-        Raises:
-            CLIError: The context is absent or active without ``force``.
-
-        Returns:
-            Updated configuration.
-        """
-        validate_context_name(name)
-        config = self.load()
-        if name not in config.contexts:
-            raise CLIError("not_found", f"Context {name!r} does not exist.")
-        if config.active_context == name and not force:
-            raise CLIError(
-                "conflict",
-                f"Context {name!r} is active and cannot be removed without --force.",
-            )
-        del config.contexts[name]
-        if config.active_context == name:
-            config.active_context = None
-        self.save(config)
-        return config
-
-    @staticmethod
-    def _validate_document(config: LocalConfig) -> None:
-        """Validate cross-field and normalized-value invariants."""
-        if config.active_context is not None:
-            validate_context_name(config.active_context, configuration=True)
-        for name, context in config.contexts.items():
-            validate_context_name(name, configuration=True)
-            normalized = validate_server_url(context.server_url, configuration=True)
-            if normalized != context.server_url:
-                raise CLIError(
-                    "invalid_configuration",
-                    f"Context {name!r} contains a non-normalized server URL.",
-                    hint=f"Use {normalized!r} instead.",
-                )
-
-
-def get_config_path() -> Path:
-    """Return the CLI config path without reading the file.
-
-    Returns:
-        Explicit override or the XDG-based default path.
-    """
-    override = os.environ.get(ENV_CONFIG_PATH)
-    return Path(override) if override else get_config_directory() / CONFIG_FILE_NAME
+        """Remove a context and expose failures as ``CLIError``."""
+        try:
+            return super().remove_context(name, force=force)
+        except (ConnectionConfigurationError, ConfigurationMutationError) as error:
+            raise _get_cli_error(error) from error
 
 
 def validate_context_name(name: str, *, configuration: bool = False) -> str:
-    """Validate a context name.
-
-    Args:
-        name: Candidate context name.
-        configuration: Whether the value came from persisted configuration.
-
-    Raises:
-        CLIError: The value is invalid.
-
-    Returns:
-        The unchanged name.
-    """
-    if not CONTEXT_NAME_PATTERN.fullmatch(name):
-        kind = "invalid_configuration" if configuration else "invalid_arguments"
-        raise CLIError(
-            kind,
-            "Context names must start with a letter and contain at most 64 "
-            "letters, digits, dots, underscores, or hyphens.",
-        )
-    return name
+    """Validate a context name and expose failures as ``CLIError``."""
+    try:
+        return _validate_context_name(name, configuration=configuration)
+    except ConnectionConfigurationError as error:
+        raise _get_cli_error(error) from error
 
 
 def validate_server_url(url: str, *, configuration: bool = False) -> str:
-    """Validate and normalize an HTTP(S) server base URL.
-
-    Args:
-        url: Candidate URL.
-        configuration: Whether the value came from persisted configuration.
-
-    Raises:
-        CLIError: The value is unsafe or malformed.
-
-    Returns:
-        URL with trailing slashes removed from its path.
-    """
-    kind = "invalid_configuration" if configuration else "invalid_arguments"
+    """Validate a server URL and expose failures as ``CLIError``."""
     try:
-        parsed = urlsplit(url)
-        _ = parsed.port
-    except ValueError as error:
-        raise CLIError(kind, f"Invalid server URL: {error}") from error
-    if (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.query
-        or parsed.fragment
-    ):
-        raise CLIError(
-            kind,
-            "Server URL must be an absolute HTTP(S) URL with a host and no "
-            "credentials, query, or fragment.",
-        )
-    path = parsed.path.rstrip("/")
-    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+        return _validate_server_url(url, configuration=configuration)
+    except ConnectionConfigurationError as error:
+        raise _get_cli_error(error) from error
 
 
 def resolve_target(
@@ -354,91 +120,32 @@ def resolve_target(
     explicit_server: str | None = None,
     context_name: str | None = None,
 ) -> ResolvedTarget:
-    """Resolve one server using the documented precedence chain.
-
-    Args:
-        store: Local configuration store.
-        explicit_server: Command-specific or global server URL.
-        context_name: Explicit named context.
-
-    Raises:
-        CLIError: No valid target can be resolved.
-
-    Returns:
-        Selected normalized target and provenance.
-    """
-    if explicit_server:
-        return ResolvedTarget(validate_server_url(explicit_server), "explicit")
-    if context_name:
-        validate_context_name(context_name)
-        config = store.load()
-        context = config.contexts.get(context_name)
-        if context is None:
-            raise CLIError(
-                "invalid_configuration",
-                f"Selected context {context_name!r} does not exist.",
-            )
-        return ResolvedTarget(context.server_url, "context", context_name)
-    environment = os.environ.get("KITARU_API_URL")
-    if environment:
-        return ResolvedTarget(
-            validate_server_url(environment, configuration=True), "environment"
+    """Resolve a CLI target and expose failures as ``CLIError``."""
+    try:
+        return _resolve_target(
+            store,
+            explicit_server=explicit_server,
+            context_name=context_name,
         )
-    config = store.load()
-    if config.active_context:
-        context = config.contexts.get(config.active_context)
-        if context is None:
-            raise CLIError(
-                "invalid_configuration",
-                f"Active context {config.active_context!r} does not exist.",
-                hint="Use `kitaru context use NAME` or remove the stale pointer.",
-            )
-        return ResolvedTarget(
-            context.server_url, "active_context", config.active_context
-        )
-    raise CLIError(
-        "invalid_configuration",
-        "No Kitaru server is configured.",
-        hint="Pass --server, set KITARU_API_URL, or select a context.",
-    )
+    except ConnectionConfigurationError as error:
+        raise _get_cli_error(error) from error
 
 
-def resolve_credential(
-    server_url: str, credential_store: CredentialStore
-) -> ResolvedCredential:
-    """Resolve one credential without exposing its value.
-
-    Args:
-        server_url: Normalized selected server URL.
-        credential_store: Credential store to query.
-
-    Returns:
-        Credential and provenance.
-    """
-    api_key = os.environ.get("KITARU_API_KEY")
-    if api_key:
-        return ResolvedCredential("environment", api_key=api_key)
-    stored = credential_store.get(server_url)
-    if stored is not None:
-        return ResolvedCredential("stored", stored=stored)
-    return ResolvedCredential("none")
-
-
-def build_api_client(
-    server_url: str,
-    credential: ResolvedCredential,
-    credential_store: CredentialStore,
-    timeout: float,
-) -> KitaruAPIClient:
-    """Build one SDK client from resolved credential provenance."""
-    if credential.source == "environment":
-        return KitaruAPIClient(
-            base_url=server_url, api_key=credential.api_key, timeout=timeout
-        )
-    if credential.source == "stored":
-        return KitaruAPIClient(
-            base_url=server_url,
-            credential_store=credential_store,
-            timeout=timeout,
-        )
-    return KitaruAPIClient(base_url=server_url, timeout=timeout)
+__all__ = [
+    "CONFIG_FILE_NAME",
+    "CONFIG_KEYS",
+    "CONTEXT_NAME_PATTERN",
+    "ENV_CONFIG_PATH",
+    "CLISettings",
+    "ConfigStore",
+    "ContextConfig",
+    "LocalConfig",
+    "ResolvedCredential",
+    "ResolvedTarget",
+    "build_api_client",
+    "get_config_path",
+    "resolve_credential",
+    "resolve_target",
+    "validate_context_name",
+    "validate_server_url",
+]
