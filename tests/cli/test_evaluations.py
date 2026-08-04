@@ -29,7 +29,9 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
     EvaluationListParams,
 )
+from kitaru.api_models.v1.filter import FilterCondition
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -241,6 +243,18 @@ class StubEvaluationClient:
         self.create_error = create_error
         self.evaluators = self._Evaluators(self)
         self.evaluations = self._Evaluations(self)
+        self.selected_sessions = [SimpleNamespace(id=uuid.uuid4())]
+        self.sessions = self._Sessions(self)
+
+    class _Sessions:
+        def __init__(self, owner: "StubEvaluationClient") -> None:
+            self.owner = owner
+            self.params: SessionListParams | None = None
+
+        async def iter(self, params):
+            self.params = params
+            for session in self.owner.selected_sessions:
+                yield session
 
     class _Evaluators:
         def __init__(self, owner: "StubEvaluationClient") -> None:
@@ -459,6 +473,69 @@ async def test_evaluate_sessions_does_not_enforce_or_batch_pair_cap() -> None:
     assert result.item["pair_count"] == 101
     assert len(client.requests) == 1
     assert len(client.requests[0].input_session_ids) == 101
+
+
+async def test_evaluate_sessions_selects_all_sessions_with_tag() -> None:
+    """A tag replaces manual session ID collection."""
+    client = StubEvaluationClient()
+
+    result = await evaluations.evaluate_sessions(
+        client,
+        None,
+        sessions_file=None,
+        tag="baseline",
+        all_sessions=False,
+        evaluators=["quality@2"],
+        evaluator_params=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    assert client.sessions.params is not None
+    session_filter = client.sessions.params.filter
+    assert isinstance(session_filter, FilterCondition)
+    assert session_filter.field == "tag"
+    assert session_filter.value == "baseline"
+    assert client.requests[0].input_session_ids == [
+        session.id for session in client.selected_sessions
+    ]
+    assert result.item["session_count"] == 1
+
+
+async def test_evaluate_sessions_all_is_explicit_and_exclusive() -> None:
+    """All-session selection is available but cannot be mixed with IDs."""
+    client = StubEvaluationClient()
+
+    result = await evaluations.evaluate_sessions(
+        client,
+        None,
+        sessions_file=None,
+        tag=None,
+        all_sessions=True,
+        evaluators=["quality@2"],
+        evaluator_params=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+    assert client.sessions.params is not None
+    assert client.sessions.params.filter is None
+    assert result.item["session_count"] == 1
+
+    with pytest.raises(CLIError, match="--tag, or --all"):
+        await evaluations.evaluate_sessions(
+            client,
+            [str(uuid.uuid4())],
+            sessions_file=None,
+            tag="baseline",
+            all_sessions=False,
+            evaluators=["quality@2"],
+            evaluator_params=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
 
 
 async def test_duplicate_session_across_sources_is_rejected_before_mutation(
