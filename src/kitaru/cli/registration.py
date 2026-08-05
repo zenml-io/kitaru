@@ -46,16 +46,16 @@ from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
 from kitaru.cli.output import CLIError, CommandResult
-from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.credential_store import CredentialStore
-from kitaru.client.references import (
+from kitaru.cli.references import (
     ParentKind,
     ReferenceResolutionError,
     resolve_parent_resource,
 )
-from kitaru.source_refs import parse_python_source_ref
+from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.credential_store import CredentialStore
 
 _MAX_REQUIREMENT_LENGTH = 255
+_MODULE_RE = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
 _ATTRIBUTE_RE = re.compile(r"^[A-Za-z_]\w*$")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ListParamsT = TypeVar("ListParamsT", bound=ListParams)
@@ -297,17 +297,16 @@ def build_agent_version_request(
 
 def normalize_agent_source(*, command: str | None, entrypoint: str | None) -> str:
     """Validate one agent source and return the stored shell command."""
-    if (command is None) == (entrypoint is None):
+    if entrypoint is not None:
         raise CLIError(
-            "invalid_arguments", "Exactly one of --command or --entrypoint is required."
+            "invalid_arguments",
+            "Agent --entrypoint is not supported; use --command.",
         )
-    if command is not None:
-        if not command.strip():
-            raise CLIError("invalid_arguments", "--command cannot be blank.")
-        return command
-    assert entrypoint is not None
-    validate_module_entrypoint(entrypoint)
-    return shlex.join(["python", "-m", "kitaru.worker.python_entrypoint", entrypoint])
+    if command is None:
+        raise CLIError("invalid_arguments", "Agent registration requires --command.")
+    if not command.strip():
+        raise CLIError("invalid_arguments", "--command cannot be blank.")
+    return command
 
 
 def parse_env(values: list[str]) -> dict[str, str]:
@@ -404,13 +403,18 @@ def validate_package_source(requirement: str, entrypoint: str) -> PackageSource:
 
 def validate_module_entrypoint(reference: str) -> tuple[str, str]:
     """Validate a top-level ``MODULE:ATTRIBUTE`` reference."""
-    try:
-        return parse_python_source_ref(reference)
-    except ValueError as error:
+    module, separator, attribute = reference.partition(":")
+    if (
+        not separator
+        or ":" in attribute
+        or not _MODULE_RE.fullmatch(module)
+        or not _ATTRIBUTE_RE.fullmatch(attribute)
+    ):
         raise CLIError(
             "invalid_arguments",
             f"Invalid entrypoint {reference!r}; expected MODULE:ATTRIBUTE.",
-        ) from error
+        )
+    return module, attribute
 
 
 def parse_json_object(value: str | None, *, option: str) -> dict[str, Any]:

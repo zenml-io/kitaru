@@ -125,16 +125,7 @@ class ExperimentsManageResult(ToolResult):
     data: ExperimentResponse | None = None
 
 
-class ProtectedWorkflowReceipt(MCPModel):
-    """Receipt for a replay-protected asynchronous workflow."""
-
-    operation: Literal["replay", "session_run", "session_evaluation", "experiment_run"]
-    request_id: str
-    idempotency: Literal["server-enforced"]
-    result: ReplayResponse | ExperimentRunResponse | JobResponse
-
-
-class ImportWorkflowReceipt(MCPModel):
+class SessionImportReceipt(MCPModel):
     """Receipt for a blob-backed import workflow."""
 
     operation: Literal["session_import"]
@@ -147,10 +138,10 @@ class ImportWorkflowReceipt(MCPModel):
     result: JobResponse
 
 
-class WorkflowStartResult(ToolResult):
-    """Workflow start result with an authoritative typed receipt."""
+class SessionImportResult(ToolResult):
+    """Session import result with an authoritative typed receipt."""
 
-    data: ProtectedWorkflowReceipt | ImportWorkflowReceipt | None = None
+    data: SessionImportReceipt | None = None
 
 
 class WorkflowCancellationReceipt(MCPModel):

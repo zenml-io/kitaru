@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Cohort and immutable cohort-version CLI commands."""
 
+import shlex
 import uuid
 from pathlib import Path
 from typing import Any
@@ -95,13 +96,46 @@ async def create_cohort(
     )
     if selected_session_ids is None:
         return CommandResult(item=created_cohort.model_dump(mode="json"))
-    version = await client.cohorts.create_version(
-        created_cohort.id,
-        CohortVersionCreateRequest(
-            add_session_ids=selected_session_ids,
-            display_version=display_version,
-        ),
-    )
+    try:
+        version = await client.cohorts.create_version(
+            created_cohort.id,
+            CohortVersionCreateRequest(
+                add_session_ids=selected_session_ids,
+                display_version=display_version,
+            ),
+        )
+    except Exception as error:
+        retry_command = [
+            "kitaru",
+            "cohort",
+            "version",
+            "create",
+            str(created_cohort.id),
+        ]
+        for session_id in selected_session_ids:
+            retry_command.extend(("--add-session", str(session_id)))
+        if display_version is not None:
+            retry_command.extend(("--display-version", display_version))
+        raise CLIError(
+            "partial_failure",
+            "Created the cohort but could not create its first version.",
+            details={
+                "cohort": {
+                    "completed": True,
+                    "id": str(created_cohort.id),
+                    "name": created_cohort.name,
+                },
+                "version": {
+                    "completed": False,
+                    "step": "create_initial_version",
+                },
+                "selected_session_ids": [
+                    str(session_id) for session_id in selected_session_ids
+                ],
+                "cause": str(error),
+            },
+            hint=f"The cohort exists. Retry with `{shlex.join(retry_command)}`.",
+        ) from error
     return CommandResult(
         item={
             "cohort": created_cohort.model_dump(mode="json"),

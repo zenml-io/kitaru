@@ -39,6 +39,11 @@ from kitaru.api_models.v1.tag import (
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
+from kitaru.cli.references import (
+    ParentKind,
+    ReferenceResolutionError,
+    resolve_parent,
+)
 from kitaru.cli.registration import (
     get_agent_version,
     get_plugin_version,
@@ -48,11 +53,6 @@ from kitaru.cli.registration import (
 )
 from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
-from kitaru.client.references import (
-    ParentKind,
-    ReferenceResolutionError,
-    resolve_parent,
-)
 
 
 def _read_payload(path: Path) -> bytes:

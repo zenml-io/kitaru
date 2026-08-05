@@ -97,6 +97,7 @@ class StubCohortClient:
         self.update_calls: list[tuple[uuid.UUID, CohortUpdateRequest]] = []
         self.deleted_cohorts: list[uuid.UUID] = []
         self.created_versions: list[tuple[uuid.UUID, CohortVersionCreateRequest]] = []
+        self.version_error: Exception | None = None
         self.version_list_calls: list[tuple[uuid.UUID, ListParams]] = []
         self.version_get_calls: list[uuid.UUID] = []
         self.version_update_calls: list[
@@ -171,6 +172,8 @@ class StubCohortClient:
             self, cohort_id: uuid.UUID, request: CohortVersionCreateRequest
         ) -> StubModel:
             self.owner.created_versions.append((cohort_id, request))
+            if self.owner.version_error is not None:
+                raise self.owner.version_error
             return self.owner.version_two
 
         async def list_versions(self, cohort_id: uuid.UUID, params: ListParams) -> Any:
@@ -296,6 +299,45 @@ async def test_cohort_create_snapshots_a_tag_selection() -> None:
     assert request.display_version == "discovery-v1"
     assert result.item["reference"] == "regression@2"
     assert result.item["session_count"] == 2
+
+
+async def test_cohort_create_reports_surviving_parent_on_version_failure() -> None:
+    """A failed first version exposes the surviving cohort and retry command."""
+    client = StubCohortClient()
+    client.version_error = RuntimeError("version rejected")
+
+    with pytest.raises(CLIError) as error:
+        await cohorts.create_cohort(
+            client,
+            "nightly",
+            agent="assistant",
+            description="Nightly cases",
+            metadata=None,
+            tag="baseline",
+            display_version="discovery-v1",
+        )
+
+    selected_session_ids = [str(session.id) for session in client.selected_sessions]
+    assert error.value.kind == "partial_failure"
+    assert error.value.details == {
+        "cohort": {
+            "completed": True,
+            "id": str(client.cohort.id),
+            "name": client.cohort.name,
+        },
+        "version": {"completed": False, "step": "create_initial_version"},
+        "selected_session_ids": selected_session_ids,
+        "cause": "version rejected",
+    }
+    assert error.value.hint == (
+        "The cohort exists. Retry with `kitaru cohort version create "
+        f"{client.cohort.id} "
+        f"--add-session {selected_session_ids[0]} "
+        f"--add-session {selected_session_ids[1]} "
+        "--display-version discovery-v1`."
+    )
+    assert len(client.created_cohorts) == 1
+    assert len(client.created_versions) == 1
 
 
 async def test_cohort_update_is_sparse_and_supports_explicit_clears() -> None:

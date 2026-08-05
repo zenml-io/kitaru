@@ -171,7 +171,7 @@ API keys are required.
 
 ## Use with Claude Code, Codex, or Cursor (MCP)
 
-Installing the `mcp` extra adds the local stdio command `kitaru-mcp`. It reuses the active Kitaru CLI context and starts in read-only mode, where the client sees only two tools for bounded registry and activity reads.
+Installing the `mcp` extra adds the local stdio command `kitaru-mcp`. Set `KITARU_API_URL`, or pass `--server`, before starting it. The server starts in read-only mode, where the client sees only two tools for bounded registry and activity reads.
 
 Add it to Claude Code:
 

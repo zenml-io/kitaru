@@ -75,7 +75,6 @@ GROUP_DESCRIPTIONS = {
     "agent": "Register and inspect agents.",
     "cohort": "Manage cohort namespaces and immutable membership versions.",
     "config": "Manage allowlisted CLI preferences.",
-    "context": "Manage named server contexts.",
     "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
     "experiment": "Configure experiments and manage asynchronous runs.",

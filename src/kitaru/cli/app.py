@@ -51,7 +51,6 @@ from kitaru.cli.config import (
     ResolvedTarget,
     get_config_path,
     resolve_target,
-    validate_context_name,
     validate_server_url,
 )
 from kitaru.cli.output import (
@@ -97,11 +96,6 @@ app = App(
 config_app = App(
     name="config",
     help=GROUP_DESCRIPTIONS["config"],
-    default_parameter=Parameter(negative=False),
-)
-context_app = App(
-    name="context",
-    help=GROUP_DESCRIPTIONS["context"],
     default_parameter=Parameter(negative=False),
 )
 agent_app = App(
@@ -180,7 +174,6 @@ experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
 app.command(config_app, name="config")
-app.command(context_app, name="context")
 app.command(agent_app, name="agent")
 app.command(cohort_app, name="cohort")
 app.command(experiment_app, name="experiment")
@@ -197,7 +190,6 @@ class Invocation:
     """Resolved non-secret settings and lazy stores for one invocation."""
 
     server: str | None
-    context_name: str | None
     request_timeout: float
     non_interactive: bool
     no_browser: bool
@@ -230,11 +222,7 @@ class Invocation:
                     "The command SERVER and global --server identify "
                     "different servers.",
                 )
-        return resolve_target(
-            self.config_store,
-            explicit_server=explicit_server or self.server,
-            context_name=self.context_name,
-        )
+        return resolve_target(explicit_server=explicit_server or self.server)
 
 
 _INVOCATION: ContextVar[Invocation | None] = ContextVar(
@@ -276,10 +264,6 @@ async def _launch(
     server: Annotated[
         str | None,
         Parameter(name="--server", help="Server URL override."),
-    ] = None,
-    context: Annotated[
-        str | None,
-        Parameter(name="--context", help="Named context override."),
     ] = None,
     non_interactive: Annotated[
         bool,
@@ -361,8 +345,6 @@ async def _launch(
         output_context = OutputContext(
             command=spec.command,
             mode=mode,
-            machine=machine,
-            non_interactive=non_interactive,
             debug=debug,
             traceback=traceback or debug,
             stdout=sys.stdout,
@@ -382,7 +364,6 @@ async def _launch(
     output_token = set_output_context(output_context)
     invocation = Invocation(
         server=server,
-        context_name=context,
         request_timeout=request_timeout,
         non_interactive=non_interactive,
         no_browser=no_browser or non_interactive,
@@ -425,7 +406,6 @@ _GLOBAL_PARAMETERS = (
         "--machine/--no-machine", "boolean", "option", False, "Terminal rendering mode."
     ),
     ParameterSpec("--server", "URL", "option", False, "Server URL override."),
-    ParameterSpec("--context", "string", "option", False, "Named context override."),
     ParameterSpec(
         "--non-interactive", "boolean", "option", False, "Disable interaction."
     ),
@@ -572,7 +552,6 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
             "authentication_failed",
             "interaction_required",
             "network_error",
-            "partial_failure",
             "internal_error",
         ),
     ),
@@ -586,7 +565,7 @@ async def login(
     password_stdin: bool = False,
     api_key_stdin: bool = False,
 ) -> CommandResult:
-    """Authenticate with a server and optionally save the global context."""
+    """Authenticate with a server and store its credential when required."""
     invocation = _invocation()
     chosen_server = server or invocation.server
     if server and invocation.server:
@@ -594,11 +573,9 @@ async def login(
     return await auth_commands.login(
         server=chosen_server,
         local=local,
-        context_name=invocation.context_name,
         username=username,
         password_stdin=password_stdin,
         api_key_stdin=api_key_stdin,
-        config_store=invocation.config_store,
         credential_store=invocation.credential_store,
         timeout=invocation.request_timeout,
         non_interactive=invocation.non_interactive,
@@ -611,7 +588,7 @@ async def login(
     app,
     _spec(
         ("logout",),
-        "Remove locally stored credentials without changing contexts.",
+        "Remove locally stored credentials.",
         parameters=(
             ParameterSpec(
                 "SERVER", "URL", "argument", False, "Server to log out from."
@@ -630,10 +607,10 @@ def logout(server: str | None = None, /, *, all: bool = False) -> CommandResult:
     """Remove one or all credentials from the local credential store."""
     invocation = _invocation()
     if all:
-        if server or invocation.server or invocation.context_name:
+        if server or invocation.server:
             raise CLIError(
                 "invalid_arguments",
-                "SERVER, --server, or --context cannot be used with --all.",
+                "SERVER or --server cannot be used with --all.",
             )
         server_url = None
     else:
@@ -716,7 +693,6 @@ async def doctor() -> CommandResult:
         config_store=invocation.config_store,
         credential_store=invocation.credential_store,
         explicit_server=invocation.server,
-        context_name=invocation.context_name,
         timeout=invocation.request_timeout,
     )
 
@@ -850,156 +826,6 @@ def config_path() -> CommandResult:
     return CommandResult(item={"path": str(path), "exists": path.exists()})
 
 
-@_register(
-    context_app,
-    _spec(
-        ("context", "add"),
-        "Add or update a named server context without activating it.",
-        parameters=(
-            ParameterSpec("NAME", "string", "argument", True, "Context name."),
-            ParameterSpec("SERVER", "URL", "argument", True, "Server URL."),
-        ),
-        read_only=False,
-        side_effects=("reads_local_file", "writes_local_config"),
-        idempotency="idempotent replacement",
-        errors=("invalid_arguments", "invalid_configuration", "internal_error"),
-    ),
-)
-def context_add(name: str, server: str, /) -> CommandResult:
-    """Add or replace one named context."""
-    config = _invocation().config_store.add_context(name, server)
-    return CommandResult(
-        item={
-            "name": name,
-            "server_url": config.contexts[name].server_url,
-            "active": config.active_context == name,
-        }
-    )
-
-
-@_register(
-    context_app,
-    _spec(
-        ("context", "list"),
-        "List named contexts and the active selection.",
-        side_effects=("reads_local_file",),
-        errors=("invalid_configuration", "internal_error"),
-    ),
-)
-def context_list() -> CommandResult:
-    """List contexts in stable name order."""
-    config = _invocation().config_store.load()
-    return CommandResult(
-        items=[
-            {
-                "name": name,
-                "server_url": context.server_url,
-                "active": config.active_context == name,
-            }
-            for name, context in sorted(config.contexts.items())
-        ]
-    )
-
-
-@_register(
-    context_app,
-    _spec(
-        ("context", "get"),
-        "Get a named context, defaulting to the active context.",
-        parameters=(
-            ParameterSpec("NAME", "string", "argument", False, "Context name."),
-        ),
-        side_effects=("reads_local_file",),
-        errors=(
-            "invalid_arguments",
-            "invalid_configuration",
-            "not_found",
-            "internal_error",
-        ),
-    ),
-)
-def context_get(name: str | None = None, /) -> CommandResult:
-    """Get an exact named context or the active context."""
-    config = _invocation().config_store.load()
-    if name is not None:
-        validate_context_name(name)
-    selected = name or config.active_context
-    if selected is None:
-        raise CLIError("invalid_configuration", "No active context is selected.")
-    context = config.contexts.get(selected)
-    if context is None:
-        raise CLIError("not_found", f"Context {selected!r} does not exist.")
-    return CommandResult(
-        item={
-            "name": selected,
-            "server_url": context.server_url,
-            "active": config.active_context == selected,
-        }
-    )
-
-
-@_register(
-    context_app,
-    _spec(
-        ("context", "use"),
-        "Select an existing context.",
-        parameters=(
-            ParameterSpec("NAME", "string", "argument", True, "Context name."),
-        ),
-        read_only=False,
-        side_effects=("reads_local_file", "writes_local_config"),
-        idempotency="idempotent",
-        errors=("invalid_arguments", "invalid_configuration", "internal_error"),
-    ),
-)
-def context_use(name: str, /) -> CommandResult:
-    """Select an exact existing context."""
-    config = _invocation().config_store.use_context(name)
-    return CommandResult(
-        item={
-            "name": name,
-            "server_url": config.contexts[name].server_url,
-            "active": True,
-        }
-    )
-
-
-@_register(
-    context_app,
-    _spec(
-        ("context", "remove"),
-        "Remove a context without deleting its credentials.",
-        parameters=(
-            ParameterSpec("NAME", "string", "argument", True, "Context name."),
-            ParameterSpec(
-                "--force", "boolean", "option", False, "Remove the active context."
-            ),
-        ),
-        read_only=False,
-        side_effects=("reads_local_file", "writes_local_config"),
-        idempotency="not_found after first removal",
-        errors=(
-            "invalid_arguments",
-            "invalid_configuration",
-            "not_found",
-            "conflict",
-            "internal_error",
-        ),
-    ),
-)
-def context_remove(name: str, /, *, force: bool = False) -> CommandResult:
-    """Remove one exact context and optionally clear the active pointer."""
-    config = _invocation().config_store.remove_context(name, force=force)
-    return CommandResult(
-        item={
-            "name": name,
-            "removed": True,
-            "active_context": config.active_context,
-            "credentials_changed": False,
-        }
-    )
-
-
 _COLLECTION_READ_ERRORS = (
     "invalid_arguments",
     "invalid_configuration",
@@ -1049,13 +875,6 @@ _WAIT_PARAMETERS = (
 )
 _AGENT_SOURCE_PARAMETERS = (
     ParameterSpec("--spec", "path", "option", False, "YAML or JSON spec document."),
-    ParameterSpec(
-        "--entrypoint",
-        "MODULE:ATTRIBUTE",
-        "option",
-        False,
-        "Zero-argument Python wrapper.",
-    ),
     ParameterSpec(
         "--command", "string", "option", False, "Shell command stored as supplied."
     ),
@@ -1147,7 +966,6 @@ async def agent_register(
     /,
     *,
     spec: Path | None = None,
-    entrypoint: str | None = None,
     command: str | None = None,
     description: str | None = None,
     version_description: str | None = None,
@@ -1163,7 +981,6 @@ async def agent_register(
     """Create a new agent parent and initial version."""
     if spec is not None:
         if _agent_direct_values(
-            entrypoint,
             command,
             description,
             version_description,
@@ -1186,7 +1003,7 @@ async def agent_register(
         parent_request, version_request = registration.build_agent_requests(
             name,
             command=command,
-            entrypoint=entrypoint,
+            entrypoint=None,
             description=description,
             version_description=version_description,
             display_version=display_version,
@@ -1273,7 +1090,6 @@ async def agent_version_register(
     /,
     *,
     spec: Path | None = None,
-    entrypoint: str | None = None,
     command: str | None = None,
     description: str | None = None,
     display_version: str | None = None,
@@ -1288,7 +1104,6 @@ async def agent_version_register(
     """Create the next server-assigned version of an exact agent."""
     if spec is not None:
         if _agent_direct_values(
-            entrypoint,
             command,
             description,
             display_version,
@@ -1307,7 +1122,7 @@ async def agent_version_register(
     else:
         request = registration.build_agent_version_request(
             command=command,
-            entrypoint=entrypoint,
+            entrypoint=None,
             description=description,
             display_version=display_version,
             working_dir=working_dir,
@@ -3239,8 +3054,7 @@ _WORKER_START_PARAMETERS = (
     _spec(
         ("worker", "start"),
         "Run a generic local worker in the foreground without durable provider "
-        "binding. The first SIGINT or SIGTERM drains held tasks; a SIGINT after "
-        "either signal exits immediately and may leave child processes running.",
+        "binding. The first SIGINT or SIGTERM requests a safe drain of held tasks.",
         parameters=_WORKER_START_PARAMETERS,
         read_only=False,
         side_effects=(
@@ -3276,7 +3090,6 @@ async def worker_start(
     target = invocation.resolve_target()
     return await workers.start_worker(
         target,
-        invocation.credential_store,
         name=name,
         kinds=kinds,
         selectors=selectors,
@@ -3285,7 +3098,6 @@ async def worker_start(
         claim_batch_size=claim_batch_size,
         poll_interval=poll_interval,
         heartbeat_interval=heartbeat_interval,
-        request_timeout=invocation.request_timeout,
         timeout=timeout,
         blob_cache_root=blob_cache_root,
         payload_cache_root=payload_cache_root,
@@ -3495,8 +3307,6 @@ def _emit_early_error(
     context = OutputContext(
         command=command,
         mode=mode,
-        machine=machine or mode != "text" or not sys.stdout.isatty(),
-        non_interactive=non_interactive or mode != "text",
         debug=debug,
         traceback=traceback or debug,
         stdout=sys.stdout,
@@ -3604,7 +3414,6 @@ def _guess_command(tokens: Sequence[str]) -> str:
         "--output",
         "-o",
         "--server",
-        "--context",
         "--request-timeout",
     }
     for token in tokens:

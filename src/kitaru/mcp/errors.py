@@ -12,11 +12,11 @@ from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.base import JsonValue
-from kitaru.client.connection import ConnectionConfigurationError
 from kitaru.client.exceptions import APIError
-from kitaru.client.references import ReferenceResolutionError
+from kitaru.mcp.connection import ConnectionConfigurationError
 from kitaru.mcp.models.common import ToolError, ToolResult
-from kitaru.redaction import redact, redact_data
+from kitaru.mcp.redaction import redact, redact_data
+from kitaru.mcp.references import ReferenceResolutionError
 
 
 @dataclass(slots=True)
@@ -113,24 +113,15 @@ def map_exception(error: BaseException) -> MCPToolError:
             401: ("authentication_failed", False),
             403: ("permission_denied", False),
             404: ("not_found", False),
-            409: (_get_conflict_code(error.detail), False),
+            409: ("conflict", False),
             422: ("invalid_arguments", False),
-            425: ("request_in_progress", True),
             429: ("rate_limited", True),
         }.get(status, ("remote_failed", status >= 500))
-        if code == "request_in_progress":
-            retryable = True
         messages = {
             "invalid_arguments": "The Kitaru server rejected the request arguments.",
             "authentication_failed": "The Kitaru server rejected the credential.",
             "permission_denied": "The Kitaru server denied this operation.",
             "not_found": "The requested Kitaru resource was not found.",
-            "idempotency_mismatch": (
-                "The request ID was already used for different arguments."
-            ),
-            "request_in_progress": (
-                "An identical protected request is still in progress."
-            ),
             "conflict": "The Kitaru operation conflicts with current remote state.",
             "rate_limited": "The Kitaru server rate limited the request.",
             "remote_failed": "The Kitaru server failed the request.",
@@ -145,17 +136,6 @@ def map_exception(error: BaseException) -> MCPToolError:
     if isinstance(error, TimeoutError):
         return MCPToolError("timeout", "The MCP tool timed out.", retryable=True)
     return MCPToolError("internal_error", "The MCP tool failed unexpectedly.")
-
-
-def _get_conflict_code(detail: str) -> str:
-    lowered = detail.lower()
-    if "idempotency" in lowered and (
-        "mismatch" in lowered or "different request" in lowered
-    ):
-        return "idempotency_mismatch"
-    if "in progress" in lowered:
-        return "request_in_progress"
-    return "conflict"
 
 
 def _details(value: object) -> dict[str, JsonValue] | None:
