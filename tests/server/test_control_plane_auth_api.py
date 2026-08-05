@@ -35,6 +35,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import (
     get_account_service,
     get_api_key_service,
@@ -45,6 +46,7 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
 
 
@@ -107,7 +109,9 @@ def build_app(
     api_key_service = ApiKeyService(repository=api_key_repository)
     app.dependency_overrides[get_api_key_service] = lambda: api_key_service
     account_service = AccountService(
-        repository=account_repository, password_hasher=FakePasswordHasher()
+        repository=account_repository,
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
     app.dependency_overrides[get_account_service] = lambda: account_service
     return app
@@ -309,6 +313,22 @@ async def test_update_account_forbidden(
     response = await client.patch(
         f"/v1/accounts/{uuid.uuid4()}",
         json={"password": "new", "old_password": "old"},
+        headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
+    )
+    assert response.status_code == 403
+
+
+async def test_update_account_is_admin_forbidden(
+    client: httpx.AsyncClient,
+    control_plane_client: FakeControlPlaneClient,
+    settings: APISettings,
+) -> None:
+    """Observe HTTP 403 when setting the admin flag under the control plane scheme."""
+    authenticate(control_plane_client, settings)
+
+    response = await client.patch(
+        f"/v1/accounts/{uuid.uuid4()}",
+        json={"is_admin": True},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 403

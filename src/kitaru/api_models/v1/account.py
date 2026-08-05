@@ -31,6 +31,9 @@ class AccountCreateRequest(RequestModel):
     name: str = Field(description="Account name.")
     email: str | None = Field(default=None, description="Contact email.")
     password: str | None = Field(default=None, description="Login password.")
+    is_admin: bool = Field(
+        default=False, description="Whether the account has admin rights."
+    )
 
 
 class AccountUpdateRequest(RequestModel):
@@ -43,6 +46,7 @@ class AccountUpdateRequest(RequestModel):
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
+    is_admin: bool | None = Field(default=None, description="New admin rights state.")
 
 
 class AccountActivateRequest(RequestModel):
@@ -63,6 +67,7 @@ class AccountResponse(TimestampedResponseModel):
     name: str = Field(description="Account name.")
     email: str | None = Field(description="Contact email.")
     is_service_account: bool = Field(description="Whether this is a service account.")
+    is_admin: bool = Field(description="Whether the account has admin rights.")
     active: bool = Field(description="Whether the account can authenticate.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
 

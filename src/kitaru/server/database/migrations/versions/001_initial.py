@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("is_service_account", sa.Boolean(), nullable=False),
+        sa.Column("is_admin", sa.Boolean(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("email", sa.String(length=255), nullable=True),
         sa.Column("password_hash", sa.String(length=128), nullable=True),

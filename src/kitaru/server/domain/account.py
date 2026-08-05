@@ -53,6 +53,7 @@ class Account(DomainModel):
 
     id: uuid.UUID = Field(default_factory=uuid7)
     is_service_account: bool = False
+    is_admin: bool = False
     external_id: uuid.UUID | None = None
     name: AccountName
     email: str | None = None
@@ -70,6 +71,14 @@ class Account(DomainModel):
             active: New active state.
         """
         self.active = active
+
+    def update_is_admin(self, is_admin: bool) -> None:
+        """Set whether the account has admin rights.
+
+        Args:
+            is_admin: New admin state.
+        """
+        self.is_admin = is_admin
 
     def update_identity(self, name: str, email: str | None) -> None:
         """Set the account name and contact email.

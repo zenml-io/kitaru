@@ -51,6 +51,7 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     is_service_account: Mapped[bool]
+    is_admin: Mapped[bool]
     external_id: Mapped[uuid.UUID | None]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     email: Mapped[str | None] = mapped_column(String(255))
@@ -72,6 +73,7 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return cls(
             id=account.id,
             is_service_account=account.is_service_account,
+            is_admin=account.is_admin,
             external_id=account.external_id,
             name=account.name,
             email=account.email,
@@ -90,6 +92,7 @@ class AccountORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return Account(
             id=self.id,
             is_service_account=self.is_service_account,
+            is_admin=self.is_admin,
             external_id=self.external_id,
             name=self.name,
             email=self.email,

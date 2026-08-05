@@ -39,6 +39,7 @@ def account_to_response(account: Account) -> AccountResponse:
         name=account.name,
         email=account.email,
         is_service_account=account.is_service_account,
+        is_admin=account.is_admin,
         active=account.active,
         metadata=account.metadata,
         created=account.created,

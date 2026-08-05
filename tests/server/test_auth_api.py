@@ -27,6 +27,7 @@ from conftest import (
     local_settings,
 )
 from kitaru.server.adapters.auth.auth_service import AuthService
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import (
     get_account_service,
     get_api_key_service,
@@ -36,6 +37,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.api_key_service import ApiKeyService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
 
 COOKIE_NAME = "kitaru_session"
@@ -265,7 +267,9 @@ async def test_none_scheme_requires_bootstrap(
         api_key_repository,
     )
     account_service = AccountService(
-        repository=account_repository, password_hasher=FakePasswordHasher()
+        repository=account_repository,
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
     app.dependency_overrides[get_account_service] = lambda: account_service
     transport = httpx.ASGITransport(app=app)
