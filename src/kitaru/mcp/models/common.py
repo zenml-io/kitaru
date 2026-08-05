@@ -96,6 +96,14 @@ class RegistryReadResult(ToolResult):
     data: RegistryItem | PageData[RegistryItem] | None = None
 
 
+# Keep job activity output fully typed without repeating the API model's verbose
+# field descriptions in the discovery schema. The literal mirrors JobKind while
+# avoiding a separate enum definition in this already budget-constrained union.
+class _MCPJob(JobResponse):
+    id: uuid.UUID
+    kind: Literal["session_run", "import", "evaluation", "replay"]
+
+
 ActivityItem = (
     SessionResponse
     | ReplayResponse
@@ -103,12 +111,12 @@ ActivityItem = (
     | ExperimentRunResponse
     | SessionNodeResponse
     | TaskResponse
-    | JobResponse
+    | _MCPJob
 )
 
 
 class ActivityReadResult(ToolResult):
-    """Activity read result with domain-typed data."""
+    """Typed activity read result."""
 
     data: ActivityItem | PageData[ActivityItem] | None = None
 

@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 import pytest
 
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.cli import app as app_module
 from kitaru.cli import jobs
 from kitaru.cli.output import (
@@ -49,6 +49,7 @@ def _job(
         owner_id=uuid.uuid5(uuid.NAMESPACE_URL, str(job_id)),
         created=now,
         updated=now + timedelta(seconds=updated_offset),
+        kind=JobKind.REPLAY,
         status=status,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=(
