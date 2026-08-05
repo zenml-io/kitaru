@@ -117,6 +117,35 @@ class APISettings(Settings):
     OTEL_METRICS_ENABLED: bool = True
     OTEL_LOGS_ENABLED: bool = True
 
+    def get_cors_allow_origins(self) -> list[str]:
+        """Get all allowed CORS origins.
+
+        Returns:
+            The configured origins and any configured service URLs.
+        """
+        origins = [
+            origin.strip()
+            for origin in self.CORS_ALLOW_ORIGINS.split(",")
+            if origin.strip()
+        ] or ["*"]
+        service_origins = [
+            url
+            for url in (
+                self.DASHBOARD_URL,
+                self.CONTROL_PLANE_API_URL,
+                self.SERVER_URL,
+            )
+            if url
+        ]
+        if service_origins:
+            if origins == ["*"]:
+                origins = service_origins
+            else:
+                origins.extend(service_origins)
+                origins = [origin for origin in origins if origin != "*"]
+                origins = list(dict.fromkeys(origins))
+        return origins
+
     @model_validator(mode="after")
     def validate_auth_settings(self) -> Self:
         """Validate authentication settings.

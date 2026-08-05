@@ -233,11 +233,7 @@ def create_app(settings: APISettings) -> FastAPI:
             # gets exported and flushed.
             shutdown_otel()
 
-    cors_allow_origins = [
-        origin.strip()
-        for origin in settings.CORS_ALLOW_ORIGINS.split(",")
-        if origin.strip()
-    ]
+    cors_allow_origins = settings.get_cors_allow_origins()
     app = FastAPI(
         title="Kitaru",
         version=version("kitaru"),
