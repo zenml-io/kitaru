@@ -25,7 +25,7 @@ from kitaru.client.auth import RenewingTokenAuth, StaticTokenAuth
 from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
     ENV_CLIENT_ID,
-    ENV_CONFIG_PATH,
+    ENV_CONFIG_DIR,
     ClientConfig,
     get_client_id,
     get_server_url,
@@ -56,16 +56,16 @@ def test_malformed_file_is_ignored(tmp_path: Path) -> None:
     assert load_config() == ClientConfig()
 
 
-def test_environment_overrides_the_config_path(
+def test_environment_overrides_the_config_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Read and write the file the environment names."""
-    override = tmp_path / "elsewhere.json"
-    monkeypatch.setenv(ENV_CONFIG_PATH, str(override))
+    """Read and write inside the directory the environment names."""
+    override = tmp_path / "elsewhere"
+    monkeypatch.setenv(ENV_CONFIG_DIR, str(override))
 
     set_server_url("https://kitaru.example.com")
 
-    assert override.exists()
+    assert (override / "config.json").exists()
     assert get_server_url() == "https://kitaru.example.com"
 
 

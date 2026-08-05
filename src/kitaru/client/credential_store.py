@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from kitaru.client.config import (
-    get_config_file_path,
+    get_config_directory,
     normalize_server_url,
     write_json_file,
 )
@@ -35,7 +35,6 @@ from kitaru.client.credentials import (
 
 logger = logging.getLogger(__name__)
 
-ENV_CREDENTIALS_PATH = "KITARU_CREDENTIALS_PATH"
 ENV_DISABLE_CREDENTIALS_CACHE = "KITARU_DISABLE_CREDENTIALS_CACHE"
 
 CREDENTIALS_FILE_NAME = "credentials.json"
@@ -55,9 +54,7 @@ class CredentialStore:
             persist: Whether to read and write the file. Defaults to reading
                 ``KITARU_DISABLE_CREDENTIALS_CACHE``.
         """
-        self._path = path or get_config_file_path(
-            ENV_CREDENTIALS_PATH, CREDENTIALS_FILE_NAME
-        )
+        self._path = path or get_config_directory() / CREDENTIALS_FILE_NAME
         if persist is None:
             persist = os.environ.get(ENV_DISABLE_CREDENTIALS_CACHE, "").lower() not in (
                 "1",

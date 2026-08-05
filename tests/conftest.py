@@ -485,8 +485,7 @@ def isolated_client_environment(
         "KITARU_API_TOKEN",
         "KITARU_API_KEY",
         "KITARU_CLIENT_ID",
-        "KITARU_CONFIG_PATH",
-        "KITARU_CREDENTIALS_PATH",
+        "KITARU_CONFIG_DIR",
         "KITARU_DISABLE_CREDENTIALS_CACHE",
     ):
         monkeypatch.delenv(name, raising=False)

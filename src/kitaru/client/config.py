@@ -25,7 +25,7 @@ from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-ENV_CONFIG_PATH = "KITARU_CONFIG_PATH"
+ENV_CONFIG_DIR = "KITARU_CONFIG_DIR"
 ENV_CLIENT_ID = "KITARU_CLIENT_ID"
 
 CONFIG_FILE_NAME = "config.json"
@@ -38,28 +38,15 @@ def get_config_directory() -> Path:
     """Return the directory holding Kitaru client configuration.
 
     Returns:
-        ``$XDG_CONFIG_HOME/kitaru``, falling back to ``~/.config/kitaru``.
+        ``KITARU_CONFIG_DIR`` when set, otherwise ``$XDG_CONFIG_HOME/kitaru``,
+        falling back to ``~/.config/kitaru``.
     """
+    override = os.environ.get(ENV_CONFIG_DIR)
+    if override:
+        return Path(override)
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "kitaru"
-
-
-def get_config_file_path(env_name: str, file_name: str) -> Path:
-    """Return the location of a client configuration file.
-
-    Args:
-        env_name: Environment variable naming an override location.
-        file_name: File name inside the Kitaru config directory.
-
-    Returns:
-        Path read from the environment variable, otherwise the file in the
-        Kitaru config directory.
-    """
-    override = os.environ.get(env_name)
-    if override:
-        return Path(override)
-    return get_config_directory() / file_name
 
 
 def write_json_file(path: Path, payload: object) -> None:
@@ -110,7 +97,7 @@ def load_config() -> ClientConfig:
         Stored configuration, or an empty one when the file is missing or
         malformed.
     """
-    path = get_config_file_path(ENV_CONFIG_PATH, CONFIG_FILE_NAME)
+    path = get_config_directory() / CONFIG_FILE_NAME
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
@@ -129,7 +116,7 @@ def save_config(config: ClientConfig) -> None:
         config: Configuration to write.
     """
     write_json_file(
-        get_config_file_path(ENV_CONFIG_PATH, CONFIG_FILE_NAME),
+        get_config_directory() / CONFIG_FILE_NAME,
         config.model_dump(mode="json", exclude_none=True),
     )
 
