@@ -24,7 +24,7 @@ import pytest
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import app as app_module
 from kitaru.cli import diagnostics
-from kitaru.cli.config import ConfigStore, ResolvedCredential, ResolvedTarget
+from kitaru.cli.config import ResolvedCredential, ResolvedTarget
 from kitaru.client.credential_store import CredentialStore
 
 
@@ -161,7 +161,6 @@ async def test_doctor_reports_every_check_when_no_server_is_configured(
     """Doctor keeps running after resolution failure and preserves check order."""
     monkeypatch.delenv("KITARU_API_URL", raising=False)
     result = await diagnostics.doctor(
-        config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server=None,
         timeout=0.1,
@@ -212,7 +211,6 @@ async def test_doctor_compatibility_check_is_non_failing(
     )
 
     result = await diagnostics.doctor(
-        config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server="https://api.example.com",
         timeout=0.1,
@@ -250,7 +248,6 @@ async def test_doctor_skips_compatibility_when_server_info_is_unavailable(
     monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
 
     result = await diagnostics.doctor(
-        config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server="https://api.example.com",
         timeout=0.1,
@@ -304,7 +301,6 @@ def test_doctor_continues_without_reusing_malformed_credentials(
         resolved_credentials.append(credential)
         return FakeClient()
 
-    monkeypatch.setenv("KITARU_CONFIG_PATH", str(tmp_path / "config.json"))
     monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
     monkeypatch.setattr(diagnostics, "_probe", successful_probe)
@@ -344,7 +340,6 @@ async def test_doctor_worker_extra_hint_names_cli_and_worker(
     monkeypatch.setattr(diagnostics.importlib.util, "find_spec", lambda name: None)
 
     result = await diagnostics.doctor(
-        config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server=None,
         timeout=0.1,
