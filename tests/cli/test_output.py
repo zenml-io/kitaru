@@ -17,6 +17,7 @@ import io
 import json
 
 import pytest
+from rich.console import Console
 from rich.text import Text
 
 from kitaru.cli.output import (
@@ -40,6 +41,7 @@ def _render_text(
     *,
     rich: bool,
     columns: int = 120,
+    strip_ansi: bool = True,
 ) -> tuple[str, str]:
     """Render one text result with a deterministic terminal width."""
     stdout = io.StringIO()
@@ -60,9 +62,11 @@ def _render_text(
         emit_result(result)
     finally:
         reset_output_context(token)
-    return Text.from_ansi(stdout.getvalue()).plain, Text.from_ansi(
-        stderr.getvalue()
-    ).plain
+    if strip_ansi:
+        return Text.from_ansi(stdout.getvalue()).plain, Text.from_ansi(
+            stderr.getvalue()
+        ).plain
+    return stdout.getvalue(), stderr.getvalue()
 
 
 def test_auto_mode_and_finite_jsonl_contract() -> None:
@@ -439,19 +443,42 @@ def test_human_doctor_renders_checks_as_an_operational_table() -> None:
                         "required": False,
                         "detail": "/opt/homebrew/bin/uv",
                     },
+                    {
+                        "name": "compatibility",
+                        "status": "warn",
+                        "required": False,
+                        "detail": "Version mismatch",
+                    },
+                    {
+                        "name": "authentication",
+                        "status": "skip",
+                        "required": True,
+                        "detail": "Server unavailable",
+                    },
                 ],
             },
             exit_code=6,
         ),
         rich=True,
+        strip_ansi=False,
     )
 
-    assert "needs attention" in stdout
-    assert "Check" in stdout
-    assert "Status" in stdout
-    assert "server_info" in stdout
-    assert "Connection refused" in stdout
-    assert '"checks"' not in stdout
+    rendered = Text.from_ansi(stdout)
+    assert "needs attention" in rendered.plain
+    assert "Check" in rendered.plain
+    assert "Status" in rendered.plain
+    assert "server_info" in rendered.plain
+    assert "Connection refused" in rendered.plain
+    assert '"checks"' not in rendered.plain
+
+    console = Console()
+    expected_colors = {"pass": 2, "fail": 1, "warn": 3}
+    for status, color_number in expected_colors.items():
+        style = rendered.get_style_at_offset(console, rendered.plain.index(status))
+        assert style.color is not None
+        assert style.color.number == color_number
+    skip_style = rendered.get_style_at_offset(console, rendered.plain.index("skip"))
+    assert skip_style.dim is True
 
 
 def test_human_registration_receipt_keeps_parent_and_version_identity() -> None:
