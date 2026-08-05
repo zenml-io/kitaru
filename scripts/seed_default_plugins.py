@@ -238,7 +238,7 @@ async def seed_plugin(
 
 async def seed_defaults(display_version: str | None = None) -> list[dict[str, Any]]:
     """Seed every development plugin into the configured Kitaru workspace."""
-    async with KitaruAPIClient.from_env() as client:
+    async with KitaruAPIClient() as client:
         return [
             await seed_plugin(client, definition, display_version)
             for definition in PLUGIN_DEFINITIONS
