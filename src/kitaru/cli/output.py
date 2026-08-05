@@ -62,6 +62,13 @@ _ERROR_TITLES = {
     "timeout": "Timed out",
 }
 
+_DOCTOR_STATUS_STYLES = {
+    "pass": "green",
+    "fail": "red",
+    "warn": "yellow",
+    "skip": "dim",
+}
+
 
 @dataclass(slots=True)
 class CLIError(Exception):
@@ -452,9 +459,10 @@ def _emit_doctor(console: Console, value: dict[str, Any]) -> None:
     for check in checks:
         if not isinstance(check, dict):
             continue
+        status = _display_value(check.get("status"))
         table.add_row(
             Text(_display_value(check.get("name"))),
-            Text(_display_value(check.get("status"))),
+            Text(status, style=_DOCTOR_STATUS_STYLES.get(status, "")),
             Text(_display_value(check.get("required"))),
             Text(_display_value(check.get("detail"))),
         )
