@@ -38,8 +38,6 @@ class KitaruAgent(
         *,
         agent_id: uuid.UUID | None = None,
         agent_version_id: uuid.UUID | None = None,
-        api_url: str | None = None,
-        api_key: str | None = None,
         session_name: str | None = None,
         batch_size: int = 20,
     ) -> None:
@@ -50,31 +48,19 @@ class KitaruAgent(
             agent_id: Optional Kitaru agent identifier. Task-bound runs infer
                 this from the task's agent version.
             agent_version_id: Optional Kitaru agent-version identifier.
-            api_url: Kitaru API URL, falling back to ``KITARU_API_URL``.
-            api_key: Kitaru API key, falling back to ``KITARU_TASK_TOKEN``
-                and then ``KITARU_API_KEY``.
             session_name: Recorded name, falling back to
                 ``KITARU_SESSION_NAME``.
             batch_size: Number of child nodes sent per upsert batch.
 
         Raises:
-            ValueError: If the API URL is missing or batch size is invalid.
+            ValueError: If batch size is invalid.
         """
         if batch_size < 1:
             raise ValueError("batch_size must be at least 1")
-        resolved_url = api_url or os.environ.get("KITARU_API_URL")
-        if not resolved_url:
-            raise ValueError("KITARU_API_URL is not set")
         super().__init__(agent)
         self._capability = _KitaruCapability(
             agent_id=agent_id,
             agent_version_id=agent_version_id,
-            api_url=resolved_url,
-            api_key=(
-                api_key
-                or os.environ.get("KITARU_TASK_TOKEN")
-                or os.environ.get("KITARU_API_KEY")
-            ),
             session_name=session_name or os.environ.get("KITARU_SESSION_NAME"),
             batch_size=batch_size,
         )

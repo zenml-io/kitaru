@@ -80,7 +80,6 @@ async def main() -> None:
         pydantic_agent,
         agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
         agent_version_id=uuid.UUID(version_value) if version_value else None,
-        api_url=os.environ["KITARU_API_URL"],
     )
 
     try:

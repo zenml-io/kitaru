@@ -127,7 +127,7 @@ class _FakeClient:
     next_ingest_error: ClassVar[BaseException | None] = None
 
     def __init__(self, **kwargs: Any) -> None:
-        self.api_key = kwargs.get("api_key")
+        self.kwargs = kwargs
         self.session_id = uuid.uuid4()
         fixture = type(self).next_fixture
         self.task_id = fixture.task_id if fixture else None
@@ -151,7 +151,7 @@ class _FakeClient:
 def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "KITARU_API_KEY",
-        "KITARU_TASK_TOKEN",
+        "KITARU_API_TOKEN",
         "KITARU_API_URL",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
@@ -246,7 +246,6 @@ def test_uses_pydantic_ai_wrapper_agent() -> None:
     wrapped = KitaruAgent(
         original,
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     assert isinstance(wrapped, WrapperAgent)
@@ -260,7 +259,6 @@ async def test_task_bound_run_leaves_agent_identity_for_server_inference(
     _set_replay(monkeypatch, spec)
     wrapped = KitaruAgent(
         Agent(TestModel(call_tools=[])),
-        api_url="http://kitaru.test",
     )
 
     await wrapped.run("ignored prompt")
@@ -273,28 +271,21 @@ async def test_task_bound_run_leaves_agent_identity_for_server_inference(
     assert "agent_version_id" not in request.model_fields_set
 
 
-def test_constructor_validates_configuration() -> None:
+def test_constructor_validates_batch_size() -> None:
     agent = Agent(TestModel(call_tools=[]))
-    with pytest.raises(ValueError, match="KITARU_API_URL"):
-        KitaruAgent(agent, agent_id=uuid.uuid4())
     with pytest.raises(ValueError, match="batch_size"):
-        KitaruAgent(
-            agent, agent_id=uuid.uuid4(), api_url="http://kitaru.test", batch_size=0
-        )
+        KitaruAgent(agent, agent_id=uuid.uuid4(), batch_size=0)
 
 
-def test_uses_task_token_before_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("KITARU_TASK_TOKEN", "task-token")
-    monkeypatch.setenv("KITARU_API_KEY", "api-key")
+def test_uses_default_api_client() -> None:
     agent = KitaruAgent(
         Agent(TestModel(call_tools=[])),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     agent.run_sync("hello")
 
-    assert _FakeClient.instances[0].api_key == "task-token"
+    assert _FakeClient.instances[0].kwargs == {}
 
 
 def test_run_sync_preserves_result_and_records_lifecycle() -> None:
@@ -302,7 +293,6 @@ def test_run_sync_preserves_result_and_records_lifecycle() -> None:
     wrapped = KitaruAgent(
         original,
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
         session_name="recorded",
     )
     result = wrapped.run_sync("hello")
@@ -339,7 +329,6 @@ async def test_setup_error_fails_created_session() -> None:
     agent = KitaruAgent(
         Agent(TestModel(call_tools=[])),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     with pytest.raises(RuntimeError, match="ingest failed"):
@@ -379,7 +368,6 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
             model_settings={"temperature": 0.9},
         ),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     result = await agent.run("caller prompt")
@@ -429,7 +417,6 @@ async def test_replay_json_input_is_encoded_and_recorded_original(
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     await agent.run("caller prompt")
@@ -483,7 +470,6 @@ async def test_imported_conversation_replays_final_turn_with_history(
     agent = KitaruAgent(
         Agent(FunctionModel(model), system_prompt="Answer from the conversation."),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     await agent.run("caller prompt")
@@ -524,7 +510,6 @@ async def test_live_json_input_is_encoded_and_recorded_original() -> None:
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     await agent.run(cast(Any, live_input))
@@ -540,7 +525,6 @@ async def test_concurrent_runs_on_one_wrapper_keep_state_isolated() -> None:
     agent = KitaruAgent(
         Agent(TestModel(call_tools=[])),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     results = await asyncio.gather(agent.run("first"), agent.run("second"))
@@ -582,7 +566,6 @@ async def test_replay_uses_spec_input_when_environment_input_is_absent(
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     await agent.run("caller prompt")
@@ -613,7 +596,6 @@ async def test_mapping_model_override_replaces_exact_requested_model(
     agent = KitaruAgent(
         Agent(FunctionModel(original, model_name="original")),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     result = await agent.run("prompt")
@@ -687,7 +669,6 @@ async def test_tool_policies(
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     result = await agent.run("weather")
@@ -727,7 +708,6 @@ async def test_history_policy_without_cache_key_uses_miss_behavior(
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     result = await agent.run("weather")
@@ -769,7 +749,6 @@ async def test_static_miss_behavior(
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     if error_type is not None:
@@ -841,7 +820,6 @@ async def test_provider_native_tools_are_observed_but_not_mocked(
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     if fails:
@@ -881,7 +859,6 @@ async def test_unpaired_provider_native_call_rejects_llm_policy(
     agent = KitaruAgent(
         Agent(FunctionModel(model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     with pytest.raises(ToolPolicyError, match="provider-native tool"):
@@ -926,7 +903,6 @@ async def test_history_policy_normalizes_validated_tool_arguments(
     agent = KitaruAgent(
         original,
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     result = await agent.run("lookup")
@@ -949,7 +925,6 @@ async def test_fully_consumed_stream_completes_session() -> None:
     agent = KitaruAgent(
         Agent(FunctionModel(stream_function=stream_model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     async with agent.run_stream("prompt") as stream:
@@ -969,7 +944,6 @@ async def test_failing_stream_fails_session() -> None:
     agent = KitaruAgent(
         Agent(FunctionModel(stream_function=stream_model)),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     with pytest.raises(RuntimeError, match="stream failed"):
@@ -995,7 +969,6 @@ async def test_per_tool_llm_policy_fails_clearly_without_executing_tool(
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
         agent_id=uuid.uuid4(),
-        api_url="http://kitaru.test",
     )
 
     with pytest.raises(

@@ -344,8 +344,6 @@ class _KitaruCapability(AbstractCapability[Any]):
 
     agent_id: uuid.UUID | None
     agent_version_id: uuid.UUID | None
-    api_url: str
-    api_key: str | None
     session_name: str | None
     batch_size: int
     _state: _RunState | None = field(default=None, repr=False)
@@ -361,7 +359,7 @@ class _KitaruCapability(AbstractCapability[Any]):
 
     async def for_run(self, ctx: RunContext[Any]) -> "_KitaruCapability":
         """Create isolated client and replay state for one run."""
-        client = KitaruAPIClient(base_url=self.api_url, api_key=self.api_key)
+        client = KitaruAPIClient()
         try:
             task_value = os.environ.get("KITARU_TASK_ID")
             task_id = uuid.UUID(task_value) if task_value else None
