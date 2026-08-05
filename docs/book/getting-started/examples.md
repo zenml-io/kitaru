@@ -1,45 +1,36 @@
 ---
-description: Import document traces, score baselines, and run an experiment.
+description: Import real agent traces, find useful cohorts, and compare an improved agent version.
 icon: flask
 ---
 
-# Example
+# Examples
 
-Kitaru has one canonical example. A PydanticAI agent extracts structured fields
-from three public NIST PDFs. Langfuse records the real model calls. Kitaru then
-imports, scores, and replays the traces.
+## Canonical returns example
 
-The example teaches these CLI operations:
+The canonical example follows an autonomous returns agent from production evidence to an evaluated improvement:
 
-- Use the default Langfuse importer.
-- Test and register the example agent and evaluator.
-- Start a local worker for a remote Kitaru server.
-- Import a Langfuse JSONL export as Kitaru sessions.
-- Score the imported baseline sessions.
-- Create an immutable cohort version.
-- Create and run an experiment against an improved agent version.
+1. Generate real PydanticAI traces through Langfuse.
+2. Register the agent and start a worker.
+3. Import the trace export as tagged Kitaru sessions.
+4. Run the bundled cost, latency, and tool-call-pattern evaluators.
+5. Freeze selected sessions in cohort versions.
+6. Register a policy evaluator and an improved agent version.
+7. Replay the cohorts and compare baseline and candidate evaluations.
 
-## Start the example
+The orders, customers, shipments, and actions are synthetic. The agent makes real model calls when you regenerate the checked-in traces, while its commerce tools only modify an in-memory store.
+
+Start in the example directory:
 
 ```bash
-cd examples/document_processing
+cd examples/canonical_example
 cp .env.example .env
+set -a; source .env; set +a
+docker compose -f ../../docker-compose.yml up -d --build
 uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
-docker compose -f ../../docker-compose.yml up -d --build db server
-./generate.sh
 ```
 
-Add the OpenAI and Langfuse credentials to `.env` before you generate the
-traces. The local Kitaru server runs at `http://localhost:8000` without API-key
-authentication.
+Continue with [`examples/canonical_example/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/canonical_example) for the complete CLI walkthrough.
 
-Continue with `examples/document_processing/README.md`. The README shows each
-Kitaru CLI command directly.
+## Native MCP configuration
 
-## Follow the code
-
-- `generate.sh` creates the real Langfuse export.
-- `traces/langfuse-traces.jsonl` contains the exported traces.
-- `agent.py` defines the improved document agent.
-- `evaluator.py` defines exact field-accuracy scoring.
-- `README.md` contains the complete CLI journey.
+[`examples/v2/mcp/`](https://github.com/zenml-io/kitaru/tree/develop/examples/v2/mcp) shows how to connect an MCP client to Kitaru's local stdio server in its default read-only mode. The MCP server can inspect v2 registry and activity records. Standard mode can manage cohorts and experiments and start bounded workflows. Trace-file upload, registration, login, worker management, and wait loops remain CLI operations.
