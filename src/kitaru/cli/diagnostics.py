@@ -39,11 +39,11 @@ from kitaru.cli.config import (
     resolve_target,
 )
 from kitaru.cli.output import CLIError, CommandResult
-from kitaru.client.credential_store import (
+from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
-    CredentialStore,
 )
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
 from kitaru.client.exceptions import APIError
 

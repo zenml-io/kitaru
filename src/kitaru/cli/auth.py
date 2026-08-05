@@ -22,6 +22,7 @@ from kitaru.api_models.v1.info import AuthScheme
 from kitaru.cli.config import validate_server_url
 from kitaru.cli.output import CLIError, CommandResult, write_interaction
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.client.config import set_server_url
 from kitaru.client.control_plane import ControlPlaneDeviceAuthorization
 from kitaru.client.control_plane_auth import control_plane_login
 from kitaru.client.credential_store import CredentialStore
@@ -123,10 +124,12 @@ async def login(
             authentication = "authenticated"
             credential_kind = "api_key" if api_key is not None else "device"
             credential_stored = True
+        set_server_url(server_url)
     except OSError as error:
         raise CLIError(
             "invalid_configuration",
-            f"Authentication succeeded but credentials could not be stored: {error}",
+            "Authentication succeeded but local connection state could not be "
+            f"stored: {error}",
         ) from error
     finally:
         await client.close()

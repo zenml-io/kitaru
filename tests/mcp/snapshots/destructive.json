@@ -2639,102 +2639,6 @@
           "title": "HistoryScope",
           "type": "string"
         },
-        "JobResponse": {
-          "description": "Job response.",
-          "properties": {
-            "cancel_requested_at": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Time cancellation was requested.",
-              "title": "Cancel Requested At"
-            },
-            "created": {
-              "description": "Creation time.",
-              "format": "date-time",
-              "title": "Created",
-              "type": "string"
-            },
-            "ended_at": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Time the job settled.",
-              "title": "Ended At"
-            },
-            "error": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "First counted task failure's error.",
-              "title": "Error"
-            },
-            "id": {
-              "description": "Job id.",
-              "format": "uuid",
-              "title": "Id",
-              "type": "string"
-            },
-            "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
-            },
-            "started_at": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Time the job started.",
-              "title": "Started At"
-            },
-            "status": {
-              "$ref": "#/$defs/JobStatus"
-            },
-            "updated": {
-              "description": "Last modification time.",
-              "format": "date-time",
-              "title": "Updated",
-              "type": "string"
-            }
-          },
-          "required": [
-            "created",
-            "updated",
-            "owner_id",
-            "id",
-            "status"
-          ],
-          "title": "JobResponse",
-          "type": "object"
-        },
         "JobStatus": {
           "description": "Job status.",
           "enum": [
@@ -2803,7 +2707,7 @@
           "title": "NodeType",
           "type": "string"
         },
-        "PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse__JobResponse__": {
+        "PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
           "additionalProperties": false,
           "properties": {
             "items": {
@@ -2828,7 +2732,7 @@
                     "$ref": "#/$defs/TaskResponse"
                   },
                   {
-                    "$ref": "#/$defs/JobResponse"
+                    "$ref": "#/$defs/_MCPJob"
                   }
                 ]
               },
@@ -2843,7 +2747,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, JobResponse]]",
+          "title": "PageData[Union[SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -4207,10 +4111,115 @@
           ],
           "title": "ToolPolicyOnMiss",
           "type": "string"
+        },
+        "_MCPJob": {
+          "properties": {
+            "cancel_requested_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time cancellation was requested.",
+              "title": "Cancel Requested At"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job settled.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First counted task failure's error.",
+              "title": "Error"
+            },
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "session_run",
+                "import",
+                "evaluation",
+                "replay"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/JobStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "kind",
+            "status"
+          ],
+          "title": "_MCPJob",
+          "type": "object"
         }
       },
       "additionalProperties": false,
-      "description": "Activity read result with domain-typed data.",
+      "description": "Typed activity read result.",
       "properties": {
         "data": {
           "anyOf": [
@@ -4233,10 +4242,10 @@
               "$ref": "#/$defs/TaskResponse"
             },
             {
-              "$ref": "#/$defs/JobResponse"
+              "$ref": "#/$defs/_MCPJob"
             },
             {
-              "$ref": "#/$defs/PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse__JobResponse__"
+              "$ref": "#/$defs/PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
             },
             {
               "type": "null"
@@ -5892,6 +5901,17 @@
     "name": "kitaru_session_import",
     "outputSchema": {
       "$defs": {
+        "JobKind": {
+          "description": "Job kind.",
+          "enum": [
+            "session_run",
+            "import",
+            "evaluation",
+            "replay"
+          ],
+          "title": "JobKind",
+          "type": "string"
+        },
         "JobResponse": {
           "description": "Job response.",
           "properties": {
@@ -5948,6 +5968,10 @@
               "title": "Id",
               "type": "string"
             },
+            "kind": {
+              "$ref": "#/$defs/JobKind",
+              "description": "Kind of workflow that created the job."
+            },
             "owner_id": {
               "description": "Id of the owning account.",
               "format": "uuid",
@@ -5983,6 +6007,7 @@
             "updated",
             "owner_id",
             "id",
+            "kind",
             "status"
           ],
           "title": "JobResponse",
@@ -6419,6 +6444,17 @@
           "title": "ExperimentRunStatus",
           "type": "string"
         },
+        "JobKind": {
+          "description": "Job kind.",
+          "enum": [
+            "session_run",
+            "import",
+            "evaluation",
+            "replay"
+          ],
+          "title": "JobKind",
+          "type": "string"
+        },
         "JobResponse": {
           "description": "Job response.",
           "properties": {
@@ -6475,6 +6511,10 @@
               "title": "Id",
               "type": "string"
             },
+            "kind": {
+              "$ref": "#/$defs/JobKind",
+              "description": "Kind of workflow that created the job."
+            },
             "owner_id": {
               "description": "Id of the owning account.",
               "format": "uuid",
@@ -6510,6 +6550,7 @@
             "updated",
             "owner_id",
             "id",
+            "kind",
             "status"
           ],
           "title": "JobResponse",

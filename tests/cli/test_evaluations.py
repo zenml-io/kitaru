@@ -30,7 +30,7 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationListParams,
 )
 from kitaru.api_models.v1.filter import FilterCondition
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import (
     TaskKind,
@@ -188,6 +188,7 @@ def _job(status: JobStatus = JobStatus.PENDING) -> JobResponse:
         owner_id=uuid.uuid4(),
         created=now,
         updated=now,
+        kind=JobKind.EVALUATION,
         status=status,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=now

@@ -6,8 +6,10 @@
 from typing import TypeVar
 
 from kitaru.api_models.v1.agent import AgentListParams
+from kitaru.api_models.v1.agent_version import AgentVersionListParams
 from kitaru.api_models.v1.base import ListParams, Page, ResponseModel
 from kitaru.api_models.v1.cohort import CohortListParams
+from kitaru.api_models.v1.cohort_version import CohortVersionListParams
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.experiment import ExperimentListParams
 from kitaru.api_models.v1.importer import ImporterListParams
@@ -58,15 +60,23 @@ async def handle_registry_read(
     if isinstance(request, RegistryListVersionsRequest):
         kind = ParentKind(request.kind)
         parent = await resolve_parent(client, kind, request.parent_reference)
-        params = ListParams(cursor=request.cursor, size=request.size, sort=request.sort)
+        common = request.model_dump(include={"cursor", "size", "sort"})
         if request.kind == "agent":
-            page = await client.agents.list_versions(parent.id, params)
+            page = await client.agents.list_versions(
+                parent.id, AgentVersionListParams.model_validate(common)
+            )
         elif request.kind == "cohort":
-            page = await client.cohorts.list_versions(parent.id, params)
+            page = await client.cohorts.list_versions(
+                parent.id, CohortVersionListParams.model_validate(common)
+            )
         elif request.kind == "importer":
-            page = await client.importers.list_versions(parent.id, params)
+            page = await client.importers.list_versions(
+                parent.id, ListParams.model_validate(common)
+            )
         else:
-            page = await client.evaluators.list_versions(parent.id, params)
+            page = await client.evaluators.list_versions(
+                parent.id, ListParams.model_validate(common)
+            )
         return build_page_data(page, request.size)
     return await _get_version(state, request)
 

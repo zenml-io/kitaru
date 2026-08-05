@@ -25,7 +25,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import (
     SessionListParams,
     SessionOrigin,
@@ -64,6 +64,7 @@ def _job(status: JobStatus = JobStatus.PENDING) -> JobResponse:
         owner_id=uuid.uuid4(),
         created=now,
         updated=now,
+        kind=JobKind.IMPORT,
         status=status,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=now
