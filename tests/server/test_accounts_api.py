@@ -21,13 +21,18 @@ import httpx
 import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher, local_settings
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
 
-ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
+ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
+NON_ADMIN_ACTOR = AuthContext(
+    account=Account(id=uuid.uuid4(), name="alice", is_admin=False)
+)
 
 
 @pytest.fixture
@@ -37,12 +42,49 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     service = AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+async def non_admin_client() -> AsyncGenerator[httpx.AsyncClient, None]:
+    """Provide an HTTP client for the app authorized as a non-admin account."""
+    app = create_app(local_settings())
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+    )
+    app.dependency_overrides[get_account_service] = lambda: service
+    app.dependency_overrides[authorize] = lambda: NON_ADMIN_ACTOR
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+async def non_admin_client_with_target() -> AsyncGenerator[
+    tuple[httpx.AsyncClient, uuid.UUID], None
+]:
+    """Provide a non-admin-authorized client plus a pre-seeded target account id."""
+    app = create_app(local_settings())
+    repository = FakeAccountRepository()
+    target = await repository.create(Account(name="bob"))
+    service = AccountService(
+        repository=repository,
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+    )
+    app.dependency_overrides[get_account_service] = lambda: service
+    app.dependency_overrides[authorize] = lambda: NON_ADMIN_ACTOR
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client, target.id
 
 
 async def test_create_account(client: httpx.AsyncClient) -> None:
@@ -75,6 +117,7 @@ async def test_create_account_response_has_no_password(
         "name",
         "email",
         "is_service_account",
+        "is_admin",
         "active",
         "metadata",
         "created",
@@ -277,6 +320,7 @@ async def self_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     service = AccountService(
         repository=repository,
         password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
@@ -330,7 +374,7 @@ async def test_update_other_account_metadata_forbidden(
         f"/v1/accounts/{created['id']}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 403
-    assert response.json() == {"detail": "Accounts can only update their own metadata."}
+    assert response.json() == {"detail": "Accounts can only update their own metadata"}
 
 
 async def test_update_own_account_password(self_client: httpx.AsyncClient) -> None:
@@ -377,7 +421,7 @@ async def test_update_other_account_password_forbidden(
     )
     assert response.status_code == 403
     assert response.json() == {
-        "detail": "Accounts cannot change the password of other accounts."
+        "detail": "Accounts cannot change the password of other accounts"
     }
 
 
@@ -465,7 +509,7 @@ async def test_deactivate_own_account_forbidden(
     """Observe HTTP 403 when an account deactivates itself."""
     response = await self_client.post(f"/v1/accounts/{ACTOR.account.id}/deactivate")
     assert response.status_code == 403
-    assert response.json() == {"detail": "Accounts cannot deactivate themselves."}
+    assert response.json() == {"detail": "Accounts cannot deactivate themselves"}
 
 
 async def test_activate_account_is_unauthenticated(
@@ -478,3 +522,50 @@ async def test_activate_account_is_unauthenticated(
         json={"activation_token": created["activation_token"], "password": "secret"},
     )
     assert response.status_code == 200
+
+
+async def test_create_account_forbidden_for_non_admin(
+    non_admin_client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 403 when a non-admin actor creates an account."""
+    response = await non_admin_client.post("/v1/accounts", json={"name": "alice"})
+    assert response.status_code == 403
+
+
+async def test_deactivate_account_forbidden_for_non_admin(
+    non_admin_client_with_target: tuple[httpx.AsyncClient, uuid.UUID],
+) -> None:
+    """Observe HTTP 403 when a non-admin actor deactivates another account."""
+    client, target_id = non_admin_client_with_target
+    response = await client.post(f"/v1/accounts/{target_id}/deactivate")
+    assert response.status_code == 403
+
+
+async def test_update_own_account_is_admin_forbidden(
+    self_client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 403 when an account changes its own admin flag."""
+    response = await self_client.patch(
+        f"/v1/accounts/{ACTOR.account.id}", json={"is_admin": False}
+    )
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Accounts cannot change their own admin flag"}
+
+
+async def test_update_account_is_admin_forbidden_for_non_admin(
+    non_admin_client_with_target: tuple[httpx.AsyncClient, uuid.UUID],
+) -> None:
+    """Observe HTTP 403 when a non-admin actor sets another account's admin flag."""
+    client, target_id = non_admin_client_with_target
+    response = await client.patch(f"/v1/accounts/{target_id}", json={"is_admin": True})
+    assert response.status_code == 403
+
+
+async def test_update_account_is_admin(client: httpx.AsyncClient) -> None:
+    """Set another account's admin flag as an admin actor."""
+    created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
+    response = await client.patch(
+        f"/v1/accounts/{created['id']}", json={"is_admin": True}
+    )
+    assert response.status_code == 200
+    assert response.json()["is_admin"] is True

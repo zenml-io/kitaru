@@ -32,13 +32,15 @@ from kitaru.api_models.v1.account import (
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
 
-ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
+ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
 
 
 @pytest.fixture
@@ -48,6 +50,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     service = AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR

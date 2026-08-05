@@ -84,6 +84,8 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
+from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
@@ -114,6 +116,7 @@ from kitaru.server.application.services.experiment_run_service import (
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
@@ -209,13 +212,31 @@ def get_server_analytics(
     )
 
 
+def get_permission_service(
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> PermissionService:
+    """Return a permission service for the current request.
+
+    Args:
+        settings: API settings for this process.
+
+    Returns:
+        Permission service bound to the auth scheme's provider.
+    """
+    if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
+        return PermissionService(AllowAllPermissionProvider())
+    return PermissionService(AdminFlagPermissionProvider())
+
+
 def get_account_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    permission_service: Annotated[PermissionService, Depends(get_permission_service)],
 ) -> AccountService:
     """Return an account service for the current request.
 
     Args:
         session: Request-scoped database session.
+        permission_service: Permission service for the current request.
 
     Returns:
         Account service bound to the SQL repository.
@@ -223,6 +244,7 @@ def get_account_service(
     return AccountService(
         repository=SQLAccountRepository(session),
         password_hasher=BcryptPasswordHasher(),
+        permission_service=permission_service,
     )
 
 

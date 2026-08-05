@@ -16,7 +16,7 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from kitaru.api_models.v1.account import (
     AccountActivateRequest,
@@ -76,6 +76,7 @@ async def create_account(
         name=body.name,
         email=body.email,
         password=body.password,
+        is_admin=body.is_admin,
         actor=actor,
     )
     if activation_token is not None:
@@ -145,10 +146,12 @@ async def update_account(
 
     A password write carries the current password in ``old_password``.
 
-    Clients observe HTTP 200 on success, 403 when writing a password outside
-    the ``local`` auth scheme, when writing another account's password or
-    metadata, and when the supplied current password is missing or wrong, 404
-    when the account does not exist, and 422 on invalid input.
+    Clients observe HTTP 200 on success, 403 when writing a password or the
+    admin flag outside the ``local`` auth scheme, when writing another
+    account's password or metadata, when changing the calling account's own
+    admin flag, when making a service account an admin, and when the
+    supplied current password is missing or wrong, 404 when the account does
+    not exist, and 422 on invalid input.
 
     Args:
         account_id: Id of the account.
@@ -157,31 +160,17 @@ async def update_account(
         actor: Caller context.
         settings: API settings for this process.
 
-    Raises:
-        HTTPException: The caller is not the account whose password or
-            metadata it writes.
-
     Returns:
         Updated account.
     """
-    if body.password is not None:
+    if body.password is not None or body.is_admin is not None:
         require_local_account_management(settings)
-    if account_id != actor.account.id:
-        if body.password is not None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Accounts cannot change the password of other accounts.",
-            )
-        if body.metadata is not None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Accounts can only update their own metadata.",
-            )
     account = await service.update_account(
         account_id,
         password=body.password,
         old_password=body.old_password,
         metadata=body.metadata,
+        is_admin=body.is_admin,
         actor=actor,
     )
     return account_to_response(account)
@@ -207,17 +196,9 @@ async def deactivate_account(
         service: Account service.
         actor: Caller context.
 
-    Raises:
-        HTTPException: The caller is deactivating itself.
-
     Returns:
         Deactivated account carrying its activation token.
     """
-    if account_id == actor.account.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Accounts cannot deactivate themselves.",
-        )
     account, activation_token = await service.deactivate_account(
         account_id, actor=actor
     )

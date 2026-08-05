@@ -24,6 +24,8 @@ from kitaru.server.application.interfaces.account_repository import (
 from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.permissions import Action, ResourceType
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
@@ -37,22 +39,28 @@ class AccountService:
     """Account use cases."""
 
     def __init__(
-        self, repository: AccountRepository, password_hasher: PasswordHasher
+        self,
+        repository: AccountRepository,
+        password_hasher: PasswordHasher,
+        permission_service: PermissionService,
     ) -> None:
         """Initialize the service.
 
         Args:
             repository: Account repository.
             password_hasher: Password hasher for login credentials.
+            permission_service: Permission service for authorization checks.
         """
         self._repository = repository
         self._password_hasher = password_hasher
+        self._permission_service = permission_service
 
     async def create_account(
         self,
         name: str,
         email: str | None,
         password: str | None,
+        is_admin: bool,
         actor: AuthContext,
     ) -> tuple[Account, str | None]:
         """Create an account, active with a password or pending activation.
@@ -61,20 +69,24 @@ class AccountService:
             name: Account name.
             email: Contact email.
             password: Login password, hashed before storage.
+            is_admin: Whether the account has admin rights.
             actor: Caller context.
 
         Raises:
+            ForbiddenError: The caller may not create accounts.
             DuplicateAccountName: The account name is already registered.
 
         Returns:
             Created account and its activation token when one was generated.
         """
-        _ = actor
+        await self._permission_service.check(actor, ResourceType.ACCOUNT, Action.CREATE)
         if password is not None:
             password_hash = await to_thread.run_sync(
                 self._password_hasher.hash, password
             )
-            account = Account(name=name, email=email, password_hash=password_hash)
+            account = Account(
+                name=name, email=email, password_hash=password_hash, is_admin=is_admin
+            )
             return await self._repository.create(account), None
         activation_token = generate_secret()
         account = Account(
@@ -82,6 +94,7 @@ class AccountService:
             email=email,
             active=False,
             activation_token_hash=hash_secret(activation_token),
+            is_admin=is_admin,
         )
         return await self._repository.create(account), activation_token
 
@@ -96,9 +109,14 @@ class AccountService:
             Stored account.
         """
         try:
-            return await self._repository.get_by_name(name)
+            account = await self._repository.get_by_name(name)
         except AccountNotFound:
-            pass
+            account = None
+        if account is not None:
+            if account.is_admin:
+                return account
+            account.update_is_admin(True)
+            return await self._repository.update(account)
         password_hash = None
         if password is not None:
             password_hash = await to_thread.run_sync(
@@ -106,7 +124,7 @@ class AccountService:
             )
         try:
             return await self._repository.create(
-                Account(name=name, password_hash=password_hash)
+                Account(name=name, password_hash=password_hash, is_admin=True)
             )
         except DuplicateAccountName:
             return await self._repository.get_by_name(name)
@@ -148,6 +166,7 @@ class AccountService:
         password: str | None,
         old_password: str | None,
         metadata: dict[str, Any] | None,
+        is_admin: bool | None,
         actor: AuthContext,
     ) -> Account:
         """Partially update an account.
@@ -157,19 +176,38 @@ class AccountService:
             password: New login password, unchanged when ``None``.
             old_password: Current login password, required to set a new one.
             metadata: New metadata, unchanged when ``None``.
+            is_admin: New admin rights state, unchanged when ``None``.
             actor: Caller context.
 
         Raises:
             AccountNotFound: No account has this id.
-            ForbiddenError: The current password is missing or does not match.
+            ForbiddenError: The caller may not set admin rights, writes its
+                own admin flag or another account's password or metadata,
+                the current password is missing or does not match, or the
+                target account is a service account.
 
         Returns:
             Updated account.
         """
-        _ = actor
         account = await self._repository.get(account_id)
+        if account_id != actor.account.id:
+            if password is not None:
+                raise ForbiddenError(
+                    "Accounts cannot change the password of other accounts"
+                )
+            if metadata is not None:
+                raise ForbiddenError("Accounts can only update their own metadata")
         if metadata is not None:
             account.update_metadata(metadata)
+        if is_admin is not None:
+            await self._permission_service.check(
+                actor, ResourceType.ACCOUNT, Action.SET_ADMIN, resource_id=account_id
+            )
+            if account_id == actor.account.id:
+                raise ForbiddenError("Accounts cannot change their own admin flag")
+            if account.is_service_account:
+                raise ForbiddenError("Service accounts cannot be admins")
+            account.update_is_admin(is_admin)
         if password is not None:
             if old_password is None:
                 raise ForbiddenError(
@@ -198,11 +236,17 @@ class AccountService:
 
         Raises:
             AccountNotFound: No account has this id.
+            ForbiddenError: The caller may not deactivate this account or is
+                deactivating itself.
 
         Returns:
             Deactivated account and its activation token.
         """
-        _ = actor
+        await self._permission_service.check(
+            actor, ResourceType.ACCOUNT, Action.DEACTIVATE, resource_id=account_id
+        )
+        if account_id == actor.account.id:
+            raise ForbiddenError("Accounts cannot deactivate themselves")
         account = await self._repository.get(account_id)
         activation_token = generate_secret()
         account.update_active(False)
