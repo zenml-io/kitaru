@@ -73,11 +73,13 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
         )
         return row.to_domain()
 
-    async def get(self, api_key_id: uuid.UUID) -> ApiKey:
+    async def get(self, api_key_id: uuid.UUID, exclusive: bool = False) -> ApiKey:
         """Load an API key by id.
 
         Args:
             api_key_id: Id of the API key.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             ApiKeyNotFound: No API key has this id.
@@ -85,7 +87,7 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
         Returns:
             Stored API key.
         """
-        row = await self._get_row(api_key_id)
+        row = await self._get_row(api_key_id, exclusive=exclusive)
         return row.to_domain()
 
     async def query(
@@ -133,8 +135,11 @@ class SQLApiKeyRepository(BaseSQLRepository[ApiKeyORM]):
         row.owner_id = api_key.owner_id
         row.name = api_key.name
         row.key_hash = api_key.key_hash
+        row.previous_key_hash = api_key.previous_key_hash
+        row.retain_period_minutes = api_key.retain_period_minutes
         row.active = api_key.active
         row.last_used = api_key.last_used
+        row.last_rotated = api_key.last_rotated
         await self._flush(
             {API_KEY_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateApiKeyName(api_key.name)}
         )

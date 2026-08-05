@@ -14,6 +14,7 @@
 """API key use cases."""
 
 import uuid
+from datetime import UTC, datetime
 
 from kitaru.server.application.interfaces.api_key_repository import (
     ApiKeyRepository,
@@ -112,6 +113,33 @@ class ApiKeyService:
         api_key = await self.get_api_key(api_key_id, actor=actor)
         api_key.update_active(active)
         return await self._repository.update(api_key)
+
+    async def rotate_api_key(
+        self, api_key_id: uuid.UUID, retain_period_minutes: int, actor: AuthContext
+    ) -> tuple[ApiKey, str]:
+        """Rotate an API key owned by the caller.
+
+        Args:
+            api_key_id: Id of the API key.
+            retain_period_minutes: Minutes the previous key remains valid.
+            actor: Caller context.
+
+        Raises:
+            ApiKeyNotFound: No API key of the caller has this id.
+
+        Returns:
+            Rotated API key and the encoded plaintext key.
+        """
+        owner_id = actor.account.id
+        api_key = await self._repository.get(api_key_id, exclusive=True)
+        if api_key.owner_id != owner_id:
+            raise ApiKeyNotFound(api_key_id)
+        secret = generate_secret()
+        api_key.rotate(
+            hash_secret(secret), retain_period_minutes, when=datetime.now(UTC)
+        )
+        stored = await self._repository.update(api_key)
+        return stored, encode_api_key(stored.id, secret)
 
     async def delete_api_key(self, api_key_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete an API key owned by the caller.

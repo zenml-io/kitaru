@@ -60,6 +60,7 @@ async def test_create_api_key(client: httpx.AsyncClient) -> None:
     assert body["active"] is True
     assert body["key"].startswith(API_KEY_PREFIX)
     assert body["last_used"] is None
+    assert body["last_rotated"] is None
     assert body["created"] is not None
     assert body["updated"] is not None
     assert uuid.UUID(body["id"])
@@ -76,6 +77,7 @@ async def test_create_api_key_response_has_no_hash(client: httpx.AsyncClient) ->
         "active",
         "key",
         "last_used",
+        "last_rotated",
         "created",
         "updated",
     }
@@ -197,6 +199,55 @@ async def test_update_api_key_not_found(client: httpx.AsyncClient) -> None:
         f"/v1/api-keys/{uuid.uuid4()}", json={"active": False}
     )
     assert response.status_code == 404
+
+
+async def test_rotate_api_key(client: httpx.AsyncClient) -> None:
+    """Rotate an API key and observe the issued response shape."""
+    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.post(
+        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "id",
+        "owner_id",
+        "name",
+        "active",
+        "key",
+        "last_used",
+        "last_rotated",
+        "created",
+        "updated",
+    }
+    assert body["id"] == created["id"]
+    assert body["key"].startswith(API_KEY_PREFIX)
+    assert body["key"] != created["key"]
+    assert body["last_rotated"] is not None
+
+
+async def test_rotate_api_key_default_retain_period(client: httpx.AsyncClient) -> None:
+    """Default retain_period_minutes to zero for an empty rotate body."""
+    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.post(f"/v1/api-keys/{created['id']}/rotate", json={})
+    assert response.status_code == 200
+
+
+async def test_rotate_api_key_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an unknown API key id."""
+    response = await client.post(
+        f"/v1/api-keys/{uuid.uuid4()}/rotate", json={"retain_period_minutes": 5}
+    )
+    assert response.status_code == 404
+
+
+async def test_rotate_api_key_negative_retain_period(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a negative retain_period_minutes."""
+    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.post(
+        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": -1}
+    )
+    assert response.status_code == 422
 
 
 async def test_delete_api_key(client: httpx.AsyncClient) -> None:

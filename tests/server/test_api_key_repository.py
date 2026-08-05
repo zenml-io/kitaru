@@ -115,6 +115,33 @@ async def test_get_not_found(setup: Setup) -> None:
         await repository.get(missing_id)
 
 
+async def test_get_exclusive(setup: Setup) -> None:
+    """Load an API key with a row lock, a no-op difference for the fake backend."""
+    repository, owner_id, _ = setup
+    created = await repository.create(
+        ApiKey(owner_id=owner_id, name="ci", key_hash="hash")
+    )
+    loaded = await repository.get(created.id, exclusive=True)
+    assert loaded == created
+
+
+async def test_rotation_fields_round_trip(setup: Setup) -> None:
+    """Persist the previous hash, retain period, and rotation timestamp."""
+    repository, owner_id, _ = setup
+    created = await repository.create(
+        ApiKey(owner_id=owner_id, name="ci", key_hash="hash")
+    )
+    last_rotated = datetime.now(UTC)
+    created.rotate("new-hash", retain_period_minutes=5, when=last_rotated)
+    updated = await repository.update(created)
+    assert updated.key_hash == "new-hash"
+    assert updated.previous_key_hash == "hash"
+    assert updated.retain_period_minutes == 5
+    assert updated.last_rotated == last_rotated
+    loaded = await repository.get(created.id)
+    assert loaded == updated
+
+
 async def test_query(setup: Setup) -> None:
     """Query API keys newest-first with filters."""
     repository, owner_id, other_owner_id = setup

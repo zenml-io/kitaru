@@ -407,7 +407,11 @@ class AuthService:
             api_key = await self._api_key_repository.get(key_id)
         except ApiKeyNotFound as exc:
             raise AuthenticationError("Invalid API key.") from exc
-        if not verify_secret(secret, api_key.key_hash):
+        if not verify_secret(secret, api_key.key_hash) and (
+            api_key.previous_key_hash is None
+            or not api_key.is_previous_key_valid(datetime.now(UTC))
+            or not verify_secret(secret, api_key.previous_key_hash)
+        ):
             raise AuthenticationError("Invalid API key.")
         if not api_key.active:
             raise AuthenticationError("Invalid API key.")

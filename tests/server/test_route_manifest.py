@@ -40,6 +40,7 @@ def test_route_manifest_is_registered() -> None:
         "/v1/agents/{agent_id}/versions",
         "/v1/api-keys",
         "/v1/api-keys/{api_key_id}",
+        "/v1/api-keys/{api_key_id}/rotate",
         "/v1/blobs",
         "/v1/blobs/{blob_id}",
         "/v1/blobs/{blob_id}/content",

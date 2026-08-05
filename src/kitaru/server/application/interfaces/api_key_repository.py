@@ -37,11 +37,13 @@ class ApiKeyRepository(Protocol):
         """
         ...
 
-    async def get(self, api_key_id: uuid.UUID) -> ApiKey:
+    async def get(self, api_key_id: uuid.UUID, exclusive: bool = False) -> ApiKey:
         """Load an API key by id.
 
         Args:
             api_key_id: Id of the API key.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
 
         Raises:
             ApiKeyNotFound: No API key has this id.

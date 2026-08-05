@@ -884,11 +884,13 @@ class FakeApiKeyRepository:
         self._api_keys[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, api_key_id: uuid.UUID) -> ApiKey:
+    async def get(self, api_key_id: uuid.UUID, exclusive: bool = False) -> ApiKey:
         """Load an API key by id.
 
         Args:
             api_key_id: Id of the API key.
+            exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
 
         Raises:
             ApiKeyNotFound: No API key has this id.
@@ -896,6 +898,7 @@ class FakeApiKeyRepository:
         Returns:
             Stored API key.
         """
+        _ = exclusive
         api_key = self._api_keys.get(api_key_id)
         if api_key is None:
             raise ApiKeyNotFound(api_key_id)

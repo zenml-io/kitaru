@@ -22,6 +22,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyIssuedResponse,
     ApiKeyListParams,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
@@ -140,6 +141,31 @@ class ApiKeysResource:
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ApiKeyResponse.model_validate(response.json())
+
+    async def rotate(
+        self, api_key_id: uuid.UUID, request: ApiKeyRotateRequest | None = None
+    ) -> ApiKeyIssuedResponse:
+        """Rotate an API key.
+
+        The response carries the new plaintext key exactly once.
+
+        Args:
+            api_key_id: Id of the API key.
+            request: API key rotate request.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing API key.
+
+        Returns:
+            Rotated API key including the new plaintext key.
+        """
+        request = request or ApiKeyRotateRequest()
+        response = await self._client.request(
+            "POST",
+            f"/v1/api-keys/{api_key_id}/rotate",
+            json=request.model_dump(mode="json", exclude_unset=True),
+        )
+        return ApiKeyIssuedResponse.model_validate(response.json())
 
     async def delete(self, api_key_id: uuid.UUID) -> None:
         """Delete an API key.

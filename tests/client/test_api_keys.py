@@ -24,6 +24,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyIssuedResponse,
     ApiKeyListParams,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
@@ -147,6 +148,32 @@ async def test_update(api_client: KitaruAPIClient) -> None:
         created.id, ApiKeyUpdateRequest(active=True)
     )
     assert updated.active is True
+
+
+async def test_rotate(api_client: KitaruAPIClient) -> None:
+    """Rotate an API key through the SDK."""
+    created = await api_client.api_keys.create(ApiKeyCreateRequest(name="ci"))
+    rotated = await api_client.api_keys.rotate(
+        created.id, ApiKeyRotateRequest(retain_period_minutes=5)
+    )
+    assert isinstance(rotated, ApiKeyIssuedResponse)
+    assert rotated.id == created.id
+    assert rotated.key.startswith(API_KEY_PREFIX)
+    assert rotated.key != created.key
+    assert rotated.last_rotated is not None
+
+
+async def test_rotate_without_request(api_client: KitaruAPIClient) -> None:
+    """Rotate an API key without a request body."""
+    created = await api_client.api_keys.create(ApiKeyCreateRequest(name="ci"))
+    rotated = await api_client.api_keys.rotate(created.id)
+    assert rotated.key != created.key
+
+
+async def test_rotate_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error."""
+    with pytest.raises(NotFoundError):
+        await api_client.api_keys.rotate(uuid.uuid4())
 
 
 async def test_delete(api_client: KitaruAPIClient) -> None:
