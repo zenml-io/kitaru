@@ -36,7 +36,7 @@ _CONTRACT_ENV_VARIABLES = frozenset(
     {
         "KITARU_API_URL",
         "KITARU_API_KEY",
-        "KITARU_TASK_TOKEN",
+        "KITARU_API_TOKEN",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
         "KITARU_REPLAY_ID",
@@ -204,7 +204,7 @@ def build_process_env(
 
     Layers the inherited environment, the run spec env, the creator-set
     extras, and the secret env, then clears any inherited contract variable
-    and resets KITARU_API_URL, KITARU_TASK_TOKEN, and KITARU_TASK_ID from the
+    and resets KITARU_API_URL, KITARU_API_TOKEN, and KITARU_TASK_ID from the
     worker's own state. An inherited KITARU_API_KEY is cleared and never
     reset, since the task process authenticates with its own task token.
 
@@ -225,7 +225,7 @@ def build_process_env(
     for name in _CONTRACT_ENV_VARIABLES:
         env.pop(name, None)
     env["KITARU_API_URL"] = os.environ["KITARU_API_URL"]
-    env["KITARU_TASK_TOKEN"] = token
+    env["KITARU_API_TOKEN"] = token
     env["KITARU_TASK_ID"] = str(task_id)
     return env
 

@@ -70,7 +70,7 @@ def test_get_task_inputs_spec_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KITARU_TASK_ID", task_id)
     monkeypatch.delenv("KITARU_TASK_INPUTS", raising=False)
     monkeypatch.setenv("KITARU_API_URL", "http://server.test")
-    monkeypatch.setenv("KITARU_TASK_TOKEN", "secret-key")
+    monkeypatch.setenv("KITARU_API_TOKEN", "secret-key")
 
     spec = _agent_spec(task_id, {"prompt": "hi"})
     seen: dict[str, object] = {}

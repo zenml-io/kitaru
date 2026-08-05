@@ -158,7 +158,7 @@ def test_build_process_env_layers_and_strips_contract_variables(
     assert env["KITARU_SESSION_NAME"] == "run-1"
     assert env["SECRET_VAR"] == "secret"
     assert env["KITARU_API_URL"] == "https://api.example.com"
-    assert env["KITARU_TASK_TOKEN"] == "task-token"
+    assert env["KITARU_API_TOKEN"] == "task-token"
     assert env["KITARU_TASK_ID"] == str(task_id)
     assert "KITARU_API_KEY" not in env
 
@@ -174,26 +174,26 @@ def test_build_process_env_extras_cannot_override_contract_variables(
     env = build_process_env(
         task_id,
         run_env={"KITARU_API_URL": "https://evil.example.com"},
-        extra_env={"KITARU_TASK_ID": "spoofed", "KITARU_TASK_TOKEN": "spoofed-token"},
+        extra_env={"KITARU_TASK_ID": "spoofed", "KITARU_API_TOKEN": "spoofed-token"},
         secret_env={"KITARU_API_KEY": "spoofed-key"},
         token="task-token",
     )
 
     assert env["KITARU_API_URL"] == "https://api.example.com"
     assert env["KITARU_TASK_ID"] == str(task_id)
-    assert env["KITARU_TASK_TOKEN"] == "task-token"
+    assert env["KITARU_API_TOKEN"] == "task-token"
     assert "KITARU_API_KEY" not in env
 
 
 def test_build_process_env_never_sets_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """KITARU_TASK_TOKEN is set and KITARU_API_KEY is absent, even when inherited."""
+    """KITARU_API_TOKEN is set and KITARU_API_KEY is absent, even when inherited."""
     monkeypatch.setenv("KITARU_API_URL", "https://api.example.com")
 
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
     env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
-    assert env["KITARU_TASK_TOKEN"] == "task-token"
+    assert env["KITARU_API_TOKEN"] == "task-token"
     assert "KITARU_API_KEY" not in env
 
     monkeypatch.setenv("KITARU_API_KEY", "worker-key")

@@ -55,7 +55,7 @@ def get_task_inputs() -> Any:
 
     base_url = get_required_env("KITARU_API_URL")
     headers = {}
-    token = os.environ.get("KITARU_TASK_TOKEN")
+    token = os.environ.get("KITARU_API_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
     response = httpx.get(f"{base_url}/v1/tasks/{task_id}/spec", headers=headers)

@@ -148,7 +148,7 @@ class KitaruAPIClient:
 
         The server URL is read from KITARU_API_URL, falling back to the stored
         active server, then to the local default. The credential is read from
-        KITARU_TASK_TOKEN or KITARU_API_KEY, falling back to the credentials
+        KITARU_API_TOKEN or KITARU_API_KEY, falling back to the credentials
         stored for the server.
 
         Returns:
@@ -168,8 +168,8 @@ class KitaruAPIClient:
     def from_env(cls) -> "KitaruAPIClient":
         """Construct a client from KITARU_API_URL and the ambient credential.
 
-        Inside a task process the credential is KITARU_TASK_TOKEN, elsewhere
-        it is KITARU_API_KEY.
+        The credential is read from KITARU_API_TOKEN, falling back to
+        KITARU_API_KEY.
 
         Raises:
             RuntimeError: KITARU_API_URL is not set.
@@ -297,7 +297,7 @@ def _get_ambient_credential() -> str | None:
     """Return the credential the environment carries.
 
     Returns:
-        KITARU_TASK_TOKEN or KITARU_API_KEY value, or None when neither is
+        KITARU_API_TOKEN or KITARU_API_KEY value, or None when neither is
         set.
     """
-    return os.environ.get("KITARU_TASK_TOKEN") or os.environ.get("KITARU_API_KEY")
+    return os.environ.get("KITARU_API_TOKEN") or os.environ.get("KITARU_API_KEY")

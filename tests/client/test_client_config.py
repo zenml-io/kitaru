@@ -41,7 +41,7 @@ def clean_client_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         ENV_CONFIG_PATH,
         "KITARU_API_URL",
         "KITARU_API_KEY",
-        "KITARU_TASK_TOKEN",
+        "KITARU_API_TOKEN",
     ):
         monkeypatch.delenv(name, raising=False)
 

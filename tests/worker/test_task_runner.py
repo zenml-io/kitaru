@@ -353,7 +353,7 @@ async def test_execute_scopes_client_calls_and_process_env_to_the_claimed_token(
     )
 
     assert seen_tokens == ["claim-token-xyz"]
-    assert captured_envs[0]["KITARU_TASK_TOKEN"] == "claim-token-xyz"
+    assert captured_envs[0]["KITARU_API_TOKEN"] == "claim-token-xyz"
 
 
 async def test_prepare_failure_fails_the_task_with_the_label_and_exception(
