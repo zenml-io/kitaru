@@ -27,7 +27,6 @@ redirects:
   agent-native/claude-code-skill: agent-native/mcp-server.md
   guides/secrets-and-model-registration: deploy/secrets.md
   # v2 restructure: retired v1 runtime pages and moved operations pages.
-  getting-started/examples: getting-started/quickstart.md
   concepts/executions: concepts/agents-and-sessions.md
   concepts/flows: concepts/agents-and-sessions.md
   concepts/checkpoints: concepts/agents-and-sessions.md

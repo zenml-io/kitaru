@@ -6,6 +6,7 @@
 * [Installation](getting-started/installation.md)
 * [Quickstart](getting-started/quickstart.md)
 * [Import your traces](getting-started/import-your-traces.md)
+* [Examples](getting-started/examples.md)
 * [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Core Concepts

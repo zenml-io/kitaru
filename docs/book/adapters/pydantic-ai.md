@@ -43,7 +43,7 @@ KitaruAgent(
     agent_id=None,              # the registered Kitaru agent's UUID
     agent_version_id=None,      # optional: pin sessions to a version
     api_url=None,               # falls back to KITARU_API_URL
-    api_key=None,               # falls back to KITARU_API_KEY
+    api_key=None,               # falls back to KITARU_TASK_TOKEN, then KITARU_API_KEY
     session_name=None,          # falls back to KITARU_SESSION_NAME
     batch_size=20,              # nodes per ingest batch
 )

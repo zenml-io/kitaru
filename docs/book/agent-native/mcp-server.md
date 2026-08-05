@@ -37,10 +37,12 @@ Then register it with your assistant (`.mcp.json` for Claude Code):
 }
 ```
 
-The server connects to Kitaru the way the CLI does — `--server URL` or
-`--context NAME` (mutually exclusive), falling back to `KITARU_API_URL`
-and then your active CLI context; credentials come from `KITARU_API_KEY`
-or the stored credential for that server.
+The server needs an explicit target — `--server URL`,
+`KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails
+if none selects a server. Credentials come from `KITARU_API_KEY` or the
+stored credential for that URL (a task-scoped `KITARU_TASK_TOKEN` is
+deliberately ignored). Both are fixed for the life of the process —
+restart `kitaru-mcp` after changing either.
 
 Tools are gated by a **capability mode** — `read-only` (the default),
 `standard`, or `destructive` — set with `--mode` or `KITARU_MCP_MODE`.
@@ -53,13 +55,15 @@ registered, so the assistant doesn't even see them:
 | `kitaru_activity_read` | read-only | Read sessions, runs, jobs, and their children |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
-| `kitaru_workflow_start` | standard | Start an asynchronous workflow and return immediately |
+| `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
 | `kitaru_delete` | destructive | Delete a cohort, experiment, version, or run |
 
 Start assistants in `read-only`, move to `standard` when you want them
-building cohorts and starting runs, and reserve `destructive` for
-sessions where you're watching.
+building cohorts, and reserve `destructive` for sessions where you're
+watching. Starting replays, evaluations, and experiment runs stays with
+the CLI (which the assistant can also drive — see below), where `--wait`
+and exit codes make the outcome checkable.
 
 ## The other surfaces
 

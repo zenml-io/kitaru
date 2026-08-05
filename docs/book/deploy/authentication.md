@@ -8,7 +8,8 @@ icon: key
 A Kitaru server is a **trusted-team deployment**: everyone authenticated
 can read and write everything, and ownership records who created a
 resource without gating access. Authentication decides who gets in, not
-who sees what — keep one server per trust boundary.
+who sees what — keep one server per trust boundary. The one exception
+is account administration, which is reserved for **admin** accounts.
 
 Two schemes, set by `KITARU_SERVER_AUTH_SCHEME`:
 
@@ -87,9 +88,12 @@ None of this needs configuration; it's how workers authenticate.
 
 ## Accounts for the team
 
-Accounts are created through the API. An account created without a
-password returns a one-time **activation token**; hand it to the teammate
-and they set their own password:
+Accounts are created through the API, by an **admin** — creating and
+deactivating accounts and granting admin rights are the only
+admin-gated operations on the server. An account can't change its own
+admin flag, and service accounts can't be admins. An account created
+without a password returns a one-time **activation token**; hand it to
+the teammate and they set their own password:
 
 ```python
 from kitaru.api_models.v1.account import AccountCreateRequest
@@ -102,6 +106,7 @@ Deactivating an account (`POST /v1/accounts/{id}/deactivate`) locks it
 out and mints a fresh activation token for later reinstatement. There is
 no account deletion — provenance on resources stays intact.
 
-The server bootstraps a `default` account on first start;
+The server bootstraps a `default` account — an admin — on first start;
 `KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD` sets its initial password so
-your first `kitaru login` works.
+your first `kitaru login` works. Pass `is_admin=True` when creating an
+account to make more admins.

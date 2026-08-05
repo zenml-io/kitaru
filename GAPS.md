@@ -6,13 +6,14 @@ launch. First pass checked Aug 3 against `origin/v2-spec-consolidated`
 plugins); **re-verified Aug 4** after major movement on both branches plus
 `origin/feat/kitaru-mcp-v2-624` (MCP), `origin/v2-importer` (bundled
 plugins), and `origin/examples/build-canonical-example` (canonical CLI
-journey); **re-verified Aug 5** (overnight deltas below). The branches
-still diverge — **no single branch contains everything the docs
-describe**, though the gap narrowed: `cli-620` was rebased onto
-`v2-importer`, so CLI + bundled plugins + adapter now live together. The
-MCP server still sits on its own branch that predates all of that. The
-docs assume the merged union ships. Re-verify against the actual release
-branch before publish.
+journey); **re-verified twice Aug 5** (deltas below). As of Aug 5
+afternoon the union is nearly closed: **`cli-620` now contains the CLI,
+bundled plugins, the adapter, AND the MCP server** (merged 13:36, with
+the MCP surface narrowed in the process). What is *not* yet in any
+merged line: the `feature/client-config` branch (client config file,
+`KITARU_TASK_TOKEN` → `KITARU_API_TOKEN` rename). The docs assume the
+merged union ships. Re-verify against the actual release branch before
+publish.
 
 ## Aug 5 overnight deltas (docs updated Aug 5)
 
@@ -49,6 +50,40 @@ branch before publish.
   mechanism before publish** — a pip-installed user currently has no way
   to seed.
 
+## Aug 5 afternoon deltas (docs updated Aug 5)
+
+- **MCP merged into `cli-620`** and its surface narrowed
+  (`f0292be9`): still seven tools, but `kitaru_workflow_start` was
+  replaced by the narrower `kitaru_session_import` (import from an
+  already-uploaded blob) — starting replays/evaluations/experiment runs
+  stays with the CLI/client. Connection resolution simplified:
+  `--server` > `KITARU_MCP_SERVER` > `KITARU_API_URL`, hard failure
+  without one; `--context`, the CLI-context fallback, and `--retries`
+  are gone. `agent-native/mcp-server.md` updated. The team maintains
+  its own detailed MCP page on `cli-620`'s (otherwise stale) docs tree
+  — expect a merge collision there plus `guides/configuration.md` /
+  `guides/projects.md`; reconcile at merge time.
+- **Permission layer + admin flag (#663)** — accounts gained
+  `is_admin`; creating/deactivating accounts and granting admin are
+  admin-only (everything else stays open to any authenticated account);
+  bootstrap `default` account is an admin; accounts can't change their
+  own flag; service accounts can't be admins. `deploy/authentication.md`
+  updated.
+- **Adapter authenticates with the task token** (`5a761c7a`): `api_key`
+  falls back to `KITARU_TASK_TOKEN` then `KITARU_API_KEY`. Adapter page
+  updated.
+- **Canonical example is complete and CI-integrated** (`4ed1a745`),
+  with a team-written `docs/book/getting-started/examples.md` on that
+  branch. A matching Examples page was added to this branch (toc +
+  redirect removed) — reconcile the two versions at merge.
+- **`feature/client-config` in flight (Michael, not merged anywhere)**:
+  client config file + server-URL resolution, client construction fails
+  without a URL, and **`KITARU_TASK_TOKEN` is renamed to
+  `KITARU_API_TOKEN`**. If it lands, sweep `deploy/authentication.md`,
+  `deploy/workers.md`, `concepts/workers.md`,
+  `concepts/under-the-hood.md`, `adapters/pydantic-ai.md`, and
+  `agent-native/mcp-server.md` for the old name.
+
 ## Resolved since Aug 3 (docs updated Aug 4)
 
 - ~~Langfuse importer packaging~~ — **resolved, mechanism in flux**: the
@@ -73,21 +108,22 @@ branch before publish.
   to a nonzero exit), `evaluation list/get`, plus registration, workers,
   jobs, `login/status/info/doctor/schema`. Docs now show CLI-first flows
   with the Python client for what only it can do.
-- ~~MCP server~~ — **resolved on its branch** (#624): `kitaru-mcp`
-  console script, `kitaru[mcp]` extra (deps: `mcp>=2,<3`), seven tools
-  gated by capability mode (`read-only`/`standard`/`destructive`).
-  `agent-native/mcp-server.md` rewritten around it.
+- ~~MCP server~~ — **resolved and merged into `cli-620`** (#624 +
+  Aug 5 merge): `kitaru-mcp` console script, `kitaru[mcp]` extra (deps:
+  `mcp>=2,<3`), seven tools gated by capability mode
+  (`read-only`/`standard`/`destructive`). `agent-native/mcp-server.md`
+  rewritten around it; surface changes from the merge are in the Aug 5
+  afternoon deltas.
 
 ## Claims that need verification before publish
 
-1. **Branch union** — docs describe bundled plugins + newest CLI + MCP +
-   Helm/auth together. As of Aug 5, `cli-620` (rebased onto
-   `v2-importer`) carries the CLI, bundled plugins, and adapter; the MCP
-   server still lives only on `feat/kitaru-mcp-v2-624` (forked from
-   `72b07eb9`, before all of that). Confirm the release branch merges
-   everything, then spot-check: `kitaru session import --tag`,
-   `kitaru-mcp`, `--importer langfuse@latest`,
-   `experiment run start --wait`, `cohort create --tag`.
+1. **Branch union** — mostly closed: as of Aug 5 13:36, `cli-620`
+   carries the CLI, bundled plugins, adapter, and MCP server together
+   (`23e7bed5` "Merge MCP into CLI" + `f0292be9`). Remaining spot-check
+   on the release branch: `kitaru session import --tag`, `kitaru-mcp`,
+   `--importer langfuse@latest`, `experiment run start --wait`,
+   `cohort create --tag`. Watch `feature/client-config` (below) — it
+   renames a documented env var.
 2. **Helm chart OCI path** — release workflow pushes to ECR Public alias
    `zenml` (⇒ `oci://public.ecr.aws/zenml/kitaru`) but the in-repo
    `helm/README.md` says `oci://public.ecr.aws/kitaru/kitaru`. One is
@@ -160,8 +196,8 @@ d. **`wait()` / HITL** — unchanged: zero v2 mention in code; docs treat
   (full CLI journey: import → evaluate → cohort → experiment) and a
   newer, shorter `examples/canonical_example/` (bundled plugins +
   tag-based evaluation, stops before cohorts). It is mid-refactor — two
-  overlapping dirs, one walkthrough. When it merges, link it from the
-  quickstart / restore `getting-started/examples.md`, and reconcile
+  overlapping dirs, one walkthrough. `getting-started/examples.md` was
+  restored Aug 5 pointing at `canonical_example/`; reconcile
   wording (their README teaches the same journey the docs do; note they
   use "Score the imported baselines" phrasing — banned vocabulary — in
   the example README, worth flagging to the team). As of Aug 5 the
