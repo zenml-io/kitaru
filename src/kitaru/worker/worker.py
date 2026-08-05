@@ -247,13 +247,13 @@ class Worker:
             self._config.payload_cache_root or DEFAULT_PAYLOAD_CACHE_ROOT
         )
 
+        registration = WorkerCreateRequest(
+            name=name,
+            scope=self._config.scope,
+            runtime=detect_runtime(),
+            metadata=self._config.metadata,
+        )
         async with self._build_client() as registration_client:
-            registration = WorkerCreateRequest(
-                name=name,
-                scope=self._config.scope,
-                runtime=detect_runtime(),
-                metadata=self._config.metadata,
-            )
             response = await registration_client.workers.create(registration)
             worker = response.worker
             logger.info("Registered worker %s (%s).", name, worker.id)

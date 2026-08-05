@@ -29,7 +29,9 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
     EvaluationListParams,
 )
+from kitaru.api_models.v1.filter import FilterCondition
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskOnFailure,
@@ -37,7 +39,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.cli import app as app_module
-from kitaru.cli import evaluations, registration
+from kitaru.cli import evaluations, registration, session_selection
 from kitaru.cli.output import CLIError
 from kitaru.client.exceptions import APIError
 
@@ -241,6 +243,18 @@ class StubEvaluationClient:
         self.create_error = create_error
         self.evaluators = self._Evaluators(self)
         self.evaluations = self._Evaluations(self)
+        self.selected_sessions = [SimpleNamespace(id=uuid.uuid4())]
+        self.sessions = self._Sessions(self)
+
+    class _Sessions:
+        def __init__(self, owner: "StubEvaluationClient") -> None:
+            self.owner = owner
+            self.params: SessionListParams | None = None
+
+        async def iter(self, params):
+            self.params = params
+            for session in self.owner.selected_sessions:
+                yield session
 
     class _Evaluators:
         def __init__(self, owner: "StubEvaluationClient") -> None:
@@ -334,7 +348,7 @@ def test_sessions_file_rejects_non_uuid_nonblank_lines(
     sessions_file.write_text(content, encoding="utf-8")
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], sessions_file)
+        session_selection.parse_session_ids([], sessions_file)
 
     assert error.value.kind == "invalid_arguments"
 
@@ -349,7 +363,7 @@ def test_sessions_file_accepts_utf8_crlf_and_combines_with_positionals(
     sessions_file = tmp_path / "sessions.txt"
     sessions_file.write_bytes(f"{first}\r\n\r\n  {second}  \r\n".encode())
 
-    assert evaluations._parse_session_ids([str(positional)], sessions_file) == [
+    assert session_selection.parse_session_ids([str(positional)], sessions_file) == [
         positional,
         first,
         second,
@@ -364,7 +378,7 @@ def test_sessions_file_rejects_stdin_and_missing_files(
     path = Path("-") if file_value == "-" else tmp_path / file_value
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], path)
+        session_selection.parse_session_ids([], path)
 
     assert error.value.kind == "invalid_arguments"
 
@@ -375,7 +389,7 @@ def test_sessions_file_rejects_invalid_utf8(tmp_path: Path) -> None:
     sessions_file.write_bytes(b"\xff\xfe")
 
     with pytest.raises(CLIError) as error:
-        evaluations._parse_session_ids([], sessions_file)
+        session_selection.parse_session_ids([], sessions_file)
 
     assert error.value.kind == "invalid_arguments"
     assert error.value.__suppress_context__ is True
@@ -395,7 +409,7 @@ def test_sessions_file_read_error_suppresses_private_path_cause(
     monkeypatch.setattr(Path, "read_text", fail_read)
 
     with pytest.raises(CLIError) as error:
-        evaluations._read_session_file(sessions_file)
+        session_selection.read_session_file(sessions_file)
 
     rendered = "".join(
         traceback.format_exception(
@@ -465,6 +479,69 @@ async def test_evaluate_sessions_does_not_enforce_or_batch_pair_cap() -> None:
     assert result.item["pair_count"] == 101
     assert len(client.requests) == 1
     assert len(client.requests[0].input_session_ids) == 101
+
+
+async def test_evaluate_sessions_selects_all_sessions_with_tag() -> None:
+    """A tag replaces manual session ID collection."""
+    client = StubEvaluationClient()
+
+    result = await evaluations.evaluate_sessions(
+        client,
+        None,
+        sessions_file=None,
+        tag="baseline",
+        all_sessions=False,
+        evaluators=["quality@2"],
+        evaluator_params=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+
+    assert client.sessions.params is not None
+    session_filter = client.sessions.params.filter
+    assert isinstance(session_filter, FilterCondition)
+    assert session_filter.field == "tag"
+    assert session_filter.value == "baseline"
+    assert client.requests[0].input_session_ids == [
+        session.id for session in client.selected_sessions
+    ]
+    assert result.item["session_count"] == 1
+
+
+async def test_evaluate_sessions_all_is_explicit_and_exclusive() -> None:
+    """All-session selection is available but cannot be mixed with IDs."""
+    client = StubEvaluationClient()
+
+    result = await evaluations.evaluate_sessions(
+        client,
+        None,
+        sessions_file=None,
+        tag=None,
+        all_sessions=True,
+        evaluators=["quality@2"],
+        evaluator_params=None,
+        wait=False,
+        interval=None,
+        timeout=None,
+    )
+    assert client.sessions.params is not None
+    assert client.sessions.params.filter is None
+    assert result.item["session_count"] == 1
+
+    with pytest.raises(CLIError, match="--filter, or --all"):
+        await evaluations.evaluate_sessions(
+            client,
+            [str(uuid.uuid4())],
+            sessions_file=None,
+            tag="baseline",
+            all_sessions=False,
+            evaluators=["quality@2"],
+            evaluator_params=None,
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
 
 
 async def test_duplicate_session_across_sources_is_rejected_before_mutation(

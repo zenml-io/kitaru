@@ -102,19 +102,6 @@ packages = ["src/kitaru"]
 [tool.uv]
 exclude-newer = "3 days"
 
-[tool.uv.sources]
-kitaru = { workspace = true }
-kitaru-importer-braintrust = { workspace = true }
-kitaru-importer-langfuse = { workspace = true }
-kitaru-importer-otlp = { workspace = true }
-
-[tool.uv.workspace]
-members = [
-    "plugins/braintrust",
-    "plugins/langfuse",
-    "plugins/otlp",
-]
-
 [dependency-groups]
 dev = [
     "pydantic-ai-slim>=2.14.1,<3",

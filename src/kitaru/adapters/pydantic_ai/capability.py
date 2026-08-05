@@ -342,7 +342,7 @@ class _RunState:
 class _KitaruCapability(AbstractCapability[Any]):
     """Run-local PydanticAI hooks for Kitaru recording and replay."""
 
-    agent_id: uuid.UUID
+    agent_id: uuid.UUID | None
     agent_version_id: uuid.UUID | None
     api_url: str
     api_key: str | None
@@ -402,11 +402,15 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Create the Kitaru session before executing the agent."""
         state = self._require_state()
         started_at = datetime.now(UTC)
+        identity: dict[str, Any] = {}
+        if self.agent_id is not None:
+            identity["agent_id"] = self.agent_id
+        if self.agent_version_id is not None:
+            identity["agent_version_id"] = self.agent_version_id
         try:
             session = await state.client.sessions.create(
                 SessionCreateRequest(
-                    agent_id=self.agent_id,
-                    agent_version_id=self.agent_version_id,
+                    **identity,
                     origin=(
                         SessionOrigin.REPLAY
                         if state.replay is not None

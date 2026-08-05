@@ -504,11 +504,11 @@ async def test_try_resolve_worker_or_task_returns_none_for_garbage(
     assert await service.try_resolve_worker_or_task("not-a-token") is None
 
 
-async def test_control_plane_scheme_resolves_a_worker_token_without_an_external_account(
+async def test_control_plane_scheme_rejects_a_worker_token_without_an_external_account(
     account_repository: FakeAccountRepository,
     api_key_repository: FakeApiKeyRepository,
 ) -> None:
-    """A worker token resolves under the control plane scheme without an external id."""
+    """A worker token without an external account is rejected under control plane."""
     settings = control_plane_settings()
     service = AuthService(
         settings=settings,
@@ -521,17 +521,15 @@ async def test_control_plane_scheme_resolves_a_worker_token_without_an_external_
     worker_id = uuid.uuid4()
     token = service.issue_worker_token(worker_id=worker_id, account_id=account.id).token
 
-    context = await service.resolve(token)
-
-    assert isinstance(context.principal, WorkerPrincipal)
-    assert context.account.id == account.id
+    with pytest.raises(AuthenticationError, match="Local accounts are rejected"):
+        await service.resolve(token)
 
 
-async def test_control_plane_scheme_resolves_a_task_token_without_an_external_account(
+async def test_control_plane_scheme_rejects_a_task_token_without_an_external_account(
     account_repository: FakeAccountRepository,
     api_key_repository: FakeApiKeyRepository,
 ) -> None:
-    """A task token resolves under the control plane scheme without an external id."""
+    """A task token without an external account is rejected under control plane."""
     settings = control_plane_settings()
     service = AuthService(
         settings=settings,
@@ -553,7 +551,5 @@ async def test_control_plane_scheme_resolves_a_task_token_without_an_external_ac
         timeout_seconds=3600,
     ).token
 
-    context = await service.resolve(token)
-
-    assert isinstance(context.principal, TaskPrincipal)
-    assert context.account.id == account.id
+    with pytest.raises(AuthenticationError, match="Local accounts are rejected"):
+        await service.resolve(token)

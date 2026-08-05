@@ -274,6 +274,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         agent="assistant",
         origin=SessionOrigin.IMPORTED,
         provider="langfuse",
+        tag="baseline",
         started_after=started_after,
         started_before=None,
     )
@@ -287,6 +288,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         {"field": "agent_id", "op": "eq", "value": str(agents.agent.id)},
         {"field": "origin", "op": "eq", "value": "imported"},
         {"field": "provider", "op": "eq", "value": "langfuse"},
+        {"field": "tag", "op": "eq", "value": "baseline"},
         {
             "field": "started_at",
             "op": "ge",
@@ -545,6 +547,77 @@ async def test_session_import_rejects_non_file_without_upload(tmp_path: Path) ->
     assert client.uploads == []
 
 
+async def test_session_import_tags_require_wait_before_mutation(
+    tmp_path: Path,
+) -> None:
+    """Post-import tagging requires a settled task before any mutation."""
+    payload = tmp_path / "input.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError, match="--tag requires --wait"):
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            tags=["baseline", "discovery"],
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+        )
+
+    assert client.uploads == []
+    assert client.requests == []
+
+
+async def test_tag_imported_sessions_links_every_tag_once() -> None:
+    """Account credentials apply each requested tag to each imported session."""
+    task_id = uuid.uuid4()
+    imported = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
+    existing = SimpleNamespace(id=uuid.uuid4(), name="baseline")
+
+    class Tags:
+        def __init__(self) -> None:
+            self.created: list[Any] = []
+            self.links: list[tuple[uuid.UUID, Any]] = []
+
+        async def iter(self, params: Any):
+            if params.filter.value == "baseline":
+                yield existing
+
+        async def create(self, request: Any) -> Any:
+            tag = SimpleNamespace(id=uuid.uuid4(), name=request.name)
+            self.created.append(tag)
+            return tag
+
+        async def create_link(self, tag_id: uuid.UUID, request: Any) -> None:
+            self.links.append((tag_id, request))
+
+    class ImportedSessions:
+        async def iter(self, params: Any):
+            assert params.filter.field == "task_id"
+            assert params.filter.value == str(task_id)
+            for session in imported:
+                yield session
+
+    tags = Tags()
+    client = SimpleNamespace(tags=tags, sessions=ImportedSessions())
+
+    count = await sessions._tag_imported_sessions(
+        client, task_id, ["baseline", "discovery"]
+    )
+
+    assert count == 2
+    assert [tag.name for tag in tags.created] == ["discovery"]
+    assert len(tags.links) == 4
+    assert {link.resource_id for _, link in tags.links} == {
+        session.id for session in imported
+    }
+
+
 def test_payload_read_error_suppresses_private_path_cause(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -614,6 +687,7 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
         result={"created": 4, "skipped": 2, "failed": 0, "failures": []},
     )
     events: list[tuple[str, Any]] = []
+    tag_calls: list[tuple[uuid.UUID, list[str]]] = []
 
     async def wait_for_terminal_tasks(*args, **kwargs):
         assert args[1] == client.job.id
@@ -631,12 +705,21 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
         sessions, "emit_event", lambda event, item: events.append((event, item))
     )
 
+    async def tag_imported_sessions(
+        client: Any, task_id: uuid.UUID, names: list[str]
+    ) -> int:
+        tag_calls.append((task_id, names))
+        return 4
+
+    monkeypatch.setattr(sessions, "_tag_imported_sessions", tag_imported_sessions)
+
     result = await sessions.import_sessions(
         client,
         payload,
         importer="jsonl@2",
         agent="assistant@3",
         params=None,
+        tags=["baseline", "discovery"],
         media_type="application/jsonl",
         wait=True,
         interval=None,
@@ -658,6 +741,10 @@ async def test_waited_session_import_returns_validated_stats_and_task_action(
         "failed": 0,
         "failures": [],
     }
+    assert result.item["tags"] == ["baseline", "discovery"]
+    assert result.item["tagged_session_count"] == 4
+    assert tag_calls == [(task.id, ["baseline", "discovery"])]
+    assert not hasattr(client.requests[0], "tags")
     assert result.warnings == ["2 duplicate session(s) were skipped."]
     assert str(task.id) in result.next_actions[0]
     assert '"field":"task_id"' in result.next_actions[0]

@@ -238,6 +238,7 @@ def test_build_process_env_extras_cannot_override_contract_variables(
         },
         extra_env={
             "KITARU_TASK_ID": "spoofed",
+            "KITARU_TASK_TOKEN": "spoofed-token",
             "KITARU_CREDENTIALS_PATH": "/evil/extra.json",
         },
         secret_env={

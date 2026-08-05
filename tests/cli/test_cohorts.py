@@ -32,6 +32,8 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionCreateRequest,
     CohortVersionUpdateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition
+from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli import app as app_module
 from kitaru.cli import cohorts
 from kitaru.cli.output import CLIError
@@ -101,9 +103,21 @@ class StubCohortClient:
             tuple[uuid.UUID, CohortVersionUpdateRequest]
         ] = []
         self.deleted_versions: list[uuid.UUID] = []
+        self.selected_sessions = [StubModel(uuid.uuid4()), StubModel(uuid.uuid4())]
         self.agents = self._Agents(self)
         self.cohorts = self._Cohorts(self)
         self.cohort_versions = self._CohortVersions(self)
+        self.sessions = self._Sessions(self)
+
+    class _Sessions:
+        def __init__(self, owner: "StubCohortClient") -> None:
+            self.owner = owner
+            self.params: SessionListParams | None = None
+
+        async def iter(self, params: SessionListParams):
+            self.params = params
+            for session in self.owner.selected_sessions:
+                yield session
 
     class _Agents:
         def __init__(self, owner: "StubCohortClient") -> None:
@@ -254,6 +268,34 @@ async def test_cohort_create_rejects_metadata_before_lookup() -> None:
 
     assert client.agent_lookups == 0
     assert client.created_cohorts == []
+
+
+async def test_cohort_create_snapshots_a_tag_selection() -> None:
+    """Create the cohort parent and first immutable membership in one command."""
+    client = StubCohortClient()
+
+    result = await cohorts.create_cohort(
+        client,
+        "nightly",
+        agent="assistant",
+        description="Nightly cases",
+        metadata=None,
+        tag="baseline",
+        display_version="discovery-v1",
+    )
+
+    assert client.sessions.params is not None
+    session_filter = client.sessions.params.filter
+    assert isinstance(session_filter, FilterCondition)
+    assert session_filter.field == "tag"
+    assert session_filter.value == "baseline"
+    _, request = client.created_versions[0]
+    assert request.add_session_ids == [
+        session.id for session in client.selected_sessions
+    ]
+    assert request.display_version == "discovery-v1"
+    assert result.item["reference"] == "regression@2"
+    assert result.item["session_count"] == 2
 
 
 async def test_cohort_update_is_sparse_and_supports_explicit_clears() -> None:
@@ -542,6 +584,31 @@ def test_public_cohort_argv_covers_all_parent_commands(
     payload = json.loads(capsys.readouterr().out)
     assert payload["command"] == "cohort.delete"
     assert payload["item"]["deleted"] is True
+
+
+def test_public_cohort_create_snapshots_a_tag(
+    argv_client: StubCohortClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The public command creates a parent and membership snapshot from a tag."""
+    assert (
+        app_module.main(
+            [
+                "cohort",
+                "create",
+                "nightly",
+                "--agent",
+                "assistant",
+                "--tag",
+                "baseline",
+                "--display-version",
+                "discovery-v1",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "cohort.create"
+    assert payload["item"]["reference"] == "regression@2"
 
 
 def test_public_cohort_version_argv_covers_all_commands(

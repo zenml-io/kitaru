@@ -29,6 +29,13 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionNodeListParams
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagListParams,
+    TagResourceType,
+    TagResponse,
+)
 from kitaru.api_models.v1.task import TaskKind, TaskResponse, TaskStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import CLIError, CommandResult, emit_event
@@ -39,6 +46,7 @@ from kitaru.cli.registration import (
     page_result,
     parse_json_object,
 )
+from kitaru.cli.session_selection import get_cohort_version
 from kitaru.client.exceptions import APIError
 from kitaru.client.references import (
     ParentKind,
@@ -58,6 +66,60 @@ def _read_payload(path: Path) -> bytes:
         raise CLIError(
             "invalid_arguments", f"FILE could not be read: {reason}."
         ) from None
+
+
+def _normalize_import_tags(tags: list[str] | None, *, wait: bool) -> list[str]:
+    """Normalize repeatable import tags before any remote mutation."""
+    normalized = [tag.strip() for tag in tags or []]
+    if any(not tag for tag in normalized):
+        raise CLIError("invalid_arguments", "--tag must not be empty.")
+    if len(set(normalized)) != len(normalized):
+        raise CLIError("invalid_arguments", "Each --tag value must be unique.")
+    if normalized and not wait:
+        raise CLIError(
+            "invalid_arguments",
+            "--tag requires --wait so the imported sessions can be tagged.",
+        )
+    return normalized
+
+
+async def _get_or_create_tag(client: Any, name: str) -> TagResponse:
+    """Resolve one exact tag name, creating it when absent."""
+    params = TagListParams(
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=name)
+    )
+    async for tag in client.tags.iter(params):
+        return tag
+    try:
+        return await client.tags.create(TagCreateRequest(name=name))
+    except APIError as error:
+        if error.status_code != 409:
+            raise
+    async for tag in client.tags.iter(params):
+        return tag
+    raise CLIError("internal_error", f"Tag {name!r} could not be resolved.")
+
+
+async def _tag_imported_sessions(
+    client: Any, task_id: uuid.UUID, names: list[str]
+) -> int:
+    """Apply every requested tag to sessions created by one import task."""
+    tags = [await _get_or_create_tag(client, name) for name in names]
+    params = SessionListParams(
+        filter=FilterCondition(field="task_id", op=FilterOp.EQ, value=str(task_id))
+    )
+    count = 0
+    async for session in client.sessions.iter(params):
+        for tag in tags:
+            await client.tags.create_link(
+                tag.id,
+                TagLinkCreateRequest(
+                    resource_type=TagResourceType.SESSION,
+                    resource_id=session.id,
+                ),
+            )
+        count += 1
+    return count
 
 
 def _blob_metadata(blob: Any) -> dict[str, Any]:
@@ -181,12 +243,14 @@ async def import_sessions(
     importer: str,
     agent: str,
     params: str | None,
+    tags: list[str] | None = None,
     media_type: str,
     wait: bool,
     interval: float | None,
     timeout: float | None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
+    tags = _normalize_import_tags(tags, wait=wait)
     wait_settings = receipts.get_wait_settings(
         wait=wait, interval=interval, timeout=timeout
     )
@@ -214,6 +278,8 @@ async def import_sessions(
         },
         "blob": blob_identity,
     }
+    if tags:
+        identity["tags"] = tags
     request = ImportCreateRequest(
         importer=importer_parent.name,
         version=importer_version.version,
@@ -272,7 +338,21 @@ async def import_sessions(
         timeout=wait_settings[1],
         initial_job=job,
     )
-    return _terminal_import_result(terminal_job, tasks, identity=identity)
+    result = _terminal_import_result(terminal_job, tasks, identity=identity)
+    if tags:
+        task, _ = _get_import_stats(terminal_job, tasks)
+        try:
+            result.item["tagged_session_count"] = await _tag_imported_sessions(
+                client, task.id, tags
+            )
+        except Exception as error:
+            raise CLIError(
+                "partial_failure",
+                "The import completed, but its tags could not be applied.",
+                details={"receipt": result.item, "error": type(error).__name__},
+                hint="Retry the import without --tag or apply the tags manually.",
+            ) from error
+    return result
 
 
 async def list_sessions(
@@ -286,6 +366,8 @@ async def list_sessions(
     agent: str | None = None,
     origin: SessionOrigin | None = None,
     provider: str | None = None,
+    tag: str | None = None,
+    cohort: str | None = None,
     started_after: datetime | None = None,
     started_before: datetime | None = None,
 ) -> CommandResult:
@@ -311,6 +393,22 @@ async def list_sessions(
     if provider is not None:
         conditions.append(
             FilterCondition(field="provider", op=FilterOp.EQ, value=provider)
+        )
+    if tag is not None:
+        normalized = tag.strip()
+        if not normalized:
+            raise CLIError("invalid_arguments", "--tag must not be empty.")
+        conditions.append(
+            FilterCondition(field="tag", op=FilterOp.EQ, value=normalized)
+        )
+    if cohort is not None:
+        _, cohort_version = await get_cohort_version(client, cohort)
+        conditions.append(
+            FilterCondition(
+                field="cohort_version_id",
+                op=FilterOp.EQ,
+                value=str(cohort_version.id),
+            )
         )
     for option, field_operator, value in (
         ("--started-after", FilterOp.GE, started_after),

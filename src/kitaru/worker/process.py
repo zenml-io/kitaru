@@ -37,8 +37,8 @@ _CONTRACT_ENV_VARIABLES = frozenset(
     {
         "KITARU_API_URL",
         "KITARU_API_KEY",
-        "KITARU_CREDENTIALS_PATH",
         "KITARU_TASK_TOKEN",
+        "KITARU_CREDENTIALS_PATH",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
         "KITARU_TASK_PLUGIN_PATH",
@@ -245,8 +245,8 @@ def build_process_env(
     Layers the inherited environment, the run spec env, the creator-set
     extras, and the secret env, then clears any inherited contract variable
     and resets KITARU_API_URL, KITARU_TASK_TOKEN, and KITARU_TASK_ID from the
-    worker's own state. Inherited API keys and credential-store paths are
-    cleared and never reset because the task process uses its own task token.
+    worker's own state. Inherited API keys and credential paths are cleared
+    because the task process authenticates with its own task token.
 
     Args:
         task_id: Id of the task the process runs.

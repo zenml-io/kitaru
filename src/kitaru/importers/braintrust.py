@@ -11,7 +11,11 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Braintrust project-log and UI JSON importer."""
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Built-in Braintrust project-log and UI JSON importer."""
 
 import hashlib
 import json
@@ -241,19 +245,25 @@ def _node_type(record: dict[str, Any], *, full_export: bool) -> NodeType:
 def _token_usage(record: dict[str, Any]) -> TokenUsage | None:
     """Map Braintrust token metrics."""
     metrics = _metrics(record)
-    values = (
-        metrics.get("prompt_tokens"),
-        metrics.get("completion_tokens"),
-        metrics.get("prompt_cached_tokens"),
-    )
+    fields = ("prompt_tokens", "completion_tokens", "prompt_cached_tokens")
+    values: list[int | None] = []
+    for field in fields:
+        value = metrics.get(field)
+        if value is None:
+            values.append(None)
+            continue
+        try:
+            values.append(int(value))
+        except (TypeError, ValueError) as exc:
+            raise InvalidImport(
+                f"Braintrust metric '{field}' must be an integer"
+            ) from exc
     if all(value is None for value in values):
         return None
-    return TokenUsage.from_counts(
-        int(values[0]) if values[0] is not None else None,
-        int(values[1]) if values[1] is not None else None,
-        int(values[2]) if values[2] is not None else None,
-        None,
-    )
+    try:
+        return TokenUsage.from_counts(values[0], values[1], values[2], None)
+    except ValueError as exc:
+        raise InvalidImport("Braintrust token metrics are invalid") from exc
 
 
 def _node_status(record: dict[str, Any]) -> NodeStatus:
@@ -304,7 +314,7 @@ class BraintrustProjectLogImporter:
         return ImporterDescriptor(
             id="braintrust",
             display_name="Braintrust project logs",
-            version=version("kitaru-importer-braintrust"),
+            version=version("kitaru"),
             file_extensions=[".json", ".jsonl", ".ndjson"],
             max_upload_bytes=MAX_UPLOAD_BYTES,
         )

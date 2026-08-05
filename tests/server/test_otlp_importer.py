@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from kitaru_importer_otlp import OTLPJSONImporter, parse
-from kitaru_importer_otlp import importer as importer_module
 
 from kitaru.importers import ImportContext, InvalidImport, NodeStatus, NodeType
+from kitaru.importers import otlp as importer_module
+from kitaru.importers.otlp import OTLPJSONImporter, parse
 from kitaru.task.importer import ParsedSession
 from kitaru.worker.process import parse_inline_dependencies
 

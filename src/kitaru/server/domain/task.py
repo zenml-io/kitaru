@@ -745,6 +745,7 @@ class ImportTaskDetails(FrozenModel):
     provider: str | None = None
     agent_id: uuid.UUID
     params: dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
 
 
 TaskDetails = Annotated[

@@ -165,8 +165,26 @@ class NormalizedImport(FrozenModel):
 
 def _parsed_nodes(nodes: list[NormalizedNode]) -> list[ParsedNode]:
     """Convert flat normalized nodes into the parsed-node tree."""
+    source_ids = [node.source_id for node in nodes]
+    source_id_set = set(source_ids)
+    if len(source_ids) != len(source_id_set):
+        raise ValueError("The normalized node graph contains duplicate source ids")
+    parents = {
+        node.source_id: node.parent_source_id
+        for node in nodes
+        if node.parent_source_id in source_id_set
+    }
+    for source_id in source_ids:
+        seen: set[str] = set()
+        current: str | None = source_id
+        while current in parents:
+            if current in seen:
+                raise ValueError("The normalized node graph contains a parent cycle")
+            seen.add(current)
+            current = parents[current]
     converted = {
         node.source_id: ParsedNode(
+            trace_id=node.trace_id,
             node_type=node.node_type,
             name=node.name,
             status=node.status,
@@ -195,6 +213,8 @@ def _parsed_nodes(nodes: list[NormalizedNode]) -> list[ParsedNode]:
             converted[node.parent_source_id].children.append(parsed)
         else:
             roots.append(parsed)
+    if nodes and not roots:
+        raise ValueError("The normalized node graph contains no root node")
     return roots
 
 
@@ -208,6 +228,17 @@ def parsed_items(
         metadata["normalization_warnings"] = session.warnings
         metadata["replay_readiness"] = session.readiness.model_dump(mode="json")
         metadata["source_content_digest"] = session.content_digest
+        try:
+            nodes = _parsed_nodes(session.nodes)
+        except ValueError as exc:
+            items.append(
+                ImportFailure(
+                    line=len(items) + 1,
+                    external_id=session.source_id,
+                    error=str(exc),
+                )
+            )
+            continue
         items.append(
             ParsedSession(
                 external_id=f"{session.source_instance}:{session.source_id}",
@@ -220,7 +251,7 @@ def parsed_items(
                 started_at=session.started_at,
                 ended_at=session.ended_at,
                 metadata=metadata,
-                nodes=_parsed_nodes(session.nodes),
+                nodes=nodes,
             )
         )
     items.extend(

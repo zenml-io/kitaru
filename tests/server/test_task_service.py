@@ -696,7 +696,10 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
 
     job_id = await _pending_job(services)
     task = await create_import_task(
-        services.tasks, job_id, plugin_version_id=version.id, payload_blob_id=payload.id
+        services.tasks,
+        job_id,
+        plugin_version_id=version.id,
+        payload_blob_id=payload.id,
     )
     spec = await services.task_service.get_spec(task.id, actor=ACTOR)
     assert (

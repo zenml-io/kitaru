@@ -18,7 +18,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from kitaru_importer_langfuse import LangfuseJSONLImporter, parse
 
 from kitaru.importers import (
     ImportContext,
@@ -27,7 +26,8 @@ from kitaru.importers import (
     NodeType,
     SessionStatus,
 )
-from kitaru.task.importer import ParsedSession
+from kitaru.importers.langfuse import LangfuseJSONLImporter, parse
+from kitaru.task.importer import ImportFailure, ParsedSession
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:
@@ -86,6 +86,36 @@ def observation(
     if parent_id is not None:
         record["parentObservationId"] = parent_id
     return record
+
+
+def test_unified_parse_preserves_node_trace_id() -> None:
+    """Keep provider trace identity through the public parser contract."""
+    parsed = list(
+        parse(
+            jsonl(observation("root", "trace-1", input_="hello", output="world")),
+            {},
+        )
+    )
+
+    assert isinstance(parsed[0], ParsedSession)
+    assert parsed[0].nodes[0].trace_id == "trace-1"
+
+
+def test_unified_parse_rejects_parent_cycle() -> None:
+    """Report a cyclic provider graph instead of importing an empty node tree."""
+    parsed = list(
+        parse(
+            jsonl(
+                observation("first", "trace-1", parent_id="second", input_="hello"),
+                observation("second", "trace-1", parent_id="first"),
+            ),
+            {},
+        )
+    )
+
+    assert len(parsed) == 1
+    assert isinstance(parsed[0], ImportFailure)
+    assert "parent cycle" in parsed[0].error
 
 
 def test_imports_multiturn_observations() -> None:

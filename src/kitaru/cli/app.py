@@ -1380,7 +1380,7 @@ async def agent_version_get(agent_version: str, /) -> CommandResult:
     cohort_app,
     _spec(
         ("cohort", "create"),
-        "Create a cohort bound to one exact agent.",
+        "Create a cohort and optionally snapshot selected sessions.",
         parameters=(
             ParameterSpec("NAME", "string", "argument", True, "New cohort name."),
             ParameterSpec(
@@ -1396,6 +1396,35 @@ async def agent_version_get(agent_version: str, /) -> CommandResult:
             ParameterSpec(
                 "--metadata", "JSON object", "option", False, "Cohort metadata."
             ),
+            ParameterSpec(
+                "--session", "UUID[]", "option", False, "Explicit session IDs."
+            ),
+            ParameterSpec(
+                "--sessions-file",
+                "path",
+                "option",
+                False,
+                "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec("--tag", "text", "option", False, "Sessions with this tag."),
+            ParameterSpec(
+                "--cohort",
+                "reference",
+                "option",
+                False,
+                "Sessions in this cohort version.",
+            ),
+            ParameterSpec(
+                "--filter", "JSON filter", "option", False, "Session filter expression."
+            ),
+            ParameterSpec("--all", "boolean", "option", False, "All sessions."),
+            ParameterSpec(
+                "--display-version",
+                "string",
+                "option",
+                False,
+                "Display version for the membership snapshot.",
+            ),
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -1410,8 +1439,17 @@ async def cohort_create(
     agent: str,
     description: str | None = None,
     metadata: str | None = None,
+    session: list[str] | None = None,
+    sessions_file: Path | None = None,
+    tag: str | None = None,
+    cohort: str | None = None,
+    filter: str | None = None,
+    all_sessions: Annotated[
+        bool, Parameter(name="--all", help="Select all sessions.")
+    ] = False,
+    display_version: str | None = None,
 ) -> CommandResult:
-    """Create a cohort bound to one exact agent."""
+    """Create a cohort and optionally snapshot selected sessions."""
     async with _open_asset_client() as client:
         return await cohorts.create_cohort(
             client,
@@ -1419,6 +1457,13 @@ async def cohort_create(
             agent=agent,
             description=description,
             metadata=metadata,
+            sessions=session,
+            sessions_file=sessions_file,
+            tag=tag,
+            cohort=cohort,
+            filter=filter,
+            all_sessions=all_sessions,
+            display_version=display_version,
         )
 
 
@@ -2795,6 +2840,13 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "--params", "JSON object", "option", False, "Importer parameters."
             ),
             ParameterSpec(
+                "--tag",
+                "text[]",
+                "option",
+                False,
+                "Tag every session created by this import; requires --wait.",
+            ),
+            ParameterSpec(
                 "--media-type",
                 "string",
                 "option",
@@ -2820,6 +2872,7 @@ async def session_import(
     importer: str,
     agent: str,
     params: str | None = None,
+    tag: list[str] | None = None,
     media_type: str = "application/octet-stream",
     wait: bool = False,
     interval: float | None = None,
@@ -2833,6 +2886,7 @@ async def session_import(
             importer=importer,
             agent=agent,
             params=params,
+            tags=tag,
             media_type=media_type,
             wait=wait,
             interval=interval,
@@ -2876,6 +2930,16 @@ async def session_import(
                 "Only sessions from this exact provider.",
             ),
             ParameterSpec(
+                "--tag", "text", "option", False, "Only sessions with this tag."
+            ),
+            ParameterSpec(
+                "--cohort",
+                "reference",
+                "option",
+                False,
+                "Only sessions in this cohort version.",
+            ),
+            ParameterSpec(
                 "--started-after",
                 "timestamp",
                 "option",
@@ -2903,10 +2967,15 @@ async def session_list(
     agent: str | None = None,
     origin: SessionOrigin | None = None,
     provider: str | None = None,
+    tag: str | None = None,
+    cohort: str | None = None,
     started_after: datetime | None = None,
     started_before: datetime | None = None,
 ) -> CommandResult:
     """List one server page of sessions."""
+    registration.list_params(
+        "session", size=size, cursor=cursor, sort=sort, filter=filter
+    )
     async with _open_asset_client() as client:
         return await sessions.list_sessions(
             client,
@@ -2918,6 +2987,8 @@ async def session_list(
             agent=agent,
             origin=origin,
             provider=provider,
+            tag=tag,
+            cohort=cohort,
             started_after=started_after,
             started_before=started_before,
         )
@@ -2981,7 +3052,7 @@ async def session_nodes(
     session_app,
     _spec(
         ("session", "evaluate"),
-        "Evaluate explicit sessions with exact evaluator versions.",
+        "Evaluate sessions selected by ID, tag, or all sessions.",
         parameters=(
             ParameterSpec(
                 "SESSION", "UUID[]", "argument", False, "Explicit session IDs."
@@ -2992,6 +3063,29 @@ async def session_nodes(
                 "option",
                 False,
                 "UTF-8 file with one session UUID per nonblank line.",
+            ),
+            ParameterSpec(
+                "--tag", "text", "option", False, "Evaluate sessions with this tag."
+            ),
+            ParameterSpec(
+                "--agent", "reference", "option", False, "Evaluate an agent's sessions."
+            ),
+            ParameterSpec(
+                "--cohort",
+                "reference",
+                "option",
+                False,
+                "Evaluate sessions in this cohort version.",
+            ),
+            ParameterSpec(
+                "--filter",
+                "JSON filter",
+                "option",
+                False,
+                "Evaluate matching sessions.",
+            ),
+            ParameterSpec(
+                "--all", "boolean", "option", False, "Evaluate all sessions."
             ),
             ParameterSpec(
                 "--evaluator",
@@ -3024,18 +3118,30 @@ async def session_evaluate(
     /,
     *,
     sessions_file: Path | None = None,
+    tag: str | None = None,
+    agent: str | None = None,
+    cohort: str | None = None,
+    filter: str | None = None,
+    all_sessions: Annotated[
+        bool, Parameter(name="--all", help="Evaluate all sessions.")
+    ] = False,
     evaluator: list[str],
     evaluator_params: list[str] | None = None,
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
 ) -> CommandResult:
-    """Evaluate explicit sessions with exact evaluator versions."""
+    """Evaluate sessions selected by ID, tag, or all sessions."""
     async with _open_asset_client() as client:
         return await evaluations.evaluate_sessions(
             client,
             session,
             sessions_file=sessions_file,
+            tag=tag,
+            agent=agent,
+            cohort=cohort,
+            filter=filter,
+            all_sessions=all_sessions,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
             wait=wait,
