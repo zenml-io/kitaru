@@ -93,7 +93,7 @@ async def test_agent_handler_merges_extras_and_secrets(tmp_path: Path) -> None:
     spec = make_agent_spec(
         task_id,
         run_env={"RUN_VAR": "1"},
-        extra_env={"KITARU_REPLAY_ID": "replay-1"},
+        extra_env={"KITARU_SESSION_NAME": "run-1"},
         secret_env={"PROVIDER_KEY": "secret"},
     )
     ctx = _ctx(tmp_path, FakeKitaruAPIClient())
@@ -101,9 +101,36 @@ async def test_agent_handler_merges_extras_and_secrets(tmp_path: Path) -> None:
     process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert process.env["RUN_VAR"] == "1"
-    assert process.env["KITARU_REPLAY_ID"] == "replay-1"
+    assert process.env["KITARU_SESSION_NAME"] == "run-1"
     assert process.env["PROVIDER_KEY"] == "secret"
     assert process.env["KITARU_TASK_TOKEN"] == "task-token"
+
+
+async def test_agent_handler_sets_the_replay_id_from_the_details(
+    tmp_path: Path,
+) -> None:
+    """A replay id on the details reaches the process environment."""
+    task_id = uuid.uuid4()
+    replay_id = uuid.uuid4()
+    spec = make_agent_spec(task_id, replay_id=replay_id)
+    ctx = _ctx(tmp_path, FakeKitaruAPIClient())
+
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert process.env["KITARU_REPLAY_ID"] == str(replay_id)
+
+
+async def test_agent_handler_omits_the_replay_id_without_one(
+    tmp_path: Path,
+) -> None:
+    """A task outside a replay gets no replay id variable."""
+    task_id = uuid.uuid4()
+    spec = make_agent_spec(task_id)
+    ctx = _ctx(tmp_path, FakeKitaruAPIClient())
+
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert "KITARU_REPLAY_ID" not in process.env
 
 
 async def test_evaluation_handler_script_plugin_materializes_and_sets_path(

@@ -57,7 +57,7 @@ from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNo
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import AgentTask, EvaluationTask
+from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -141,9 +141,13 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     agent_task = tasks[0]
     assert isinstance(agent_task, AgentTask)
     assert agent_task.inputs == baseline.inputs
-    assert agent_task.env == {"KITARU_REPLAY_ID": str(bundle.replay.id)}
+    assert agent_task.env == {}
     assert agent_task.labels == {"agent_version": str(agent_version.id)}
     assert agent_task.on_failure is TaskOnFailure.ABORT
+
+    spec = await services.task_service.get_spec(agent_task.id, actor=ACTOR)
+    assert isinstance(spec.details, AgentTaskDetails)
+    assert spec.details.replay_id == bundle.replay.id
 
     worker = await create_worker(services.workers, ACTOR.account.id)
     claimed = await services.task_service.claim_tasks(
@@ -518,9 +522,13 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
         agent_task = tasks[0]
         assert isinstance(agent_task, AgentTask)
         assert agent_task.inputs == baseline.inputs
-        assert agent_task.env == {"KITARU_REPLAY_ID": str(bundle.replay.id)}
+        assert agent_task.env == {}
         assert agent_task.labels == {"agent_version": str(agent_version.id)}
         assert agent_task.on_failure is TaskOnFailure.ABORT
+
+        spec = await services.task_service.get_spec(agent_task.id, actor=ACTOR)
+        assert isinstance(spec.details, AgentTaskDetails)
+        assert spec.details.replay_id == bundle.replay.id
 
 
 async def test_start_run_stamps_the_job_kind_replay(

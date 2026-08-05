@@ -148,14 +148,14 @@ def test_build_process_env_layers_and_strips_contract_variables(
     env = build_process_env(
         task_id,
         run_env={"RUN_VAR": "run"},
-        extra_env={"KITARU_REPLAY_ID": "replay-1"},
+        extra_env={"KITARU_SESSION_NAME": "run-1"},
         secret_env={"SECRET_VAR": "secret"},
         token="task-token",
     )
 
     assert env["SOME_INHERITED_VAR"] == "inherited"
     assert env["RUN_VAR"] == "run"
-    assert env["KITARU_REPLAY_ID"] == "replay-1"
+    assert env["KITARU_SESSION_NAME"] == "run-1"
     assert env["SECRET_VAR"] == "secret"
     assert env["KITARU_API_URL"] == "https://api.example.com"
     assert env["KITARU_TASK_TOKEN"] == "task-token"

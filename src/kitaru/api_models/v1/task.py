@@ -175,6 +175,9 @@ class AgentTaskDetails(ResponseModel):
 
     kind: Literal["agent"] = Field(default="agent")
     inputs: JsonValue = Field(description="Inputs passed to the agent's command.")
+    replay_id: uuid.UUID | None = Field(
+        default=None, description="Replay the task runs for."
+    )
 
 
 class EvaluationTaskDetails(ResponseModel):

@@ -462,6 +462,7 @@ def get_task_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
+        replay_repository=SQLReplayRepository(session),
         policy=policy,
     )
     return TaskService(
