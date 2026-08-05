@@ -50,6 +50,8 @@ class AgentHandler:
         inputs_json = json.dumps(spec.details.inputs)
         if len(inputs_json.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES:
             env["KITARU_TASK_INPUTS"] = inputs_json
+        if spec.details.replay_id is not None:
+            env["KITARU_REPLAY_ID"] = str(spec.details.replay_id)
         return TaskProcess(
             command=spec.run.command,
             working_dir=spec.run.working_dir,

@@ -41,6 +41,9 @@ from kitaru.server.adapters.db.repositories.job_repository import SQLJobReposito
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
 )
@@ -87,6 +90,7 @@ def _build_task_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher("test-encryption-key")
         ),
+        replay_repository=SQLReplayRepository(session),
         policy=policy,
     )
     transitions = TaskTransitions(

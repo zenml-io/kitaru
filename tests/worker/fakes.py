@@ -99,6 +99,7 @@ def make_agent_spec(
     extra_env: dict[str, str] | None = None,
     secret_env: dict[str, str] | None = None,
     working_dir: str | None = None,
+    replay_id: uuid.UUID | None = None,
 ) -> TaskSpecResponse:
     """Build an agent task spec.
 
@@ -111,6 +112,7 @@ def make_agent_spec(
         extra_env: Creator-set environment extras.
         secret_env: Secrets merged into the process environment.
         working_dir: Working directory.
+        replay_id: Replay the task runs for.
 
     Returns:
         Agent task spec.
@@ -122,7 +124,7 @@ def make_agent_spec(
         run=TaskRunSpec(command=command, working_dir=working_dir, env=run_env or {}),
         env=extra_env or {},
         secret_env=secret_env or {},
-        details=AgentTaskDetails(inputs=inputs),
+        details=AgentTaskDetails(inputs=inputs, replay_id=replay_id),
     )
 
 

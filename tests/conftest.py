@@ -5342,6 +5342,7 @@ def build_job_and_task_services(
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
+        replay_repository=FakeReplayRepository(),
         policy=task_policy,
     )
     task_service = TaskService(
@@ -5468,6 +5469,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         plugin_repository=plugins,
         blob_repository=blobs,
         secret_repository=secrets,
+        replay_repository=replays,
         policy=task_policy,
     )
     task_service = TaskService(

@@ -384,6 +384,19 @@
             "default": "agent",
             "title": "Kind",
             "type": "string"
+          },
+          "replay_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replay the task runs for.",
+            "title": "Replay Id"
           }
         },
         "required": [

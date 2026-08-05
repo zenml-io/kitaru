@@ -200,7 +200,12 @@ def test_check_attempt_rejects_a_stale_fence() -> None:
 
 def test_contract_env_names_are_rejected() -> None:
     """Env extras naming a contract variable fail validation."""
-    for name in ("KITARU_API_URL", "KITARU_API_KEY", "KITARU_TASK_RESULT_PATH"):
+    for name in (
+        "KITARU_API_URL",
+        "KITARU_API_KEY",
+        "KITARU_REPLAY_ID",
+        "KITARU_TASK_RESULT_PATH",
+    ):
         with pytest.raises(InvalidTaskEnv):
             _task(env={name: "x"})
 

@@ -19,6 +19,7 @@ from kitaru.server.application.interfaces.agent_version_repository import (
 )
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.secret_repository import SecretRepository
 from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
@@ -51,6 +52,7 @@ class TaskSpecBuilder:
         plugin_repository: PluginRepository,
         blob_repository: BlobRepository,
         secret_repository: SecretRepository,
+        replay_repository: ReplayRepository,
         policy: TaskPolicy,
     ) -> None:
         """Initialize the builder.
@@ -60,12 +62,14 @@ class TaskSpecBuilder:
             plugin_repository: Plugin repository.
             blob_repository: Blob repository.
             secret_repository: Secret repository.
+            replay_repository: Replay repository.
             policy: Task execution policy.
         """
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
         self._blobs = blob_repository
         self._secrets = secret_repository
+        self._replays = replay_repository
         self._policy = policy
 
     async def build_spec(self, task: Task) -> TaskSpec:
@@ -112,6 +116,7 @@ class TaskSpecBuilder:
             secret = await self._secrets.get(secret_id)
             for key, value in secret.values.items():
                 secret_env[key] = value.get_secret_value()
+        replay = await self._replays.get_by_job_id(task.job_id)
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.AGENT,
@@ -123,7 +128,10 @@ class TaskSpecBuilder:
             ),
             env=task.env,
             secret_env=secret_env,
-            details=AgentTaskDetails(inputs=task.inputs),
+            details=AgentTaskDetails(
+                inputs=task.inputs,
+                replay_id=replay.id if replay is not None else None,
+            ),
         )
 
     async def _evaluation_spec(self, task: EvaluationTask) -> TaskSpec:
