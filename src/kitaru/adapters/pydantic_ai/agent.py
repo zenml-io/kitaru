@@ -36,7 +36,7 @@ class KitaruAgent(
         self,
         agent: AbstractAgent[AgentDepsT, OutputDataT],
         *,
-        agent_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
         agent_version_id: uuid.UUID | None = None,
         api_url: str | None = None,
         api_key: str | None = None,
@@ -47,7 +47,8 @@ class KitaruAgent(
 
         Args:
             agent: PydanticAI agent to execute.
-            agent_id: Kitaru agent identifier.
+            agent_id: Optional Kitaru agent identifier. Task-bound runs infer
+                this from the task's agent version.
             agent_version_id: Optional Kitaru agent-version identifier.
             api_url: Kitaru API URL, falling back to ``KITARU_API_URL``.
             api_key: Kitaru API key, falling back to ``KITARU_API_KEY``.

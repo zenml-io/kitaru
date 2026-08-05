@@ -251,6 +251,26 @@ def test_uses_pydantic_ai_wrapper_agent() -> None:
     assert wrapped.wrapped is original
 
 
+async def test_task_bound_run_leaves_agent_identity_for_server_inference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = _replay_spec(PassthroughConfig())
+    _set_replay(monkeypatch, spec)
+    wrapped = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        api_url="http://kitaru.test",
+    )
+
+    await wrapped.run("ignored prompt")
+
+    request = _FakeClient.instances[0].sessions.created[0]
+    assert request.task_id == spec.task_id
+    assert request.agent_id is None
+    assert request.agent_version_id is None
+    assert "agent_id" not in request.model_fields_set
+    assert "agent_version_id" not in request.model_fields_set
+
+
 def test_constructor_validates_configuration() -> None:
     agent = Agent(TestModel(call_tools=[]))
     with pytest.raises(ValueError, match="KITARU_API_URL"):
