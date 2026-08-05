@@ -46,7 +46,7 @@ from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
-from kitaru.server.application.services.replay_pipeline import create_replay_pipeline
+from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.replay import Replay, ReplayAccessDenied
@@ -178,8 +178,8 @@ class ReplayService:
         )
         config.check_standalone()
         config = await self._experiments.create_replay_config(config)
-        replay = await create_replay_pipeline(
-            baseline=baseline,
+        replays = await create_replay_pipelines(
+            baselines=[baseline],
             agent_version_id=agent_version.id,
             config=config,
             evaluate_baselines=command.evaluate_baselines,
@@ -195,7 +195,7 @@ class ReplayService:
                 AnalyticsEvent.REPLAY_CREATED,
                 analytics_events.build_replay_created_properties(command.override),
             )
-        return (await self._bundle([replay]))[0]
+        return (await self._bundle(replays))[0]
 
     async def get_replay(
         self, replay_id: uuid.UUID, actor: AuthContext

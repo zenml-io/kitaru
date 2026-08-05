@@ -42,8 +42,8 @@ REPLAY_ID_ENV = "KITARU_REPLAY_ID"
 AGENT_VERSION_LABEL = "agent_version"
 
 
-async def create_replay_pipeline(
-    baseline: Session,
+async def create_replay_pipelines(
+    baselines: Sequence[Session],
     agent_version_id: uuid.UUID,
     config: ReplayConfig,
     evaluate_baselines: bool,
@@ -52,97 +52,21 @@ async def create_replay_pipeline(
     replay_repository: ReplayRepository,
     job_repository: JobRepository,
     task_repository: TaskRepository,
-) -> Replay:
-    """Create a replay's job, initial tasks, and replay row in one pipeline.
+) -> list[Replay]:
+    """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
-    The agent task carries the baseline session's inputs with the config's
+    Each agent task carries its baseline session's inputs with the config's
     override applied, the replay id in its env extras, and the agent version
     as a label. With ``evaluate_baselines``, one baseline evaluator task is
     appended per evaluator that has not already scored the baseline session.
-
-    Args:
-        baseline: Session being replayed.
-        agent_version_id: Agent version to replay with.
-        config: Replay config the replay and, for a run, its sibling
-            replays all point at.
-        evaluate_baselines: Whether to also score the baseline session.
-        experiment_run_id: Run this replay belongs to, ``None`` for a
-            standalone replay.
-        actor: Caller context.
-        replay_repository: Replay repository.
-        job_repository: Job repository.
-        task_repository: Task repository.
-
-    Raises:
-        DuplicateReplayForBaseline: The run already holds a replay for this
-            baseline session.
-
-    Returns:
-        Created replay.
-    """
-    job = await job_repository.create(
-        Job(owner_id=actor.account.id, kind=JobKind.REPLAY)
-    )
-    replay = await replay_repository.create(
-        Replay(
-            owner_id=actor.account.id,
-            job_id=job.id,
-            experiment_run_id=experiment_run_id,
-            replay_config_id=config.id,
-            baseline_session_id=baseline.id,
-            evaluate_baselines=evaluate_baselines,
-        )
-    )
-    await add_task(
-        AgentTask(
-            job_id=job.id,
-            agent_version_id=agent_version_id,
-            inputs=effective_inputs(baseline.inputs, config.override),
-            env={REPLAY_ID_ENV: str(replay.id)},
-            labels={AGENT_VERSION_LABEL: str(agent_version_id)},
-            on_failure=TaskOnFailure.ABORT,
-        ),
-        job_repository,
-        task_repository,
-    )
-    if evaluate_baselines:
-        scored = await task_repository.get_scored_evaluator_version_ids(baseline.id)
-        for evaluator in config.evaluators:
-            if evaluator.evaluator_version_id in scored:
-                continue
-            await add_task(
-                EvaluationTask(
-                    job_id=job.id,
-                    plugin_version_id=evaluator.evaluator_version_id,
-                    input_session_id=baseline.id,
-                    params=evaluator.params,
-                    on_failure=TaskOnFailure.ABORT,
-                ),
-                job_repository,
-                task_repository,
-            )
-    return replay
-
-
-async def create_replay_pipelines(
-    baselines: Sequence[Session],
-    agent_version_id: uuid.UUID,
-    config: ReplayConfig,
-    evaluate_baselines: bool,
-    experiment_run_id: uuid.UUID,
-    actor: AuthContext,
-    replay_repository: ReplayRepository,
-    job_repository: JobRepository,
-    task_repository: TaskRepository,
-) -> list[Replay]:
-    """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
     Args:
         baselines: Sessions being replayed.
         agent_version_id: Agent version to replay with.
         config: Replay config every created replay points at.
         evaluate_baselines: Whether to also score the baseline sessions.
-        experiment_run_id: Run the replays belong to.
+        experiment_run_id: Run the replays belong to, ``None`` for
+            standalone replays.
         actor: Caller context.
         replay_repository: Replay repository.
         job_repository: Job repository.
