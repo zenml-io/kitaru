@@ -17,12 +17,7 @@ Call both available tools exactly once:
 After both tools return, report both results in one sentence. Do not calculate or
 invent either result yourself.
 """.strip()
-_REQUIRED_ENV = (
-    "OPENAI_API_KEY",
-    "KITARU_API_URL",
-    "KITARU_API_KEY",
-    "KITARU_AGENT_ID",
-)
+_REQUIRED_ENV = ("OPENAI_API_KEY",)
 _LANGFUSE_ENV = (
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
@@ -49,6 +44,12 @@ def _require_environment() -> None:
     if missing:
         names = ", ".join(missing)
         raise RuntimeError(f"Missing required environment variables: {names}")
+    if not os.environ.get("KITARU_TASK_ID") and not (
+        os.environ.get("KITARU_AGENT_ID") or os.environ.get("KITARU_AGENT_VERSION_ID")
+    ):
+        raise RuntimeError(
+            "Set KITARU_AGENT_ID or KITARU_AGENT_VERSION_ID for a local run"
+        )
 
 
 def _configure_langfuse() -> Any | None:
@@ -71,6 +72,7 @@ def _configure_langfuse() -> Any | None:
 async def main() -> None:
     """Run the example once and print the final answer."""
     _require_environment()
+    agent_value = os.environ.get("KITARU_AGENT_ID")
     version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
     langfuse = _configure_langfuse()
     pydantic_agent = Agent("openai:gpt-5-nano")
@@ -78,7 +80,7 @@ async def main() -> None:
     pydantic_agent.tool_plain(multiply)
     agent = KitaruAgent(
         pydantic_agent,
-        agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
+        agent_id=uuid.UUID(agent_value) if agent_value else None,
         agent_version_id=uuid.UUID(version_value) if version_value else None,
     )
 

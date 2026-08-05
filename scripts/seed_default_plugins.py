@@ -25,10 +25,13 @@ from typing import Any, Literal
 
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
+    EvaluatorListParams,
     EvaluatorVersionCreateRequest,
 )
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.importer import (
     ImporterCreateRequest,
+    ImporterListParams,
     ImporterVersionCreateRequest,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
@@ -104,9 +107,18 @@ def _get_digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-async def _get_parent(resource: Any, name: str) -> Any | None:
+async def _get_parent(
+    resource: Any, kind: Literal["importer", "evaluator"], name: str
+) -> Any | None:
     """Return an exact named plugin parent when it exists."""
-    matches = [item async for item in resource.iter() if item.name == name]
+    params_type = ImporterListParams if kind == "importer" else EvaluatorListParams
+    page = await resource.list(
+        params_type(
+            size=2,
+            filter=FilterCondition(field="name", op=FilterOp.EQ, value=name),
+        )
+    )
+    matches = page.items
     if len(matches) > 1:
         raise RuntimeError(f"More than one plugin is named '{name}'")
     return matches[0] if matches else None
@@ -199,7 +211,7 @@ async def seed_plugin(
     digest = _get_digest(content)
     version_label = display_version or f"inline-{digest[:12]}"
     resource = client.importers if definition.kind == "importer" else client.evaluators
-    parent = await _get_parent(resource, definition.name)
+    parent = await _get_parent(resource, definition.kind, definition.name)
     if parent is None:
         parent = await _create_parent(resource, definition)
     elif not _is_seeded_parent(parent):

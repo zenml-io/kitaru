@@ -23,14 +23,12 @@ from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.importers import (
     ImportContext,
-    ImporterDescriptor,
     InvalidImport,
     NodeStatus,
     NodeType,
@@ -192,7 +190,7 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def _detect_shape(record: dict[str, Any]) -> str:
-    """Detect one supported Langfuse JSONL row shape."""
+    """Detect one supported Langfuse record shape."""
     if isinstance(record.get("observations"), list):
         return _TRACE_SHAPE
     event_type = str(record.get("type", "")).lower()
@@ -204,31 +202,49 @@ def _detect_shape(record: dict[str, Any]) -> str:
         return _EVENT_SHAPE
     if _first(record, "traceId", "trace_id") is not None:
         return _OBSERVATION_SHAPE
-    raise InvalidImport("Could not detect the Langfuse JSONL row shape")
+    raise InvalidImport("Could not detect the Langfuse record shape")
 
 
-def _parse_lines(content: bytes) -> list[dict[str, Any]]:
-    """Parse non-empty JSONL records."""
+def _parse_records(content: bytes) -> list[dict[str, Any]]:
+    """Parse non-empty JSON or JSONL records."""
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise InvalidImport("Langfuse import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise InvalidImport("Import file must be UTF-8 JSONL") from exc
-    records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
-        if not isinstance(value, dict):
-            raise InvalidImport(f"Line {line_number} must contain a JSON object")
-        records.append(value)
+        raise InvalidImport("Import file must be UTF-8 JSON or JSONL") from exc
+    if not text.strip():
+        raise InvalidImport("Import file contains no JSON records")
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        records = []
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
+            if not isinstance(value, dict):
+                raise InvalidImport(
+                    f"Line {line_number} must contain a JSON object"
+                ) from None
+            records.append(value)
+    else:
+        if isinstance(decoded, dict):
+            records = [decoded]
+        elif isinstance(decoded, list) and all(
+            isinstance(item, dict) for item in decoded
+        ):
+            records = decoded
+        else:
+            raise InvalidImport("Langfuse JSON must contain an object or object array")
     if not records:
-        raise InvalidImport("Import file contains no JSONL records")
+        raise InvalidImport("Import file contains no JSON records")
     shapes = {_detect_shape(record) for record in records}
     if len(shapes) != 1:
-        raise InvalidImport("Import file mixes multiple Langfuse JSONL row shapes")
+        raise InvalidImport("Import file mixes multiple Langfuse record shapes")
     return records
 
 
@@ -389,30 +405,19 @@ def _canonical_digest(value: Any) -> str:
 
 
 class LangfuseJSONLImporter:
-    """Normalize Langfuse trace, observation, and ingestion-event JSONL."""
-
-    @property
-    def descriptor(self) -> ImporterDescriptor:
-        """Return importer metadata."""
-        return ImporterDescriptor(
-            id="langfuse",
-            display_name="Langfuse JSONL",
-            version=version("kitaru"),
-            file_extensions=[".jsonl"],
-            max_upload_bytes=MAX_UPLOAD_BYTES,
-        )
+    """Normalize Langfuse trace, observation, and ingestion-event records."""
 
     def parse(self, content: bytes, context: ImportContext) -> NormalizedImport:
-        """Parse a Langfuse JSONL upload.
+        """Parse a Langfuse JSON or JSONL upload.
 
         Args:
-            content: Complete uploaded JSONL.
+            content: Complete uploaded JSON or JSONL.
             context: User selections.
 
         Returns:
             Multi-turn sessions and isolated normalization errors.
         """
-        records = _parse_lines(content)
+        records = _parse_records(content)
         shape = _detect_shape(records[0])
         if shape == _EVENT_SHAPE:
             records = _events_to_traces(records)
@@ -768,7 +773,7 @@ def parse(
     content: bytes,
     params: dict[str, Any],
 ) -> Iterator[ParsedSession | ImportFailure]:
-    """Parse Langfuse JSONL through the unified importer contract."""
+    """Parse Langfuse JSON or JSONL through the unified importer contract."""
     context = ImportContext(
         source_instance=params.get("source_instance"),
         filename=params.get("filename"),

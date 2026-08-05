@@ -17,7 +17,10 @@ import json
 from decimal import Decimal
 from typing import Any
 
-from kitaru.importers import ImportContext, NodeType, SessionStatus
+import pytest
+
+import kitaru.importers.braintrust as braintrust_module
+from kitaru.importers import ImportContext, InvalidImport, NodeType, SessionStatus
 from kitaru.importers.braintrust import BraintrustProjectLogImporter, parse
 from kitaru.task.importer import ImportFailure, ParsedSession
 
@@ -28,6 +31,14 @@ def context(
 ) -> ImportContext:
     """Build one importer context."""
     return ImportContext(source_instance=source_instance, filename=filename)
+
+
+def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject content before decoding when it exceeds the importer limit."""
+    monkeypatch.setattr(braintrust_module, "MAX_UPLOAD_BYTES", 3)
+
+    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
+        BraintrustProjectLogImporter().parse(b"1234", context())
 
 
 def event(

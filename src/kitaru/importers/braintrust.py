@@ -23,14 +23,12 @@ from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.importers import (
     ImportContext,
-    ImporterDescriptor,
     InvalidImport,
     NodeStatus,
     NodeType,
@@ -123,6 +121,8 @@ def _parse_datetime(value: Any) -> datetime | None:
 
 def _parse_records(content: bytes) -> tuple[list[dict[str, Any]], bool]:
     """Parse Braintrust JSON, JSONL, or API fetch output."""
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise InvalidImport("Braintrust import exceeds the 50 MiB upload limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -307,17 +307,6 @@ def _root_record(records: list[dict[str, Any]], trace_id: str) -> dict[str, Any]
 
 class BraintrustProjectLogImporter:
     """Normalize Braintrust project logs and lower-fidelity UI exports."""
-
-    @property
-    def descriptor(self) -> ImporterDescriptor:
-        """Return importer metadata."""
-        return ImporterDescriptor(
-            id="braintrust",
-            display_name="Braintrust project logs",
-            version=version("kitaru"),
-            file_extensions=[".json", ".jsonl", ".ndjson"],
-            max_upload_bytes=MAX_UPLOAD_BYTES,
-        )
 
     def parse(self, content: bytes, context: ImportContext) -> NormalizedImport:
         """Parse a Braintrust project-log or UI export."""

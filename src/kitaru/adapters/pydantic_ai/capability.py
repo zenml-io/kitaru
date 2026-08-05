@@ -233,6 +233,8 @@ def _case_matches(case: StaticCase, arguments: dict[str, Any]) -> bool:
         return True
     if case.match_mode is StaticMatchMode.EXACT:
         return arguments == case.match
+    if not isinstance(case.match, dict):
+        return False
     return all(
         name in arguments and arguments[name] == value
         for name, value in case.match.items()
@@ -378,6 +380,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                 effective_input = ctx.prompt
             prompt_input, message_history = _project_conversation_input(effective_input)
             override = replay.override if replay is not None else None
+            if override is not None and override.prompt is not None:
+                prompt_input = override.prompt
         except BaseException:
             await client.close()
             raise
@@ -487,7 +491,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                 error=_error_text(error),
             )
         except BaseException as recording_error:
-            raise recording_error from error
+            raise error from recording_error
         finally:
             await self._close()
         raise error

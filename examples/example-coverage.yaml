@@ -342,6 +342,37 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: pydantic-ai-v2-adapter
+    path: examples/integrations/pydantic_ai_v2/__main__.py
+    public_docs: [examples/integrations/pydantic_ai_v2/README.md]
+    owner_area: PydanticAI v2 recording and replay adapter
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/adapters/pydantic_ai/test_adapter.py
+        notes: covers recording, replay overrides, tool policies, streaming, and concurrent runs without provider calls
+      local_smoke:
+        status: smoke_only
+        command: uv run python -m examples.integrations.pydantic_ai_v2
+        requires_server: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+      live_provider:
+        status: manual_only
+        waiver:
+          reason: The v2 example requires an OpenAI call and a configured v2 server, and is not wired into the current provider workflow.
+          reviewer_action: If this example changes, run its documented command against a v2 server or record a release waiver.
+        provider: openai
+        command: uv run python -m examples.integrations.pydantic_ai_v2
+        weekly_workflow: false
+        local_release_smoke: false
+        manual_command_available: true
+        required_env: [OPENAI_API_KEY]
+        timeout_seconds: 120
+        cost_class: low
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: pydantic-ai-streaming
     path: examples/integrations/pydantic_ai_agent/pydantic_ai_streaming.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

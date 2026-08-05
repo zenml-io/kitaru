@@ -15,7 +15,7 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal, Self
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,18 +62,6 @@ class TokenUsage(APITokenUsage):
             cached_input_tokens=cached_input_tokens,
             reasoning_tokens=reasoning_tokens,
         )
-
-
-class ImporterDescriptor(FrozenModel):
-    """Deploy-time trace importer description."""
-
-    id: str
-    display_name: str
-    version: str
-    file_extensions: list[str]
-    max_upload_bytes: int
-    status: Literal["available", "unavailable"] = "available"
-    error_code: str | None = None
 
 
 class ImportContext(FrozenModel):

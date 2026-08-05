@@ -82,6 +82,8 @@ class _FakeSessions:
         return SimpleNamespace(id=self._client.session_id)
 
     async def update(self, session_id: uuid.UUID, request: Any) -> Any:
+        if self._client.update_error is not None:
+            raise self._client.update_error
         self.updated.append((session_id, request))
         self._client.events.append("session:update")
         return None
@@ -125,6 +127,7 @@ class _FakeClient:
         found=False, result=None
     )
     next_ingest_error: ClassVar[BaseException | None] = None
+    next_update_error: ClassVar[BaseException | None] = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -135,6 +138,7 @@ class _FakeClient:
         self.inputs = fixture.inputs if fixture else None
         self.lookup_response = type(self).next_lookup_response
         self.ingest_error = type(self).next_ingest_error
+        self.update_error = type(self).next_update_error
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
         self.tasks = _FakeTasks(self)
@@ -163,6 +167,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeClient.next_fixture = None
     _FakeClient.next_lookup_response = ToolLookupResponse(found=False, result=None)
     _FakeClient.next_ingest_error = None
+    _FakeClient.next_update_error = None
     monkeypatch.setattr(capability_module, "KitaruAPIClient", _FakeClient)
 
 
@@ -288,6 +293,17 @@ def test_uses_default_api_client() -> None:
     assert _FakeClient.instances[0].kwargs == {}
 
 
+def test_subset_static_case_with_non_mapping_match_does_not_match() -> None:
+    """Treat malformed subset cases as misses instead of crashing the adapter."""
+    case = StaticCase(
+        match=["Paris"],
+        match_mode=StaticMatchMode.SUBSET,
+        result="unused",
+    )
+
+    assert not capability_module._case_matches(case, {"city": "Paris"})
+
+
 def test_run_sync_preserves_result_and_records_lifecycle() -> None:
     original = Agent(TestModel(call_tools=[]))
     wrapped = KitaruAgent(
@@ -338,6 +354,26 @@ async def test_setup_error_fails_created_session() -> None:
     assert client.sessions.updated[0][1].status is SessionStatus.FAILED
     assert client.sessions.updated[0][1].error
     assert client.closed
+
+
+async def test_recording_failure_does_not_replace_agent_failure() -> None:
+    """Keep the agent error primary when terminal session recording also fails."""
+
+    def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        raise ValueError("agent failed")
+
+    _FakeClient.next_update_error = RuntimeError("recording failed")
+    agent = KitaruAgent(
+        Agent(FunctionModel(model)),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(ValueError, match="agent failed") as exc_info:
+        await agent.run("prompt")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "recording failed"
+    assert _FakeClient.instances[0].closed
 
 
 async def test_replay_resolves_input_and_replaces_request_configuration(
@@ -491,6 +527,43 @@ async def test_imported_conversation_replays_final_turn_with_history(
     assert prompts == ["My name is Ada.", "What is my name?"]
     assert responses == ["Hello Ada."]
     assert _FakeClient.instances[0].sessions.created[0].inputs == imported_inputs
+
+
+async def test_prompt_override_replaces_imported_conversation_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Apply a replay prompt override after projecting imported history."""
+    observed: list[str] = []
+
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        observed.extend(
+            part.content
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, UserPromptPart) and isinstance(part.content, str)
+        )
+        return ModelResponse(parts=[TextPart("replayed")])
+
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            PassthroughConfig(),
+            inputs={
+                "schema_version": 1,
+                "turns": [
+                    {"inputs": "first", "outputs": "answer"},
+                    {"inputs": "recorded prompt", "outputs": "recorded output"},
+                ],
+            },
+            override=ReplayOverride(prompt="replacement prompt"),
+        ),
+    )
+    agent = KitaruAgent(Agent(FunctionModel(model)), agent_id=uuid.uuid4())
+
+    await agent.run("caller prompt")
+
+    assert observed == ["first", "replacement prompt"]
 
 
 async def test_live_json_input_is_encoded_and_recorded_original() -> None:

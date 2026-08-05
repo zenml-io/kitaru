@@ -17,7 +17,6 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.importers.models import (
     ImportContext,
-    ImporterDescriptor,
     NormalizationError,
     NormalizedImport,
     NormalizedNode,
@@ -35,7 +34,6 @@ class InvalidImport(ValueError):
 
 __all__ = [
     "ImportContext",
-    "ImporterDescriptor",
     "InvalidImport",
     "NodeStatus",
     "NodeType",

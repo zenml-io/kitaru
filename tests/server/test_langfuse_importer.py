@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+import kitaru.importers.langfuse as langfuse_module
 from kitaru.importers import (
     ImportContext,
     InvalidImport,
@@ -38,6 +39,14 @@ def jsonl(*records: dict[str, Any]) -> bytes:
 def context(source_instance: str | None = None) -> ImportContext:
     """Build an import context."""
     return ImportContext(source_instance=source_instance)
+
+
+def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reject content before decoding when it exceeds the importer limit."""
+    monkeypatch.setattr(langfuse_module, "MAX_UPLOAD_BYTES", 3)
+
+    with pytest.raises(InvalidImport, match="50 MiB upload limit"):
+        LangfuseJSONLImporter().parse(b"1234", context())
 
 
 def test_unified_parse_returns_prefixed_external_id() -> None:
@@ -99,6 +108,19 @@ def test_unified_parse_preserves_node_trace_id() -> None:
 
     assert isinstance(parsed[0], ParsedSession)
     assert parsed[0].nodes[0].trace_id == "trace-1"
+
+
+def test_imports_pretty_printed_json_array() -> None:
+    """Accept the JSON array format advertised by the importer."""
+    content = json.dumps(
+        [observation("root", "trace-1", input_="hello", output="world")],
+        indent=2,
+    ).encode()
+
+    batch = LangfuseJSONLImporter().parse(content, context())
+
+    assert len(batch.sessions) == 1
+    assert batch.sessions[0].source_id == "conversation-1"
 
 
 def test_unified_parse_rejects_parent_cycle() -> None:

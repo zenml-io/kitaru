@@ -61,11 +61,18 @@ class FakePluginResource:
         """Initialize empty parent and version stores."""
         self.parents: list[Any] = []
         self.versions: dict[tuple[uuid.UUID, int], Any] = {}
+        self.list_params: list[Any] = []
 
-    async def iter(self) -> Any:
-        """Yield every stored parent."""
-        for parent in self.parents:
-            yield parent
+    async def list(self, params: Any) -> SimpleNamespace:
+        """Return parents matching the requested exact-name filter."""
+        self.list_params.append(params)
+        condition = params.filter
+        items = [
+            parent
+            for parent in self.parents
+            if getattr(parent, condition.field) == condition.value
+        ]
+        return SimpleNamespace(items=items[: params.size])
 
     async def create(self, request: Any) -> SimpleNamespace:
         """Create one plugin parent."""
@@ -142,6 +149,8 @@ async def test_seed_creates_only_changed_versions(tmp_path: Path) -> None:
     assert changed["action"] == "created_version"
     assert changed["version"] == 2
     assert len(client.importers.parents) == 1
+    assert all(params.filter.field == "name" for params in client.importers.list_params)
+    assert all(params.size == 2 for params in client.importers.list_params)
 
 
 async def test_seed_refuses_unmarked_existing_parent(tmp_path: Path) -> None:

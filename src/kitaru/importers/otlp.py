@@ -24,7 +24,6 @@ from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
-from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +32,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.importers import (
     ImportContext,
-    ImporterDescriptor,
     InvalidImport,
     NodeStatus,
     NodeType,
@@ -831,17 +829,6 @@ def _normalize_session(
 
 class OTLPJSONImporter:
     """Normalize OTLP ExportTraceServiceRequest JSON and JSONL."""
-
-    @property
-    def descriptor(self) -> ImporterDescriptor:
-        """Return importer metadata."""
-        return ImporterDescriptor(
-            id="otlp-json",
-            display_name="OpenTelemetry OTLP JSON",
-            version=version("kitaru"),
-            file_extensions=[".json", ".jsonl", ".ndjson"],
-            max_upload_bytes=MAX_UPLOAD_BYTES,
-        )
 
     def parse(self, content: bytes, context: ImportContext) -> NormalizedImport:
         """Parse OTLP JSON or JSONL into Kitaru sessions."""
