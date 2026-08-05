@@ -25,16 +25,17 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kitaru.cli.output import CLIError
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.credential_store import (
+from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
-    CredentialStore,
     get_config_directory,
+    get_server_url,
 )
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
 
 ENV_CONFIG_PATH = "KITARU_CONFIG_PATH"
-CONFIG_FILE_NAME = "config.json"
+CONFIG_FILE_NAME = "cli.json"
 CONFIG_KEYS = ("cli.machine_mode",)
 
 
@@ -64,7 +65,7 @@ class ResolvedTarget:
     """Server URL selected for one invocation."""
 
     server_url: str
-    source: Literal["explicit", "environment"]
+    source: Literal["explicit", "environment", "stored"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,7 +195,7 @@ def validate_server_url(url: str, *, configuration: bool = False) -> str:
 
 
 def resolve_target(*, explicit_server: str | None = None) -> ResolvedTarget:
-    """Resolve a server from an explicit option or ``KITARU_API_URL``."""
+    """Resolve a server from an explicit option, environment, or client config."""
     if explicit_server is not None:
         return ResolvedTarget(validate_server_url(explicit_server), "explicit")
     environment = os.environ.get("KITARU_API_URL")
@@ -202,10 +203,13 @@ def resolve_target(*, explicit_server: str | None = None) -> ResolvedTarget:
         return ResolvedTarget(
             validate_server_url(environment, configuration=True), "environment"
         )
+    stored = get_server_url()
+    if stored:
+        return ResolvedTarget(validate_server_url(stored, configuration=True), "stored")
     raise CLIError(
         "invalid_configuration",
         "No Kitaru server was resolved.",
-        hint="Pass --server or set KITARU_API_URL.",
+        hint="Pass --server, set KITARU_API_URL, or run `kitaru login`.",
     )
 
 

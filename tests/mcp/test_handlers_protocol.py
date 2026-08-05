@@ -159,6 +159,7 @@ async def test_public_sdk_call_has_canonical_structured_text_parity() -> None:
     assert result.structured_content is not None
     assert json.loads(result.content[0].text) == result.structured_content
     assert result.structured_content["data"]["id"] == str(item_id)
+    assert result.structured_content["data"]["expected"] is None
 
 
 async def test_remote_response_validation_is_not_reported_as_bad_arguments() -> None:

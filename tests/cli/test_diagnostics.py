@@ -274,7 +274,11 @@ def test_doctor_continues_without_reusing_malformed_credentials(
     """Malformed credentials do not block independent explicit-server checks."""
     fake_token = "FAKE-TOKEN-MUST-NOT-LEAK"
     server_url = "https://api.example.com"
-    credentials_path = tmp_path / "credentials.json"
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    if os.name == "posix":
+        config_dir.chmod(0o700)
+    credentials_path = config_dir / "credentials.json"
     credentials_path.write_text(
         json.dumps(
             {
@@ -301,7 +305,7 @@ def test_doctor_continues_without_reusing_malformed_credentials(
         return FakeClient()
 
     monkeypatch.setenv("KITARU_CONFIG_PATH", str(tmp_path / "config.json"))
-    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", str(credentials_path))
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
     monkeypatch.setattr(diagnostics, "_probe", successful_probe)
     monkeypatch.setattr(diagnostics, "build_api_client", build_client)

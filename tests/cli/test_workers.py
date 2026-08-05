@@ -27,8 +27,13 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.task import LabelSelector, TaskKind
-from kitaru.api_models.v1.worker import WorkerListParams, WorkerResponse, WorkerRuntime
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerListParams,
+    WorkerResponse,
+    WorkerRuntime,
+)
 from kitaru.cli import app as app_module
 from kitaru.cli import workers
 from kitaru.cli.config import ResolvedTarget

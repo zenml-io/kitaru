@@ -362,6 +362,7 @@ async def _create_importer_task(
         script: Parser script source written to the plugin file.
         tmp_path: Temporary directory the plugin file is written under.
         params: Parameters passed to the importer task.
+
     Returns:
         Id of the running import task and the path of its plugin file.
     """

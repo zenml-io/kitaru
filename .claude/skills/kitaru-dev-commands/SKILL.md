@@ -58,8 +58,8 @@ just audit                            # Audit Python dependencies with pip-audit
 just links                            # Check markdown links offline (requires lychee)
 just example-coverage-audit           # Validate example metadata and required waivers; audit-only, no provider calls
 just build                            # Build wheel + sdist locally
-just mcp-schema-check                  # Verify MCP 2/5/7 schema snapshots and budgets
-just mcp-wheel-smoke                   # Verify clean base and [mcp] wheel installs
+just mcp-schema-check                 # Verify MCP 2/5/7 schema snapshots and budgets
+just mcp-wheel-smoke                  # Verify clean base and [mcp] wheel installs
 
 # Docs workflows (require Node 22+ and pnpm)
 just generate-docs                    # Generate changelog + SDK reference docs

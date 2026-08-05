@@ -23,7 +23,7 @@ from typing import Literal
 
 import pytest
 
-from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.cli import receipts
 from kitaru.cli.output import (
     CLIError,
@@ -40,6 +40,7 @@ def _job(job_id: uuid.UUID, status: JobStatus) -> JobResponse:
         owner_id=uuid.uuid5(uuid.NAMESPACE_URL, str(job_id)),
         created=now,
         updated=now,
+        kind=JobKind.IMPORT,
         status=status,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=(

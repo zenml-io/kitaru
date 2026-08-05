@@ -22,6 +22,7 @@ from kitaru.api_models.v1.auth import TokenResponse
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import auth
 from kitaru.cli.output import CLIError
+from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.exceptions import AuthenticationError
@@ -94,7 +95,7 @@ async def test_api_key_is_validated_before_replacing_stored_credential(
     assert stored.api_key == "KITKEY_working"
 
 
-async def test_valid_api_key_is_stored_without_selecting_a_target(
+async def test_valid_api_key_is_stored_and_selects_its_server(
     tmp_path, monkeypatch
 ) -> None:
     """Successful validation persists the key, not the short-lived token."""
@@ -122,12 +123,13 @@ async def test_valid_api_key_is_stored_without_selecting_a_target(
     assert result.item["credential_kind"] == "api_key"
     assert result.item["credential_stored"] is True
     assert "KITKEY_valid" not in str(result.item)
+    assert get_server_url() == "https://api.example.com"
 
 
-async def test_no_auth_login_does_not_store_credentials_or_a_target(
+async def test_no_auth_login_stores_only_the_selected_target(
     tmp_path, monkeypatch
 ) -> None:
-    """A server with no auth produces no credential or target mutation."""
+    """A server with no auth becomes selected without storing a credential."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     client = FakeClient(AuthScheme.NONE)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
@@ -148,6 +150,7 @@ async def test_no_auth_login_does_not_store_credentials_or_a_target(
     assert result.item["authentication"] == "not_required"
     assert credential_store.list() == []
     assert result.item["credential_stored"] is False
+    assert get_server_url() == "https://public.example.com"
 
 
 async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) -> None:

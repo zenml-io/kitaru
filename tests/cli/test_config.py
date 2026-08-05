@@ -23,6 +23,26 @@ from kitaru.cli.app import main
 from kitaru.cli.config import ConfigStore, resolve_target, validate_server_url
 from kitaru.cli.diagnostics import _check_mode
 from kitaru.cli.output import CLIError
+from kitaru.client.config import set_server_url
+
+
+def test_cli_preferences_do_not_overwrite_client_connection_config(
+    tmp_path, monkeypatch
+) -> None:
+    """Presentation preferences and client connection state use separate files."""
+    config_dir = tmp_path / "client-config"
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
+
+    set_server_url("https://api.example.com")
+    ConfigStore().set_machine_mode(True)
+
+    assert json.loads((config_dir / "config.json").read_text(encoding="utf-8")) == {
+        "server_url": "https://api.example.com"
+    }
+    assert json.loads((config_dir / "cli.json").read_text(encoding="utf-8")) == {
+        "cli": {"machine_mode": True},
+        "schema_version": 1,
+    }
 
 
 def test_context_configuration_is_removed_and_legacy_fields_are_dropped(
@@ -102,8 +122,9 @@ def test_config_is_allowlisted_and_malformed_state_is_refused(
     assert path_result["item"] == {"path": str(config_path), "exists": True}
 
 
-def test_server_resolution_uses_only_explicit_or_environment(monkeypatch) -> None:
-    """An explicit URL wins, then the environment, with no persisted fallback."""
+def test_server_resolution_uses_explicit_environment_then_stored(monkeypatch) -> None:
+    """An explicit URL wins, followed by the environment and stored target."""
+    set_server_url("https://stored.example.com/")
     monkeypatch.setenv("KITARU_API_URL", "https://env.example.com/")
 
     assert (
@@ -113,8 +134,8 @@ def test_server_resolution_uses_only_explicit_or_environment(monkeypatch) -> Non
     assert resolve_target().source == "environment"
 
     monkeypatch.delenv("KITARU_API_URL")
-    with pytest.raises(CLIError, match="No Kitaru server was resolved"):
-        resolve_target()
+    assert resolve_target().server_url == "https://stored.example.com"
+    assert resolve_target().source == "stored"
 
 
 @pytest.mark.parametrize(

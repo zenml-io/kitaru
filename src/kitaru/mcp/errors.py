@@ -65,7 +65,7 @@ def error_result(result_type: type[ToolResult], error: BaseException) -> ToolRes
 
 def protocol_result(envelope: ToolResult) -> CallToolResult:
     """Render identical redacted canonical JSON as structured and text content."""
-    dumped = envelope.model_dump(mode="json", exclude_none=True)
+    dumped = envelope.model_dump(mode="json")
     structured = cast(dict[str, JsonValue], redact_data(dumped))
     text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
     return CallToolResult(

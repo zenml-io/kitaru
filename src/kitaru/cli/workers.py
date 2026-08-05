@@ -26,8 +26,8 @@ from typing import Any, Literal, Protocol
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
-from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
-from kitaru.api_models.v1.worker import WorkerListParams
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import LabelSelector, WorkerListParams, WorkerScope
 from kitaru.cli.config import ResolvedTarget
 from kitaru.cli.output import (
     CLIError,

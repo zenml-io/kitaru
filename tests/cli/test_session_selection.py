@@ -50,12 +50,20 @@ class SelectionClient:
         async def iter(self):
             yield self.owner.agent
 
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
+
     class _Cohorts:
         def __init__(self, owner: "SelectionClient") -> None:
             self.owner = owner
 
         async def iter(self):
             yield self.owner.cohort
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            return SimpleNamespace(items=[self.owner.cohort], next_cursor=None)
 
         async def iter_versions(self, cohort_id: uuid.UUID):
             assert cohort_id == self.owner.cohort.id
