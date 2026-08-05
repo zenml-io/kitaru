@@ -24,10 +24,10 @@ from kitaru.client.auth import (
 from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
     ClientConfig,
-    get_active_server_url,
+    get_server_url,
     load_config,
     save_config,
-    set_active_server_url,
+    set_server_url,
 )
 from kitaru.client.control_plane import (
     ControlPlaneLoginError,
@@ -77,8 +77,8 @@ __all__ = [
     "ValidationError",
     "control_plane_login",
     "device_login",
-    "get_active_server_url",
+    "get_server_url",
     "load_config",
     "save_config",
-    "set_active_server_url",
+    "set_server_url",
 ]

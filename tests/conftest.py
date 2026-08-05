@@ -476,6 +476,23 @@ def credential_store(tmp_path: Path) -> CredentialStore:
     return CredentialStore(path=tmp_path / "credentials.json")
 
 
+@pytest.fixture(autouse=True)
+def isolated_client_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Isolate client construction from the ambient environment and config."""
+    for name in (
+        "KITARU_API_URL",
+        "KITARU_API_TOKEN",
+        "KITARU_API_KEY",
+        "KITARU_CONFIG_PATH",
+        "KITARU_CREDENTIALS_PATH",
+        "KITARU_DISABLE_CREDENTIALS_CACHE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+
+
 @pytest.fixture
 def isolated_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the client config directory at a fresh temporary directory."""

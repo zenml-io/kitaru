@@ -33,7 +33,7 @@ from kitaru.client.auth import (
     StaticTokenAuth,
     TokenAuth,
 )
-from kitaru.client.config import get_active_server_url
+from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
@@ -60,7 +60,6 @@ from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.workers import WorkersResource
-from kitaru.env import get_required_env
 from kitaru.transport import build_async_client
 
 
@@ -69,7 +68,7 @@ class KitaruAPIClient:
 
     def __init__(
         self,
-        base_url: str,
+        base_url: str | None = None,
         api_key: str | None = None,
         credential_store: CredentialStore | None = None,
         timeout: float = 30.0,
@@ -79,21 +78,35 @@ class KitaruAPIClient:
         """Initialize the client.
 
         Args:
-            base_url: Server base URL.
+            base_url: Server base URL, read from KITARU_API_URL and then the
+                stored server URL when omitted.
             api_key: API key authenticating this client. A server key is sent
                 as a bearer token, a control plane key is exchanged for a
-                session token held in memory.
+                session token held in memory. Read from KITARU_API_TOKEN and
+                then KITARU_API_KEY when omitted.
             credential_store: Store holding the credentials this client
-                authenticates with, renewing its token as it expires.
+                authenticates with, renewing its token as it expires. Defaults
+                to the on-disk store when no API key is given.
             timeout: Request timeout in seconds.
             retries: Retry count for failed requests.
             pool_size: Connection pool size.
 
         Raises:
+            RuntimeError: No server URL is configured.
             ValueError: Both an API key and a credential store were supplied.
         """
         if api_key is not None and credential_store is not None:
             raise ValueError("api_key and credential_store are mutually exclusive")
+        if base_url is None:
+            base_url = os.environ.get("KITARU_API_URL") or get_server_url()
+            if not base_url:
+                raise RuntimeError("No server URL is configured")
+        if api_key is None and credential_store is None:
+            api_key = os.environ.get("KITARU_API_TOKEN") or os.environ.get(
+                "KITARU_API_KEY"
+            )
+            if api_key is None:
+                credential_store = CredentialStore()
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         self._auth: TokenAuth | None = None
@@ -141,44 +154,6 @@ class KitaruAPIClient:
         self.tags = TagsResource(self)
         self.tasks = TasksResource(self)
         self.workers = WorkersResource(self)
-
-    @classmethod
-    def from_config(cls) -> "KitaruAPIClient":
-        """Construct a client from the environment and the stored configuration.
-
-        The server URL is read from KITARU_API_URL, falling back to the stored
-        active server. The credential is read from KITARU_API_TOKEN or
-        KITARU_API_KEY, falling back to the credentials stored for the server.
-
-        Raises:
-            RuntimeError: No server URL is configured.
-
-        Returns:
-            Client.
-        """
-        base_url = os.environ.get("KITARU_API_URL") or get_active_server_url()
-        if not base_url:
-            raise RuntimeError("No server URL is configured")
-        credential = _get_ambient_credential()
-        if credential:
-            return cls(base_url=base_url, api_key=credential)
-        return cls(base_url=base_url, credential_store=CredentialStore())
-
-    @classmethod
-    def from_env(cls) -> "KitaruAPIClient":
-        """Construct a client from KITARU_API_URL and the ambient credential.
-
-        The credential is read from KITARU_API_TOKEN, falling back to
-        KITARU_API_KEY.
-
-        Raises:
-            RuntimeError: KITARU_API_URL is not set.
-
-        Returns:
-            Client.
-        """
-        base_url = get_required_env("KITARU_API_URL")
-        return cls(base_url=base_url, api_key=_get_ambient_credential())
 
     def with_token(self, token: str) -> "KitaruAPIClient":
         """Return a view of this client authenticating with a fixed bearer token.
@@ -291,13 +266,3 @@ class KitaruAPIClient:
             traceback: Exception traceback.
         """
         await self.close()
-
-
-def _get_ambient_credential() -> str | None:
-    """Return the credential the environment carries.
-
-    Returns:
-        KITARU_API_TOKEN or KITARU_API_KEY value, or None when neither is
-        set.
-    """
-    return os.environ.get("KITARU_API_TOKEN") or os.environ.get("KITARU_API_KEY")

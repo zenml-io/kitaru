@@ -21,8 +21,9 @@ from typing import Protocol
 import httpx
 
 from kitaru.api_models.v1.auth import TokenResponse
+from kitaru.client.config import normalize_server_url
 from kitaru.client.control_plane import ControlPlaneSession
-from kitaru.client.credential_store import CredentialStore, normalize_server_url
+from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken, ServerCredentials
 
 

@@ -16,7 +16,7 @@
 import os
 import uuid
 
-from kitaru.client.credential_store import (
+from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
     get_config_directory,

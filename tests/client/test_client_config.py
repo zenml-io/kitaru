@@ -25,32 +25,18 @@ from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
     ENV_CONFIG_PATH,
     ClientConfig,
-    get_active_server_url,
+    get_server_url,
     load_config,
-    set_active_server_url,
+    set_server_url,
 )
-
-pytestmark = pytest.mark.usefixtures("isolated_config_directory")
-
-
-@pytest.fixture(autouse=True)
-def clean_client_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Clear the environment variables client construction reads."""
-    for name in (
-        ENV_CONFIG_PATH,
-        "KITARU_API_URL",
-        "KITARU_API_KEY",
-        "KITARU_API_TOKEN",
-    ):
-        monkeypatch.delenv(name, raising=False)
 
 
 def test_round_trip(tmp_path: Path) -> None:
-    """Write the active server URL and read it back normalized."""
-    set_active_server_url("https://kitaru.example.com/")
+    """Write the server URL and read it back normalized."""
+    set_server_url("https://kitaru.example.com/")
 
     assert (tmp_path / "config" / "kitaru" / "config.json").exists()
-    assert get_active_server_url() == "https://kitaru.example.com"
+    assert get_server_url() == "https://kitaru.example.com"
 
 
 def test_missing_file_reads_as_empty() -> None:
@@ -74,73 +60,84 @@ def test_environment_overrides_the_config_path(
     override = tmp_path / "elsewhere.json"
     monkeypatch.setenv(ENV_CONFIG_PATH, str(override))
 
-    set_active_server_url("https://kitaru.example.com")
+    set_server_url("https://kitaru.example.com")
 
     assert override.exists()
-    assert get_active_server_url() == "https://kitaru.example.com"
+    assert get_server_url() == "https://kitaru.example.com"
 
 
-def test_clearing_the_active_server(tmp_path: Path) -> None:
-    """Drop the active server URL from the file when cleared."""
-    set_active_server_url("https://kitaru.example.com")
-    set_active_server_url(None)
+def test_clearing_the_server_url(tmp_path: Path) -> None:
+    """Drop the server URL from the file when cleared."""
+    set_server_url("https://kitaru.example.com")
+    set_server_url(None)
 
     path = tmp_path / "config" / "kitaru" / "config.json"
-    assert get_active_server_url() is None
+    assert get_server_url() is None
     assert json.loads(path.read_text(encoding="utf-8")) == {}
 
 
-def test_from_config_prefers_the_environment_url(
+def test_explicit_url_beats_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the server URL passed to the constructor over the environment."""
+    monkeypatch.setenv("KITARU_API_URL", "http://environment")
+
+    client = KitaruAPIClient(base_url="http://explicit")
+
+    assert client._http.base_url == httpx.URL("http://explicit")
+
+
+def test_environment_url_beats_the_stored_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Use the server URL the environment names over the stored one."""
     monkeypatch.setenv("KITARU_API_URL", "http://environment")
-    set_active_server_url("http://stored")
+    set_server_url("http://stored")
 
-    client = KitaruAPIClient.from_config()
+    client = KitaruAPIClient()
 
     assert client._http.base_url == httpx.URL("http://environment")
 
 
-def test_from_config_uses_the_active_server() -> None:
-    """Use the stored active server when the environment names none."""
-    set_active_server_url("http://stored")
+def test_uses_the_stored_server_url() -> None:
+    """Use the stored server URL when the environment names none."""
+    set_server_url("http://stored")
 
-    client = KitaruAPIClient.from_config()
+    client = KitaruAPIClient()
 
     assert client._http.base_url == httpx.URL("http://stored")
 
 
-def test_from_config_fails_without_a_server_url() -> None:
+def test_fails_without_a_server_url() -> None:
     """Raise when neither the environment nor the file names a server."""
     with pytest.raises(RuntimeError):
-        KitaruAPIClient.from_config()
+        KitaruAPIClient()
 
 
-def test_from_config_prefers_the_environment_credential(
+def test_prefers_the_environment_credential(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Authenticate with the credential the environment names."""
     monkeypatch.setenv("KITARU_API_KEY", "kitaru-key")
-    set_active_server_url("http://stored")
+    set_server_url("http://stored")
 
-    client = KitaruAPIClient.from_config()
+    client = KitaruAPIClient()
 
     assert isinstance(client._auth, StaticTokenAuth)
 
 
-def test_from_config_falls_back_to_stored_credentials() -> None:
+def test_falls_back_to_stored_credentials() -> None:
     """Authenticate through the credential store without an environment credential."""
-    set_active_server_url("http://stored")
+    set_server_url("http://stored")
 
-    client = KitaruAPIClient.from_config()
+    client = KitaruAPIClient()
 
     assert isinstance(client._auth, RenewingTokenAuth)
 
 
 def test_kitaru_client_defaults_to_the_resolved_server() -> None:
     """Build the default API client from the stored configuration."""
-    set_active_server_url("http://stored")
+    set_server_url("http://stored")
 
     client = KitaruClient()
 

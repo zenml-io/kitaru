@@ -27,7 +27,7 @@ class KitaruClient:
         Args:
             api_client: API client used to send requests.
         """
-        self._api_client = api_client or KitaruAPIClient.from_config()
+        self._api_client = api_client or KitaruAPIClient()
 
     async def close(self) -> None:
         """Close the underlying API client."""
