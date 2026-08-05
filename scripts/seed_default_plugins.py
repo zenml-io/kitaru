@@ -64,6 +64,14 @@ PLUGIN_DEFINITIONS = (
     ),
     PluginDefinition(
         kind="importer",
+        name="langsmith",
+        path=_REPOSITORY_ROOT / "plugins/importers/langsmith.py",
+        entrypoint="parse",
+        description="Import LangSmith run-query and bulk-export JSON records.",
+        provider="langsmith",
+    ),
+    PluginDefinition(
+        kind="importer",
         name="langfuse",
         path=_REPOSITORY_ROOT / "plugins/importers/langfuse.py",
         entrypoint="parse",

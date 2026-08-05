@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Braintrust importer tests based on a sanitized project-log export."""
+"""Braintrust importer plugin tests based on a sanitized project-log export."""
 
 import json
 from decimal import Decimal
