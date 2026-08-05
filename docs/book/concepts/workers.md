@@ -38,7 +38,7 @@ your command as-is, in the working directory and environment the agent
 version declares — plus the [secrets](../deploy/secrets.md) it references.
 
 The worker hands each subprocess its context through environment
-variables: `KITARU_API_URL` and a `KITARU_TASK_TOKEN` — a bearer token
+variables: `KITARU_API_URL` and a `KITARU_API_TOKEN` — a bearer token
 scoped to that one task and attempt, with your broader `KITARU_API_KEY`
 deliberately stripped from the child environment — plus
 `KITARU_TASK_ID` to link the recorded session to the task, and

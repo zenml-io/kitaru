@@ -14,9 +14,13 @@ export KITARU_API_URL="https://kitaru.internal.example.com"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-`KitaruAPIClient.from_env()` reads exactly these — a missing URL is an
-error, a missing key means unauthenticated (fine when the server runs
-`AUTH_SCHEME=none`). Workers and task subprocesses receive the same pair.
+`KitaruAPIClient()` resolves both on its own: the server URL from
+`KITARU_API_URL`, falling back to the URL stored by `kitaru login` (no
+URL anywhere is an error); the credential from the task token a worker
+injects (`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then the stored
+`kitaru login` credential — and no credential means unauthenticated,
+fine when the server runs `AUTH_SCHEME=none`. Workers and task
+subprocesses are handed the pair explicitly.
 
 ## Contexts (CLI)
 

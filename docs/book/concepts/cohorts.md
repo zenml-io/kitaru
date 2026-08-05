@@ -25,7 +25,7 @@ from kitaru.api_models.v1.cohort import CohortCreateRequest
 from kitaru.api_models.v1.cohort_version import CohortVersionCreateRequest
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
 
     cohort = await client.cohorts.create(
         CohortCreateRequest(name="refund-regression", agent_id=AGENT_ID)

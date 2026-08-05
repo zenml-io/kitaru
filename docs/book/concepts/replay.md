@@ -39,7 +39,7 @@ from kitaru.api_models.v1.replay_config import (
 )
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
     replay = await client.replays.create(
         ReplayCreateRequest(
             baseline_session_id=BASELINE_ID,

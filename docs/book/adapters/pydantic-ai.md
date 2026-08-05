@@ -42,8 +42,6 @@ KitaruAgent(
     agent,                      # the PydanticAI agent to wrap
     agent_id=None,              # the registered Kitaru agent's UUID
     agent_version_id=None,      # optional: pin sessions to a version
-    api_url=None,               # falls back to KITARU_API_URL
-    api_key=None,               # falls back to KITARU_TASK_TOKEN, then KITARU_API_KEY
     session_name=None,          # falls back to KITARU_SESSION_NAME
     batch_size=20,              # nodes per ingest batch
 )
@@ -52,9 +50,14 @@ KitaruAgent(
 Register the agent first (`kitaru agent register`) and hand its id to the
 wrapper — via `KITARU_AGENT_ID` in your own environment, as the examples
 do. When the script runs under a worker task (a replay), the id is
-optional: the adapter infers the agent from the task itself. Everything
-else can come from the environment, which is what makes the same script
-work on your laptop, in production, and under a worker without edits.
+optional: the adapter infers the agent from the task itself.
+
+The connection is the client's, not the adapter's: server and credential
+resolve the same way as for `KitaruAPIClient` — `KITARU_API_URL` (or
+the stored server URL), then the task token a worker injects
+(`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then stored `kitaru login`
+credentials. That's what makes the same script work on your laptop, in
+production, and under a worker without edits.
 
 ## What gets recorded
 

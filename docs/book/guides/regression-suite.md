@@ -28,7 +28,7 @@ from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.session import SessionListParams
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
     refund_runs = [
         s.id
         async for s in client.sessions.iter(SessionListParams(

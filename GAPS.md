@@ -76,13 +76,22 @@ publish.
   with a team-written `docs/book/getting-started/examples.md` on that
   branch. A matching Examples page was added to this branch (toc +
   redirect removed) — reconcile the two versions at merge.
-- **`feature/client-config` in flight (Michael, not merged anywhere)**:
-  client config file + server-URL resolution, client construction fails
-  without a URL, and **`KITARU_TASK_TOKEN` is renamed to
-  `KITARU_API_TOKEN`**. If it lands, sweep `deploy/authentication.md`,
-  `deploy/workers.md`, `concepts/workers.md`,
-  `concepts/under-the-hood.md`, `adapters/pydantic-ai.md`, and
-  `agent-native/mcp-server.md` for the old name.
+- **Client config landed (#666, merged ~14:49 and propagated to
+  `v2-importer` and `cli-620`; docs swept same day)**:
+  - `KITARU_TASK_TOKEN` → **`KITARU_API_TOKEN`** everywhere; docs
+    renamed (workers concept, authentication, MCP, adapter pages).
+  - `KitaruAPIClient.from_env()` is **gone** — precedence folded into
+    the constructor: URL = `KITARU_API_URL` > stored server URL (else
+    error); credential = `KITARU_API_TOKEN` > `KITARU_API_KEY` > stored
+    login credential > anonymous. All nine doc snippets now construct
+    `KitaruAPIClient()` directly.
+  - The adapter (`5b65b0cc`, `v2-importer`) **dropped `api_url` /
+    `api_key` params** — it uses the client's resolution. Note the copy
+    of the adapter on `cli-620` still has the old params until the next
+    merge from `v2-importer`; docs follow the newer surface.
+  - The team's own MCP page on `cli-620` still says
+    "`KITARU_TASK_TOKEN` is deliberately ignored" — stale on their
+    side; flag at merge time.
 
 ## Resolved since Aug 3 (docs updated Aug 4)
 

@@ -91,7 +91,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.session import SessionListParams
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
     sessions = await client.sessions.list(SessionListParams(size=1))
     session = sessions.items[0]
     print(session.id, session.status, session.cost, session.tokens)
@@ -181,7 +181,7 @@ from kitaru.api_models.v1.replay_config import (
 RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
     baseline = await client.replays.create(
         ReplayCreateRequest(
             baseline_session_id=SESSION_ID,   # from step 3

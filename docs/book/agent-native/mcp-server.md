@@ -40,7 +40,7 @@ Then register it with your assistant (`.mcp.json` for Claude Code):
 The server needs an explicit target — `--server URL`,
 `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails
 if none selects a server. Credentials come from `KITARU_API_KEY` or the
-stored credential for that URL (a task-scoped `KITARU_TASK_TOKEN` is
+stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is
 deliberately ignored). Both are fixed for the life of the process —
 restart `kitaru-mcp` after changing either.
 
@@ -79,7 +79,7 @@ export KITARU_API_KEY="KITKEY_..."
   `kitaru experiment run start`, plus registration, workers, and jobs.
   Commands take `--output json`, so assistant-driven invocations parse
   cleanly.
-* **Python client** — `KitaruAPIClient.from_env()` reaches everything,
+* **Python client** — `KitaruAPIClient()` reaches everything,
   including single-session replays. Your assistant writes the same
   snippets these docs show.
 * **REST** — the server's OpenAPI schema at `/docs` on your server, when

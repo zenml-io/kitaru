@@ -85,7 +85,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.session import SessionListParams
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()  # KITARU_API_URL, KITARU_API_KEY
+    client = KitaruAPIClient()  # KITARU_API_URL, KITARU_API_KEY
     page = await client.sessions.list(SessionListParams())
     for session in page.items:
         print(session.id, session.origin, session.status, session.cost)

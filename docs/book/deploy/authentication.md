@@ -79,7 +79,7 @@ step:
 * Each claimed task comes with a **task token** scoped to that single
   task and attempt, carrying an explicit allowlist of the sessions and
   blobs the task may touch. The worker hands *that* to your agent
-  subprocess as `KITARU_TASK_TOKEN` — your broad API key is stripped
+  subprocess as `KITARU_API_TOKEN` — your broad API key is stripped
   from the child environment.
 
 So the process running arbitrary agent code holds a credential that can

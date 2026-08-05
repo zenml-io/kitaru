@@ -49,7 +49,7 @@ from kitaru.api_models.v1.replay_config import (
 RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
 
 async def main() -> None:
-    client = KitaruAPIClient.from_env()
+    client = KitaruAPIClient()
     replay = await client.replays.create(
         ReplayCreateRequest(
             baseline_session_id=SESSION_ID,
