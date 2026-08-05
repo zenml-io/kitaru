@@ -56,7 +56,7 @@ def main() -> None:
     try:
         task_id = get_required_env("KITARU_TASK_ID")
         base_url = get_required_env("KITARU_API_URL")
-        token = get_required_env("KITARU_TASK_TOKEN")
+        token = get_required_env("KITARU_API_TOKEN")
 
         async def _main() -> None:
             async with KitaruAPIClient(base_url=base_url, api_key=token) as client:

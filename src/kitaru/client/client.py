@@ -17,8 +17,6 @@ from types import TracebackType
 
 from kitaru.client.api_client import KitaruAPIClient
 
-DEFAULT_SERVER_URL = "http://localhost:8000"
-
 
 class KitaruClient:
     """Kitaru client."""
@@ -29,8 +27,7 @@ class KitaruClient:
         Args:
             api_client: API client used to send requests.
         """
-        # TODO: Make the default server URL configurable.
-        self._api_client = api_client or KitaruAPIClient(base_url=DEFAULT_SERVER_URL)
+        self._api_client = api_client or KitaruAPIClient()
 
     async def close(self) -> None:
         """Close the underlying API client."""

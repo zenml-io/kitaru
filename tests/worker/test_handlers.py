@@ -103,7 +103,7 @@ async def test_agent_handler_merges_extras_and_secrets(tmp_path: Path) -> None:
     assert process.env["RUN_VAR"] == "1"
     assert process.env["KITARU_SESSION_NAME"] == "run-1"
     assert process.env["PROVIDER_KEY"] == "secret"
-    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
 
 
 async def test_agent_handler_sets_the_replay_id_from_the_details(
@@ -155,7 +155,7 @@ async def test_evaluation_handler_script_plugin_materializes_and_sets_path(
     assert client.blobs.download_calls == [blob_id]
     assert process.working_dir is None
     assert process.command == ("uv run --with numpy python -m kitaru.task evaluate")
-    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
 
 
 async def test_evaluation_handler_package_plugin_skips_materialization(
@@ -220,7 +220,7 @@ async def test_import_handler_script_plugin_materializes_code_and_payload(
     assert Path(process.env["KITARU_TASK_PLUGIN_PATH"]).read_bytes() == code_content
     assert Path(process.env["KITARU_TASK_PAYLOAD_PATH"]).read_bytes() == payload_content
     assert set(client.blobs.download_calls) == {code_blob_id, payload_blob_id}
-    assert process.env["KITARU_TASK_TOKEN"] == "task-token"
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
     # The payload is cached under the payload cache root, the plugin under
     # the code cache root, never the other's directory.
     assert "payloads" in process.env["KITARU_TASK_PAYLOAD_PATH"]

@@ -22,13 +22,15 @@ from pathlib import Path
 
 import pytest
 
-from kitaru.client.credential_store import (
+from kitaru.client.config import (
     DIRECTORY_MODE,
-    ENV_DISABLE_CREDENTIALS_CACHE,
     FILE_MODE,
-    CredentialStore,
     get_config_directory,
     normalize_server_url,
+)
+from kitaru.client.credential_store import (
+    ENV_DISABLE_CREDENTIALS_CACHE,
+    CredentialStore,
 )
 from kitaru.client.credentials import ApiToken, ApiType
 
