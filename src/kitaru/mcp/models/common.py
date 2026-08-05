@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.agent_version import AgentVersionResponse
+from kitaru.api_models.v1.annotation import AnnotationResponse
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
@@ -18,6 +19,10 @@ from kitaru.api_models.v1.evaluator import EvaluatorResponse, EvaluatorVersionRe
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
 from kitaru.api_models.v1.importer import ImporterResponse, ImporterVersionResponse
+from kitaru.api_models.v1.investigation import (
+    InvestigationResponse,
+    InvestigationSessionResponse,
+)
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.replay import ReplayResponse
 from kitaru.api_models.v1.session import SessionResponse
@@ -68,7 +73,7 @@ class ToolError(MCPModel):
 
 
 class ToolResult(MCPModel):
-    """Versioned result envelope shared by all seven tools."""
+    """Versioned result envelope shared by all public tools."""
 
     schema_version: Literal["1"] = "1"
     ok: bool
@@ -121,6 +126,21 @@ class ActivityReadResult(ToolResult):
     data: ActivityItem | PageData[ActivityItem] | None = None
 
 
+ReviewItem = InvestigationResponse | InvestigationSessionResponse | AnnotationResponse
+
+
+class ReviewReadResult(ToolResult):
+    """Typed investigation and annotation read result."""
+
+    data: ReviewItem | PageData[ReviewItem] | None = None
+
+
+class ReviewManageResult(ToolResult):
+    """Typed investigation and annotation management result."""
+
+    data: ReviewItem | None = None
+
+
 class CohortsManageResult(ToolResult):
     """Cohort management result."""
 
@@ -131,6 +151,12 @@ class ExperimentsManageResult(ToolResult):
     """Experiment management result."""
 
     data: ExperimentResponse | None = None
+
+
+class EvaluatorsManageResult(ToolResult):
+    """Evaluator parent or version management result."""
+
+    data: EvaluatorResponse | EvaluatorVersionResponse | None = None
 
 
 class SessionImportReceipt(MCPModel):
@@ -152,6 +178,40 @@ class SessionImportResult(ToolResult):
     data: SessionImportReceipt | None = None
 
 
+class EvaluationSelectionReceipt(MCPModel):
+    """Resolved evaluator identity used by an evaluation batch."""
+
+    evaluator_id: uuid.UUID
+    evaluator_version_id: uuid.UUID
+    version: int
+
+
+class EvaluationStartReceipt(MCPModel):
+    """Immediate receipt for a queued evaluation batch."""
+
+    operation: Literal["evaluation"]
+    input_session_ids: list[uuid.UUID]
+    evaluators: list[EvaluationSelectionReceipt]
+    result: JobResponse
+
+
+class ExperimentRunStartReceipt(MCPModel):
+    """Immediate receipt for a started experiment run."""
+
+    operation: Literal["experiment_run"]
+    experiment_id: uuid.UUID
+    cohort_version_id: uuid.UUID
+    agent_version_id: uuid.UUID
+    evaluate_baselines: bool
+    result: ExperimentRunResponse
+
+
+class WorkflowStartResult(ToolResult):
+    """Workflow start result with an authoritative typed receipt."""
+
+    data: EvaluationStartReceipt | ExperimentRunStartReceipt | None = None
+
+
 class WorkflowCancellationReceipt(MCPModel):
     """Authoritative cancellation response."""
 
@@ -167,10 +227,21 @@ class WorkflowCancelResult(ToolResult):
     data: WorkflowCancellationReceipt | None = None
 
 
+DeleteKind = Literal[
+    "cohort",
+    "cohort_version",
+    "experiment",
+    "experiment_run",
+    "investigation",
+    "annotation",
+    "evaluator",
+]
+
+
 class DeleteReceipt(MCPModel):
     """Receipt for one exact allowlisted deletion."""
 
-    kind: Literal["cohort", "cohort_version", "experiment", "experiment_run"]
+    kind: DeleteKind
     id: uuid.UUID
     deleted: Literal[True]
 

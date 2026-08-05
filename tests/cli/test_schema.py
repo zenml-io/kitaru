@@ -56,6 +56,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     roots = {item["name"] for item in describe_schema()}
     assert roots == {
         "agent",
+        "annotation",
         "cohort",
         "config",
         "doctor",
@@ -64,6 +65,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "experiment",
         "importer",
         "info",
+        "investigation",
         "job",
         "login",
         "logout",
@@ -75,6 +77,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     }
     descriptions = {item["name"]: item["description"] for item in describe_schema()}
     assert descriptions["agent"] == "Register and inspect agents."
+    assert descriptions["annotation"] == "Create and manage session annotations."
     assert (
         descriptions["cohort"]
         == "Manage cohort namespaces and immutable membership versions."
@@ -85,6 +88,9 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         == "Configure experiments and manage asynchronous runs."
     )
     assert descriptions["importer"] == "Develop, register, and inspect importers."
+    assert descriptions["investigation"] == (
+        "Create investigations and review their linked sessions."
+    )
     assert descriptions["evaluator"] == "Develop, register, and inspect evaluators."
     assert descriptions["session"] == "Import and inspect sessions and their nodes."
 

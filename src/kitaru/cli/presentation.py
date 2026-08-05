@@ -106,6 +106,16 @@ _NAME = HumanField("name", "Name")
 _STATUS = HumanField("status", "Status")
 _DESCRIPTION = HumanField("description", "Description")
 _METADATA = HumanField("metadata", "Metadata")
+_INVESTIGATION_SESSION_FIELDS = (
+    _STATUS,
+    HumanField("session_id", "Session"),
+    _ID,
+)
+_ANNOTATION_FIELDS = (
+    HumanField("question_key", "Question"),
+    HumanField("value", "Value"),
+    _ID,
+)
 
 _ASSET_FIELDS = (
     _NAME,
@@ -347,6 +357,71 @@ _VIEWS: dict[str, HumanView] = {
     "cohort.version.update": _build_view(
         "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
+    "investigation.list": _build_view(
+        "Investigations",
+        (
+            _STATUS,
+            _NAME,
+            HumanField("completed_sessions", "Completed"),
+            HumanField("total_sessions", "Total"),
+            _ID,
+            _CREATED,
+        ),
+    ),
+    "investigation.get": _build_view(
+        "Investigation",
+        (_STATUS, _NAME, _ID),
+        (
+            HumanSection("Summary", (_STATUS, _NAME, _DESCRIPTION, _ID)),
+            HumanSection(
+                "Progress",
+                (
+                    HumanField("completed_sessions", "Completed sessions"),
+                    HumanField("total_sessions", "Total sessions"),
+                    HumanField("questions", "Questions"),
+                ),
+            ),
+            HumanSection(
+                "Timing",
+                (
+                    HumanField("started_at", "Started"),
+                    HumanField("ended_at", "Ended"),
+                    _CREATED,
+                    _UPDATED,
+                ),
+            ),
+        ),
+    ),
+    "investigation.create": _build_view("Investigation", (_STATUS, _NAME, _ID)),
+    "investigation.update": _build_view("Investigation", (_STATUS, _NAME, _ID)),
+    "investigation.session.list": _build_view(
+        "Investigation sessions",
+        (
+            HumanField("position", "Position"),
+            _STATUS,
+            HumanField("session_id", "Session", no_wrap=True),
+            _ID,
+        ),
+    ),
+    "investigation.session.complete": _build_view(
+        "Investigation session", _INVESTIGATION_SESSION_FIELDS
+    ),
+    "investigation.session.skip": _build_view(
+        "Investigation session", _INVESTIGATION_SESSION_FIELDS
+    ),
+    "annotation.list": _build_view(
+        "Annotations",
+        (
+            HumanField("question_key", "Question"),
+            HumanField("value", "Value"),
+            HumanField("session_id", "Session", 110),
+            _ID,
+            _CREATED,
+        ),
+    ),
+    "annotation.get": _build_view("Annotation", _ANNOTATION_FIELDS),
+    "annotation.create": _build_view("Annotation", _ANNOTATION_FIELDS),
+    "annotation.update": _build_view("Annotation", _ANNOTATION_FIELDS),
     "experiment.list": _build_view(
         "Experiments",
         (

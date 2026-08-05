@@ -17,9 +17,9 @@ from kitaru.mcp.settings import CapabilityMode, MCPSettings
 SNAPSHOT_DIRECTORY = Path(__file__).parents[1] / "tests" / "mcp" / "snapshots"
 METRICS_PATH = SNAPSHOT_DIRECTORY / "metrics.json"
 EXPECTED_TOOL_COUNTS = {
-    CapabilityMode.READ_ONLY: 2,
-    CapabilityMode.STANDARD: 5,
-    CapabilityMode.DESTRUCTIVE: 7,
+    CapabilityMode.READ_ONLY: 3,
+    CapabilityMode.STANDARD: 9,
+    CapabilityMode.DESTRUCTIVE: 11,
 }
 MAX_TOOLS = 12
 MAX_TOOL_SCHEMA_BYTES = 32 * 1024

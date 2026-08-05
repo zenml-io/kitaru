@@ -22,20 +22,29 @@ EXPECTED = {
     CapabilityMode.READ_ONLY: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_review_read",
     ],
     CapabilityMode.STANDARD: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_review_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
+        "kitaru_review_manage",
+        "kitaru_workflow_start",
+        "kitaru_evaluators_manage",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_review_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
+        "kitaru_review_manage",
+        "kitaru_workflow_start",
+        "kitaru_evaluators_manage",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -54,7 +63,12 @@ async def test_exact_capability_filtered_inventories_and_annotations() -> None:
                 tool.name in {"kitaru_workflow_cancel", "kitaru_delete"}
             )
             assert annotations.read_only_hint is (
-                tool.name in {"kitaru_registry_read", "kitaru_activity_read"}
+                tool.name
+                in {
+                    "kitaru_registry_read",
+                    "kitaru_activity_read",
+                    "kitaru_review_read",
+                }
             )
 
 
