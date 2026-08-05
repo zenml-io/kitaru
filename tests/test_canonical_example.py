@@ -1,22 +1,24 @@
 """Contract tests for the canonical returns-resolution example."""
 
 import json
+import uuid
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
+import pytest
 from examples.canonical_example.agent import (
     build_agent,
     build_prompt,
     get_instructions,
     get_ticket_input,
 )
-from examples.canonical_example.evaluator import evaluate
 from examples.canonical_example.fixtures import CASES
 from examples.canonical_example.models import ResolutionAction
 from examples.canonical_example.store import MockCommerceStore
 
 from kitaru.api_models.v1.session import SessionResponse
-from kitaru.api_models.v1.session_node import NodeType
+from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
 from kitaru.importers.langfuse import parse
 from kitaru.task.evaluator import SessionView
 from kitaru.task.importer import ParsedSession, flatten_nodes
@@ -115,34 +117,75 @@ def test_strict_agent_instructions_require_approval_before_refunds() -> None:
     assert "risk flag" in strict
 
 
-def test_policy_evaluator_scores_reviewed_actions() -> None:
-    """Score native and imported session shapes with the same rubric."""
+def _load_documented_evaluator() -> dict[str, Any]:
+    """Load the evaluator implementation taught in the manual walkthrough."""
+    readme = (EXAMPLE_DIR / "README.md").read_text()
+    marker = '```python\n# /// script\n# requires-python = ">=3.11"'
+    source = (
+        '# /// script\n# requires-python = ">=3.11"'
+        + readme.split(marker, maxsplit=1)[1].split("```", maxsplit=1)[0]
+    )
+    namespace: dict[str, Any] = {}
+    exec(compile(source, "documented_evaluator.py", "exec"), namespace)
+    return namespace
+
+
+def _create_tool_node(
+    tool_name: str, *, amount: str | None = None
+) -> SessionNodeResponse:
+    """Create one accepted terminal tool node for the documented evaluator."""
+    return SessionNodeResponse.model_construct(
+        id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+        node_type=NodeType.TOOL_CALL,
+        tool_name=tool_name,
+        outputs={"accepted": True, "amount": amount},
+    )
+
+
+def test_documented_evaluator_catches_conflicting_actions() -> None:
+    """Keep the manual evaluator aligned with the reviewed trace behavior."""
+    evaluate = _load_documented_evaluator()["evaluate"]
     passing = SessionView(
         session=SessionResponse.model_construct(
-            inputs={"ticket_id": "ticket-001"}, outputs={"action": "refund"}
+            inputs={"ticket_id": "ticket-001"},
+            outputs={"action": "refund", "amount": "98.00"},
         ),
-        nodes=[],
+        nodes=[_create_tool_node("issue_refund", amount="98.00")],
     )
-    failing = SessionView(
+    conflicting = SessionView(
         session=SessionResponse.model_construct(
-            inputs={"turns": [{"inputs": {"ticket_id": "ticket-007"}}]},
-            outputs={"action": "refund"},
+            inputs={"ticket_id": "ticket-007"},
+            outputs={"action": "escalate", "amount": None},
+        ),
+        nodes=[
+            _create_tool_node("issue_refund", amount="120.00"),
+            _create_tool_node("escalate_to_human"),
+        ],
+    )
+
+    assert evaluate(passing).passed is True
+    assert evaluate(conflicting).passed is False
+
+
+def test_documented_evaluator_rejects_missing_tool_evidence() -> None:
+    """Keep missing evidence explicit in the manual evaluator."""
+    evaluate = _load_documented_evaluator()["evaluate"]
+    view = SessionView(
+        session=SessionResponse.model_construct(
+            inputs={"ticket_id": "ticket-001"},
+            outputs={"action": "refund", "amount": "98.00"},
         ),
         nodes=[],
     )
 
-    pass_result = evaluate(passing)
-    fail_result = evaluate(failing)
-
-    assert pass_result.score is True
-    assert pass_result.passed is True
-    assert fail_result.score is False
-    assert fail_result.passed is False
-    assert "expected escalate, observed refund" in fail_result.explanation
+    with pytest.raises(ValueError, match="tool-call evidence"):
+        evaluate(view)
 
 
 def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
     """Keep one imported baseline session per ticket with LLM and tool nodes."""
+    evaluate = _load_documented_evaluator()["evaluate"]
     sessions = [
         item
         for item in parse(
@@ -175,7 +218,14 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
                     inputs=session.inputs,
                     outputs=session.outputs,
                 ),
-                nodes=[],
+                nodes=[
+                    SessionNodeResponse.model_construct(
+                        node_type=node.node_type,
+                        tool_name=node.tool_name,
+                        outputs=node.outputs,
+                    )
+                    for node in flatten_nodes(session.nodes)
+                ],
             )
         ).passed
     }
@@ -203,6 +253,9 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     """Teach import, evaluation, cohorting, improvement, replay, and comparison."""
     readme = (EXAMPLE_DIR / "README.md").read_text()
 
+    assert "source .env" in readme
+    assert "--env-file .env" not in readme
+
     for command in (
         "kitaru login --local",
         "python ../../scripts/seed_default_plugins.py",
@@ -214,10 +267,11 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         "kitaru session list",
         "kitaru session evaluate",
         "kitaru evaluation list",
-        "kitaru cohort create cheap-baseline",
-        "kitaru cohort create expensive-baseline",
-        "--cohort cheap-baseline@1",
-        "--cohort expensive-baseline@1",
+        "kitaru cohort create unsafe-refund-baseline",
+        "kitaru cohort create safe-refund-control",
+        "--cohort unsafe-refund-baseline@1",
+        "--cohort safe-refund-control@1",
+        "kitaru evaluator scaffold",
         "kitaru evaluator test",
         "kitaru evaluator register",
         "--evaluator returns-policy@1",
@@ -233,21 +287,38 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         assert command in readme
     assert "--agent returns-resolver@1" in readme
     assert "--tag returns-baseline" in readme
-    assert '"field":"name","op":"eq","value":"cost"' in readme
     assert "--evaluator cost@latest" in readme
     assert "--evaluator latency@latest" in readme
     assert "--evaluator tool-call-patterns@latest" in readme
-    assert "CHEAP_SESSION_ID_3" in readme
-    assert "EXPENSIVE_SESSION_ID_3" in readme
-    assert "CHEAP_COHORT_VERSION_ID" in readme
-    assert "EXPENSIVE_COHORT_VERSION_ID" in readme
-    assert "cohort version get cheap-baseline@1" in readme
-    assert "cohort version get expensive-baseline@1" in readme
+    assert "TICKET_004_SESSION_ID" in readme
+    assert "TICKET_007_SESSION_ID" in readme
+    assert "TICKET_010_SESSION_ID" in readme
+    assert "TARGET_COHORT_VERSION_ID" in readme
+    assert "CONTROL_COHORT_VERSION_ID" in readme
+    assert "cohort version get unsafe-refund-baseline@1" in readme
+    assert "cohort version get safe-refund-control@1" in readme
     assert "jq -r '.item.id'" in readme
-    assert "--cohort-version \"$CHEAP_COHORT_VERSION_ID\"" in readme
-    assert "--cohort-version \"$EXPENSIVE_COHORT_VERSION_ID\"" in readme
+    assert '--cohort-version "$TARGET_COHORT_VERSION_ID"' in readme
+    assert '--cohort-version "$CONTROL_COHORT_VERSION_ID"' in readme
     assert "returns-resolver@2" in readme
     assert "policy_correct" in readme
+    assert "The starter example does not contain `evaluator.py`" in readme
+    assert "accepted terminal tool call" in readme
+    assert "Which agent outcome matters most?" in readme
+    assert "Which successful cases must remain correct?" in readme
+
+
+def test_agent_guided_readme_delegates_evaluator_authoring() -> None:
+    """Keep evaluator code out of the user's agent-guided responsibilities."""
+    readme = (EXAMPLE_DIR / "README_AGENT_GUIDED.md").read_text()
+
+    assert "You do not need to know Kitaru terminology" in readme
+    assert "No completed `evaluator.py` exists" in readme
+    assert "creates it" in readme
+    assert "You do not need to approve Python details separately" in readme
+    assert "accepted terminal tool calls" in readme
+    assert "observations" in readme
+    assert "counterexamples" in readme
 
 
 def test_trace_export_has_no_real_email_domains() -> None:

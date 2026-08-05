@@ -10,7 +10,10 @@ Copy the local environment template before choosing either path:
 
 ```bash
 cp .env.example .env
+set -a; source .env; set +a
 ```
+
+The second command exports the values from `.env` into the current terminal. Run it once in every terminal used for this example. It also clears credentials left by an earlier Kitaru task or server before loading values explicitly defined in `.env`.
 
 The template already points the CLI at `http://localhost:8000`. Model and Langfuse credentials are only required when regenerating the traces.
 
@@ -38,21 +41,21 @@ Install the dependencies and connect the CLI:
 
 ```bash
 uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
-uv run --env-file .env kitaru login --local
-uv run --env-file .env kitaru status
+uv run kitaru login --local
+uv run kitaru status
 ```
 
 Seed the development importers and evaluators into the fresh local database:
 
 ```bash
-uv run --env-file .env python ../../scripts/seed_default_plugins.py
+uv run python ../../scripts/seed_default_plugins.py
 ```
 
 Confirm that the `langfuse` importer and the `cost`, `latency`, and `tool-call-patterns` evaluators are available:
 
 ```bash
-uv run --env-file .env kitaru importer list
-uv run --env-file .env kitaru evaluator list
+uv run kitaru importer list
+uv run kitaru evaluator list
 ```
 
 Open [http://localhost:8000](http://localhost:8000) to use the dashboard.
@@ -72,7 +75,7 @@ The PydanticAI entrypoint is `agent.py`. Each invocation resolves one incoming e
 Register the baseline:
 
 ```bash
-uv run --env-file .env kitaru agent register \
+uv run kitaru agent register \
   returns-resolver \
   --entrypoint examples.canonical_example.agent:main \
   --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
@@ -94,14 +97,14 @@ Registration creates the `returns-resolver` agent and version `1`.
 Open a second terminal in this directory and keep the worker active:
 
 ```bash
-uv run --env-file .env kitaru worker start \
+uv run kitaru worker start \
   --name returns-example-worker
 ```
 
 Confirm that Kitaru can see it:
 
 ```bash
-uv run --env-file .env kitaru worker list
+uv run kitaru worker list
 ```
 
 ## Step 4: Import the baseline sessions
@@ -109,7 +112,7 @@ uv run --env-file .env kitaru worker list
 Import the Langfuse traces under the exact baseline agent version:
 
 ```bash
-uv run --env-file .env kitaru session import \
+uv run kitaru session import \
   traces/langfuse-traces.jsonl \
   --importer langfuse@latest \
   --agent returns-resolver@1 \
@@ -124,7 +127,7 @@ The importer preserves the LLM calls, tool calls, tool results, final resolution
 Check what the import produced:
 
 ```bash
-uv run --env-file .env kitaru session list \
+uv run kitaru session list \
   --tag returns-baseline \
   --origin imported \
   --size 20
@@ -135,7 +138,7 @@ uv run --env-file .env kitaru session list \
 Run Kitaru's deterministic evaluators across the imported baseline:
 
 ```bash
-uv run --env-file .env kitaru session evaluate \
+uv run kitaru session evaluate \
   --tag returns-baseline \
   --evaluator cost@latest \
   --evaluator latency@latest \
@@ -143,87 +146,202 @@ uv run --env-file .env kitaru session evaluate \
   --wait
 ```
 
-These evaluators make no model calls. Cost and latency surface expensive tickets, while tool-call patterns expose repeated lookups and different investigation paths.
+These evaluators make no model calls. Cost and latency show resource variation, while tool-call patterns expose repeated lookups and different investigation paths.
 
 List the stored results:
 
 ```bash
-uv run --env-file .env kitaru evaluation list --size 100
+uv run kitaru evaluation list --size 100
 ```
 
-## Step 6: Create cost cohorts
+## Step 6: Decide what to improve
 
-Use cost as the first signal for dividing the baseline into two small cohorts. List only the cost results:
+The broad evaluators describe the sessions, but they cannot decide what good behavior means for your business. Before creating a cohort, answer these questions:
+
+1. Which agent outcome matters most?
+2. Which observed behavior is unacceptable?
+3. What should the agent have done instead?
+4. Which successful cases must remain correct?
+5. What evidence would be enough to use the candidate version?
+
+For this example, the support lead gives these answers:
+
+- Refunds above the automatic approval threshold must escalate.
+- Refunds on orders with a risk flag must escalate.
+- Valid refunds must remain refunds and cannot exceed the amount paid.
+- Both risky cases must become correct, all control cases must remain correct, and no replay may fail.
+
+The recommended path is the [agent-guided walkthrough](README_AGENT_GUIDED.md). The `kitaru-session-improvement` skill inspects the traces, asks these questions one at a time, proposes evidence-backed cohort membership, and carries the session IDs into Kitaru. It then hands the approved behavior brief to `kitaru-evaluator-authoring`, which validates or creates the evaluator used by the experiment.
+
+The remaining commands show the same operations manually.
+
+## Step 7: Create a policy evaluator
+
+An evaluator is a Python function that applies the same check to every recorded or replayed session. Here, it turns the support lead's approved rule into one Boolean result named `policy_correct`.
+
+The rubric is observable in the trace:
+
+- **Pass:** the final action, accepted terminal tool call, and refund amount match the reviewed outcome.
+- **Fail:** the action is wrong, a refund has the wrong amount, or conflicting accepted actions occurred. An escalation cannot pass if the agent already issued a refund.
+- **Missing evidence:** fail the evaluation task with a clear error instead of guessing.
+
+Ticket 001 is a passing example because the agent issues the reviewed $98 refund. Ticket 004 is a failing example because it issues $280 above the automatic approval threshold. Ticket 007 is a failing example because it accepts a refund despite an account risk flag.
+
+The starter example does not contain `evaluator.py`. Create the scaffold after agreeing on the rubric:
 
 ```bash
-uv run --env-file .env kitaru evaluation list \
-  --filter '{"field":"name","op":"eq","value":"cost"}' \
-  --size 20
+uv run kitaru evaluator scaffold \
+  returns-policy \
+  --path evaluator.py
 ```
 
-From the table, choose the session IDs for the three lowest costs and the three highest costs. The sessions between those groups do not need to belong to either cohort.
+Replace the scaffold with this implementation:
 
-Create an immutable snapshot of the three cheapest sessions. Replace the placeholders with the session IDs from the cost results:
+<details>
+<summary>Show evaluator.py</summary>
 
-```bash
-uv run --env-file .env kitaru cohort create cheap-baseline \
-  --agent returns-resolver \
-  --description "The three baseline sessions with the lowest recorded cost." \
-  --session CHEAP_SESSION_ID_1 \
-  --session CHEAP_SESSION_ID_2 \
-  --session CHEAP_SESSION_ID_3
+```python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Evaluate whether a returns resolution follows the reviewed policy."""
+
+import json
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.task.evaluator import SessionView
+
+REVIEWED_OUTCOMES = {
+    "ticket-001": ("refund", Decimal("98.00")),
+    "ticket-002": ("escalate", None),
+    "ticket-003": ("escalate", None),
+    "ticket-004": ("escalate", None),
+    "ticket-005": ("escalate", None),
+    "ticket-006": ("replacement", None),
+    "ticket-007": ("escalate", None),
+    "ticket-008": ("escalate", None),
+    "ticket-009": ("refund", Decimal("80.00")),
+    "ticket-010": ("refund", Decimal("98.00")),
+}
+
+ACTION_TO_TOOL = {
+    "refund": "issue_refund",
+    "replacement": "create_replacement",
+    "escalate": "escalate_to_human",
+}
+
+
+def _get_latest_turn(value: Any, field: str) -> Any:
+    """Unwrap one field from the latest imported turn when present."""
+    if isinstance(value, dict) and isinstance(value.get("turns"), list):
+        turns = value["turns"]
+        if not turns:
+            raise ValueError("The imported session has no turns.")
+        return turns[-1].get(field)
+    return value
+
+
+def _get_resolution(value: Any) -> dict[str, Any]:
+    """Read the native or imported resolution output."""
+    value = _get_latest_turn(value, "outputs")
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, dict) or not isinstance(value.get("action"), str):
+        raise ValueError("Session outputs do not contain a resolution action.")
+    return value
+
+
+def _get_amount(value: Any) -> Decimal | None:
+    """Parse one optional money amount."""
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError("The recorded refund amount is invalid.") from exc
+
+
+def _get_accepted_terminal_actions(
+    session: SessionView,
+) -> list[tuple[str, Decimal | None]]:
+    """Read accepted terminal actions from recorded tool nodes."""
+    tool_nodes = [
+        node for node in session.nodes if node.node_type is NodeType.TOOL_CALL
+    ]
+    if not tool_nodes:
+        raise ValueError("Session nodes do not contain tool-call evidence.")
+
+    terminal_tools = set(ACTION_TO_TOOL.values())
+    actions: list[tuple[str, Decimal | None]] = []
+    for node in tool_nodes:
+        if node.tool_name not in terminal_tools:
+            continue
+        output = node.outputs
+        if isinstance(output, str):
+            output = json.loads(output)
+        if isinstance(output, dict) and output.get("accepted") is True:
+            actions.append((node.tool_name, _get_amount(output.get("amount"))))
+    return actions
+
+
+def evaluate(session: SessionView) -> EvaluationResult:
+    """Pass when the reported and accepted actions match the reviewed outcome."""
+    inputs = _get_latest_turn(session.session.inputs, "inputs")
+    if not isinstance(inputs, dict) or not isinstance(inputs.get("ticket_id"), str):
+        raise ValueError("Session inputs do not contain a ticket_id.")
+
+    ticket_id = inputs["ticket_id"]
+    if ticket_id not in REVIEWED_OUTCOMES:
+        raise ValueError(f"No reviewed outcome exists for {ticket_id}.")
+
+    expected_action, expected_amount = REVIEWED_OUTCOMES[ticket_id]
+    resolution = _get_resolution(session.session.outputs)
+    actual_action = resolution["action"]
+    actual_amount = _get_amount(resolution.get("amount"))
+    accepted_actions = _get_accepted_terminal_actions(session)
+    expected_tool = ACTION_TO_TOOL[expected_action]
+    expected_accepted = [(expected_tool, expected_amount)]
+
+    passed = (
+        actual_action == expected_action
+        and (expected_amount is None or actual_amount == expected_amount)
+        and accepted_actions == expected_accepted
+    )
+    return EvaluationResult(
+        name="policy_correct",
+        score=passed,
+        passed=passed,
+        explanation=(
+            f"{ticket_id}: expected {expected_action} via {expected_tool}; "
+            f"observed {actual_action} with accepted actions {accepted_actions}."
+        ),
+    )
 ```
 
-Create another snapshot for the three most expensive sessions:
+</details>
+
+Validate that the file loads and exposes the expected callable:
 
 ```bash
-uv run --env-file .env kitaru cohort create expensive-baseline \
-  --agent returns-resolver \
-  --description "The three baseline sessions with the highest recorded cost." \
-  --session EXPENSIVE_SESSION_ID_1 \
-  --session EXPENSIVE_SESSION_ID_2 \
-  --session EXPENSIVE_SESSION_ID_3
-```
-
-Confirm the membership of both cohort versions:
-
-```bash
-uv run --env-file .env kitaru session list \
-  --cohort cheap-baseline@1 \
-  --size 20
-
-uv run --env-file .env kitaru session list \
-  --cohort expensive-baseline@1 \
-  --size 20
-```
-
-The cohort versions are fixed snapshots. The next part of the example will use `expensive-baseline@1` as an optimization target and `cheap-baseline@1` as a comparison group.
-
-## Step 7: Define policy-correct behavior
-
-The support policy gives each synthetic ticket one reviewed terminal action. The evaluator in `evaluator.py` applies one binary criterion:
-
-- **Pass:** the final action is the reviewed refund, replacement, or escalation outcome for that ticket.
-- **Fail:** the final action differs from the reviewed outcome.
-
-For example, ticket 001 passes when the agent refunds the defective shoes. Tickets 004 and 007 fail when the agent refunds before the required approval or risk review.
-
-Test the evaluator contract locally:
-
-```bash
-uv run --env-file .env kitaru evaluator test \
+uv run kitaru evaluator test \
   evaluator.py \
   --entrypoint evaluate
 ```
 
+This command validates loading and the function signature. It does not score a session. The server-side baseline evaluation in the next step checks the behavior against all ten recorded sessions.
+
 Register its first immutable version:
 
 ```bash
-uv run --env-file .env kitaru evaluator register \
+uv run kitaru evaluator register \
   returns-policy \
   --script evaluator.py \
   --entrypoint evaluate \
-  --description "Check whether a returns ticket ends with its reviewed policy action." \
+  --description "Check whether the reported and accepted returns actions match the reviewed policy outcome." \
   --display-version 1.0
 ```
 
@@ -232,7 +350,7 @@ uv run --env-file .env kitaru evaluator register \
 Apply the policy evaluator to every imported baseline session:
 
 ```bash
-uv run --env-file .env kitaru session evaluate \
+uv run kitaru session evaluate \
   --tag returns-baseline \
   --evaluator returns-policy@1 \
   --wait
@@ -241,21 +359,63 @@ uv run --env-file .env kitaru session evaluate \
 List the policy results:
 
 ```bash
-uv run --env-file .env kitaru evaluation list \
+uv run kitaru evaluation list \
   --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
   --size 20
 ```
 
 The checked-in baseline contains eight passes and two failures. Tickets 004 and 007 issue refunds where the reviewed policy requires escalation.
 
-## Step 9: Register an improved agent version
+## Step 9: Create behavioral cohorts
+
+List the baseline sessions with their ticket IDs and terminal actions:
+
+```bash
+uv run kitaru --output json session list \
+  --tag returns-baseline \
+  --origin imported \
+  --size 20 \
+  | jq -r '.items[] | [(.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id), .id, (.outputs.turns[-1].outputs.action // .outputs.action)] | @tsv'
+```
+
+Create the target cohort from tickets 004 and 007. Replace the placeholders with the listed session IDs:
+
+```bash
+uv run kitaru cohort create unsafe-refund-baseline \
+  --agent returns-resolver \
+  --description "Baseline sessions that refunded despite an approval or risk rule requiring escalation." \
+  --session TICKET_004_SESSION_ID \
+  --session TICKET_007_SESSION_ID
+```
+
+Create the control cohort from tickets 001, 009, and 010:
+
+```bash
+uv run kitaru cohort create safe-refund-control \
+  --agent returns-resolver \
+  --description "Valid refund sessions that must remain correct after the policy change." \
+  --session TICKET_001_SESSION_ID \
+  --session TICKET_009_SESSION_ID \
+  --session TICKET_010_SESSION_ID
+```
+
+Confirm both immutable snapshots:
+
+```bash
+uv run kitaru session list --cohort unsafe-refund-baseline@1 --size 20
+uv run kitaru session list --cohort safe-refund-control@1 --size 20
+```
+
+The target cohort captures the behavior that should change. The control cohort captures nearby behavior that must not regress.
+
+## Step 10: Register an improved agent version
 
 The baseline instructions tell the agent to assume that action tools enforce approval limits. The improved version removes that assumption and requires the agent to inspect risk flags, approval thresholds, final-sale rules, and return windows before calling `issue_refund`.
 
 Register the same entrypoint with strict policy instructions enabled:
 
 ```bash
-uv run --env-file .env kitaru agent version register \
+uv run kitaru agent version register \
   returns-resolver \
   --entrypoint examples.canonical_example.agent:main \
   --description "Check approval and risk rules before issuing a refund." \
@@ -273,95 +433,99 @@ uv run --env-file .env kitaru agent version register \
 
 This creates `returns-resolver@2`. The imported sessions remain attached to version 1.
 
-## Step 10: Create the experiment
+## Step 11: Create the experiment
 
-Create one reusable experiment that records policy correctness and cost. Kitaru resolves each evaluator reference to an immutable version when it creates the experiment:
+Create one reusable experiment that records the primary policy result plus the broad guardrails. Kitaru resolves each evaluator reference to an immutable version when it creates the experiment:
 
 ```bash
-uv run --env-file .env kitaru experiment create \
+uv run kitaru experiment create \
   improve-returns-policy \
-  --description "Replay cost cohorts with strict refund approval rules." \
+  --description "Replay policy-risk and valid-refund cohorts with strict refund approval rules." \
   --evaluator returns-policy@1 \
-  --evaluator cost@latest
+  --evaluator cost@latest \
+  --evaluator latency@latest \
+  --evaluator tool-call-patterns@latest
 ```
 
 The mock commerce tools are safe to call again, so the experiment uses Kitaru's default passthrough tool policy. Every replay receives a new isolated in-memory store.
 
-## Step 11: Replay both cohorts
+## Step 12: Replay the target and control cohorts
 
 Resolve the two cohort references to the UUIDs required by `experiment run start`:
 
 ```bash
-CHEAP_COHORT_VERSION_ID="$(
-  uv run --env-file .env kitaru --output json \
-    cohort version get cheap-baseline@1 \
+TARGET_COHORT_VERSION_ID="$(
+  uv run kitaru --output json \
+    cohort version get unsafe-refund-baseline@1 \
   | jq -r '.item.id'
 )"
 
-EXPENSIVE_COHORT_VERSION_ID="$(
-  uv run --env-file .env kitaru --output json \
-    cohort version get expensive-baseline@1 \
+CONTROL_COHORT_VERSION_ID="$(
+  uv run kitaru --output json \
+    cohort version get safe-refund-control@1 \
   | jq -r '.item.id'
 )"
 ```
 
-Replay the cheap cohort through agent version 2 and score both the imported baselines and replayed sessions:
+Replay the target cohort through agent version 2 and score both the imported baselines and replayed sessions:
 
 ```bash
-uv run --env-file .env kitaru experiment run start \
+uv run kitaru experiment run start \
   improve-returns-policy \
-  --cohort-version "$CHEAP_COHORT_VERSION_ID" \
+  --cohort-version "$TARGET_COHORT_VERSION_ID" \
   --agent returns-resolver@2 \
   --evaluate-baselines \
   --wait \
   --timeout 1800
 ```
 
-Run the same experiment against the expensive cohort:
+Run the same experiment against the control cohort:
 
 ```bash
-uv run --env-file .env kitaru experiment run start \
+uv run kitaru experiment run start \
   improve-returns-policy \
-  --cohort-version "$EXPENSIVE_COHORT_VERSION_ID" \
+  --cohort-version "$CONTROL_COHORT_VERSION_ID" \
   --agent returns-resolver@2 \
   --evaluate-baselines \
   --wait \
   --timeout 1800
 ```
 
-Each baseline input now has a separate replayed session. Kitaru applies the same `returns-policy@1` and resolved cost-evaluator version to both sides.
+Each baseline input now has a separate replayed session. Kitaru applies the same resolved policy and guardrail evaluator versions to both sides.
 
-## Step 12: Compare the evidence
+## Step 13: Compare the evidence
 
 List the completed experiment runs:
 
 ```bash
-uv run --env-file .env kitaru experiment run list --size 20
+uv run kitaru experiment run list --size 20
 ```
 
 Each `experiment run start` receipt prints exact `get` and `jobs` commands in `next_actions`. Run those commands to inspect the replay and evaluator jobs. They have this form:
 
 ```bash
-uv run --env-file .env kitaru experiment run get YOUR_RUN_UUID
-uv run --env-file .env kitaru experiment run jobs YOUR_RUN_UUID --size 20
+uv run kitaru experiment run get YOUR_RUN_UUID
+uv run kitaru experiment run jobs YOUR_RUN_UUID --size 20
 ```
 
 List the replayed sessions and policy evaluations:
 
 ```bash
-uv run --env-file .env kitaru session list \
+uv run kitaru session list \
   --agent returns-resolver \
   --origin replay \
   --size 20
 
-uv run --env-file .env kitaru evaluation list \
+uv run kitaru evaluation list \
   --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
   --size 100
 ```
 
-Open [http://localhost:8000](http://localhost:8000) to compare each imported session with its replay, inspect the changed tool path, and review policy correctness and cost together. A failed replay remains useful evidence: inspect it, change the agent again, register version 3, and rerun the same immutable experiment and cohort versions.
+Open [http://localhost:8000](http://localhost:8000) to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, cost, latency, and tool-call patterns together.
 
-## Step 13: Stop the local server
+The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Cost and latency deltas remain visible for the shipping decision. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
+
+## Step 14: Stop the local server
 
 After the walkthrough, stop the containers:
 
