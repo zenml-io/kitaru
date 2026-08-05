@@ -19,9 +19,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Generic, TypeVar
 
-from kitaru.adapters.pydantic_ai.capability import _KitaruCapability
 from pydantic_ai import AgentRun
 from pydantic_ai.agent import AbstractAgent, WrapperAgent
+
+from .capability import _KitaruCapability
 
 AgentDepsT = TypeVar("AgentDepsT")
 OutputDataT = TypeVar("OutputDataT")

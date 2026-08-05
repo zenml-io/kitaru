@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic_ai import Agent
 
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from plugins.adapters.pydantic_ai import KitaruAgent
 
 PROMPT = """
 Call both available tools exactly once:

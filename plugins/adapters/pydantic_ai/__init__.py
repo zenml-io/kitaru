@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """PydanticAI recording and replay adapter."""
 
-from kitaru.adapters.pydantic_ai.agent import KitaruAgent
-from kitaru.adapters.pydantic_ai.capability import (
+from .agent import KitaruAgent
+from .capability import (
     ToolPolicyError,
     ToolPolicyMissError,
 )

@@ -7,7 +7,7 @@ This example runs a real PydanticAI `Agent("openai:gpt-5-nano")` through `Kitaru
 From the repository root:
 
 ```bash
-uv sync --extra pydantic-ai
+uv sync
 
 export OPENAI_API_KEY="..."
 # Configure the Kitaru client through `kitaru login`, or use environment values:

@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the built-in starting-point evaluators."""
+"""Tests for the starting-point evaluator plugins."""
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal

@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 _SCRIPT = runpy.run_path(
-    str(Path(__file__).resolve().parents[1] / "scripts/seed_default_plugins.py")
+    str(Path(__file__).resolve().parents[2] / "scripts/seed_default_plugins.py")
 )
 PluginDefinition = _SCRIPT["PluginDefinition"]
 seed_plugin = _SCRIPT["seed_plugin"]
