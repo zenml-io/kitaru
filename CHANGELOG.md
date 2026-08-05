@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Investigations and annotations, managed via `/v1/investigations` and `/v1/annotations`. An investigation asks a set of questions about a set of sessions, each optionally carrying a curated view, and answers are stored as annotations. Annotations also attach directly to a session, targeting the whole session or a part of it through a selector.
 - Stage 4 CLI hardening adds client/server compatibility diagnostics, structured interrupt handling, and isolated wheel/sdist artifact smoke coverage.
 - CLI commands to create, inspect, update, and delete experiments with exact evaluator versions, inline replay configuration, sparse updates, and explicit destructive-delete confirmation.
 - CLI commands to create, inspect, update, and delete cohorts and immutable cohort versions, including exact version references and explicit destructive-delete confirmation.

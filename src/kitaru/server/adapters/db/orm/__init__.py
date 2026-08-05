@@ -17,6 +17,7 @@ from kitaru.server.adapters.db.orm.account import AccountORM
 from kitaru.server.adapters.db.orm.agent import AgentORM
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
 from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecretORM
+from kitaru.server.adapters.db.orm.annotation import AnnotationORM
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
 from kitaru.server.adapters.db.orm.blob import BlobORM
 from kitaru.server.adapters.db.orm.cohort import CohortORM
@@ -28,6 +29,10 @@ from kitaru.server.adapters.db.orm.device import DeviceORM
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.experiment import ExperimentORM, ReplayConfigORM
 from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
+from kitaru.server.adapters.db.orm.investigation import InvestigationORM
+from kitaru.server.adapters.db.orm.investigation_session import (
+    InvestigationSessionORM,
+)
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
@@ -43,6 +48,7 @@ __all__ = [
     "AgentORM",
     "AgentVersionORM",
     "AgentVersionSecretORM",
+    "AnnotationORM",
     "ApiKeyORM",
     "BlobORM",
     "CohortORM",
@@ -52,6 +58,8 @@ __all__ = [
     "EvaluationORM",
     "ExperimentORM",
     "ExperimentRunORM",
+    "InvestigationORM",
+    "InvestigationSessionORM",
     "JobORM",
     "PluginORM",
     "PluginVersionORM",

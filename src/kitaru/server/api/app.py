@@ -41,6 +41,7 @@ from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
     agents,
+    annotations,
     api_keys,
     auth,
     blobs,
@@ -54,6 +55,7 @@ from kitaru.server.adapters.rest.routers import (
     importers,
     imports,
     info,
+    investigations,
     jobs,
     replays,
     secrets,
@@ -270,6 +272,9 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(
         agent_versions.router, prefix="/v1/agent-versions", tags=["agent-versions"]
     )
+    app.include_router(
+        annotations.router, prefix="/v1/annotations", tags=["annotations"]
+    )
     app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
     app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
     app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
@@ -291,6 +296,9 @@ def create_app(settings: APISettings) -> FastAPI:
     )
     app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
     app.include_router(imports.router, prefix="/v1/imports", tags=["imports"])
+    app.include_router(
+        investigations.router, prefix="/v1/investigations", tags=["investigations"]
+    )
     app.include_router(jobs.router, prefix="/v1/jobs", tags=["jobs"])
     app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
     app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
