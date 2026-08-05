@@ -33,6 +33,7 @@ from kitaru.client.auth import (
     StaticTokenAuth,
     TokenAuth,
 )
+from kitaru.client.config import DEFAULT_SERVER_URL, get_active_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
@@ -142,6 +143,28 @@ class KitaruAPIClient:
         self.workers = WorkersResource(self)
 
     @classmethod
+    def from_config(cls) -> "KitaruAPIClient":
+        """Construct a client from the environment and the stored configuration.
+
+        The server URL is read from KITARU_API_URL, falling back to the stored
+        active server, then to the local default. The credential is read from
+        KITARU_TASK_TOKEN or KITARU_API_KEY, falling back to the credentials
+        stored for the server.
+
+        Returns:
+            Client.
+        """
+        base_url = (
+            os.environ.get("KITARU_API_URL")
+            or get_active_server_url()
+            or DEFAULT_SERVER_URL
+        )
+        credential = _get_ambient_credential()
+        if credential:
+            return cls(base_url=base_url, api_key=credential)
+        return cls(base_url=base_url, credential_store=CredentialStore())
+
+    @classmethod
     def from_env(cls) -> "KitaruAPIClient":
         """Construct a client from KITARU_API_URL and the ambient credential.
 
@@ -155,10 +178,7 @@ class KitaruAPIClient:
             Client.
         """
         base_url = get_required_env("KITARU_API_URL")
-        credential = os.environ.get("KITARU_TASK_TOKEN") or os.environ.get(
-            "KITARU_API_KEY"
-        )
-        return cls(base_url=base_url, api_key=credential)
+        return cls(base_url=base_url, api_key=_get_ambient_credential())
 
     def with_token(self, token: str) -> "KitaruAPIClient":
         """Return a view of this client authenticating with a fixed bearer token.
@@ -271,3 +291,13 @@ class KitaruAPIClient:
             traceback: Exception traceback.
         """
         await self.close()
+
+
+def _get_ambient_credential() -> str | None:
+    """Return the credential the environment carries.
+
+    Returns:
+        KITARU_TASK_TOKEN or KITARU_API_KEY value, or None when neither is
+        set.
+    """
+    return os.environ.get("KITARU_TASK_TOKEN") or os.environ.get("KITARU_API_KEY")

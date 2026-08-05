@@ -54,6 +54,45 @@ def get_config_directory() -> Path:
     return root / "kitaru"
 
 
+def get_config_file_path(env_name: str, file_name: str) -> Path:
+    """Return the location of a client configuration file.
+
+    Args:
+        env_name: Environment variable naming an override location.
+        file_name: File name inside the Kitaru config directory.
+
+    Returns:
+        Path read from the environment variable, otherwise the file in the
+        Kitaru config directory.
+    """
+    override = os.environ.get(env_name)
+    if override:
+        return Path(override)
+    return get_config_directory() / file_name
+
+
+def write_json_file(path: Path, payload: object) -> None:
+    """Write a JSON file, replacing it in one step.
+
+    Args:
+        path: File location.
+        payload: JSON-serializable content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
+    # A partial write must never replace a good file, and the content must
+    # never be readable by others between creating the file and setting its
+    # mode.
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, sort_keys=True)
+        os.chmod(temporary, FILE_MODE)
+        os.replace(temporary, path)
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def normalize_server_url(url: str) -> str:
     """Normalize a server URL into the key credentials are stored under.
 
@@ -77,7 +116,9 @@ class CredentialStore:
             persist: Whether to read and write the file. Defaults to reading
                 ``KITARU_DISABLE_CREDENTIALS_CACHE``.
         """
-        self._path = path or _get_default_path()
+        self._path = path or get_config_file_path(
+            ENV_CREDENTIALS_PATH, CREDENTIALS_FILE_NAME
+        )
         if persist is None:
             persist = os.environ.get(ENV_DISABLE_CREDENTIALS_CACHE, "").lower() not in (
                 "1",
@@ -291,20 +332,7 @@ class CredentialStore:
             for key, entry in self._credentials.items()
             if _should_persist(entry)
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
-        # A partial write must never replace a good file, and the secrets must
-        # never be readable between creating the file and setting its mode.
-        handle, temporary = tempfile.mkstemp(
-            dir=self._path.parent, prefix=f".{self._path.name}."
-        )
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as file:
-                json.dump(payload, file, indent=2, sort_keys=True)
-            os.chmod(temporary, FILE_MODE)
-            os.replace(temporary, self._path)
-        except OSError:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        write_json_file(self._path, payload)
         self._loaded_at = self._path.stat().st_mtime
 
 
@@ -326,16 +354,3 @@ def _should_persist(credentials: ServerCredentials) -> bool:
     if token.expires_at is None:
         return True
     return datetime.now(UTC) - token.expires_at < EVICTION_AGE
-
-
-def _get_default_path() -> Path:
-    """Return the credentials file location.
-
-    Returns:
-        ``KITARU_CREDENTIALS_PATH`` when set, otherwise the file in the Kitaru
-        config directory.
-    """
-    override = os.environ.get(ENV_CREDENTIALS_PATH)
-    if override:
-        return Path(override)
-    return get_config_directory() / CREDENTIALS_FILE_NAME
