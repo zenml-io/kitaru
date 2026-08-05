@@ -73,12 +73,14 @@ class CommandSpec:
 _COMMANDS: dict[tuple[str, ...], CommandSpec] = {}
 GROUP_DESCRIPTIONS = {
     "agent": "Register and inspect agents.",
+    "annotation": "Create and manage session annotations.",
     "cohort": "Manage cohort namespaces and immutable membership versions.",
     "config": "Manage allowlisted CLI preferences.",
     "evaluation": "Inspect stored evaluations.",
     "evaluator": "Develop, register, and inspect evaluators.",
     "experiment": "Configure experiments and manage asynchronous runs.",
     "importer": "Develop, register, and inspect importers.",
+    "investigation": "Create investigations and review their linked sessions.",
     "session": "Import and inspect sessions and their nodes.",
     "worker": "Run and inspect generic local workers.",
     "job": "Inspect, watch, and cancel jobs.",

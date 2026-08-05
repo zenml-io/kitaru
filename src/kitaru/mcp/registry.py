@@ -24,26 +24,36 @@ from kitaru.mcp.models.common import (
     ActivityReadResult,
     CohortsManageResult,
     DeleteResult,
+    EvaluatorsManageResult,
     ExperimentsManageResult,
     RegistryReadResult,
+    ReviewManageResult,
+    ReviewReadResult,
     SessionImportResult,
     ToolResult,
     WorkflowCancelResult,
+    WorkflowStartResult,
 )
+from kitaru.mcp.models.evaluators import EvaluatorsManageRequest
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
+from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
     SessionImportRequest,
     WorkflowCancelRequest,
+    WorkflowStartRequest,
 )
 from kitaru.mcp.redaction import redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.cohorts import handle_cohorts_manage
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
+from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.registry import handle_registry_read
+from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
+from kitaru.mcp.tools.workflow_start import handle_workflow_start
 from kitaru.mcp.tools.workflows import handle_session_import
 
 ToolHandler = Callable[[MCPServerState, Any], Awaitable[object]]
@@ -91,6 +101,16 @@ async def activity_read_tool(
     )
 
 
+async def review_read_tool(
+    request: ReviewReadRequest, context: Context
+) -> ReviewReadResult:
+    """Read investigations, annotations, and ordered investigation sessions."""
+    return cast(
+        ReviewReadResult,
+        await _invoke(context, request, ReviewReadResult, handle_review_read),
+    )
+
+
 async def cohorts_manage_tool(
     request: CohortsManageRequest, context: Context
 ) -> CohortsManageResult:
@@ -123,6 +143,38 @@ async def session_import_tool(
     )
 
 
+async def review_manage_tool(
+    request: ReviewManageRequest, context: Context
+) -> ReviewManageResult:
+    """Create or update investigations, linked statuses, and annotations."""
+    return cast(
+        ReviewManageResult,
+        await _invoke(context, request, ReviewManageResult, handle_review_manage),
+    )
+
+
+async def workflow_start_tool(
+    request: WorkflowStartRequest, context: Context
+) -> WorkflowStartResult:
+    """Start an evaluation batch or experiment run and return immediately."""
+    return cast(
+        WorkflowStartResult,
+        await _invoke(context, request, WorkflowStartResult, handle_workflow_start),
+    )
+
+
+async def evaluators_manage_tool(
+    request: EvaluatorsManageRequest, context: Context
+) -> EvaluatorsManageResult:
+    """Create or update evaluator parents and blob- or package-backed versions."""
+    return cast(
+        EvaluatorsManageResult,
+        await _invoke(
+            context, request, EvaluatorsManageResult, handle_evaluators_manage
+        ),
+    )
+
+
 async def workflow_cancel_tool(
     request: WorkflowCancelRequest, context: Context
 ) -> WorkflowCancelResult:
@@ -134,7 +186,7 @@ async def workflow_cancel_tool(
 
 
 async def delete_tool(request: DeleteRequest, context: Context) -> DeleteResult:
-    """Delete one exact allowlisted cohort, experiment, version, or run."""
+    """Delete one exact allowlisted registry, review, or run resource."""
     return cast(
         DeleteResult, await _invoke(context, request, DeleteResult, handle_delete)
     )
@@ -174,6 +226,13 @@ TOOL_SPECS = (
         activity_read_tool,
     ),
     ToolSpec(
+        "kitaru_review_read",
+        CapabilityMode.READ_ONLY,
+        review_read_tool.__doc__ or "",
+        _annotations(read_only=True, destructive=False, idempotent=True),
+        review_read_tool,
+    ),
+    ToolSpec(
         "kitaru_cohorts_manage",
         CapabilityMode.STANDARD,
         cohorts_manage_tool.__doc__ or "",
@@ -193,6 +252,27 @@ TOOL_SPECS = (
         session_import_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
         session_import_tool,
+    ),
+    ToolSpec(
+        "kitaru_review_manage",
+        CapabilityMode.STANDARD,
+        review_manage_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        review_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_workflow_start",
+        CapabilityMode.STANDARD,
+        workflow_start_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        workflow_start_tool,
+    ),
+    ToolSpec(
+        "kitaru_evaluators_manage",
+        CapabilityMode.STANDARD,
+        evaluators_manage_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        evaluators_manage_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",

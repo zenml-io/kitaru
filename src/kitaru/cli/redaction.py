@@ -23,8 +23,9 @@ from uuid import UUID
 from pydantic import BaseModel
 
 _SECRET_KEY = re.compile(
-    r"^(?:authorization|credential|password|api[_-]?key|access[_-]?token|"
-    r"refresh[_-]?token|device[_-]?code|secret)$",
+    r"(?:^|[_-])(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|"
+    r"password|secret)$|^(?:authorization|credential|device[_-]?code|"
+    r"client[_-]?secret|private[_-]?key|secret[_-]?env)$",
     re.IGNORECASE,
 )
 _SECRET_VALUE = re.compile(r"(?i)(bearer\s+|KITKEY_|ZENPROKEY_)[^\s,;\]\}\"']+")

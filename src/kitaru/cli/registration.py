@@ -26,6 +26,7 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionCreateRequest,
     RunSpec,
 )
+from kitaru.api_models.v1.annotation import AnnotationListParams
 from kitaru.api_models.v1.base import ListParams, Page
 from kitaru.api_models.v1.cohort import CohortListParams
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -41,6 +42,7 @@ from kitaru.api_models.v1.importer import (
     ImporterListParams,
     ImporterVersionCreateRequest,
 )
+from kitaru.api_models.v1.investigation import InvestigationListParams
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionListParams
@@ -647,12 +649,14 @@ def plugin_parent_request(
 def list_params(
     kind: Literal[
         "agent",
+        "annotation",
         "cohort",
         "evaluation",
         "evaluator",
         "experiment",
         "experiment_run",
         "importer",
+        "investigation",
         "session",
     ],
     *,
@@ -664,12 +668,14 @@ def list_params(
     """Build a kind-specific list request."""
     request_type = {
         "agent": AgentListParams,
+        "annotation": AnnotationListParams,
         "cohort": CohortListParams,
         "evaluation": EvaluationListParams,
         "evaluator": EvaluatorListParams,
         "experiment": ExperimentListParams,
         "experiment_run": ExperimentRunListParams,
         "importer": ImporterListParams,
+        "investigation": InvestigationListParams,
         "session": SessionListParams,
     }[kind]
     return build_list_params(

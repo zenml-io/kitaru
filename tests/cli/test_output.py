@@ -232,6 +232,11 @@ def test_redaction_masks_secret_fields_and_recognizable_values() -> None:
             "api_key": "KITKEY_topsecret",
             "credential_stored": True,
             "credential_status": {"kind": "api_key", "renewable": True},
+            "annotation": {
+                "client_secret": "client-value",
+                "private_key": "private-value",
+                "secret_env": "env-value",
+            },
             "message": "Authorization: Bearer token-value",
         }
     )
@@ -241,7 +246,63 @@ def test_redaction_masks_secret_fields_and_recognizable_values() -> None:
         "kind": "api_key",
         "renewable": True,
     }
+    assert redacted["annotation"] == {
+        "client_secret": "***",
+        "private_key": "***",
+        "secret_env": "***",
+    }
     assert "token-value" not in redacted["message"]
+
+
+@pytest.mark.parametrize("rich", [False, True])
+def test_annotation_text_escapes_terminal_control_characters(rich: bool) -> None:
+    """Stored annotation text cannot emit terminal control sequences."""
+    payload = "move\x1b[999Dlink\x1b]8;;https://evil.example\x07text"
+    stdout, _ = _render_text(
+        "annotation.get",
+        CommandResult(item={"id": "annotation-id", "value": payload}),
+        rich=rich,
+        strip_ansi=False,
+    )
+    assert "\x1b[999D" not in stdout
+    assert "\x1b]8;;https://evil.example" not in stdout
+    assert "\\u001b[999D" in stdout
+    assert "\\u001b]8;;https://evil.example\\u0007text" in stdout
+
+
+def test_annotation_json_redacts_nested_secret_fields() -> None:
+    """Structured annotation output masks recognized nested credentials."""
+    stdout = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command="annotation.get",
+            mode="json",
+            debug=False,
+            traceback=False,
+            stdout=stdout,
+            stderr=io.StringIO(),
+            rich=False,
+        )
+    )
+    try:
+        emit_result(
+            CommandResult(
+                item={
+                    "value": {
+                        "client_secret": "client-value",
+                        "private_key": "private-value",
+                        "secret_env": "env-value",
+                    }
+                }
+            )
+        )
+    finally:
+        reset_output_context(token)
+    assert json.loads(stdout.getvalue())["item"]["value"] == {
+        "client_secret": "***",
+        "private_key": "***",
+        "secret_env": "***",
+    }
 
 
 @pytest.mark.parametrize(

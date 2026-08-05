@@ -1,5 +1,5 @@
 ---
-description: Inspect and operate Kitaru v2 agents, sessions, cohorts, experiments, evaluators, replays, and asynchronous jobs through a compact local MCP server
+description: Inspect and operate Kitaru v2 agents, sessions, investigations, annotations, cohorts, experiments, evaluators, replays, and asynchronous jobs through a compact local MCP server
 icon: plug
 ---
 
@@ -7,7 +7,7 @@ icon: plug
 
 Kitaru includes an optional local [Model Context Protocol](https://modelcontextprotocol.io/) server for coding agents. It is a thin, typed adapter over the Kitaru API: it does not shell out to the CLI, read local files, start a Kitaru server, or expose credentials.
 
-The server uses stdio and advertises only two read tools by default. Standard and destructive capabilities must be selected explicitly when the process starts.
+The server uses stdio and advertises only three read tools by default. Standard and destructive capabilities must be selected explicitly when the process starts.
 
 ## Install
 
@@ -135,9 +135,9 @@ Modes are cumulative and filter the registry before `tools/list`.
 
 | Mode | Tools | Risk |
 |---|---:|---|
-| `read-only` | 2 | Remote reads only; this is the default. |
-| `standard` | 5 | Adds metadata writes and workflows that may execute registered code or consume compute. |
-| `destructive` | 7 | Adds cancellation and allowlisted deletion. |
+| `read-only` | 3 | Remote reads only; this is the default. |
+| `standard` | 9 | Adds metadata writes and workflows that may execute registered code or consume compute. |
+| `destructive` | 11 | Adds cancellation and allowlisted deletion. |
 
 A tool that is not allowed in the selected mode is absent from discovery rather than advertised and rejected later. MCP annotations are client hints; Kitaru authentication and API authorization remain authoritative.
 
@@ -155,17 +155,21 @@ kitaru-mcp --mode destructive
 
 ## Measured tool surface
 
-The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 92,898 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 32,729 bytes.
+The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 140,794 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 32,731 bytes.
 
 | Tool | First mode | Operations |
 |---|---|---|
 | `kitaru_registry_read` | read-only | `list`, `get`, `list_versions`, `get_version` for agent, cohort, experiment, importer, and evaluator registry records. |
 | `kitaru_activity_read` | read-only | `list` and `get` sessions, replays, evaluations, experiment runs, and jobs; `list_children` for session nodes, experiment-run jobs, and job tasks. |
+| `kitaru_review_read` | read-only | `list` and `get` investigations and annotations; `list_sessions` for one investigation. |
 | `kitaru_cohorts_manage` | standard | `create`, `update`, `create_version`, `update_version`. |
 | `kitaru_experiments_manage` | standard | `create`, `update` with exact evaluator versions. |
 | `kitaru_session_import` | standard | Import sessions from one existing payload blob with exact importer and agent versions. |
+| `kitaru_review_manage` | standard | Create and update investigations, complete or skip investigation sessions, create manual annotations, answer investigation questions, and update annotation values. |
+| `kitaru_workflow_start` | standard | Start bounded session evaluations with exact evaluator versions or start exact experiment runs, then return immediately. |
+| `kitaru_evaluators_manage` | standard | `create`, `update`, `create_version`, and `update_version` for evaluators, using an existing script blob or exactly pinned package source for new versions. |
 | `kitaru_workflow_cancel` | destructive | Cancel an exact job or experiment run. |
-| `kitaru_delete` | destructive | Delete an exact cohort, cohort version, experiment, or experiment run. |
+| `kitaru_delete` | destructive | Delete an exact cohort, cohort version, experiment, experiment run, investigation, annotation, or evaluator. |
 
 The MCP SDK exposes each discriminated input under a required `request` property. For example:
 
@@ -197,6 +201,12 @@ Blob-backed import retains the existing API's domain deduplication only. It does
 
 Experiment evaluator selections use exact evaluator IDs and positive version numbers. The MCP adapter resolves each selection to the existing API's evaluator name and version fields before submitting the request.
 
+`kitaru_workflow_start` uses the same exact evaluator selection for session evaluations. Each request may contain at most 100 distinct session/evaluator pairs and returns the submitted job immediately. Experiment runs require exact experiment, cohort-version, and agent-version IDs and also return immediately.
+
+### Evaluator registration
+
+`kitaru_evaluators_manage` creates evaluator parents separately from their versions. A new version may reference an existing script blob or an exactly pinned PEP 508 package requirement. The MCP server does not read local files, upload blobs, or resolve unpinned package ranges.
+
 ## Cancellation and deletion
 
 Destructive operations require exact UUIDs. They do not accept names, `force`, or a confirmation flag and are not advertised as idempotent. The MCP client is responsible for obtaining any required user approval before the call.
@@ -224,6 +234,6 @@ Malformed tool arguments are rejected by the MCP SDK as a protocol-level invalid
 
 ## Deliberate exclusions
 
-The first release does not expose agent, importer, or evaluator registration; blob upload or local file reads; login/logout or context mutation; accounts, API keys, secrets, workers, tags, or server lifecycle; wait/watch loops; resources or prompts; remote HTTP/SSE transport; or v1 compatibility aliases.
+The first release does not expose agent or importer registration; blob upload or local file reads; login/logout or context mutation; accounts, API keys, secrets, workers, tags, or server lifecycle; wait/watch loops; resources or prompts; remote HTTP/SSE transport; or v1 compatibility aliases.
 
 Kitaru agents can still consume third-party or provider MCP servers through their framework adapters. That is separate from this native local Kitaru server.

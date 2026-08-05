@@ -15,6 +15,7 @@
 
 import json
 import traceback as traceback_module
+import unicodedata
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -522,11 +523,13 @@ def _get_human_error_hint(command: str, kind: str) -> str | None:
         group = command.split(".", 1)[0]
         if group in {
             "agent",
+            "annotation",
             "cohort",
             "evaluation",
             "evaluator",
             "experiment",
             "importer",
+            "investigation",
             "session",
             "worker",
         }:
@@ -587,7 +590,18 @@ def _display_value(value: Any) -> str:
         return "-"
     if isinstance(value, bool):
         return "true" if value else "false"
-    return str(value)
+    return _escape_terminal_controls(str(value))
+
+
+def _escape_terminal_controls(value: str) -> str:
+    """Render unsafe terminal control characters as visible escapes."""
+    return "".join(
+        character
+        if character in {"\n", "\t"}
+        or not unicodedata.category(character).startswith("C")
+        else f"\\u{ord(character):04x}"
+        for character in value
+    )
 
 
 def _write_json(stream: TextIO, payload: Any) -> None:
