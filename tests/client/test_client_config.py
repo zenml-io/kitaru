@@ -23,7 +23,6 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth, StaticTokenAuth
 from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
-    DEFAULT_SERVER_URL,
     ENV_CONFIG_PATH,
     ClientConfig,
     get_active_server_url,
@@ -112,11 +111,10 @@ def test_from_config_uses_the_active_server() -> None:
     assert client._http.base_url == httpx.URL("http://stored")
 
 
-def test_from_config_falls_back_to_the_local_default() -> None:
-    """Use the local default when nothing is configured."""
-    client = KitaruAPIClient.from_config()
-
-    assert client._http.base_url == httpx.URL(DEFAULT_SERVER_URL)
+def test_from_config_fails_without_a_server_url() -> None:
+    """Raise when neither the environment nor the file names a server."""
+    with pytest.raises(RuntimeError):
+        KitaruAPIClient.from_config()
 
 
 def test_from_config_prefers_the_environment_credential(
@@ -124,6 +122,7 @@ def test_from_config_prefers_the_environment_credential(
 ) -> None:
     """Authenticate with the credential the environment names."""
     monkeypatch.setenv("KITARU_API_KEY", "kitaru-key")
+    set_active_server_url("http://stored")
 
     client = KitaruAPIClient.from_config()
 
@@ -132,6 +131,8 @@ def test_from_config_prefers_the_environment_credential(
 
 def test_from_config_falls_back_to_stored_credentials() -> None:
     """Authenticate through the credential store without an environment credential."""
+    set_active_server_url("http://stored")
+
     client = KitaruAPIClient.from_config()
 
     assert isinstance(client._auth, RenewingTokenAuth)

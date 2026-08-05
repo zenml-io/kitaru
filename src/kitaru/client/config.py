@@ -29,8 +29,6 @@ ENV_CONFIG_PATH = "KITARU_CONFIG_PATH"
 
 CONFIG_FILE_NAME = "config.json"
 
-DEFAULT_SERVER_URL = "http://localhost:8000"
-
 
 class ClientConfig(BaseModel):
     """Client configuration."""

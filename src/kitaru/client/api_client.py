@@ -33,7 +33,7 @@ from kitaru.client.auth import (
     StaticTokenAuth,
     TokenAuth,
 )
-from kitaru.client.config import DEFAULT_SERVER_URL, get_active_server_url
+from kitaru.client.config import get_active_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import raise_for_response
 from kitaru.client.resources.accounts import AccountsResource
@@ -147,18 +147,18 @@ class KitaruAPIClient:
         """Construct a client from the environment and the stored configuration.
 
         The server URL is read from KITARU_API_URL, falling back to the stored
-        active server, then to the local default. The credential is read from
-        KITARU_API_TOKEN or KITARU_API_KEY, falling back to the credentials
-        stored for the server.
+        active server. The credential is read from KITARU_API_TOKEN or
+        KITARU_API_KEY, falling back to the credentials stored for the server.
+
+        Raises:
+            RuntimeError: No server URL is configured.
 
         Returns:
             Client.
         """
-        base_url = (
-            os.environ.get("KITARU_API_URL")
-            or get_active_server_url()
-            or DEFAULT_SERVER_URL
-        )
+        base_url = os.environ.get("KITARU_API_URL") or get_active_server_url()
+        if not base_url:
+            raise RuntimeError("No server URL is configured")
         credential = _get_ambient_credential()
         if credential:
             return cls(base_url=base_url, api_key=credential)
