@@ -40,7 +40,7 @@ from kitaru.server.application.models.auth import (
 )
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import encode_api_key
-from kitaru.server.domain.keys import generate_secret
+from kitaru.server.domain.keys import generate_secret, hash_secret
 
 
 @pytest.fixture
@@ -188,6 +188,85 @@ async def test_api_key_auth_malformed(service: AuthService, credential: str) -> 
     """Reject malformed API key strings."""
     with pytest.raises(AuthenticationError, match="Invalid API key"):
         await service.resolve(credential)
+
+
+async def test_api_key_auth_old_key_valid_within_retain_window(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Accept the previous key while it is within its retain window."""
+    account = await create_account(account_repository)
+    api_key, old_key = await create_api_key(api_key_repository, account.id)
+
+    stored = await api_key_repository.get(api_key.id)
+    stored.rotate(
+        hash_secret(generate_secret()), retain_period_minutes=5, when=datetime.now(UTC)
+    )
+    await api_key_repository.update(stored)
+
+    context = await service.resolve(old_key)
+    assert context.account.id == account.id
+
+
+async def test_api_key_auth_old_key_rejected_with_zero_retain(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Reject the previous key when rotated with a zero retain period."""
+    account = await create_account(account_repository)
+    api_key, old_key = await create_api_key(api_key_repository, account.id)
+
+    stored = await api_key_repository.get(api_key.id)
+    stored.rotate(
+        hash_secret(generate_secret()), retain_period_minutes=0, when=datetime.now(UTC)
+    )
+    await api_key_repository.update(stored)
+
+    with pytest.raises(AuthenticationError, match="Invalid API key"):
+        await service.resolve(old_key)
+
+
+async def test_api_key_auth_old_key_rejected_after_retain_window(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Reject the previous key once its retain window has passed."""
+    account = await create_account(account_repository)
+    api_key, old_key = await create_api_key(api_key_repository, account.id)
+
+    stored = await api_key_repository.get(api_key.id)
+    stale_rotation = datetime.now(UTC) - timedelta(minutes=10)
+    stored.rotate(
+        hash_secret(generate_secret()), retain_period_minutes=5, when=stale_rotation
+    )
+    await api_key_repository.update(stored)
+
+    with pytest.raises(AuthenticationError, match="Invalid API key"):
+        await service.resolve(old_key)
+
+
+async def test_api_key_auth_new_key_immediately_after_rotation(
+    service: AuthService,
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Accept the new key right after rotation."""
+    account = await create_account(account_repository)
+    api_key, _ = await create_api_key(api_key_repository, account.id)
+
+    new_secret = generate_secret()
+    stored = await api_key_repository.get(api_key.id)
+    stored.rotate(
+        hash_secret(new_secret), retain_period_minutes=5, when=datetime.now(UTC)
+    )
+    await api_key_repository.update(stored)
+    new_key = encode_api_key(api_key.id, new_secret)
+
+    context = await service.resolve(new_key)
+    assert context.account.id == account.id
 
 
 async def test_login_with_password(

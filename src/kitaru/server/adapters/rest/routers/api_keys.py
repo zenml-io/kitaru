@@ -23,6 +23,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyIssuedResponse,
     ApiKeyListParams,
     ApiKeyResponse,
+    ApiKeyRotateRequest,
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
@@ -139,6 +140,34 @@ async def update_api_key(
     """
     api_key = await service.update_api_key(api_key_id, active=body.active, actor=actor)
     return api_key_to_response(api_key)
+
+
+@router.post("/{api_key_id}/rotate")
+async def rotate_api_key(
+    api_key_id: uuid.UUID,
+    body: ApiKeyRotateRequest,
+    service: Annotated[ApiKeyService, Depends(get_api_key_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> ApiKeyIssuedResponse:
+    """Rotate an API key.
+
+    Clients observe HTTP 200 on success, 404 when the caller owns no API key
+    with this id, and 422 on invalid input. The response carries the new
+    plaintext key exactly once.
+
+    Args:
+        api_key_id: Id of the API key.
+        body: API key rotate request.
+        service: API key service.
+        actor: Caller context.
+
+    Returns:
+        Rotated API key including the new plaintext key.
+    """
+    api_key, key = await service.rotate_api_key(
+        api_key_id, retain_period_minutes=body.retain_period_minutes, actor=actor
+    )
+    return api_key_to_issued_response(api_key, key)
 
 
 @router.delete("/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)

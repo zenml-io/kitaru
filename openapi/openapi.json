@@ -711,6 +711,19 @@
             "title": "Key",
             "type": "string"
           },
+          "last_rotated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last rotation.",
+            "title": "Last Rotated"
+          },
           "last_used": {
             "anyOf": [
               {
@@ -750,6 +763,7 @@
           "name",
           "active",
           "last_used",
+          "last_rotated",
           "key"
         ],
         "title": "ApiKeyIssuedResponse",
@@ -774,6 +788,19 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "last_rotated": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last rotation.",
+            "title": "Last Rotated"
           },
           "last_used": {
             "anyOf": [
@@ -813,9 +840,25 @@
           "id",
           "name",
           "active",
-          "last_used"
+          "last_used",
+          "last_rotated"
         ],
         "title": "ApiKeyResponse",
+        "type": "object"
+      },
+      "ApiKeyRotateRequest": {
+        "additionalProperties": false,
+        "description": "API key rotate request.",
+        "properties": {
+          "retain_period_minutes": {
+            "default": 0,
+            "description": "Number of minutes the previous key remains valid after rotation.",
+            "minimum": 0.0,
+            "title": "Retain Period Minutes",
+            "type": "integer"
+          }
+        },
+        "title": "ApiKeyRotateRequest",
         "type": "object"
       },
       "ApiKeyUpdateRequest": {
@@ -8484,6 +8527,60 @@
           }
         },
         "summary": "Update Api Key",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/v1/api-keys/{api_key_id}/rotate": {
+      "post": {
+        "description": "Rotate an API key.\n\nClients observe HTTP 200 on success, 404 when the caller owns no API key\nwith this id, and 422 on invalid input. The response carries the new\nplaintext key exactly once.\n\nArgs:\n    api_key_id: Id of the API key.\n    body: API key rotate request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Rotated API key including the new plaintext key.",
+        "operationId": "rotate_api_key_v1_api_keys__api_key_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "api_key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Api Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRotateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyIssuedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rotate Api Key",
         "tags": [
           "api-keys"
         ]

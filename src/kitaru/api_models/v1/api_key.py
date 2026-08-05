@@ -34,6 +34,16 @@ class ApiKeyUpdateRequest(RequestModel):
     active: bool = Field(description="New active state.")
 
 
+class ApiKeyRotateRequest(RequestModel):
+    """API key rotate request."""
+
+    retain_period_minutes: int = Field(
+        default=0,
+        ge=0,
+        description="Number of minutes the previous key remains valid after rotation.",
+    )
+
+
 class ApiKeyListParams(FilterableListParams):
     """API key list params."""
 
@@ -47,6 +57,7 @@ class ApiKeyResponse(OwnedResponseModel):
     last_used: datetime | None = Field(
         description="Time of the last use for authentication."
     )
+    last_rotated: datetime | None = Field(description="Time of the last rotation.")
 
 
 class ApiKeyIssuedResponse(ApiKeyResponse):
