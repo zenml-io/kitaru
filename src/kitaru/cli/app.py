@@ -19,6 +19,7 @@ import math
 import sys
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -320,6 +321,10 @@ async def _launch(
             traceback=traceback,
             exception=error,
         )
+    if command == app.help_print:
+        with suppress(BrokenPipeError):
+            command(*bound.args, **bound.kwargs)
+        return 0
     spec = _FUNCTION_SPECS.get(command)
     if not isinstance(spec, CommandSpec):
         return _emit_early_error(
