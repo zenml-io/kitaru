@@ -57,9 +57,14 @@ print(issued.key)        # shown once — store it in your secret manager
      are not in the current CLI — update to CLI commands if they land
      before launch. -->
 
-Keys can be deactivated (`update` with `active=False`) and deleted;
-`last_used` on the key tells you which ones are dead. Give each consumer
-its own named key so revocation is surgical.
+Keys can be rotated in place — `client.api_keys.rotate(key_id)` returns
+a fresh plaintext (again, exactly once), with an optional
+`retain_period_minutes` grace window during which the old key still
+works, so a worker fleet can pick up the new key without a
+stop-the-world cutover. Keys can also be deactivated (`update` with
+`active=False`) and deleted; `last_used` on the key tells you which ones
+are dead. Give each consumer its own named key so revocation is
+surgical.
 
 ## Workers and tasks get scoped tokens
 

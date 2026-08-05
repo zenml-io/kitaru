@@ -42,12 +42,20 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The CLI form is two commands:
+On the CLI, `cohort create` can snapshot a selection into version 1 in
+the same breath — by explicit IDs, a tag, a filter, or another cohort
+version:
 
 ```bash
-kitaru cohort create refund-regression --agent support-agent
+kitaru cohort create refund-regression --agent support-agent \
+  --tag imported-baseline --display-version week-32
+```
+
+Later versions are membership deltas:
+
+```bash
 kitaru cohort version create refund-regression \
-  --add-session <id> --add-session <id> --display-version week-32
+  --add-session <id> --remove-session <id> --display-version week-33
 ```
 
 The first version starts from an empty list; each later version is the

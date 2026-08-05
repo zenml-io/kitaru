@@ -55,11 +55,11 @@ up to 20 failure samples (line number, external id, error).
 
 ## The built-in importers
 
-Every Kitaru server seeds three importers at startup — `langfuse`,
-`braintrust`, and `otlp` (OpenTelemetry JSON/JSONL/NDJSON exports) —
-versioned in step with the server, so `--importer langfuse@latest`
-always resolves. Their code ships inside the `kitaru` package and runs
-on your worker like any other importer; there is nothing to register.
+Kitaru ships three default importers — `langfuse`, `braintrust`, and
+`otlp` (OpenTelemetry JSON/JSONL/NDJSON exports) — seeded into the
+server as part of setting it up, so `--importer langfuse@latest` always
+resolves. Their code ships inside the `kitaru` package and runs on your
+worker like any other importer; there is nothing to write.
 
 The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per
 payload — and understands three record shapes: `trace`, `observation`,

@@ -60,11 +60,12 @@ is just an evaluator that calls a model inside `evaluate` — same contract,
 same rows. The walkthrough is in
 [Write an evaluator](../guides/write-an-evaluator.md).
 
-Three evaluators come **built in** on every server — `cost`, `latency`,
-and `tool-call-patterns` (does the session repeat calls to the same
-tool?). They make no model calls; they're cheap signals for triaging
-which sessions deserve a closer look, available as `cost@latest` before
-you've registered anything.
+Three evaluators come **built in** — `cost`, `latency`, and
+`tool-call-patterns` (does the session repeat calls to the same tool?),
+seeded alongside the default importers when the server is set up. They
+make no model calls; they're cheap signals for triaging which sessions
+deserve a closer look, available as `cost@latest` before you've written
+anything.
 
 ## The evaluation row
 
@@ -112,8 +113,9 @@ anything.
 
 ## Running evaluators in batch
 
-Score existing sessions without replaying anything. From the CLI, select
-by IDs, by tag, or everything:
+Evaluate existing sessions without replaying anything. From the CLI,
+select by IDs, by tag, by agent, by cohort version, by filter — or
+everything:
 
 ```bash
 kitaru session evaluate --tag imported-baseline \
@@ -122,8 +124,9 @@ kitaru session evaluate --tag imported-baseline \
 ```
 
 Exactly one selection is required — explicit session IDs (arguments or
-`--sessions-file`), `--tag`, or `--all` — and an empty match is an
-error, not a silent no-op. The client form:
+`--sessions-file`), `--tag`, `--agent`, `--cohort`, `--filter`, or
+`--all` — and an empty match is an error, not a silent no-op. The
+client form:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest

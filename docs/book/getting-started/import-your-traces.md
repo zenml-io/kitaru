@@ -22,10 +22,14 @@ infrastructure.
 
 ## 1. Register the agent the traces belong to
 
-The Langfuse importer is **built in** — every Kitaru server ships with
-default importers for `langfuse`, `braintrust`, and `otlp`
-(OpenTelemetry) exports. There is nothing to install or register for
-those formats.
+The Langfuse importer is **built in** — Kitaru ships default importers
+for `langfuse`, `braintrust`, and `otlp` (OpenTelemetry) exports,
+registered into the server when it's set up. There is no importer code
+to write for those formats.
+
+<!-- TODO(v2-launch): default-plugin seeding moved from server startup to
+     scripts/seed_default_plugins.py (Aug 4) — confirm the shipped
+     mechanism and exact setup step before publish. -->
 
 Register the agent these traces belong to, if you haven't:
 
@@ -49,10 +53,11 @@ kitaru session import langfuse-export.jsonl \
   --wait
 ```
 
-`--tag` labels every session this import creates, so later steps can
-select them as a group — `kitaru session evaluate --tag
-imported-baseline ...` — without copying IDs around. (Tagging happens
-once the import completes, which is why `--tag` requires `--wait`.)
+`--tag` labels every session this import creates (repeat it for more
+than one label), so later steps can select them as a group —
+`kitaru session evaluate --tag imported-baseline ...` — without copying
+IDs around. (Tagging happens once the import completes, which is why
+`--tag` requires `--wait`.)
 
 The final receipt reports what happened: sessions `created`, `skipped`,
 and `failed`, with samples of the failures. Each imported trace becomes

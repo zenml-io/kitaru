@@ -40,7 +40,7 @@ uv add "kitaru[pydantic-ai]"
 ```python
 KitaruAgent(
     agent,                      # the PydanticAI agent to wrap
-    agent_id=...,               # required: the registered Kitaru agent's UUID
+    agent_id=None,              # the registered Kitaru agent's UUID
     agent_version_id=None,      # optional: pin sessions to a version
     api_url=None,               # falls back to KITARU_API_URL
     api_key=None,               # falls back to KITARU_API_KEY
@@ -51,9 +51,10 @@ KitaruAgent(
 
 Register the agent first (`kitaru agent register`) and hand its id to the
 wrapper — via `KITARU_AGENT_ID` in your own environment, as the examples
-do. Everything else can come from the environment, which is what makes
-the same script work on your laptop, in production, and under a worker
-without edits.
+do. When the script runs under a worker task (a replay), the id is
+optional: the adapter infers the agent from the task itself. Everything
+else can come from the environment, which is what makes the same script
+work on your laptop, in production, and under a worker without edits.
 
 ## What gets recorded
 

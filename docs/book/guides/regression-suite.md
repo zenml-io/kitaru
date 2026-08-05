@@ -43,17 +43,17 @@ ever triggered an incident. [Imported sessions](import-langfuse-traces.md)
 qualify exactly like recorded ones — your Langfuse history from before
 Kitaru existed is admissible evidence, and if you imported it with
 `--tag`, the tag *is* your selection
-(`kitaru session list --filter '{"field": "tag", "op": "eq", "value": "imported-baseline"}'`).
+(`kitaru session list --tag imported-baseline`).
 
 ## 2. Freeze it into a cohort version
 
-From the CLI:
+From the CLI, one command — `cohort create` takes the same selection
+flags as `session evaluate` (`--tag`, `--session`, `--sessions-file`,
+`--filter`) and freezes the match into version 1:
 
 ```bash
-kitaru cohort create refund-regression --agent support-agent
-kitaru cohort version create refund-regression \
-  --add-session <id> --add-session <id> \
-  --display-version week-32
+kitaru cohort create refund-regression --agent support-agent \
+  --tag imported-baseline --display-version week-32
 ```
 
 Or from the client, straight from the selection above:

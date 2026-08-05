@@ -6,20 +6,58 @@ launch. First pass checked Aug 3 against `origin/v2-spec-consolidated`
 plugins); **re-verified Aug 4** after major movement on both branches plus
 `origin/feat/kitaru-mcp-v2-624` (MCP), `origin/v2-importer` (bundled
 plugins), and `origin/examples/build-canonical-example` (canonical CLI
-journey). The branches still diverge — **no single branch contains
-everything the docs describe** (notably: the MCP server sits on its own
-branch that predates bundled plugins and the newest CLI). The docs assume
-the merged union ships. Re-verify against the actual release branch before
-publish.
+journey); **re-verified Aug 5** (overnight deltas below). The branches
+still diverge — **no single branch contains everything the docs
+describe**, though the gap narrowed: `cli-620` was rebased onto
+`v2-importer`, so CLI + bundled plugins + adapter now live together. The
+MCP server still sits on its own branch that predates all of that. The
+docs assume the merged union ships. Re-verify against the actual release
+branch before publish.
+
+## Aug 5 overnight deltas (docs updated Aug 5)
+
+- **Session selectors everywhere** — `cohort create` now snapshots a
+  selection into version 1 directly (`--session`/`--sessions-file`/
+  `--tag`/`--cohort`/`--filter`/`--all` + `--display-version`);
+  `session evaluate` gained `--agent`/`--cohort`/`--filter`;
+  `session list` gained `--tag`/`--cohort`. Cohorts/regression-suite/
+  evaluators pages updated to the one-command forms.
+- **`session import --tag` is repeatable**; tags are applied by the CLI
+  after the import job settles (still requires `--wait`; receipt gains
+  `tagged_session_count`). Docs wording already matched.
+- **Adapter `agent_id` is now optional** — task-bound (replay) runs
+  infer the agent from the task's agent version; explicit id still the
+  way for production recording. Adapter page updated.
+- **API key rotation (#662)** — `POST /v1/api-keys/{id}/rotate`, client
+  `api_keys.rotate(...)` with `retain_period_minutes` grace window.
+  Documented in `deploy/authentication.md` (still client-only, no CLI
+  noun).
+- **`KITARU_REPLAY_ID` unchanged for users** — it moved to the agent
+  task details server-side but is still set in the task subprocess env;
+  no doc changes needed.
+- **Default-plugin seeding regressed** (`aa766dae`, Aug 4): server
+  startup auto-seeding (`ensure_default_plugins`) and the
+  `kitaru==<version>` package pin + air-gap skip
+  (`filter_uninstalled_requirements`) were **removed**. Seeding is now a
+  manual dev script — `scripts/seed_default_plugins.py`, which registers
+  the six plugins as ordinary script-source versions via the public API
+  (the canonical example runs it explicitly; nothing runs it
+  automatically, and the script isn't shipped in the installed package).
+  Docs softened to "seeded into the server as part of setting it up"
+  with a `TODO(v2-launch)` in `import-your-traces.md`; the air-gap claim
+  was dropped from `deploy/workers.md`. **Confirm the final shipped
+  mechanism before publish** — a pip-installed user currently has no way
+  to seed.
 
 ## Resolved since Aug 3 (docs updated Aug 4)
 
-- ~~Langfuse importer packaging~~ — **resolved**: the separate
-  `kitaru-importer-langfuse` PyPI package is gone. `langfuse`,
+- ~~Langfuse importer packaging~~ — **resolved, mechanism in flux**: the
+  separate `kitaru-importer-langfuse` PyPI package is gone. `langfuse`,
   `braintrust`, and `otlp` importers plus `cost`/`latency`/
-  `tool-call-patterns` evaluators are bundled in the `kitaru` package and
-  auto-seeded by the server, pinned to `kitaru==<server version>`. Docs
-  now use `--importer langfuse@latest` with no registration step.
+  `tool-call-patterns` evaluators are bundled in the `kitaru` package.
+  Docs use `--importer langfuse@latest` with no code to write. **But
+  see the Aug 5 seeding note below** — startup auto-seeding was removed
+  again on Aug 4.
 - ~~Published server image~~ — **resolved**: `release.yml` publishes
   `zenmldocker/kitaru-server:<version>` (+`latest`) and a
   `zenmldocker/kitaru` client image. `deploy/docker.md` now documents the
@@ -43,11 +81,13 @@ publish.
 ## Claims that need verification before publish
 
 1. **Branch union** — docs describe bundled plugins + newest CLI + MCP +
-   Helm/auth together; that combination exists on no branch today
-   (MCP branch forked from `72b07eb9`, before bundled plugins and the
-   tag-based evaluation CLI). Confirm the release branch merges all of
-   it, then spot-check: `kitaru session import --tag`, `kitaru-mcp`,
-   `--importer langfuse@latest`, `experiment run start --wait`.
+   Helm/auth together. As of Aug 5, `cli-620` (rebased onto
+   `v2-importer`) carries the CLI, bundled plugins, and adapter; the MCP
+   server still lives only on `feat/kitaru-mcp-v2-624` (forked from
+   `72b07eb9`, before all of that). Confirm the release branch merges
+   everything, then spot-check: `kitaru session import --tag`,
+   `kitaru-mcp`, `--importer langfuse@latest`,
+   `experiment run start --wait`, `cohort create --tag`.
 2. **Helm chart OCI path** — release workflow pushes to ECR Public alias
    `zenml` (⇒ `oci://public.ecr.aws/zenml/kitaru`) but the in-repo
    `helm/README.md` says `oci://public.ecr.aws/kitaru/kitaru`. One is
@@ -105,10 +145,11 @@ a. **Canonical URLs** — README and docs keep `docs.zenml.io/kitaru` and
 b. **Exact adapter list shipping in v2.0** — only PydanticAI is ported.
    Update `adapters/README.md` and the README when decided.
 c. **Pricing / managed offering wording** — the `control_plane` auth
-   scheme and a private `kitaru-pro-server` ECR image + cloud.zenml.io
-   Helm overlay (`server.pro.*` values) now exist in code, all
-   undocumented here. The managed offering is clearly being built —
-   decide whether launch copy should mention it.
+   scheme, a private `kitaru-pro-server` ECR image + cloud.zenml.io
+   Helm overlay (`server.pro.*` values), and now ZenML Pro CORS support
+   (#664, Aug 5) all exist in code, all undocumented here. The managed
+   offering is clearly being built — decide whether launch copy should
+   mention it.
 d. **`wait()` / HITL** — unchanged: zero v2 mention in code; docs treat
    HITL as ZenML's. Confirm the posture.
 
@@ -123,7 +164,12 @@ d. **`wait()` / HITL** — unchanged: zero v2 mention in code; docs treat
   quickstart / restore `getting-started/examples.md`, and reconcile
   wording (their README teaches the same journey the docs do; note they
   use "Score the imported baselines" phrasing — banned vocabulary — in
-  the example README, worth flagging to the team).
+  the example README, worth flagging to the team). As of Aug 5 the
+  walkthrough is complete ("canonical returns workflow") and its README
+  ends with "Open http://localhost:8000 to compare each imported
+  session with its replay" — but no server-served UI exists in any
+  branch's code; flag to the team as either aspirational or a missing
+  piece.
 - There is still no standalone `kitaru replay` verb by design: at
   population scale replay is `experiment run start`; single-session
   replay is the client's `replays.create`. Docs are consistent with
