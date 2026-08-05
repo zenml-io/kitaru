@@ -63,7 +63,9 @@ jwt_issuer: "{{ .Kitaru.pro.apiURL }}"
 auth_cookie_name: kitaru-server-{{ .Kitaru.pro.workspaceID }}
 server_id: {{ .Kitaru.pro.workspaceID | quote }}
 dashboard_url: {{ .Kitaru.pro.dashboardURL }}/workspaces/{{ .Kitaru.pro.workspaceID }}
-
+{{- if .Kitaru.pro.extraCorsOrigins }}
+cors_allow_origins: "{{ join "," .Kitaru.pro.extraCorsOrigins }}"
+{{- end }}
 {{- else }}
 
 auth_scheme: {{ .Kitaru.auth.authScheme | quote }}
