@@ -40,10 +40,10 @@ def test_bare_command_path_prints_help_without_bootstrap(
 ) -> None:
     """A bare root or command group prints its help without local setup."""
 
-    def fail_config_store():
+    def fail_read_config():
         raise AssertionError("help read local config")
 
-    monkeypatch.setattr(app_module, "ConfigStore", fail_config_store)
+    monkeypatch.setattr(app_module, "read_config", fail_read_config)
 
     assert app_module.main(tokens) == 0
     captured = capsys.readouterr()
@@ -56,10 +56,10 @@ def test_help_version_schema_and_scaffold_skip_bootstrap(
 ) -> None:
     """Offline bootstrap commands do not construct the local config store."""
 
-    def fail_config_store():
+    def fail_read_config():
         raise AssertionError("offline command read local config")
 
-    monkeypatch.setattr(app_module, "ConfigStore", fail_config_store)
+    monkeypatch.setattr(app_module, "read_config", fail_read_config)
 
     assert app_module.main(["--help"]) == 0
     help_output = capsys.readouterr()
