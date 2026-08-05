@@ -158,14 +158,13 @@ def call_parser(
 
 
 def session_request(
-    importer: ImportTaskDetails, parsed: ParsedSession, task_id: uuid.UUID
+    importer: ImportTaskDetails, parsed: ParsedSession
 ) -> SessionCreateRequest:
     """Build a session create request for one parsed import item.
 
     Args:
         importer: Importer task details.
         parsed: Parsed session.
-        task_id: Id of the importer task.
 
     Returns:
         Session create request.
@@ -184,7 +183,6 @@ def session_request(
         external_id=parsed.external_id,
         metadata=parsed.metadata,
         provider=importer.provider,
-        task_id=task_id,
     )
 
 
@@ -299,7 +297,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
             if isinstance(item, ImportFailure):
                 _record_failure(item)
                 continue
-            request = session_request(details, item, task_uuid)
+            request = session_request(details, item)
             try:
                 session = await client.sessions.create(request)
             except APIError as exc:

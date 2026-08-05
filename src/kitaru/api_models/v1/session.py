@@ -98,9 +98,6 @@ class SessionCreateRequest(RequestModel):
     adapter_version: str | None = Field(
         default=None, description="Recording adapter version."
     )
-    task_id: uuid.UUID | None = Field(
-        default=None, description="Task the session was produced by."
-    )
 
 
 class SessionUpdateRequest(RequestModel):

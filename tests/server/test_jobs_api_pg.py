@@ -96,8 +96,8 @@ async def test_session_run_lifecycle_completes_the_job(
                 "inputs": None,
                 "outputs": None,
                 "expected": None,
-                "task_id": task["id"],
             },
+            headers=task_headers,
         )
     ).json()
 

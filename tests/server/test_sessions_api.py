@@ -640,21 +640,41 @@ async def test_delete_session_not_found(client: httpx.AsyncClient) -> None:
 
 
 async def test_create_session_conflicts_when_task_not_running(
-    client: httpx.AsyncClient, task_repository: FakeTaskRepository
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
+    task_repository: FakeTaskRepository,
+    account: Account,
+    auth_service: AuthService,
 ) -> None:
-    """Observe HTTP 409 when the named task is not running."""
+    """Observe HTTP 409 when the token's task is not running."""
     task = await create_agent_task(task_repository, uuid.uuid4())
-    response = await client.post(
-        "/v1/sessions", json=_session_body(task_id=str(task.id))
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
     )
-    assert response.status_code == 409
+    async with client:
+        token = _task_token(auth_service, account, task_id=task.id)
+        response = await client.post(
+            "/v1/sessions",
+            json=_session_body(),
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 409
 
 
 async def test_create_session_links_the_agent_task_result_session(
-    client: httpx.AsyncClient,
+    session_repository: FakeSessionRepository,
+    node_repository: FakeSessionNodeRepository,
+    evaluation_repository: FakeEvaluationRepository,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
+    account: Account,
+    auth_service: AuthService,
 ) -> None:
     """Creating a session for a running agent task links it as the result session."""
     agent = await create_agent(agent_repository, ACCOUNT.id)
@@ -667,10 +687,21 @@ async def test_create_session_links_the_agent_task_result_session(
     task.claim(uuid.uuid4(), datetime.now(UTC))
     task.start(datetime.now(UTC))
     await task_repository.update(task)
-
-    response = await client.post(
-        "/v1/sessions", json=_session_body(agent_id=None, task_id=str(task.id))
+    client = _build_task_scoped_app(
+        session_repository,
+        node_repository,
+        task_repository,
+        evaluation_repository,
+        auth_service,
+        agent_version_repository=agent_version_repository,
     )
+    async with client:
+        token = _task_token(auth_service, account, task_id=task.id)
+        response = await client.post(
+            "/v1/sessions",
+            json=_session_body(agent_id=None),
+            headers={"Authorization": f"Bearer {token}"},
+        )
     assert response.status_code == 201
     body = response.json()
 
@@ -836,6 +867,7 @@ def _build_task_scoped_app(
     task_repository: FakeTaskRepository,
     evaluation_repository: FakeEvaluationRepository,
     auth_service: AuthService,
+    agent_version_repository: FakeAgentVersionRepository | None = None,
 ) -> httpx.AsyncClient:
     """Build an app authenticating real task tokens, unlike the default client fixture.
 
@@ -845,6 +877,8 @@ def _build_task_scoped_app(
         task_repository: Fake task repository backing the app.
         evaluation_repository: Fake evaluation repository backing the app.
         auth_service: Authentication service backing the app.
+        agent_version_repository: Fake agent version repository backing the
+            app, None builds an empty one.
 
     Returns:
         HTTP client routed to the app.
@@ -853,7 +887,9 @@ def _build_task_scoped_app(
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
         task_repository=task_repository,
-        agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
+        agent_version_repository=agent_version_repository
+        if agent_version_repository is not None
+        else FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
@@ -873,6 +909,7 @@ def _task_token(
     auth_service: AuthService,
     account: Account,
     granted_session_id: uuid.UUID | None = None,
+    task_id: uuid.UUID | None = None,
 ) -> str:
     """Mint a task token scoped to the given account for the task route tests."""
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
@@ -880,7 +917,7 @@ def _task_token(
         grants[GrantKind.SESSION] = frozenset({granted_session_id})
     return auth_service.issue_task_token(
         TaskSubject(
-            task_id=uuid.uuid4(),
+            task_id=task_id if task_id is not None else uuid.uuid4(),
             attempt=1,
             worker_id=uuid.uuid4(),
             account_id=account.id,

@@ -4943,19 +4943,6 @@
               }
             ],
             "description": "Initial session status."
-          },
-          "task_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Task the session was produced by.",
-            "title": "Task Id"
           }
         },
         "required": [

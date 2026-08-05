@@ -679,32 +679,26 @@ async def test_create_session_helper_defaults(
     assert session.status == SessionStatus.IN_PROGRESS
 
 
-async def test_create_session_requires_the_named_task_to_exist(
+async def test_create_session_requires_the_principals_task_to_exist(
     service: SessionService,
 ) -> None:
-    """A session naming an unknown task conflicts."""
+    """A task principal whose task is unknown conflicts."""
     with pytest.raises(TaskNotFound):
         await service.create_session(
-            SessionCreate(
-                agent_id=uuid.uuid4(),
-                origin=SessionOrigin.RECORDED,
-                task_id=uuid.uuid4(),
-            ),
-            actor=ACTOR,
+            SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+            actor=_task_principal(uuid.uuid4()),
         )
 
 
-async def test_create_session_requires_the_named_task_to_be_running(
+async def test_create_session_requires_the_principals_task_to_be_running(
     service: SessionService, task_repository: FakeTaskRepository
 ) -> None:
-    """A session naming a pending task conflicts."""
+    """A task principal whose task is pending conflicts."""
     task = await create_agent_task(task_repository, uuid.uuid4())
     with pytest.raises(TaskNotRunning):
         await service.create_session(
-            SessionCreate(
-                agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, task_id=task.id
-            ),
-            actor=ACTOR,
+            SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+            actor=_task_principal(task.id),
         )
 
 
@@ -718,8 +712,8 @@ async def test_create_session_links_an_agent_tasks_result_session(
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
     session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=_task_principal(task.id),
     )
     stored_task = await task_repository.get(task.id)
     assert stored_task.result_session_id == session.id
@@ -734,14 +728,15 @@ async def test_create_session_rejects_a_second_link_to_an_agent_task(
     """A second session cannot link to an agent task that already has one."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
+    actor = _task_principal(task.id)
     await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=actor,
     )
     with pytest.raises(TaskResultSessionAlreadyLinked):
         await service.create_session(
-            SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
-            actor=ACTOR,
+            SessionCreate(origin=SessionOrigin.RECORDED),
+            actor=actor,
         )
 
 
@@ -752,13 +747,14 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     task = await _start(
         task_repository, await create_import_task(task_repository, uuid.uuid4())
     )
+    actor = _task_principal(task.id)
     first = await service.create_session(
-        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.IMPORTED),
+        actor=actor,
     )
     second = await service.create_session(
-        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.IMPORTED),
+        actor=actor,
     )
     assert first.task_id == task.id
     assert second.task_id == task.id
@@ -776,8 +772,8 @@ async def test_create_session_infers_agent_and_version_from_an_agent_task(
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
     session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=_task_principal(task.id),
     )
     assert session.agent_version_id == version.id
     assert session.agent_id == version.agent_id
@@ -797,9 +793,8 @@ async def test_create_session_accepts_the_agent_task_version_it_was_given(
             agent_id=version.agent_id,
             agent_version_id=version.id,
             origin=SessionOrigin.RECORDED,
-            task_id=task.id,
         ),
-        actor=ACTOR,
+        actor=_task_principal(task.id),
     )
     assert session.agent_version_id == version.id
 
@@ -818,9 +813,8 @@ async def test_create_session_rejects_a_version_the_agent_task_does_not_run(
             SessionCreate(
                 agent_version_id=uuid.uuid4(),
                 origin=SessionOrigin.RECORDED,
-                task_id=task.id,
             ),
-            actor=ACTOR,
+            actor=_task_principal(task.id),
         )
 
 
@@ -838,9 +832,8 @@ async def test_create_session_rejects_an_agent_the_version_does_not_belong_to(
             SessionCreate(
                 agent_id=uuid.uuid4(),
                 origin=SessionOrigin.RECORDED,
-                task_id=task.id,
             ),
-            actor=ACTOR,
+            actor=_task_principal(task.id),
         )
 
 
@@ -919,8 +912,8 @@ async def test_create_session_takes_an_import_tasks_agent_and_version(
         ),
     )
     session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.IMPORTED),
+        actor=_task_principal(task.id),
     )
     assert session.agent_id == version.agent_id
     assert session.agent_version_id == version.id
@@ -936,8 +929,8 @@ async def test_create_session_leaves_the_version_empty_for_a_versionless_import(
         await create_import_task(task_repository, uuid.uuid4(), agent_id=agent_id),
     )
     session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.IMPORTED, task_id=task.id),
-        actor=ACTOR,
+        SessionCreate(origin=SessionOrigin.IMPORTED),
+        actor=_task_principal(task.id),
     )
     assert session.agent_id == agent_id
     assert session.agent_version_id is None
@@ -955,9 +948,8 @@ async def test_create_session_rejects_an_agent_the_import_task_does_not_use(
             SessionCreate(
                 agent_id=uuid.uuid4(),
                 origin=SessionOrigin.IMPORTED,
-                task_id=task.id,
             ),
-            actor=ACTOR,
+            actor=_task_principal(task.id),
         )
 
 
@@ -967,7 +959,7 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
-    """A task principal's session links its own task, ignoring a mismatched request.
+    """A task principal's session links its own task.
 
     The account on a task principal's context is the owner of the task's
     job, resolved by the auth layer from the task token, not the account
@@ -986,7 +978,7 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
         ),
     )
     session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED, task_id=uuid.uuid4()),
+        SessionCreate(origin=SessionOrigin.RECORDED),
         actor=actor,
     )
     assert session.task_id == task.id

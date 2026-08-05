@@ -87,21 +87,20 @@ class SessionService:
     ) -> Session:
         """Create a session owned by the caller.
 
-        A session naming a task requires that task to be running. An agent
-        task links exactly one session and gets its result session written in
-        the same transaction, an import task links every session it creates.
-        The task is the source of truth for the agent and the agent version.
-        A task principal's session is always linked to its own task,
-        regardless of what the request names.
+        A task principal's session is linked to the principal's task, which
+        must be running. An agent task links exactly one session and gets its
+        result session written in the same transaction, an import task links
+        every session it creates. The task is the source of truth for the
+        agent and the agent version.
 
         Args:
             command: Fields for the new session.
             actor: Caller context.
 
         Raises:
-            TaskNotFound: No task has the named id.
-            TaskNotRunning: The named task is not running.
-            TaskResultSessionAlreadyLinked: The named agent task already
+            TaskNotFound: No task has the principal's task id.
+            TaskNotRunning: The principal's task is not running.
+            TaskResultSessionAlreadyLinked: The principal's agent task already
                 links a session.
             SessionAgentVersionMismatch: The command names a different agent
                 version than the task runs.
@@ -118,7 +117,7 @@ class SessionService:
         Returns:
             Created session.
         """
-        task_id = command.task_id
+        task_id = None
         if isinstance(actor.principal, TaskPrincipal):
             task_id = actor.principal.task_id
         task = None
@@ -174,7 +173,8 @@ class SessionService:
 
         Args:
             command: Fields for the new session.
-            task: Task the session was produced by, None when it names none.
+            task: Task the session was produced by, None when the caller
+                has none.
 
         Raises:
             SessionAgentVersionMismatch: The command names a different agent

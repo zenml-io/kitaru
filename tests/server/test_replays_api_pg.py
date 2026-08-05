@@ -129,8 +129,8 @@ async def test_replay_pipeline_completes_through_the_api(
                 "inputs": None,
                 "outputs": None,
                 "expected": None,
-                "task_id": agent_task["id"],
             },
+            headers=agent_task_headers,
         )
     ).json()
     assert result_session["agent_id"] == agent_id
