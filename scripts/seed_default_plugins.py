@@ -56,11 +56,27 @@ class PluginDefinition:
 PLUGIN_DEFINITIONS = (
     PluginDefinition(
         kind="importer",
+        name="braintrust",
+        path=_REPOSITORY_ROOT / "plugins/importers/braintrust.py",
+        entrypoint="parse",
+        description="Import Braintrust project-log and UI JSON exports.",
+        provider="braintrust",
+    ),
+    PluginDefinition(
+        kind="importer",
         name="langfuse",
         path=_REPOSITORY_ROOT / "plugins/importers/langfuse.py",
         entrypoint="parse",
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
+    ),
+    PluginDefinition(
+        kind="importer",
+        name="otlp",
+        path=_REPOSITORY_ROOT / "plugins/importers/otlp.py",
+        entrypoint="parse",
+        description="Import OpenTelemetry OTLP JSON, JSONL, and NDJSON exports.",
+        provider="opentelemetry",
     ),
     PluginDefinition(
         kind="evaluator",

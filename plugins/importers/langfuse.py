@@ -501,19 +501,20 @@ class LangfuseJSONLImporter:
             session_id = next(iter(session_ids), trace_id)
             session_traces[session_id].append((trace_id, observations))
 
-        items: list[ParsedSession | ImportFailure] = []
+        sessions: list[ParsedSession] = []
+        failures: list[ImportFailure] = []
         for source_id, traces in sorted(session_traces.items()):
             try:
-                items.append(self._parse_session(source_id, traces, params))
+                sessions.append(self._parse_session(source_id, traces, params))
             except InvalidImport as exc:
-                items.append(
+                failures.append(
                     ImportFailure(
-                        line=len(items) + 1,
+                        line=len(failures) + 1,
                         external_id=source_id,
                         error=str(exc),
                     )
                 )
-        return items
+        return [*sessions, *failures]
 
     def _parse_session(
         self,
