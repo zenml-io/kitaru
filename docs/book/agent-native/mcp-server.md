@@ -155,7 +155,7 @@ kitaru-mcp --mode destructive
 
 ## Measured tool surface
 
-The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 91,951 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 31,782 bytes.
+The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 92,898 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 32,729 bytes.
 
 | Tool | First mode | Operations |
 |---|---|---|
