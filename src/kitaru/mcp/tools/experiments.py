@@ -3,28 +3,28 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Experiment management handler."""
 
-import uuid
-
-from kitaru.api_models.v1.evaluator import EvaluatorResponse
 from kitaru.api_models.v1.experiment import (
     ExperimentCreateRequest,
     ExperimentUpdateRequest,
 )
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
-from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import (
-    EvaluatorSelection,
     ExperimentCreate,
     ExperimentsManageRequest,
 )
+from kitaru.mcp.tools.evaluator_resolution import resolve_evaluator_selections
 
 
 async def handle_experiments_manage(
     state: MCPServerState, request: ExperimentsManageRequest
 ) -> object:
     """Perform one exact-ID experiment mutation."""
-    evaluators = await _get_evaluator_configs(state, request.evaluators)
+    resolved = (
+        None
+        if request.evaluators is None
+        else await resolve_evaluator_selections(state, request.evaluators)
+    )
+    evaluators = None if resolved is None else resolved.configs
     if isinstance(request, ExperimentCreate):
         dto = ExperimentCreateRequest(
             name=request.name,
@@ -50,40 +50,3 @@ async def handle_experiments_manage(
     return await state.client.experiments.update(
         request.experiment_id, ExperimentUpdateRequest.model_validate(values)
     )
-
-
-async def _get_evaluator_configs(
-    state: MCPServerState, selections: list[EvaluatorSelection] | None
-) -> list[EvaluatorConfig] | None:
-    if selections is None:
-        return None
-    identities = [(item.evaluator_id, item.version) for item in selections]
-    if len(set(identities)) != len(identities):
-        raise MCPToolError("invalid_arguments", "Evaluator selections must be unique.")
-    configs: list[EvaluatorConfig] = []
-    parents: dict[uuid.UUID, EvaluatorResponse] = {}
-    for selection in selections:
-        parent = parents.get(selection.evaluator_id)
-        if parent is None:
-            parent = await state.client.evaluators.get(selection.evaluator_id)
-            parents[selection.evaluator_id] = parent
-        version = await state.client.evaluators.get_version(
-            selection.evaluator_id, selection.version
-        )
-        if (
-            parent.id != selection.evaluator_id
-            or version.evaluator_id != selection.evaluator_id
-            or version.version != selection.version
-        ):
-            raise MCPToolError(
-                "conflict",
-                "Evaluator selection resolved to a different parent or version.",
-            )
-        configs.append(
-            EvaluatorConfig(
-                evaluator=parent.name,
-                version=version.version,
-                params=selection.params,
-            )
-        )
-    return configs

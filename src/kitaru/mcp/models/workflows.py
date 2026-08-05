@@ -6,10 +6,11 @@
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
-from kitaru.mcp.models.common import MCPModel
+from kitaru.mcp.models.common import DeleteKind, MCPModel
+from kitaru.mcp.models.management import EvaluatorSelection
 
 
 class SessionImportRequest(MCPModel):
@@ -20,6 +21,40 @@ class SessionImportRequest(MCPModel):
     importer_version: int = Field(ge=1)
     agent_version_id: uuid.UUID
     params: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class EvaluationStart(MCPModel):
+    """Start one bounded evaluation batch."""
+
+    operation: Literal["evaluation"]
+    session_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    evaluators: list[EvaluatorSelection] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def _validate_batch(self) -> "EvaluationStart":
+        if len(set(self.session_ids)) != len(self.session_ids):
+            raise ValueError("session_ids must be unique")
+        if len(self.session_ids) * len(self.evaluators) > 100:
+            raise ValueError(
+                "evaluation batches support at most 100 session/evaluator pairs"
+            )
+        return self
+
+
+class ExperimentRunStart(MCPModel):
+    """Start one exact experiment run."""
+
+    operation: Literal["experiment_run"]
+    experiment_id: uuid.UUID
+    cohort_version_id: uuid.UUID
+    agent_version_id: uuid.UUID
+    evaluate_baselines: bool = False
+
+
+WorkflowStartRequest = Annotated[
+    EvaluationStart | ExperimentRunStart,
+    Field(discriminator="operation"),
+]
 
 
 class JobCancel(MCPModel):
@@ -45,5 +80,5 @@ WorkflowCancelRequest = Annotated[
 class DeleteRequest(MCPModel):
     """Delete one allowlisted exact resource."""
 
-    kind: Literal["cohort", "cohort_version", "experiment", "experiment_run"]
+    kind: DeleteKind
     id: uuid.UUID

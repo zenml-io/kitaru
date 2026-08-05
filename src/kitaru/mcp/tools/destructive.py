@@ -31,6 +31,12 @@ async def handle_delete(state: MCPServerState, request: DeleteRequest) -> object
         await state.client.cohort_versions.delete(request.id)
     elif request.kind == "experiment":
         await state.client.experiments.delete(request.id)
-    else:
+    elif request.kind == "experiment_run":
         await state.client.experiment_runs.delete(request.id)
+    elif request.kind == "investigation":
+        await state.client.investigations.delete(request.id)
+    elif request.kind == "annotation":
+        await state.client.annotations.delete(request.id)
+    else:
+        await state.client.evaluators.delete(request.id)
     return {"kind": request.kind, "id": str(request.id), "deleted": True}

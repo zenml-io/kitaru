@@ -4293,6 +4293,978 @@
   {
     "annotations": {
       "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read investigations, annotations, and ordered investigation sessions.",
+    "inputSchema": {
+      "$defs": {
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        },
+        "ReviewGet": {
+          "additionalProperties": false,
+          "description": "Get one investigation or annotation by exact UUID.",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "investigation",
+                "annotation"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "get",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "id"
+          ],
+          "title": "ReviewGet",
+          "type": "object"
+        },
+        "ReviewList": {
+          "additionalProperties": false,
+          "description": "List one bounded page of investigations or annotations.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
+            },
+            "kind": {
+              "enum": [
+                "investigation",
+                "annotation"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind"
+          ],
+          "title": "ReviewList",
+          "type": "object"
+        },
+        "ReviewListSessions": {
+          "additionalProperties": false,
+          "description": "List one ordered page of sessions for an exact investigation.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "investigation_id": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_sessions",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "investigation_id"
+          ],
+          "title": "ReviewListSessions",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "get": "#/$defs/ReviewGet",
+              "list": "#/$defs/ReviewList",
+              "list_sessions": "#/$defs/ReviewListSessions"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReviewList"
+            },
+            {
+              "$ref": "#/$defs/ReviewGet"
+            },
+            {
+              "$ref": "#/$defs/ReviewListSessions"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "review_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_review_read",
+    "outputSchema": {
+      "$defs": {
+        "AnnotationResponse": {
+          "description": "Annotation response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Annotation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Investigation session being answered.",
+              "title": "Investigation Session Id"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "question_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Key of the question being answered.",
+              "title": "Question Key"
+            },
+            "selector": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Part of the session being annotated."
+            },
+            "session_id": {
+              "description": "Session being annotated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "value": {
+              "description": "Annotation value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "session_id",
+            "value"
+          ],
+          "title": "AnnotationResponse",
+          "type": "object"
+        },
+        "AnnotationSelector": {
+          "additionalProperties": false,
+          "description": "Annotation selector.",
+          "properties": {
+            "node_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Targeted node.",
+              "title": "Node Id"
+            },
+            "part": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelectorPart"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Payload of the node targeted."
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "JSON Pointer within the targeted payload.",
+              "title": "Path"
+            },
+            "span": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSpan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Character range within the resolved string."
+            }
+          },
+          "title": "AnnotationSelector",
+          "type": "object"
+        },
+        "AnnotationSelectorPart": {
+          "description": "Payload of a session node an annotation selector targets.",
+          "enum": [
+            "input",
+            "output",
+            "error",
+            "metadata"
+          ],
+          "title": "AnnotationSelectorPart",
+          "type": "string"
+        },
+        "AnnotationSpan": {
+          "additionalProperties": false,
+          "description": "Annotation span.",
+          "properties": {
+            "end": {
+              "description": "End offset of the character range.",
+              "title": "End",
+              "type": "integer"
+            },
+            "start": {
+              "description": "Start offset of the character range.",
+              "title": "Start",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "title": "AnnotationSpan",
+          "type": "object"
+        },
+        "InvestigationResponse": {
+          "description": "Investigation response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the investigation's sessions belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "completed_sessions": {
+              "description": "Number of linked sessions marked completed or skipped.",
+              "title": "Completed Sessions",
+              "type": "integer"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Curator rationale.",
+              "title": "Description"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the last session settled.",
+              "title": "Ended At"
+            },
+            "id": {
+              "description": "Investigation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Investigation name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "questions": {
+              "description": "Questions asked about each session.",
+              "items": {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the first answer was recorded.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/InvestigationStatus"
+            },
+            "total_sessions": {
+              "description": "Number of linked sessions.",
+              "title": "Total Sessions",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "name",
+            "description",
+            "status",
+            "questions",
+            "metadata",
+            "total_sessions",
+            "completed_sessions"
+          ],
+          "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionResponse": {
+          "description": "Investigation session response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Investigation session id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_id": {
+              "description": "Investigation this session belongs to.",
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "position": {
+              "description": "Presentation order within the investigation.",
+              "title": "Position",
+              "type": "integer"
+            },
+            "session_id": {
+              "description": "Session being investigated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/InvestigationSessionStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "view": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionView"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Curated session view."
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "investigation_id",
+            "session_id",
+            "position",
+            "status",
+            "view"
+          ],
+          "title": "InvestigationSessionResponse",
+          "type": "object"
+        },
+        "InvestigationSessionStatus": {
+          "description": "Investigation session status.",
+          "enum": [
+            "pending",
+            "completed",
+            "skipped"
+          ],
+          "title": "InvestigationSessionStatus",
+          "type": "string"
+        },
+        "InvestigationSessionView": {
+          "additionalProperties": false,
+          "description": "Investigation session view.",
+          "properties": {
+            "items": {
+              "description": "Curated findings for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionViewItem"
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "summary": {
+              "description": "Summary shown above the trace.",
+              "title": "Summary",
+              "type": "string"
+            },
+            "version": {
+              "default": 1,
+              "description": "Format version.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "title": "InvestigationSessionView",
+          "type": "object"
+        },
+        "InvestigationSessionViewItem": {
+          "additionalProperties": false,
+          "description": "Investigation session view item.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the curator saw.",
+              "title": "Description",
+              "type": "string"
+            },
+            "label": {
+              "description": "Short title for the item.",
+              "title": "Label",
+              "type": "string"
+            },
+            "selectors": {
+              "description": "References the item covers.",
+              "items": {
+                "$ref": "#/$defs/AnnotationSelector"
+              },
+              "title": "Selectors",
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "description"
+          ],
+          "title": "InvestigationSessionViewItem",
+          "type": "object"
+        },
+        "InvestigationStatus": {
+          "description": "Investigation status.",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ],
+          "title": "InvestigationStatus",
+          "type": "string"
+        },
+        "PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/InvestigationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/InvestigationSessionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/AnnotationResponse"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "PageData[Union[InvestigationResponse, InvestigationSessionResponse, AnnotationResponse]]",
+          "type": "object"
+        },
+        "PageMetadata": {
+          "additionalProperties": false,
+          "description": "Opaque one-page cursor metadata.",
+          "properties": {
+            "has_more": {
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Cursor"
+            },
+            "size": {
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size",
+            "next_cursor",
+            "has_more"
+          ],
+          "title": "PageMetadata",
+          "type": "object"
+        },
+        "QuestionItem": {
+          "additionalProperties": false,
+          "description": "Question item.",
+          "properties": {
+            "key": {
+              "description": "Key identifying the question within the array.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question display text.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "QuestionItem",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed investigation and annotation read result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvestigationResponse"
+            },
+            {
+              "$ref": "#/$defs/InvestigationSessionResponse"
+            },
+            {
+              "$ref": "#/$defs/AnnotationResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ReviewReadResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
       "idempotentHint": false,
       "openWorldHint": true,
       "readOnlyHint": false
@@ -6184,6 +7156,2354 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Create or update investigations, linked statuses, and annotations.",
+    "inputSchema": {
+      "$defs": {
+        "AnnotationSelector": {
+          "additionalProperties": false,
+          "description": "Annotation selector.",
+          "properties": {
+            "node_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Targeted node.",
+              "title": "Node Id"
+            },
+            "part": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelectorPart"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Payload of the node targeted."
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "JSON Pointer within the targeted payload.",
+              "title": "Path"
+            },
+            "span": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSpan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Character range within the resolved string."
+            }
+          },
+          "title": "AnnotationSelector",
+          "type": "object"
+        },
+        "AnnotationSelectorPart": {
+          "description": "Payload of a session node an annotation selector targets.",
+          "enum": [
+            "input",
+            "output",
+            "error",
+            "metadata"
+          ],
+          "title": "AnnotationSelectorPart",
+          "type": "string"
+        },
+        "AnnotationSpan": {
+          "additionalProperties": false,
+          "description": "Annotation span.",
+          "properties": {
+            "end": {
+              "description": "End offset of the character range.",
+              "title": "End",
+              "type": "integer"
+            },
+            "start": {
+              "description": "Start offset of the character range.",
+              "title": "Start",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "title": "AnnotationSpan",
+          "type": "object"
+        },
+        "AnnotationUpdate": {
+          "additionalProperties": false,
+          "description": "Update one annotation value.",
+          "properties": {
+            "annotation_id": {
+              "format": "uuid",
+              "title": "Annotation Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "update_annotation",
+              "title": "Operation",
+              "type": "string"
+            },
+            "value": {
+              "title": "Value"
+            }
+          },
+          "required": [
+            "operation",
+            "annotation_id",
+            "value"
+          ],
+          "title": "AnnotationUpdate",
+          "type": "object"
+        },
+        "InvestigationAnswerCreate": {
+          "additionalProperties": false,
+          "description": "Answer one investigation question for one linked session.",
+          "properties": {
+            "investigation_session_id": {
+              "format": "uuid",
+              "title": "Investigation Session Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "answer_question",
+              "title": "Operation",
+              "type": "string"
+            },
+            "question_key": {
+              "minLength": 1,
+              "title": "Question Key",
+              "type": "string"
+            },
+            "selector": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "value": {
+              "title": "Value"
+            }
+          },
+          "required": [
+            "operation",
+            "investigation_session_id",
+            "question_key",
+            "value"
+          ],
+          "title": "InvestigationAnswerCreate",
+          "type": "object"
+        },
+        "InvestigationCreate": {
+          "additionalProperties": false,
+          "description": "Create an investigation and its ordered sessions.",
+          "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "name": {
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "operation": {
+              "const": "create_investigation",
+              "title": "Operation",
+              "type": "string"
+            },
+            "questions": {
+              "items": {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              "maxItems": 100,
+              "title": "Questions",
+              "type": "array"
+            },
+            "sessions": {
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionInput"
+              },
+              "maxItems": 100,
+              "title": "Sessions",
+              "type": "array"
+            }
+          },
+          "required": [
+            "operation",
+            "agent_id",
+            "name",
+            "questions",
+            "sessions"
+          ],
+          "title": "InvestigationCreate",
+          "type": "object"
+        },
+        "InvestigationSessionInput": {
+          "additionalProperties": false,
+          "description": "Investigation session input.",
+          "properties": {
+            "session_id": {
+              "description": "Session to link.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "view": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionView"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Curated session view."
+            }
+          },
+          "required": [
+            "session_id"
+          ],
+          "title": "InvestigationSessionInput",
+          "type": "object"
+        },
+        "InvestigationSessionView": {
+          "additionalProperties": false,
+          "description": "Investigation session view.",
+          "properties": {
+            "items": {
+              "description": "Curated findings for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionViewItem"
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "summary": {
+              "description": "Summary shown above the trace.",
+              "title": "Summary",
+              "type": "string"
+            },
+            "version": {
+              "default": 1,
+              "description": "Format version.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "title": "InvestigationSessionView",
+          "type": "object"
+        },
+        "InvestigationSessionViewItem": {
+          "additionalProperties": false,
+          "description": "Investigation session view item.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the curator saw.",
+              "title": "Description",
+              "type": "string"
+            },
+            "label": {
+              "description": "Short title for the item.",
+              "title": "Label",
+              "type": "string"
+            },
+            "selectors": {
+              "description": "References the item covers.",
+              "items": {
+                "$ref": "#/$defs/AnnotationSelector"
+              },
+              "title": "Selectors",
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "description"
+          ],
+          "title": "InvestigationSessionViewItem",
+          "type": "object"
+        },
+        "InvestigationUpdate": {
+          "additionalProperties": false,
+          "description": "Sparsely update investigation metadata.",
+          "properties": {
+            "clear_description": {
+              "default": false,
+              "title": "Clear Description",
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "investigation_id": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Name"
+            },
+            "operation": {
+              "const": "update_investigation",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "investigation_id"
+          ],
+          "title": "InvestigationUpdate",
+          "type": "object"
+        },
+        "ManualAnnotationCreate": {
+          "additionalProperties": false,
+          "description": "Create a manual annotation for one session.",
+          "properties": {
+            "operation": {
+              "const": "create_annotation",
+              "title": "Operation",
+              "type": "string"
+            },
+            "selector": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "value": {
+              "title": "Value"
+            }
+          },
+          "required": [
+            "operation",
+            "session_id",
+            "value"
+          ],
+          "title": "ManualAnnotationCreate",
+          "type": "object"
+        },
+        "QuestionItem": {
+          "additionalProperties": false,
+          "description": "Question item.",
+          "properties": {
+            "key": {
+              "description": "Key identifying the question within the array.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question display text.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "QuestionItem",
+          "type": "object"
+        },
+        "SetInvestigationSessionStatus": {
+          "additionalProperties": false,
+          "description": "Set one linked session to a terminal status.",
+          "properties": {
+            "investigation_id": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "set_session_status",
+              "title": "Operation",
+              "type": "string"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "completed",
+                "skipped"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "investigation_id",
+            "session_id",
+            "status"
+          ],
+          "title": "SetInvestigationSessionStatus",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "answer_question": "#/$defs/InvestigationAnswerCreate",
+              "create_annotation": "#/$defs/ManualAnnotationCreate",
+              "create_investigation": "#/$defs/InvestigationCreate",
+              "set_session_status": "#/$defs/SetInvestigationSessionStatus",
+              "update_annotation": "#/$defs/AnnotationUpdate",
+              "update_investigation": "#/$defs/InvestigationUpdate"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InvestigationCreate"
+            },
+            {
+              "$ref": "#/$defs/InvestigationUpdate"
+            },
+            {
+              "$ref": "#/$defs/SetInvestigationSessionStatus"
+            },
+            {
+              "$ref": "#/$defs/ManualAnnotationCreate"
+            },
+            {
+              "$ref": "#/$defs/InvestigationAnswerCreate"
+            },
+            {
+              "$ref": "#/$defs/AnnotationUpdate"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "review_manage_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_review_manage",
+    "outputSchema": {
+      "$defs": {
+        "AnnotationResponse": {
+          "description": "Annotation response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Annotation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Investigation session being answered.",
+              "title": "Investigation Session Id"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "question_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Key of the question being answered.",
+              "title": "Question Key"
+            },
+            "selector": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Part of the session being annotated."
+            },
+            "session_id": {
+              "description": "Session being annotated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "value": {
+              "description": "Annotation value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "session_id",
+            "value"
+          ],
+          "title": "AnnotationResponse",
+          "type": "object"
+        },
+        "AnnotationSelector": {
+          "additionalProperties": false,
+          "description": "Annotation selector.",
+          "properties": {
+            "node_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Targeted node.",
+              "title": "Node Id"
+            },
+            "part": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelectorPart"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Payload of the node targeted."
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "JSON Pointer within the targeted payload.",
+              "title": "Path"
+            },
+            "span": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSpan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Character range within the resolved string."
+            }
+          },
+          "title": "AnnotationSelector",
+          "type": "object"
+        },
+        "AnnotationSelectorPart": {
+          "description": "Payload of a session node an annotation selector targets.",
+          "enum": [
+            "input",
+            "output",
+            "error",
+            "metadata"
+          ],
+          "title": "AnnotationSelectorPart",
+          "type": "string"
+        },
+        "AnnotationSpan": {
+          "additionalProperties": false,
+          "description": "Annotation span.",
+          "properties": {
+            "end": {
+              "description": "End offset of the character range.",
+              "title": "End",
+              "type": "integer"
+            },
+            "start": {
+              "description": "Start offset of the character range.",
+              "title": "Start",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "title": "AnnotationSpan",
+          "type": "object"
+        },
+        "InvestigationResponse": {
+          "description": "Investigation response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the investigation's sessions belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "completed_sessions": {
+              "description": "Number of linked sessions marked completed or skipped.",
+              "title": "Completed Sessions",
+              "type": "integer"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Curator rationale.",
+              "title": "Description"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the last session settled.",
+              "title": "Ended At"
+            },
+            "id": {
+              "description": "Investigation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Investigation name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "questions": {
+              "description": "Questions asked about each session.",
+              "items": {
+                "$ref": "#/$defs/QuestionItem"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the first answer was recorded.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/InvestigationStatus"
+            },
+            "total_sessions": {
+              "description": "Number of linked sessions.",
+              "title": "Total Sessions",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "name",
+            "description",
+            "status",
+            "questions",
+            "metadata",
+            "total_sessions",
+            "completed_sessions"
+          ],
+          "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionResponse": {
+          "description": "Investigation session response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Investigation session id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_id": {
+              "description": "Investigation this session belongs to.",
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "position": {
+              "description": "Presentation order within the investigation.",
+              "title": "Position",
+              "type": "integer"
+            },
+            "session_id": {
+              "description": "Session being investigated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/InvestigationSessionStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "view": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionView"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Curated session view."
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "investigation_id",
+            "session_id",
+            "position",
+            "status",
+            "view"
+          ],
+          "title": "InvestigationSessionResponse",
+          "type": "object"
+        },
+        "InvestigationSessionStatus": {
+          "description": "Investigation session status.",
+          "enum": [
+            "pending",
+            "completed",
+            "skipped"
+          ],
+          "title": "InvestigationSessionStatus",
+          "type": "string"
+        },
+        "InvestigationSessionView": {
+          "additionalProperties": false,
+          "description": "Investigation session view.",
+          "properties": {
+            "items": {
+              "description": "Curated findings for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionViewItem"
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "summary": {
+              "description": "Summary shown above the trace.",
+              "title": "Summary",
+              "type": "string"
+            },
+            "version": {
+              "default": 1,
+              "description": "Format version.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "title": "InvestigationSessionView",
+          "type": "object"
+        },
+        "InvestigationSessionViewItem": {
+          "additionalProperties": false,
+          "description": "Investigation session view item.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the curator saw.",
+              "title": "Description",
+              "type": "string"
+            },
+            "label": {
+              "description": "Short title for the item.",
+              "title": "Label",
+              "type": "string"
+            },
+            "selectors": {
+              "description": "References the item covers.",
+              "items": {
+                "$ref": "#/$defs/AnnotationSelector"
+              },
+              "title": "Selectors",
+              "type": "array"
+            }
+          },
+          "required": [
+            "label",
+            "description"
+          ],
+          "title": "InvestigationSessionViewItem",
+          "type": "object"
+        },
+        "InvestigationStatus": {
+          "description": "Investigation status.",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ],
+          "title": "InvestigationStatus",
+          "type": "string"
+        },
+        "QuestionItem": {
+          "additionalProperties": false,
+          "description": "Question item.",
+          "properties": {
+            "key": {
+              "description": "Key identifying the question within the array.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question display text.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "QuestionItem",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed investigation and annotation management result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvestigationResponse"
+            },
+            {
+              "$ref": "#/$defs/InvestigationSessionResponse"
+            },
+            {
+              "$ref": "#/$defs/AnnotationResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ReviewManageResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Start an evaluation batch or experiment run and return immediately.",
+    "inputSchema": {
+      "$defs": {
+        "EvaluationStart": {
+          "additionalProperties": false,
+          "description": "Start one bounded evaluation batch.",
+          "properties": {
+            "evaluators": {
+              "items": {
+                "$ref": "#/$defs/EvaluatorSelection"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "title": "Evaluators",
+              "type": "array"
+            },
+            "operation": {
+              "const": "evaluation",
+              "title": "Operation",
+              "type": "string"
+            },
+            "session_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "maxItems": 100,
+              "minItems": 1,
+              "title": "Session Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "operation",
+            "session_ids",
+            "evaluators"
+          ],
+          "title": "EvaluationStart",
+          "type": "object"
+        },
+        "EvaluatorSelection": {
+          "additionalProperties": false,
+          "description": "Exact evaluator parent/version selection for a mutation.",
+          "properties": {
+            "evaluator_id": {
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "evaluator_id",
+            "version"
+          ],
+          "title": "EvaluatorSelection",
+          "type": "object"
+        },
+        "ExperimentRunStart": {
+          "additionalProperties": false,
+          "description": "Start one exact experiment run.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "evaluate_baselines": {
+              "default": false,
+              "title": "Evaluate Baselines",
+              "type": "boolean"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "experiment_run",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id"
+          ],
+          "title": "ExperimentRunStart",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "evaluation": "#/$defs/EvaluationStart",
+              "experiment_run": "#/$defs/ExperimentRunStart"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EvaluationStart"
+            },
+            {
+              "$ref": "#/$defs/ExperimentRunStart"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "workflow_start_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_workflow_start",
+    "outputSchema": {
+      "$defs": {
+        "EvaluationSelectionReceipt": {
+          "additionalProperties": false,
+          "description": "Resolved evaluator identity used by an evaluation batch.",
+          "properties": {
+            "evaluator_id": {
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "evaluator_version_id": {
+              "format": "uuid",
+              "title": "Evaluator Version Id",
+              "type": "string"
+            },
+            "version": {
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "evaluator_id",
+            "evaluator_version_id",
+            "version"
+          ],
+          "title": "EvaluationSelectionReceipt",
+          "type": "object"
+        },
+        "EvaluationStartReceipt": {
+          "additionalProperties": false,
+          "description": "Immediate receipt for a queued evaluation batch.",
+          "properties": {
+            "evaluators": {
+              "items": {
+                "$ref": "#/$defs/EvaluationSelectionReceipt"
+              },
+              "title": "Evaluators",
+              "type": "array"
+            },
+            "input_session_ids": {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Input Session Ids",
+              "type": "array"
+            },
+            "operation": {
+              "const": "evaluation",
+              "title": "Operation",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobResponse"
+            }
+          },
+          "required": [
+            "operation",
+            "input_session_ids",
+            "evaluators",
+            "result"
+          ],
+          "title": "EvaluationStartReceipt",
+          "type": "object"
+        },
+        "ExperimentRunProgress": {
+          "description": "Experiment run progress.",
+          "properties": {
+            "canceled": {
+              "description": "Replays canceled.",
+              "title": "Canceled",
+              "type": "integer"
+            },
+            "completed": {
+              "description": "Replays completed.",
+              "title": "Completed",
+              "type": "integer"
+            },
+            "evaluating": {
+              "description": "Replays evaluating.",
+              "title": "Evaluating",
+              "type": "integer"
+            },
+            "failed": {
+              "description": "Replays failed.",
+              "title": "Failed",
+              "type": "integer"
+            },
+            "pending": {
+              "description": "Replays pending.",
+              "title": "Pending",
+              "type": "integer"
+            },
+            "total": {
+              "description": "Total replays in the run.",
+              "title": "Total",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "pending",
+            "evaluating",
+            "completed",
+            "failed",
+            "canceled",
+            "total"
+          ],
+          "title": "ExperimentRunProgress",
+          "type": "object"
+        },
+        "ExperimentRunResponse": {
+          "description": "Experiment run response.",
+          "properties": {
+            "agent_version_id": {
+              "description": "Agent version to replay with.",
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "cohort_version_id": {
+              "description": "Cohort version whose sessions are replayed.",
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the run settled.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed run.",
+              "title": "Error"
+            },
+            "evaluate_baselines": {
+              "description": "Whether baseline sessions are also scored.",
+              "title": "Evaluate Baselines",
+              "type": "boolean"
+            },
+            "experiment_id": {
+              "description": "Experiment this run belongs to.",
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "id": {
+              "description": "Experiment run id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "number": {
+              "description": "Run number within the experiment.",
+              "title": "Number",
+              "type": "integer"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "progress": {
+              "$ref": "#/$defs/ExperimentRunProgress",
+              "description": "Replay counts by status."
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the run started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/ExperimentRunStatus",
+              "description": "Run status."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "experiment_id",
+            "number",
+            "status",
+            "cohort_version_id",
+            "agent_version_id",
+            "evaluate_baselines",
+            "progress"
+          ],
+          "title": "ExperimentRunResponse",
+          "type": "object"
+        },
+        "ExperimentRunStartReceipt": {
+          "additionalProperties": false,
+          "description": "Immediate receipt for a started experiment run.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "evaluate_baselines": {
+              "title": "Evaluate Baselines",
+              "type": "boolean"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "experiment_run",
+              "title": "Operation",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ExperimentRunResponse"
+            }
+          },
+          "required": [
+            "operation",
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id",
+            "evaluate_baselines",
+            "result"
+          ],
+          "title": "ExperimentRunStartReceipt",
+          "type": "object"
+        },
+        "ExperimentRunStatus": {
+          "description": "Experiment run status.",
+          "enum": [
+            "running",
+            "canceling",
+            "completed",
+            "failed",
+            "canceled"
+          ],
+          "title": "ExperimentRunStatus",
+          "type": "string"
+        },
+        "JobKind": {
+          "description": "Job kind.",
+          "enum": [
+            "session_run",
+            "import",
+            "evaluation",
+            "replay"
+          ],
+          "title": "JobKind",
+          "type": "string"
+        },
+        "JobResponse": {
+          "description": "Job response.",
+          "properties": {
+            "cancel_requested_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time cancellation was requested.",
+              "title": "Cancel Requested At"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job settled.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First counted task failure's error.",
+              "title": "Error"
+            },
+            "id": {
+              "description": "Job id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/JobKind",
+              "description": "Kind of workflow that created the job."
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/JobStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "kind",
+            "status"
+          ],
+          "title": "JobResponse",
+          "type": "object"
+        },
+        "JobStatus": {
+          "description": "Job status.",
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "canceled"
+          ],
+          "title": "JobStatus",
+          "type": "string"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Workflow start result with an authoritative typed receipt.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluationStartReceipt"
+            },
+            {
+              "$ref": "#/$defs/ExperimentRunStartReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "WorkflowStartResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Create or update evaluator parents and blob- or package-backed versions.",
+    "inputSchema": {
+      "$defs": {
+        "EvaluatorCreate": {
+          "additionalProperties": false,
+          "description": "Create an evaluator parent.",
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "operation": {
+              "const": "create",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "name"
+          ],
+          "title": "EvaluatorCreate",
+          "type": "object"
+        },
+        "EvaluatorUpdate": {
+          "additionalProperties": false,
+          "description": "Sparsely update an evaluator parent.",
+          "properties": {
+            "clear_description": {
+              "default": false,
+              "title": "Clear Description",
+              "type": "boolean"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Description"
+            },
+            "evaluator_id": {
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "metadata": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Metadata"
+            },
+            "operation": {
+              "const": "update",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "evaluator_id"
+          ],
+          "title": "EvaluatorUpdate",
+          "type": "object"
+        },
+        "EvaluatorVersionCreate": {
+          "additionalProperties": false,
+          "description": "Create a version from an existing blob or exact package pin.",
+          "properties": {
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Display Version"
+            },
+            "evaluator_id": {
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "create_version",
+              "title": "Operation",
+              "type": "string"
+            },
+            "source": {
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          "required": [
+            "operation",
+            "evaluator_id",
+            "source"
+          ],
+          "title": "EvaluatorVersionCreate",
+          "type": "object"
+        },
+        "EvaluatorVersionUpdate": {
+          "additionalProperties": false,
+          "description": "Set or clear one evaluator version display label.",
+          "properties": {
+            "clear_display_version": {
+              "default": false,
+              "title": "Clear Display Version",
+              "type": "boolean"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Display Version"
+            },
+            "evaluator_id": {
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "update_version",
+              "title": "Operation",
+              "type": "string"
+            },
+            "version": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "evaluator_id",
+            "version"
+          ],
+          "title": "EvaluatorVersionUpdate",
+          "type": "object"
+        },
+        "PackagePluginSource": {
+          "additionalProperties": false,
+          "description": "Package plugin source.",
+          "properties": {
+            "entrypoint": {
+              "description": "Module and attribute, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "requirement": {
+              "description": "Pinned PEP 508 requirement.",
+              "title": "Requirement",
+              "type": "string"
+            },
+            "type": {
+              "const": "package",
+              "default": "package",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "requirement",
+            "entrypoint"
+          ],
+          "title": "PackagePluginSource",
+          "type": "object"
+        },
+        "ScriptPluginSource": {
+          "additionalProperties": false,
+          "description": "Script plugin source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the script.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "entrypoint": {
+              "description": "Attribute in the file.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "type": {
+              "const": "script",
+              "default": "script",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id",
+            "entrypoint"
+          ],
+          "title": "ScriptPluginSource",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "create": "#/$defs/EvaluatorCreate",
+              "create_version": "#/$defs/EvaluatorVersionCreate",
+              "update": "#/$defs/EvaluatorUpdate",
+              "update_version": "#/$defs/EvaluatorVersionUpdate"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EvaluatorCreate"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorUpdate"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorVersionCreate"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorVersionUpdate"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "evaluators_manage_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_evaluators_manage",
+    "outputSchema": {
+      "$defs": {
+        "EvaluatorResponse": {
+          "description": "Evaluator response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Evaluator id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this evaluator.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Evaluator name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "EvaluatorResponse",
+          "type": "object"
+        },
+        "EvaluatorVersionResponse": {
+          "description": "Evaluator version response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "evaluator_id": {
+              "description": "Evaluator this version belongs to.",
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "id": {
+              "description": "Evaluator version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "source": {
+              "description": "Evaluator code to load.",
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "evaluator_id",
+            "version",
+            "display_version",
+            "source"
+          ],
+          "title": "EvaluatorVersionResponse",
+          "type": "object"
+        },
+        "PackagePluginSource": {
+          "additionalProperties": false,
+          "description": "Package plugin source.",
+          "properties": {
+            "entrypoint": {
+              "description": "Module and attribute, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "requirement": {
+              "description": "Pinned PEP 508 requirement.",
+              "title": "Requirement",
+              "type": "string"
+            },
+            "type": {
+              "const": "package",
+              "default": "package",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "requirement",
+            "entrypoint"
+          ],
+          "title": "PackagePluginSource",
+          "type": "object"
+        },
+        "ScriptPluginSource": {
+          "additionalProperties": false,
+          "description": "Script plugin source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the script.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "entrypoint": {
+              "description": "Attribute in the file.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "type": {
+              "const": "script",
+              "default": "script",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id",
+            "entrypoint"
+          ],
+          "title": "ScriptPluginSource",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Evaluator parent or version management result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluatorResponse"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorVersionResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "EvaluatorsManageResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": true,
@@ -6719,7 +10039,7 @@
       "openWorldHint": true,
       "readOnlyHint": false
     },
-    "description": "Delete one exact allowlisted cohort, experiment, version, or run.",
+    "description": "Delete one exact allowlisted registry, review, or run resource.",
     "inputSchema": {
       "$defs": {
         "DeleteRequest": {
@@ -6736,7 +10056,10 @@
                 "cohort",
                 "cohort_version",
                 "experiment",
-                "experiment_run"
+                "experiment_run",
+                "investigation",
+                "annotation",
+                "evaluator"
               ],
               "title": "Kind",
               "type": "string"
@@ -6783,7 +10106,10 @@
                 "cohort",
                 "cohort_version",
                 "experiment",
-                "experiment_run"
+                "experiment_run",
+                "investigation",
+                "annotation",
+                "evaluator"
               ],
               "title": "Kind",
               "type": "string"

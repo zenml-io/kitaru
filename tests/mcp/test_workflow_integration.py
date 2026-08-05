@@ -12,7 +12,7 @@ from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.management import EvaluatorSelection
 from kitaru.mcp.models.workflows import SessionImportRequest
 from kitaru.mcp.settings import MCPSettings
-from kitaru.mcp.tools.experiments import _get_evaluator_configs
+from kitaru.mcp.tools.evaluator_resolution import resolve_evaluator_selections
 from kitaru.mcp.tools.workflows import handle_session_import
 
 
@@ -105,7 +105,7 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:
     evaluator_id = uuid.uuid4()
     client = _EvaluatorClient(evaluator_id)
-    configs = await _get_evaluator_configs(
+    resolved = await resolve_evaluator_selections(
         _get_state(client),
         [
             EvaluatorSelection(
@@ -116,8 +116,7 @@ async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> N
             EvaluatorSelection(evaluator_id=evaluator_id, version=3),
         ],
     )
-    assert configs is not None
-    assert [config.model_dump(mode="json") for config in configs] == [
+    assert [config.model_dump(mode="json") for config in resolved.configs] == [
         {"evaluator": "accuracy", "version": 2, "params": {"threshold": 0.8}},
         {"evaluator": "accuracy", "version": 3, "params": {}},
     ]
@@ -130,7 +129,7 @@ async def test_evaluator_version_must_belong_to_selected_parent() -> None:
     client = _EvaluatorClient(evaluator_id)
     client.returned_parent_id = uuid.uuid4()
     with pytest.raises(MCPToolError, match="different parent or version") as raised:
-        await _get_evaluator_configs(
+        await resolve_evaluator_selections(
             _get_state(client),
             [EvaluatorSelection(evaluator_id=evaluator_id, version=2)],
         )

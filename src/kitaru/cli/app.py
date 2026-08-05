@@ -31,21 +31,24 @@ from cyclopts import App, Parameter
 from cyclopts.exceptions import CycloptsError
 from pydantic import ValidationError as PydanticValidationError
 
+from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskKind
-from kitaru.cli import auth as auth_commands
 from kitaru.cli import (
+    annotations,
     cohorts,
     diagnostics,
     evaluations,
     experiment_runs,
     experiments,
+    investigations,
     jobs,
     registration,
     scaffold,
     sessions,
     workers,
 )
+from kitaru.cli import auth as auth_commands
 from kitaru.cli.config import (
     CONFIG_KEYS,
     ResolvedTarget,
@@ -120,6 +123,21 @@ cohort_version_app = App(
     help="Create and manage immutable cohort membership versions.",
     default_parameter=Parameter(negative=False),
 )
+annotation_app = App(
+    name="annotation",
+    help=GROUP_DESCRIPTIONS["annotation"],
+    default_parameter=Parameter(negative=False),
+)
+investigation_app = App(
+    name="investigation",
+    help=GROUP_DESCRIPTIONS["investigation"],
+    default_parameter=Parameter(negative=False),
+)
+investigation_session_app = App(
+    name="session",
+    help="List and settle sessions linked to an investigation.",
+    default_parameter=Parameter(negative=False),
+)
 experiment_app = App(
     name="experiment",
     help=GROUP_DESCRIPTIONS["experiment"],
@@ -172,14 +190,17 @@ job_app = App(
 )
 agent_app.command(agent_version_app, name="version")
 cohort_app.command(cohort_version_app, name="version")
+investigation_app.command(investigation_session_app, name="session")
 experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
 app.command(config_app, name="config")
 app.command(agent_app, name="agent")
+app.command(annotation_app, name="annotation")
 app.command(cohort_app, name="cohort")
 app.command(experiment_app, name="experiment")
 app.command(importer_app, name="importer")
+app.command(investigation_app, name="investigation")
 app.command(evaluator_app, name="evaluator")
 app.command(session_app, name="session")
 app.command(evaluation_app, name="evaluation")
@@ -845,7 +866,18 @@ _LIST_PARAMETERS = (
         "--filter", "JSON", "option", False, "Advanced JSON filter expression."
     ),
 )
+_CURSOR_PARAMETERS = _LIST_PARAMETERS[:2]
 _VERSION_LIST_PARAMETERS = _LIST_PARAMETERS[:-1]
+_INVESTIGATION_SESSION_STATUS_PARAMETERS = (
+    ParameterSpec("INVESTIGATION", "UUID", "argument", True, "Investigation ID."),
+    ParameterSpec(
+        "SESSION",
+        "UUID",
+        "argument",
+        True,
+        "Session ID linked to the investigation.",
+    ),
+)
 _WAIT_PARAMETERS = (
     ParameterSpec(
         "--wait", "boolean", "option", False, "Wait for remote work settlement."
@@ -1588,6 +1620,425 @@ async def cohort_version_delete(
     """Delete one exact immutable cohort version."""
     async with _open_asset_client() as client:
         return await cohorts.delete_cohort_version(client, version, force=force)
+
+
+@_register(
+    investigation_app,
+    _spec(
+        ("investigation", "create"),
+        "Create an investigation with ordered questions and linked sessions.",
+        parameters=(
+            ParameterSpec(
+                "NAME", "string", "argument", True, "New investigation name."
+            ),
+            ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
+                "--description", "string", "option", False, "Curator rationale."
+            ),
+            ParameterSpec(
+                "--question",
+                "KEY=QUESTION[]",
+                "option",
+                False,
+                "Ordered investigation question; repeat for each question.",
+            ),
+            ParameterSpec(
+                "--session",
+                "UUID[]",
+                "option",
+                False,
+                "Ordered session UUID; repeat for each linked session.",
+            ),
+            ParameterSpec(
+                "--session-view",
+                "SESSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Curated view for a session selected with --session.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def investigation_create(
+    name: str,
+    /,
+    *,
+    agent: str,
+    description: str | None = None,
+    question: list[str] | None = None,
+    session: list[uuid.UUID] | None = None,
+    session_view: list[str] | None = None,
+) -> CommandResult:
+    """Create an investigation with its questions and linked sessions."""
+    async with _open_asset_client() as client:
+        return await investigations.create_investigation(
+            client,
+            name,
+            agent=agent,
+            description=description,
+            questions=question or [],
+            session_ids=session or [],
+            session_views=session_view or [],
+        )
+
+
+@_register(
+    investigation_app,
+    _spec(
+        ("investigation", "list"),
+        "List investigations.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def investigation_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of investigations."""
+    async with _open_asset_client() as client:
+        return await investigations.list_investigations(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    investigation_app,
+    _spec(
+        ("investigation", "get"),
+        "Get an investigation by exact UUID.",
+        parameters=(
+            ParameterSpec(
+                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
+            ),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
+    """Get one investigation by UUID."""
+    async with _open_asset_client() as client:
+        return await investigations.get_investigation(client, investigation)
+
+
+@_register(
+    investigation_app,
+    _spec(
+        ("investigation", "update"),
+        "Update selected investigation fields.",
+        parameters=(
+            ParameterSpec(
+                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
+            ),
+            ParameterSpec("--name", "string", "option", False, "New name."),
+            ParameterSpec(
+                "--description", "string", "option", False, "New curator rationale."
+            ),
+            ParameterSpec(
+                "--clear-description",
+                "boolean",
+                "option",
+                False,
+                "Clear the curator rationale.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def investigation_update(
+    investigation: uuid.UUID,
+    /,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    clear_description: bool = False,
+) -> CommandResult:
+    """Update selected fields on one investigation."""
+    async with _open_asset_client() as client:
+        return await investigations.update_investigation(
+            client,
+            investigation,
+            name=name,
+            description=description,
+            clear_description=clear_description,
+        )
+
+
+@_register(
+    investigation_app,
+    _spec(
+        ("investigation", "delete"),
+        "Delete an investigation, its linked sessions, and its answers.",
+        parameters=(
+            ParameterSpec(
+                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
+            ),
+            ParameterSpec(
+                "--force",
+                "boolean",
+                "option",
+                False,
+                "Confirm cascading remote deletion.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def investigation_delete(
+    investigation: uuid.UUID, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one investigation and its linked review state."""
+    async with _open_asset_client() as client:
+        return await investigations.delete_investigation(
+            client, investigation, force=force
+        )
+
+
+@_register(
+    investigation_session_app,
+    _spec(
+        ("investigation", "session", "list"),
+        "List sessions linked to an investigation in presentation order.",
+        parameters=(
+            ParameterSpec(
+                "INVESTIGATION", "UUID", "argument", True, "Investigation ID."
+            ),
+            *_CURSOR_PARAMETERS,
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def investigation_session_list(
+    investigation: uuid.UUID,
+    /,
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+) -> CommandResult:
+    """List one ordered page of an investigation's linked sessions."""
+    async with _open_asset_client() as client:
+        return await investigations.list_investigation_sessions(
+            client, investigation, size=size, cursor=cursor
+        )
+
+
+@_register(
+    investigation_session_app,
+    _spec(
+        ("investigation", "session", "complete"),
+        "Mark a pending investigation session completed.",
+        parameters=_INVESTIGATION_SESSION_STATUS_PARAMETERS,
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="server_rejects_settled_sessions",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def investigation_session_complete(
+    investigation: uuid.UUID, session: uuid.UUID, /
+) -> CommandResult:
+    """Mark one pending investigation session completed."""
+    async with _open_asset_client() as client:
+        return await investigations.update_investigation_session_status(
+            client,
+            investigation,
+            session,
+            status=InvestigationSessionStatus.COMPLETED,
+        )
+
+
+@_register(
+    investigation_session_app,
+    _spec(
+        ("investigation", "session", "skip"),
+        "Mark a pending investigation session skipped.",
+        parameters=_INVESTIGATION_SESSION_STATUS_PARAMETERS,
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="server_rejects_settled_sessions",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def investigation_session_skip(
+    investigation: uuid.UUID, session: uuid.UUID, /
+) -> CommandResult:
+    """Mark one pending investigation session skipped."""
+    async with _open_asset_client() as client:
+        return await investigations.update_investigation_session_status(
+            client,
+            investigation,
+            session,
+            status=InvestigationSessionStatus.SKIPPED,
+        )
+
+
+@_register(
+    annotation_app,
+    _spec(
+        ("annotation", "create"),
+        "Create a manual annotation or answer an investigation question.",
+        parameters=(
+            ParameterSpec(
+                "--session",
+                "UUID",
+                "option",
+                False,
+                "Session ID for a manual annotation.",
+            ),
+            ParameterSpec(
+                "--investigation-session",
+                "UUID",
+                "option",
+                False,
+                "Investigation-session ID for an answer.",
+            ),
+            ParameterSpec(
+                "--question-key",
+                "string",
+                "option",
+                False,
+                "Question key for an investigation answer.",
+            ),
+            ParameterSpec(
+                "--selector",
+                "JSON object",
+                "option",
+                False,
+                "Optional node, payload part, JSON Pointer, or span selector.",
+            ),
+            ParameterSpec("--value", "JSON value", "option", True, "Annotation value."),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="manual_non_idempotent_answer_replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def annotation_create(
+    *,
+    value: str,
+    session: uuid.UUID | None = None,
+    investigation_session: uuid.UUID | None = None,
+    question_key: str | None = None,
+    selector: str | None = None,
+) -> CommandResult:
+    """Create one manual annotation or investigation answer."""
+    async with _open_asset_client() as client:
+        return await annotations.create_annotation(
+            client,
+            value=value,
+            session_id=session,
+            investigation_session_id=investigation_session,
+            question_key=question_key,
+            selector=selector,
+        )
+
+
+@_register(
+    annotation_app,
+    _spec(
+        ("annotation", "list"),
+        "List annotations.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def annotation_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of annotations."""
+    async with _open_asset_client() as client:
+        return await annotations.list_annotations(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    annotation_app,
+    _spec(
+        ("annotation", "get"),
+        "Get an annotation by exact UUID.",
+        parameters=(
+            ParameterSpec("ANNOTATION", "UUID", "argument", True, "Annotation ID."),
+        ),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def annotation_get(annotation: uuid.UUID, /) -> CommandResult:
+    """Get one annotation by UUID."""
+    async with _open_asset_client() as client:
+        return await annotations.get_annotation(client, annotation)
+
+
+@_register(
+    annotation_app,
+    _spec(
+        ("annotation", "update"),
+        "Replace an annotation's JSON value.",
+        parameters=(
+            ParameterSpec("ANNOTATION", "UUID", "argument", True, "Annotation ID."),
+            ParameterSpec(
+                "--value", "JSON value", "option", True, "Replacement value."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def annotation_update(annotation: uuid.UUID, /, *, value: str) -> CommandResult:
+    """Replace one annotation's value."""
+    async with _open_asset_client() as client:
+        return await annotations.update_annotation(client, annotation, value=value)
+
+
+@_register(
+    annotation_app,
+    _spec(
+        ("annotation", "delete"),
+        "Delete an annotation.",
+        parameters=(
+            ParameterSpec("ANNOTATION", "UUID", "argument", True, "Annotation ID."),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def annotation_delete(
+    annotation: uuid.UUID, /, *, force: bool = False
+) -> CommandResult:
+    """Delete one annotation by UUID."""
+    async with _open_asset_client() as client:
+        return await annotations.delete_annotation(client, annotation, force=force)
 
 
 @_register(
