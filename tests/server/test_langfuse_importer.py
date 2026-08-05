@@ -20,15 +20,10 @@ from typing import Any
 import pytest
 
 import importers.langfuse as langfuse_module
-from importers.langfuse import LangfuseJSONLImporter, parse
-from kitaru.importers import (
-    ImportContext,
-    InvalidImport,
-    NodeStatus,
-    NodeType,
-    SessionStatus,
-)
-from kitaru.task.importer import ImportFailure, ParsedSession
+from importers.langfuse import InvalidImport, LangfuseJSONLImporter, parse
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:
@@ -36,9 +31,36 @@ def jsonl(*records: dict[str, Any]) -> bytes:
     return b"\n".join(json.dumps(record).encode() for record in records)
 
 
-def context(source_instance: str | None = None) -> ImportContext:
-    """Build an import context."""
-    return ImportContext(source_instance=source_instance)
+def params(source_instance: str | None = None) -> dict[str, Any]:
+    """Build importer parameters."""
+    return {"source_instance": source_instance} if source_instance else {}
+
+
+def sessions(
+    content: bytes, importer_params: dict[str, Any] | None = None
+) -> list[ParsedSession]:
+    """Return successfully parsed sessions."""
+    return [
+        item
+        for item in LangfuseJSONLImporter().parse(content, importer_params or {})
+        if isinstance(item, ParsedSession)
+    ]
+
+
+def failures(
+    content: bytes, importer_params: dict[str, Any] | None = None
+) -> list[ImportFailure]:
+    """Return isolated import failures."""
+    return [
+        item
+        for item in LangfuseJSONLImporter().parse(content, importer_params or {})
+        if isinstance(item, ImportFailure)
+    ]
+
+
+def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
+    """Flatten parsed nodes depth-first for assertions."""
+    return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
 def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,7 +68,7 @@ def test_rejects_oversized_upload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(langfuse_module, "MAX_UPLOAD_BYTES", 3)
 
     with pytest.raises(InvalidImport, match="50 MiB upload limit"):
-        LangfuseJSONLImporter().parse(b"1234", context())
+        LangfuseJSONLImporter().parse(b"1234", {})
 
 
 def test_unified_parse_returns_prefixed_external_id() -> None:
@@ -117,10 +139,10 @@ def test_imports_pretty_printed_json_array() -> None:
         indent=2,
     ).encode()
 
-    batch = LangfuseJSONLImporter().parse(content, context())
+    parsed = sessions(content)
 
-    assert len(batch.sessions) == 1
-    assert batch.sessions[0].source_id == "conversation-1"
+    assert len(parsed) == 1
+    assert parsed[0].metadata["langfuse.session_id"] == "conversation-1"
 
 
 def test_unified_parse_rejects_parent_cycle() -> None:
@@ -142,7 +164,7 @@ def test_unified_parse_rejects_parent_cycle() -> None:
 
 def test_imports_multiturn_observations() -> None:
     """Group source traces into a multi-turn Kitaru session."""
-    batch = LangfuseJSONLImporter().parse(
+    parsed = LangfuseJSONLImporter().parse(
         jsonl(
             observation(
                 "root-1",
@@ -178,14 +200,13 @@ def test_imports_multiturn_observations() -> None:
                 start_time="2026-07-24T10:01:00.100000Z",
             ),
         ),
-        context(),
+        {},
     )
 
-    assert batch.errors == []
-    assert len(batch.sessions) == 1
-    session = batch.sessions[0]
-    assert session.source_id == "conversation-1"
-    assert session.source_instance == "project-1"
+    assert len(parsed) == 1
+    session = parsed[0]
+    assert isinstance(session, ParsedSession)
+    assert session.external_id == "project-1:conversation-1"
     assert session.status is SessionStatus.COMPLETED
     assert session.inputs == {
         "schema_version": 1,
@@ -202,28 +223,29 @@ def test_imports_multiturn_observations() -> None:
             },
         ],
     }
-    assert [turn.trace_id for turn in session.turns] == ["trace-1", "trace-2"]
-    nodes = {node.source_id: node for node in session.nodes}
+    assert session.metadata["langfuse.trace_ids"] == ["trace-1", "trace-2"]
+    nodes = {node.external_id: node for node in flatten(session.nodes)}
     assert nodes["trace-1:root-1"].node_type is NodeType.SPAN
     assert nodes["trace-1:generation-1"].node_type is NodeType.LLM_CALL
-    assert nodes["trace-1:generation-1"].parent_source_id == "trace-1:root-1"
+    assert nodes["trace-1:generation-1"] in nodes["trace-1:root-1"].children
     assert nodes["trace-2:root-2"].node_type is NodeType.SPAN
     assert nodes["trace-2:tool-1"].node_type is NodeType.TOOL_CALL
     assert nodes["trace-2:tool-1"].tool_name == "weather"
-    assert session.readiness.level == "ready"
-    assert session.readiness.tool_call_count == 1
-    assert session.readiness.replayable_tool_call_count == 1
+    readiness = session.metadata["replay_readiness"]
+    assert isinstance(readiness, dict)
+    assert readiness["level"] == "ready"
+    assert readiness["tool_call_count"] == 1
+    assert readiness["replayable_tool_call_count"] == 1
 
 
 def test_trace_without_session_id_becomes_one_turn_session() -> None:
     """Use a trace id when Langfuse has no session id."""
-    batch = LangfuseJSONLImporter().parse(
+    parsed = sessions(
         jsonl(observation("root", "trace-1", session_id=None, input_="hello")),
-        context(),
     )
 
-    assert batch.sessions[0].source_id == "trace-1"
-    assert len(batch.sessions[0].turns) == 1
+    assert parsed[0].metadata["langfuse.session_id"] == "trace-1"
+    assert parsed[0].metadata["source_trace_count"] == 1
 
 
 def test_imports_nested_trace_rows() -> None:
@@ -250,19 +272,19 @@ def test_imports_nested_trace_rows() -> None:
         ],
     }
 
-    batch = LangfuseJSONLImporter().parse(jsonl(trace), context())
+    session = sessions(jsonl(trace))[0]
 
-    assert batch.sessions[0].name == "support turn"
-    assert batch.sessions[0].turns[0].inputs == {"message": "hello"}
-    assert batch.sessions[0].outputs == {"answer": "hi"}
-    assert batch.sessions[0].source_metadata["langfuse.environments"] == ["production"]
-    assert batch.sessions[0].source_metadata["langfuse.releases"] == ["release-1"]
-    assert batch.sessions[0].source_metadata["langfuse.versions"] == ["version-1"]
+    assert session.name == "support turn"
+    assert session.inputs["turns"][0]["inputs"] == {"message": "hello"}
+    assert session.outputs == {"answer": "hi"}
+    assert session.metadata["langfuse.environments"] == ["production"]
+    assert session.metadata["langfuse.releases"] == ["release-1"]
+    assert session.metadata["langfuse.versions"] == ["version-1"]
 
 
 def test_imports_legacy_ingestion_events() -> None:
     """Detect ingestion-event JSONL and merge create and update events."""
-    batch = LangfuseJSONLImporter().parse(
+    parsed = sessions(
         jsonl(
             {
                 "type": "trace-create",
@@ -290,55 +312,53 @@ def test_imports_legacy_ingestion_events() -> None:
                     "output": {"answer": "hi"},
                 },
             },
-        ),
-        context(),
+        )
     )
 
-    assert batch.errors == []
-    assert batch.sessions[0].nodes[0].outputs == {"answer": "hi"}
+    assert parsed[0].nodes[0].outputs == {"answer": "hi"}
 
 
 def test_reports_one_invalid_group_without_losing_valid_sessions() -> None:
     """Isolate semantic errors by grouped source session."""
-    batch = LangfuseJSONLImporter().parse(
-        jsonl(
-            observation(
-                "valid-root",
-                "valid-trace",
-                session_id="valid-session",
-                input_="hello",
-            ),
-            observation(
-                "invalid-root",
-                "invalid-trace",
-                session_id="invalid-session",
-                project_id=None,
-                input_="hello",
-            ),
+    content = jsonl(
+        observation(
+            "valid-root",
+            "valid-trace",
+            session_id="valid-session",
+            input_="hello",
         ),
-        context(),
+        observation(
+            "invalid-root",
+            "invalid-trace",
+            session_id="invalid-session",
+            project_id=None,
+            input_="hello",
+        ),
     )
+    parsed_sessions = sessions(content)
+    parsed_failures = failures(content)
 
-    assert [session.source_id for session in batch.sessions] == ["valid-session"]
-    assert len(batch.errors) == 1
-    assert batch.errors[0].source_id == "invalid-session"
-    assert "provide source_instance" in batch.errors[0].message
+    assert [session.metadata["langfuse.session_id"] for session in parsed_sessions] == [
+        "valid-session"
+    ]
+    assert len(parsed_failures) == 1
+    assert parsed_failures[0].external_id == "invalid-session"
+    assert "provide source_instance" in parsed_failures[0].error
 
 
 def test_source_instance_selection_handles_exports_without_project_ids() -> None:
     """Apply the explicit source instance when the export omits a project id."""
-    batch = LangfuseJSONLImporter().parse(
+    parsed = sessions(
         jsonl(observation("root", "trace-1", project_id=None, input_="hello")),
-        context(source_instance="selected-project"),
+        params(source_instance="selected-project"),
     )
 
-    assert batch.errors == []
-    assert batch.sessions[0].source_instance == "selected-project"
+    assert parsed[0].external_id == "selected-project:conversation-1"
 
 
 def test_status_message_does_not_imply_failure() -> None:
     """Treat a status message as diagnostic unless its level failed."""
-    batch = LangfuseJSONLImporter().parse(
+    parsed = sessions(
         jsonl(
             observation(
                 "root",
@@ -347,12 +367,11 @@ def test_status_message_does_not_imply_failure() -> None:
                 level="WARNING",
                 statusMessage="model retried once",
             )
-        ),
-        context(),
+        )
     )
 
-    assert batch.sessions[0].status is SessionStatus.COMPLETED
-    assert batch.sessions[0].nodes[0].status is NodeStatus.COMPLETED
+    assert parsed[0].status is SessionStatus.COMPLETED
+    assert parsed[0].nodes[0].status is NodeStatus.COMPLETED
 
 
 def test_exact_normalized_content_has_stable_digest() -> None:
@@ -366,10 +385,15 @@ def test_exact_normalized_content_has_stable_digest() -> None:
     )
     importer = LangfuseJSONLImporter()
 
-    forward = importer.parse(jsonl(first, child), context()).sessions[0]
-    reversed_ = importer.parse(jsonl(child, first), context()).sessions[0]
+    forward = importer.parse(jsonl(first, child), {})[0]
+    reversed_ = importer.parse(jsonl(child, first), {})[0]
 
-    assert forward.content_digest == reversed_.content_digest
+    assert isinstance(forward, ParsedSession)
+    assert isinstance(reversed_, ParsedSession)
+    assert (
+        forward.metadata["source_content_digest"]
+        == reversed_.metadata["source_content_digest"]
+    )
 
 
 def test_rejects_mixed_row_shapes() -> None:
@@ -378,12 +402,12 @@ def test_rejects_mixed_row_shapes() -> None:
     enriched = observation("root", "trace-2")
 
     with pytest.raises(InvalidImport, match="mixes multiple"):
-        LangfuseJSONLImporter().parse(jsonl(nested_trace, enriched), context())
+        LangfuseJSONLImporter().parse(jsonl(nested_trace, enriched), {})
 
 
 def test_maps_openai_agents_function_span_as_tool() -> None:
     """Recognize the function span shape emitted by OpenAI Agents."""
-    batch = LangfuseJSONLImporter().parse(
+    session = sessions(
         jsonl(
             observation(
                 "root",
@@ -411,16 +435,15 @@ def test_maps_openai_agents_function_span_as_tool() -> None:
                     },
                 },
             ),
-        ),
-        context(),
-    )
+        )
+    )[0]
 
-    nodes = {node.source_id: node for node in batch.sessions[0].nodes}
+    nodes = {node.external_id: node for node in flatten(session.nodes)}
     tool = nodes["trace-1:function"]
     assert tool.node_type is NodeType.TOOL_CALL
     assert tool.tool_name == "get_weather"
     assert tool.provider == "openai"
-    assert tool.source_metadata == {
+    assert tool.metadata == {
         "langfuse.gen_ai.system": "openai",
         "langfuse.name": "get_weather",
         "langfuse.service.name": "weather-agent",
@@ -429,7 +452,7 @@ def test_maps_openai_agents_function_span_as_tool() -> None:
 
 def test_maps_model_provider_cost_and_bounded_metadata() -> None:
     """Map model evidence without retaining raw provider payloads."""
-    batch = LangfuseJSONLImporter().parse(
+    session = sessions(
         jsonl(
             observation(
                 "generation",
@@ -449,22 +472,21 @@ def test_maps_model_provider_cost_and_bounded_metadata() -> None:
                     "response": {"encrypted_content": "do-not-retain"},
                 },
             )
-        ),
-        context(),
-    )
+        )
+    )[0]
 
-    node = batch.sessions[0].nodes[0]
+    node = session.nodes[0]
     assert node.requested_model == "requested-model"
     assert node.model == "resolved-model"
     assert node.provider == "openai"
     assert node.cost == Decimal("0.0125")
-    assert "response" not in node.source_metadata
-    assert node.source_metadata["langfuse.gen_ai.provider.name"] == "openai"
+    assert "response" not in node.metadata
+    assert node.metadata["langfuse.gen_ai.provider.name"] == "openai"
 
 
 def test_uses_model_when_model_id_is_null() -> None:
     """Use the exported model name when modelId is present but null."""
-    batch = LangfuseJSONLImporter().parse(
+    session = sessions(
         jsonl(
             observation(
                 "generation",
@@ -475,43 +497,39 @@ def test_uses_model_when_model_id_is_null() -> None:
                 model="fixture-model",
                 modelId=None,
             )
-        ),
-        context(),
-    )
+        )
+    )[0]
 
-    node = batch.sessions[0].nodes[0]
+    node = session.nodes[0]
     assert node.requested_model == "fixture-model"
     assert node.model == "fixture-model"
 
 
 def test_recovered_tool_failure_does_not_fail_session() -> None:
     """Use the root observation outcome after a retry succeeds."""
-    session = (
-        LangfuseJSONLImporter()
-        .parse(
-            jsonl(
-                observation(
-                    "root",
-                    "trace-1",
-                    input_={"message": "invoice"},
-                    output={"answer": "recovered"},
-                ),
-                observation(
-                    "tool",
-                    "trace-1",
-                    parent_id="root",
-                    observation_type="TOOL",
-                    input_={"invoice": "one"},
-                    output=None,
-                    level="ERROR",
-                    statusMessage="temporary failure",
-                ),
+    session = sessions(
+        jsonl(
+            observation(
+                "root",
+                "trace-1",
+                input_={"message": "invoice"},
+                output={"answer": "recovered"},
             ),
-            context(),
+            observation(
+                "tool",
+                "trace-1",
+                parent_id="root",
+                observation_type="TOOL",
+                input_={"invoice": "one"},
+                output=None,
+                level="ERROR",
+                statusMessage="temporary failure",
+            ),
         )
-        .sessions[0]
-    )
+    )[0]
 
     assert session.status is SessionStatus.COMPLETED
     assert session.error is None
-    assert session.readiness.level == "partial"
+    readiness = session.metadata["replay_readiness"]
+    assert isinstance(readiness, dict)
+    assert readiness["level"] == "partial"

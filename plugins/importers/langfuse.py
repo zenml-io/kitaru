@@ -21,28 +21,16 @@ import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from kitaru.api_models.v1.imports import ImportFailure
-from kitaru.importers import (
-    ImportContext,
-    InvalidImport,
-    NodeStatus,
-    NodeType,
-    NormalizationError,
-    NormalizedImport,
-    NormalizedNode,
-    NormalizedSession,
-    NormalizedTurn,
-    ReplayReadiness,
-    SessionStatus,
-    TokenUsage,
-    parsed_items,
-)
-from kitaru.task.importer import ParsedSession
+from kitaru.api_models.v1.session import SessionStatus, TokenUsage
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.task.importer import ParsedNode, ParsedSession
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _TRACE_SHAPE = "trace"
@@ -75,6 +63,21 @@ _TRACE_CONTEXT_FIELDS = {
     "traceTags": "tags",
     "traceVersion": "version",
 }
+
+
+class InvalidImport(ValueError):
+    """Raised when a Langfuse payload cannot be parsed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Turn:
+    """One source trace within a multi-turn session."""
+
+    trace_id: str
+    inputs: Any = None
+    outputs: Any = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
 
 
 def _first(record: dict[str, Any], *names: str) -> Any:
@@ -376,7 +379,7 @@ def _node_status(record: dict[str, Any]) -> NodeStatus:
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     """Map Langfuse usage data."""
     usage = _dict(_first(record, "usageDetails", "usage_details"))
-    return TokenUsage.from_counts(
+    counts = (
         _integer(
             _first(record, "inputUsage", "input_usage")
             or usage.get("input")
@@ -394,6 +397,14 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
         ),
         _integer(usage.get("reasoning_tokens")),
     )
+    if all(value is None for value in counts):
+        return None
+    return TokenUsage(
+        input_tokens=counts[0],
+        output_tokens=counts[1],
+        cached_input_tokens=counts[2],
+        reasoning_tokens=counts[3],
+    )
 
 
 def _canonical_digest(value: Any) -> str:
@@ -404,18 +415,60 @@ def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-class LangfuseJSONLImporter:
-    """Normalize Langfuse trace, observation, and ingestion-event records."""
+def _build_node_tree(
+    nodes_with_parents: list[tuple[ParsedNode, str | None]],
+) -> list[ParsedNode]:
+    """Build and validate the parsed-node tree."""
+    external_ids = [node.external_id for node, _ in nodes_with_parents]
+    if any(external_id is None for external_id in external_ids):
+        raise InvalidImport("The parsed node graph contains a missing external id")
+    if len(external_ids) != len(set(external_ids)):
+        raise InvalidImport("The parsed node graph contains duplicate external ids")
 
-    def parse(self, content: bytes, context: ImportContext) -> NormalizedImport:
+    converted = {
+        node.external_id: node
+        for node, _ in nodes_with_parents
+        if node.external_id is not None
+    }
+    parents = {
+        node.external_id: parent_external_id
+        for node, parent_external_id in nodes_with_parents
+        if node.external_id is not None and parent_external_id in converted
+    }
+    for external_id in external_ids:
+        seen: set[str] = set()
+        current = external_id
+        while current in parents:
+            if current in seen:
+                raise InvalidImport("The parsed node graph contains a parent cycle")
+            seen.add(current)
+            current = parents[current]
+
+    roots: list[ParsedNode] = []
+    for node, parent_external_id in nodes_with_parents:
+        if parent_external_id in converted:
+            converted[parent_external_id].children.append(node)
+        else:
+            roots.append(node)
+    if nodes_with_parents and not roots:
+        raise InvalidImport("The parsed node graph contains no root node")
+    return roots
+
+
+class LangfuseJSONLImporter:
+    """Parse Langfuse trace, observation, and ingestion-event records."""
+
+    def parse(
+        self, content: bytes, params: dict[str, Any]
+    ) -> list[ParsedSession | ImportFailure]:
         """Parse a Langfuse JSON or JSONL upload.
 
         Args:
             content: Complete uploaded JSON or JSONL.
-            context: User selections.
+            params: User selections passed to the importer.
 
         Returns:
-            Multi-turn sessions and isolated normalization errors.
+            Parsed sessions and isolated import failures.
         """
         records = _parse_records(content)
         shape = _detect_shape(records[0])
@@ -448,22 +501,27 @@ class LangfuseJSONLImporter:
             session_id = next(iter(session_ids), trace_id)
             session_traces[session_id].append((trace_id, observations))
 
-        sessions: list[NormalizedSession] = []
-        errors: list[NormalizationError] = []
+        items: list[ParsedSession | ImportFailure] = []
         for source_id, traces in sorted(session_traces.items()):
             try:
-                sessions.append(self._normalize_session(source_id, traces, context))
+                items.append(self._parse_session(source_id, traces, params))
             except InvalidImport as exc:
-                errors.append(NormalizationError(source_id=source_id, message=str(exc)))
-        return NormalizedImport(sessions=sessions, errors=errors)
+                items.append(
+                    ImportFailure(
+                        line=len(items) + 1,
+                        external_id=source_id,
+                        error=str(exc),
+                    )
+                )
+        return items
 
-    def _normalize_session(
+    def _parse_session(
         self,
         source_id: str,
         traces: list[tuple[str, list[dict[str, Any]]]],
-        context: ImportContext,
-    ) -> NormalizedSession:
-        """Normalize one grouped Langfuse session."""
+        params: dict[str, Any],
+    ) -> ParsedSession:
+        """Parse one grouped Langfuse session."""
         project_ids = {
             str(value)
             for _, observations in traces
@@ -474,9 +532,13 @@ class LangfuseJSONLImporter:
             raise InvalidImport(
                 f"Session '{source_id}' contains conflicting Langfuse project ids"
             )
-        source_instance = context.source_instance or next(iter(project_ids), None)
-        if not source_instance and context.filename:
-            source_instance = Path(context.filename).stem.strip() or None
+        selected_source = params.get("source_instance")
+        filename = params.get("filename")
+        source_instance = (
+            str(selected_source) if selected_source not in (None, "") else None
+        ) or next(iter(project_ids), None)
+        if not source_instance and isinstance(filename, str):
+            source_instance = Path(filename).stem.strip() or None
         if not source_instance:
             raise InvalidImport(
                 f"Session '{source_id}' has no project id; provide source_instance"
@@ -484,7 +546,7 @@ class LangfuseJSONLImporter:
 
         warnings: list[str] = []
         raw_nodes: list[tuple[str, str | None, dict[str, Any]]] = []
-        turns: list[NormalizedTurn] = []
+        turns: list[_Turn] = []
         trace_names: list[str] = []
         root_by_trace: dict[str, dict[str, Any]] = {}
         for trace_id, observations in traces:
@@ -533,7 +595,7 @@ class LangfuseJSONLImporter:
                 default=None,
             )
             turns.append(
-                NormalizedTurn(
+                _Turn(
                     trace_id=trace_id,
                     inputs=turn_input,
                     outputs=turn_output,
@@ -576,73 +638,77 @@ class LangfuseJSONLImporter:
                 item[0],
             )
         )
-        nodes: list[NormalizedNode] = []
+        nodes_with_parents: list[tuple[ParsedNode, str | None]] = []
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
             status = _node_status(record)
-            nodes.append(
-                NormalizedNode(
-                    source_id=source_node_id,
-                    parent_source_id=parent_source_id,
-                    trace_id=str(_first(record, "traceId", "trace_id")),
-                    node_type=node_type,
-                    name=str(record.get("name") or record.get("type") or "span"),
-                    status=status,
-                    error=(
-                        str(_first(record, "statusMessage", "status_message"))
-                        if status is NodeStatus.FAILED
-                        and _first(record, "statusMessage", "status_message")
-                        else None
-                    ),
-                    started_at=_datetime(_first(record, "startTime", "start_time")),
-                    ended_at=_datetime(_first(record, "endTime", "end_time")),
-                    inputs=_decode_json(record.get("input")),
-                    outputs=_decode_json(record.get("output")),
-                    requested_model=(
-                        _first_nonempty(
-                            record,
-                            "providedModelName",
-                            "provided_model_name",
-                            "model",
+            nodes_with_parents.append(
+                (
+                    ParsedNode(
+                        external_id=source_node_id,
+                        trace_id=str(_first(record, "traceId", "trace_id")),
+                        node_type=node_type,
+                        name=str(record.get("name") or record.get("type") or "span"),
+                        status=status,
+                        error=(
+                            str(_first(record, "statusMessage", "status_message"))
+                            if status is NodeStatus.FAILED
+                            and _first(record, "statusMessage", "status_message")
+                            else None
+                        ),
+                        started_at=_datetime(_first(record, "startTime", "start_time")),
+                        ended_at=_datetime(_first(record, "endTime", "end_time")),
+                        inputs=_decode_json(record.get("input")),
+                        outputs=_decode_json(record.get("output")),
+                        requested_model=(
+                            _first_nonempty(
+                                record,
+                                "providedModelName",
+                                "provided_model_name",
+                                "model",
+                            )
+                            or _metadata_value(record, "gen_ai.request.model")
+                        ),
+                        model=(
+                            _first_nonempty(record, "modelId", "model_id", "model")
+                            or _metadata_value(
+                                record,
+                                "gen_ai.response.model",
+                                "gen_ai.request.model",
+                            )
+                        ),
+                        provider=(
+                            _first_nonempty(record, "modelProvider", "model_provider")
+                            or _metadata_value(
+                                record,
+                                "gen_ai.provider.name",
+                                "gen_ai.system",
+                            )
+                        ),
+                        tokens=_tokens(record),
+                        cost=_decimal(
+                            _first(record, "totalCost", "total_cost")
+                            or _dict(_first(record, "costDetails", "cost_details")).get(
+                                "total"
+                            )
+                        ),
+                        model_params=_dict(
+                            _first(record, "modelParameters", "model_parameters")
                         )
-                        or _metadata_value(record, "gen_ai.request.model")
+                        or None,
+                        tool_name=tool_name,
+                        attributes={
+                            "langfuse.type": record.get("type"),
+                            "langfuse.level": record.get("level"),
+                        },
+                        metadata=_source_metadata(record),
+                        children=[],
                     ),
-                    model=(
-                        _first_nonempty(record, "modelId", "model_id", "model")
-                        or _metadata_value(
-                            record,
-                            "gen_ai.response.model",
-                            "gen_ai.request.model",
-                        )
-                    ),
-                    provider=(
-                        _first_nonempty(record, "modelProvider", "model_provider")
-                        or _metadata_value(
-                            record,
-                            "gen_ai.provider.name",
-                            "gen_ai.system",
-                        )
-                    ),
-                    tokens=_tokens(record),
-                    cost=_decimal(
-                        _first(record, "totalCost", "total_cost")
-                        or _dict(_first(record, "costDetails", "cost_details")).get(
-                            "total"
-                        )
-                    ),
-                    model_params=_dict(
-                        _first(record, "modelParameters", "model_parameters")
-                    )
-                    or None,
-                    tool_name=tool_name,
-                    attributes={
-                        "langfuse.type": record.get("type"),
-                        "langfuse.level": record.get("level"),
-                    },
-                    source_metadata=_source_metadata(record),
+                    parent_source_id,
                 )
             )
 
+        nodes = [node for node, _ in nodes_with_parents]
         graph_complete = not any("missing parent" in warning for warning in warnings)
         tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
         replayable_tools = [
@@ -664,14 +730,14 @@ class LangfuseJSONLImporter:
             readiness_level = "ready"
         else:
             readiness_level = "partial"
-        readiness = ReplayReadiness(
-            level=readiness_level,
-            root_inputs_available=root_inputs_available,
-            graph_complete=graph_complete,
-            tool_call_count=len(tool_nodes),
-            replayable_tool_call_count=len(replayable_tools),
-            reasons=reasons,
-        )
+        readiness = {
+            "level": readiness_level,
+            "root_inputs_available": root_inputs_available,
+            "graph_complete": graph_complete,
+            "tool_call_count": len(tool_nodes),
+            "replayable_tool_call_count": len(replayable_tools),
+            "reasons": reasons,
+        }
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -705,67 +771,73 @@ class LangfuseJSONLImporter:
             "source_id": source_id,
             "source_instance": source_instance,
             "status": session_status,
-            "turns": [turn.model_dump(mode="json") for turn in turns],
-            "nodes": [node.model_dump(mode="json") for node in nodes],
+            "turns": [asdict(turn) for turn in turns],
+            "nodes": [
+                {
+                    "parent_external_id": parent_external_id,
+                    **node.model_dump(mode="json", exclude={"children"}),
+                }
+                for node, parent_external_id in nodes_with_parents
+            ],
         }
-        return NormalizedSession(
-            source_id=source_id,
-            source_instance=source_instance,
+        metadata = {
+            "langfuse.project_id": next(iter(project_ids), None),
+            "langfuse.session_id": source_id,
+            "langfuse.trace_ids": [turn.trace_id for turn in turns],
+            "langfuse.environments": sorted(
+                {
+                    str(value)
+                    for _, observations in traces
+                    for record in observations
+                    if (
+                        value := _first(
+                            record,
+                            "traceEnvironment",
+                            "environment",
+                        )
+                    )
+                }
+            ),
+            "langfuse.releases": sorted(
+                {
+                    str(record["traceRelease"])
+                    for _, observations in traces
+                    for record in observations
+                    if record.get("traceRelease") not in (None, "")
+                }
+            ),
+            "langfuse.versions": sorted(
+                {
+                    str(value)
+                    for _, observations in traces
+                    for record in observations
+                    if (
+                        value := _first(
+                            record,
+                            "traceVersion",
+                            "version",
+                        )
+                    )
+                }
+            ),
+            "source_trace_count": len(turns),
+            "source_completeness": "unknown",
+            "normalization_warnings": warnings,
+            "replay_readiness": readiness,
+            "source_content_digest": _canonical_digest(digest_payload),
+        }
+        return ParsedSession(
+            external_id=f"{source_instance}:{source_id}",
             name=trace_names[-1] if trace_names else None,
             status=session_status,
-            turns=turns,
-            nodes=nodes,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
+            expected=None,
             error=session_error,
             started_at=started_at,
             ended_at=ended_at,
-            source_metadata={
-                "langfuse.project_id": next(iter(project_ids), None),
-                "langfuse.session_id": source_id,
-                "langfuse.trace_ids": [turn.trace_id for turn in turns],
-                "langfuse.environments": sorted(
-                    {
-                        str(value)
-                        for _, observations in traces
-                        for record in observations
-                        if (
-                            value := _first(
-                                record,
-                                "traceEnvironment",
-                                "environment",
-                            )
-                        )
-                    }
-                ),
-                "langfuse.releases": sorted(
-                    {
-                        str(record["traceRelease"])
-                        for _, observations in traces
-                        for record in observations
-                        if record.get("traceRelease") not in (None, "")
-                    }
-                ),
-                "langfuse.versions": sorted(
-                    {
-                        str(value)
-                        for _, observations in traces
-                        for record in observations
-                        if (
-                            value := _first(
-                                record,
-                                "traceVersion",
-                                "version",
-                            )
-                        )
-                    }
-                ),
-                "source_trace_count": len(turns),
-                "source_completeness": "unknown",
-            },
-            warnings=warnings,
-            readiness=readiness,
-            content_digest=_canonical_digest(digest_payload),
+            metadata=metadata,
+            nodes=_build_node_tree(nodes_with_parents),
         )
 
 
@@ -774,8 +846,4 @@ def parse(
     params: dict[str, Any],
 ) -> Iterator[ParsedSession | ImportFailure]:
     """Parse Langfuse JSON or JSONL through the unified importer contract."""
-    context = ImportContext(
-        source_instance=params.get("source_instance"),
-        filename=params.get("filename"),
-    )
-    yield from parsed_items(LangfuseJSONLImporter().parse(content, context))
+    yield from LangfuseJSONLImporter().parse(content, params)
