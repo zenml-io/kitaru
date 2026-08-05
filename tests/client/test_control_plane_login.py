@@ -50,8 +50,6 @@ CONTROL_PLANE_URL = "https://control-plane.example.com"
 SERVER_URL = "http://test"
 CONTROL_PLANE_TOKEN = "cp-token"
 
-pytestmark = pytest.mark.usefixtures("isolated_config_directory")
-
 
 class FakeControlPlaneSession:
     """Control plane session issuing a fixed token without any HTTP."""

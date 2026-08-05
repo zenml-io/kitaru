@@ -77,7 +77,9 @@ HARD_FAILURE_TASK_STATUSES = frozenset(
 
 # Variables the worker owns in the task process environment, rejected in the
 # creator-set extras so no creator can shadow the process contract.
-CONTRACT_ENV_NAMES = frozenset({"KITARU_API_URL", "KITARU_API_KEY", "KITARU_REPLAY_ID"})
+CONTRACT_ENV_NAMES = frozenset(
+    {"KITARU_API_URL", "KITARU_API_KEY", "KITARU_API_TOKEN", "KITARU_REPLAY_ID"}
+)
 CONTRACT_ENV_PREFIX = "KITARU_TASK_"
 
 

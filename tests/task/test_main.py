@@ -49,7 +49,7 @@ def test_main_missing_api_url_exits_one(
     """Exit 1 with the error on stderr when KITARU_API_URL is unset."""
     monkeypatch.setattr("sys.argv", ["kitaru.task", "import"])
     monkeypatch.setenv("KITARU_TASK_ID", "task-123")
-    monkeypatch.setenv("KITARU_TASK_TOKEN", "task-token")
+    monkeypatch.setenv("KITARU_API_TOKEN", "task-token")
     monkeypatch.delenv("KITARU_API_URL", raising=False)
     with pytest.raises(SystemExit) as excinfo:
         main()
@@ -60,15 +60,15 @@ def test_main_missing_api_url_exits_one(
 def test_main_missing_task_token_exits_one(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Exit 1 with the error on stderr when KITARU_TASK_TOKEN is unset."""
+    """Exit 1 with the error on stderr when KITARU_API_TOKEN is unset."""
     monkeypatch.setattr("sys.argv", ["kitaru.task", "import"])
     monkeypatch.setenv("KITARU_TASK_ID", "task-123")
     monkeypatch.setenv("KITARU_API_URL", "http://server.test")
-    monkeypatch.delenv("KITARU_TASK_TOKEN", raising=False)
+    monkeypatch.delenv("KITARU_API_TOKEN", raising=False)
     with pytest.raises(SystemExit) as excinfo:
         main()
     assert excinfo.value.code == 1
-    assert "KITARU_TASK_TOKEN" in capsys.readouterr().err
+    assert "KITARU_API_TOKEN" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("kind", ["evaluate", "import"])
@@ -77,7 +77,7 @@ def test_main_runs_selected_kind(monkeypatch: pytest.MonkeyPatch, kind: str) -> 
     monkeypatch.setattr("sys.argv", ["kitaru.task", kind])
     monkeypatch.setenv("KITARU_TASK_ID", "task-123")
     monkeypatch.setenv("KITARU_API_URL", "http://server.test")
-    monkeypatch.setenv("KITARU_TASK_TOKEN", "task-token")
+    monkeypatch.setenv("KITARU_API_TOKEN", "task-token")
     calls: list[tuple[str, str]] = []
 
     async def fake_run_flow(
@@ -97,7 +97,7 @@ def test_main_reports_flow_failure(
     monkeypatch.setattr("sys.argv", ["kitaru.task", "evaluate"])
     monkeypatch.setenv("KITARU_TASK_ID", "task-123")
     monkeypatch.setenv("KITARU_API_URL", "http://server.test")
-    monkeypatch.setenv("KITARU_TASK_TOKEN", "task-token")
+    monkeypatch.setenv("KITARU_API_TOKEN", "task-token")
 
     async def failing_run_flow(
         kind: str, client: KitaruAPIClient, task_id: str

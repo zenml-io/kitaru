@@ -22,6 +22,13 @@ from kitaru.client.auth import (
     TokenSource,
 )
 from kitaru.client.client import KitaruClient
+from kitaru.client.config import (
+    ClientConfig,
+    get_server_url,
+    load_config,
+    save_config,
+    set_server_url,
+)
 from kitaru.client.control_plane import (
     ControlPlaneLoginError,
     ControlPlaneSession,
@@ -49,6 +56,7 @@ __all__ = [
     "ApiType",
     "AuthenticationError",
     "AuthorizationError",
+    "ClientConfig",
     "ControlPlaneLoginError",
     "ControlPlaneSession",
     "CredentialStore",
@@ -69,4 +77,8 @@ __all__ = [
     "ValidationError",
     "control_plane_login",
     "device_login",
+    "get_server_url",
+    "load_config",
+    "save_config",
+    "set_server_url",
 ]

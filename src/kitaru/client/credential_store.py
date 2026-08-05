@@ -16,13 +16,17 @@
 import json
 import logging
 import os
-import tempfile
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from kitaru.client.config import (
+    get_config_directory,
+    normalize_server_url,
+    write_json_file,
+)
 from kitaru.client.credentials import (
     ApiToken,
     ApiType,
@@ -31,39 +35,12 @@ from kitaru.client.credentials import (
 
 logger = logging.getLogger(__name__)
 
-ENV_CREDENTIALS_PATH = "KITARU_CREDENTIALS_PATH"
 ENV_DISABLE_CREDENTIALS_CACHE = "KITARU_DISABLE_CREDENTIALS_CACHE"
 
 CREDENTIALS_FILE_NAME = "credentials.json"
-# Only the owner may read the file or list the directory holding it.
-FILE_MODE = 0o600
-DIRECTORY_MODE = 0o700
 # Entries with an expired token and no way to refresh it are dropped once the
 # token has been useless for this long.
 EVICTION_AGE = timedelta(days=7)
-
-
-def get_config_directory() -> Path:
-    """Return the directory holding Kitaru client configuration.
-
-    Returns:
-        ``$XDG_CONFIG_HOME/kitaru``, falling back to ``~/.config/kitaru``.
-    """
-    base = os.environ.get("XDG_CONFIG_HOME")
-    root = Path(base) if base else Path.home() / ".config"
-    return root / "kitaru"
-
-
-def normalize_server_url(url: str) -> str:
-    """Normalize a server URL into the key credentials are stored under.
-
-    Args:
-        url: Server base URL.
-
-    Returns:
-        URL without a trailing slash.
-    """
-    return url.rstrip("/")
 
 
 class CredentialStore:
@@ -77,7 +54,7 @@ class CredentialStore:
             persist: Whether to read and write the file. Defaults to reading
                 ``KITARU_DISABLE_CREDENTIALS_CACHE``.
         """
-        self._path = path or _get_default_path()
+        self._path = path or get_config_directory() / CREDENTIALS_FILE_NAME
         if persist is None:
             persist = os.environ.get(ENV_DISABLE_CREDENTIALS_CACHE, "").lower() not in (
                 "1",
@@ -291,20 +268,7 @@ class CredentialStore:
             for key, entry in self._credentials.items()
             if _should_persist(entry)
         }
-        self._path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
-        # A partial write must never replace a good file, and the secrets must
-        # never be readable between creating the file and setting its mode.
-        handle, temporary = tempfile.mkstemp(
-            dir=self._path.parent, prefix=f".{self._path.name}."
-        )
-        try:
-            with os.fdopen(handle, "w", encoding="utf-8") as file:
-                json.dump(payload, file, indent=2, sort_keys=True)
-            os.chmod(temporary, FILE_MODE)
-            os.replace(temporary, self._path)
-        except OSError:
-            Path(temporary).unlink(missing_ok=True)
-            raise
+        write_json_file(self._path, payload)
         self._loaded_at = self._path.stat().st_mtime
 
 
@@ -326,16 +290,3 @@ def _should_persist(credentials: ServerCredentials) -> bool:
     if token.expires_at is None:
         return True
     return datetime.now(UTC) - token.expires_at < EVICTION_AGE
-
-
-def _get_default_path() -> Path:
-    """Return the credentials file location.
-
-    Returns:
-        ``KITARU_CREDENTIALS_PATH`` when set, otherwise the file in the Kitaru
-        config directory.
-    """
-    override = os.environ.get(ENV_CREDENTIALS_PATH)
-    if override:
-        return Path(override)
-    return get_config_directory() / CREDENTIALS_FILE_NAME
