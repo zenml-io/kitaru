@@ -19,9 +19,11 @@ import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
@@ -31,7 +33,10 @@ from kitaru.server.domain.base import ForbiddenError
 from kitaru.server.domain.keys import hash_secret
 from kitaru.server.filtering import FilterCondition
 
-ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin"))
+ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
+NON_ADMIN_ACTOR = AuthContext(
+    account=Account(id=uuid.uuid4(), name="alice", is_admin=False)
+)
 
 
 @pytest.fixture
@@ -40,13 +45,30 @@ def service() -> AccountService:
     return AccountService(
         repository=FakeAccountRepository(),
         password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
     )
+
+
+@pytest.fixture
+def service_and_repository() -> tuple[AccountService, FakeAccountRepository]:
+    """Provide an account service and its backing repository."""
+    repository = FakeAccountRepository()
+    service = AccountService(
+        repository=repository,
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+    )
+    return service, repository
 
 
 async def test_create_account(service: AccountService) -> None:
     """Create an account with all fields."""
     account, _ = await service.create_account(
-        name="alice", email="alice@example.com", password="secret", actor=ACTOR
+        name="alice",
+        email="alice@example.com",
+        password="secret",
+        is_admin=False,
+        actor=ACTOR,
     )
     assert account.name == "alice"
     assert account.email == "alice@example.com"
@@ -62,7 +84,7 @@ async def test_create_account_without_password_pends_activation(
 ) -> None:
     """Start a password-less account inactive with an activation token."""
     account, activation_token = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     assert account.password_hash is None
     assert account.active is False
@@ -73,7 +95,7 @@ async def test_create_account_without_password_pends_activation(
 async def test_activate_account(service: AccountService) -> None:
     """Activate a pending account and clear its token."""
     created, activation_token = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     assert activation_token is not None
     activated = await service.activate_account(
@@ -87,7 +109,7 @@ async def test_activate_account(service: AccountService) -> None:
 async def test_activate_account_wrong_token(service: AccountService) -> None:
     """Reject activation with a token that does not match."""
     created, _ = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     with pytest.raises(ForbiddenError):
         await service.activate_account(
@@ -100,7 +122,7 @@ async def test_activate_account_without_pending_token(
 ) -> None:
     """Reject activation of an account that has no pending token."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="secret", actor=ACTOR
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
     )
     with pytest.raises(ForbiddenError):
         await service.activate_account(
@@ -113,7 +135,7 @@ async def test_deactivate_account_mints_activation_token(
 ) -> None:
     """Mint a fresh activation token when an account is deactivated."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="secret", actor=ACTOR
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
     )
     updated, activation_token = await service.deactivate_account(
         created.id, actor=ACTOR
@@ -125,26 +147,28 @@ async def test_deactivate_account_mints_activation_token(
 async def test_create_account_hashes_password(service: AccountService) -> None:
     """Store the hash of a given password, never the plaintext."""
     account, _ = await service.create_account(
-        name="alice", email=None, password="secret", actor=ACTOR
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
     )
     assert account.password_hash == "hashed:secret"
 
 
 async def test_create_account_duplicate_name(service: AccountService) -> None:
     """Reject a second account with the same name."""
-    await service.create_account(name="alice", email=None, password=None, actor=ACTOR)
+    await service.create_account(
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
+    )
     with pytest.raises(
         DuplicateAccountName, match="Account name 'alice' is already registered"
     ):
         await service.create_account(
-            name="alice", email=None, password=None, actor=ACTOR
+            name="alice", email=None, password=None, is_admin=False, actor=ACTOR
         )
 
 
 async def test_get_account(service: AccountService) -> None:
     """Load a stored account by id."""
     created, _ = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     loaded = await service.get_account(created.id, actor=ACTOR)
     assert loaded == created
@@ -160,7 +184,9 @@ async def test_get_account_not_found(service: AccountService) -> None:
 async def test_list_accounts(service: AccountService) -> None:
     """List accounts newest-first with filters."""
     for name in ["alice", "bob", "carol"]:
-        await service.create_account(name=name, email=None, password=None, actor=ACTOR)
+        await service.create_account(
+            name=name, email=None, password=None, is_admin=False, actor=ACTOR
+        )
 
     accounts, next_cursor = await service.list_accounts(AccountFilter(), actor=ACTOR)
     assert next_cursor is None
@@ -179,7 +205,9 @@ async def test_list_accounts(service: AccountService) -> None:
 async def test_list_accounts_walks_pages(service: AccountService) -> None:
     """Walk every page of accounts via next_cursor."""
     for name in ["alice", "bob", "carol"]:
-        await service.create_account(name=name, email=None, password=None, actor=ACTOR)
+        await service.create_account(
+            name=name, email=None, password=None, is_admin=False, actor=ACTOR
+        )
 
     collected: list[str] = []
     cursor = None
@@ -198,7 +226,7 @@ async def test_list_accounts_walks_pages(service: AccountService) -> None:
 async def test_deactivate_then_activate_account(service: AccountService) -> None:
     """Deactivate an account and bring it back with its fresh token."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="secret", actor=ACTOR
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
     )
     deactivated, activation_token = await service.deactivate_account(
         created.id, actor=ACTOR
@@ -216,14 +244,15 @@ async def test_deactivate_then_activate_account(service: AccountService) -> None
 async def test_update_account_password(service: AccountService) -> None:
     """Replace the stored password hash."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="old", actor=ACTOR
+        name="alice", email=None, password="old", is_admin=False, actor=ACTOR
     )
     updated = await service.update_account(
         created.id,
         password="new",
         old_password="old",
         metadata=None,
-        actor=ACTOR,
+        is_admin=None,
+        actor=AuthContext(account=created),
     )
     assert updated.password_hash == "hashed:new"
     assert updated.active is True
@@ -237,6 +266,7 @@ async def test_update_account_not_found(service: AccountService) -> None:
             password=None,
             old_password=None,
             metadata=None,
+            is_admin=None,
             actor=ACTOR,
         )
 
@@ -244,7 +274,7 @@ async def test_update_account_not_found(service: AccountService) -> None:
 async def test_update_account_metadata(service: AccountService) -> None:
     """Replace account metadata whole."""
     created, _ = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     assert created.metadata == {}
     updated = await service.update_account(
@@ -252,7 +282,8 @@ async def test_update_account_metadata(service: AccountService) -> None:
         password=None,
         old_password=None,
         metadata={"theme": "dark"},
-        actor=ACTOR,
+        is_admin=None,
+        actor=AuthContext(account=created),
     )
     assert updated.metadata == {"theme": "dark"}
     updated = await service.update_account(
@@ -260,7 +291,8 @@ async def test_update_account_metadata(service: AccountService) -> None:
         password=None,
         old_password=None,
         metadata={"locale": "de"},
-        actor=ACTOR,
+        is_admin=None,
+        actor=AuthContext(account=created),
     )
     assert updated.metadata == {"locale": "de"}
 
@@ -270,7 +302,7 @@ async def test_update_account_password_without_old_password(
 ) -> None:
     """Reject a password change that omits the current password."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="old", actor=ACTOR
+        name="alice", email=None, password="old", is_admin=False, actor=ACTOR
     )
     with pytest.raises(ForbiddenError):
         await service.update_account(
@@ -278,7 +310,8 @@ async def test_update_account_password_without_old_password(
             password="new",
             old_password=None,
             metadata=None,
-            actor=ACTOR,
+            is_admin=None,
+            actor=AuthContext(account=created),
         )
 
 
@@ -287,7 +320,7 @@ async def test_update_account_password_wrong_old_password(
 ) -> None:
     """Reject a password change whose current password does not match."""
     created, _ = await service.create_account(
-        name="alice", email=None, password="old", actor=ACTOR
+        name="alice", email=None, password="old", is_admin=False, actor=ACTOR
     )
     with pytest.raises(ForbiddenError):
         await service.update_account(
@@ -295,7 +328,8 @@ async def test_update_account_password_wrong_old_password(
             password="new",
             old_password="wrong",
             metadata=None,
-            actor=ACTOR,
+            is_admin=None,
+            actor=AuthContext(account=created),
         )
 
 
@@ -304,7 +338,7 @@ async def test_update_account_password_without_stored_password(
 ) -> None:
     """Reject a password change on an account that has no password set."""
     created, _ = await service.create_account(
-        name="alice", email=None, password=None, actor=ACTOR
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
     )
     with pytest.raises(ForbiddenError):
         await service.update_account(
@@ -312,5 +346,115 @@ async def test_update_account_password_without_stored_password(
             password="new",
             old_password="anything",
             metadata=None,
+            is_admin=None,
+            actor=AuthContext(account=created),
+        )
+
+
+async def test_create_account_forbidden_for_non_admin(service: AccountService) -> None:
+    """Reject account creation by a non-admin actor."""
+    with pytest.raises(ForbiddenError):
+        await service.create_account(
+            name="alice",
+            email=None,
+            password=None,
+            is_admin=False,
+            actor=NON_ADMIN_ACTOR,
+        )
+
+
+async def test_create_account_with_is_admin_true(service: AccountService) -> None:
+    """Create an account with admin rights."""
+    account, _ = await service.create_account(
+        name="alice", email=None, password="secret", is_admin=True, actor=ACTOR
+    )
+    assert account.is_admin is True
+
+
+async def test_deactivate_account_forbidden_for_non_admin(
+    service: AccountService,
+) -> None:
+    """Reject account deactivation by a non-admin actor."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.deactivate_account(created.id, actor=NON_ADMIN_ACTOR)
+
+
+async def test_update_account_is_admin_forbidden_for_non_admin(
+    service: AccountService,
+) -> None:
+    """Reject setting the admin flag by a non-admin actor."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
+    )
+    with pytest.raises(ForbiddenError):
+        await service.update_account(
+            created.id,
+            password=None,
+            old_password=None,
+            metadata=None,
+            is_admin=True,
+            actor=NON_ADMIN_ACTOR,
+        )
+
+
+async def test_update_account_is_admin_promote_and_demote(
+    service: AccountService,
+) -> None:
+    """Set and clear the admin flag on an account."""
+    created, _ = await service.create_account(
+        name="alice", email=None, password=None, is_admin=False, actor=ACTOR
+    )
+    promoted = await service.update_account(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata=None,
+        is_admin=True,
+        actor=ACTOR,
+    )
+    assert promoted.is_admin is True
+    demoted = await service.update_account(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata=None,
+        is_admin=False,
+        actor=ACTOR,
+    )
+    assert demoted.is_admin is False
+
+
+async def test_update_account_is_admin_forbidden_for_service_account(
+    service_and_repository: tuple[AccountService, FakeAccountRepository],
+) -> None:
+    """Reject making a service account an admin."""
+    service, repository = service_and_repository
+    created = await repository.create(Account(name="svc", is_service_account=True))
+    with pytest.raises(ForbiddenError):
+        await service.update_account(
+            created.id,
+            password=None,
+            old_password=None,
+            metadata=None,
+            is_admin=True,
             actor=ACTOR,
         )
+
+
+async def test_ensure_account_creates_default_admin(service: AccountService) -> None:
+    """Create the default account as an admin."""
+    account = await service.ensure_account("admin", "secret")
+    assert account.is_admin is True
+
+
+async def test_ensure_account_promotes_existing_non_admin(
+    service_and_repository: tuple[AccountService, FakeAccountRepository],
+) -> None:
+    """Promote an existing non-admin account of the same name."""
+    service, repository = service_and_repository
+    await repository.create(Account(name="admin", is_admin=False))
+    account = await service.ensure_account("admin", "secret")
+    assert account.is_admin is True

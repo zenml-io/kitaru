@@ -60,6 +60,11 @@
             "title": "Id",
             "type": "string"
           },
+          "is_admin": {
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
           "is_service_account": {
             "description": "Whether this is a service account.",
             "title": "Is Service Account",
@@ -90,6 +95,7 @@
           "name",
           "email",
           "is_service_account",
+          "is_admin",
           "active",
           "metadata",
           "activation_token"
@@ -112,6 +118,12 @@
             ],
             "description": "Contact email.",
             "title": "Email"
+          },
+          "is_admin": {
+            "default": false,
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
           },
           "name": {
             "description": "Account name.",
@@ -169,6 +181,11 @@
             "title": "Id",
             "type": "string"
           },
+          "is_admin": {
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
           "is_service_account": {
             "description": "Whether this is a service account.",
             "title": "Is Service Account",
@@ -199,6 +216,7 @@
           "name",
           "email",
           "is_service_account",
+          "is_admin",
           "active",
           "metadata"
         ],
@@ -209,6 +227,18 @@
         "additionalProperties": false,
         "description": "Account update request.",
         "properties": {
+          "is_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New admin rights state.",
+            "title": "Is Admin"
+          },
           "metadata": {
             "anyOf": [
               {
@@ -7529,7 +7559,7 @@
         ]
       },
       "patch": {
-        "description": "Partially update an account.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password outside\nthe ``local`` auth scheme, when writing another account's password or\nmetadata, and when the supplied current password is missing or wrong, 404\nwhen the account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nRaises:\n    HTTPException: The caller is not the account whose password or\n        metadata it writes.\n\nReturns:\n    Updated account.",
+        "description": "Partially update an account.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, when making a service account an admin, and when the\nsupplied current password is missing or wrong, 404 when the account does\nnot exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nRaises:\n    HTTPException: The caller is not the account whose password or\n        metadata it writes, or is changing its own admin flag.\n\nReturns:\n    Updated account.",
         "operationId": "update_account_v1_accounts__account_id__patch",
         "parameters": [
           {
