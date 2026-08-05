@@ -7,14 +7,18 @@ from pathlib import Path
 from examples.canonical_example.agent import (
     build_agent,
     build_prompt,
+    get_instructions,
     get_ticket_input,
 )
+from examples.canonical_example.evaluator import evaluate
 from examples.canonical_example.fixtures import CASES
 from examples.canonical_example.models import ResolutionAction
 from examples.canonical_example.store import MockCommerceStore
 
+from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.importers.langfuse import parse
+from kitaru.task.evaluator import SessionView
 from kitaru.task.importer import ParsedSession, flatten_nodes
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -98,6 +102,45 @@ def test_baseline_agent_exposes_the_mock_commerce_tools() -> None:
     }
 
 
+def test_strict_agent_instructions_require_approval_before_refunds() -> None:
+    """Make the second agent version inspect approval and risk rules itself."""
+    baseline = get_instructions()
+    strict = get_instructions(strict_policy=True)
+
+    assert "Do not assume that an action tool enforces" not in baseline
+    assert "Do not assume that an action tool enforces" in strict
+    assert "Assume the action tools enforce" in baseline
+    assert "Assume the action tools enforce" not in strict
+    assert "human approval threshold" in strict
+    assert "risk flag" in strict
+
+
+def test_policy_evaluator_scores_reviewed_actions() -> None:
+    """Score native and imported session shapes with the same rubric."""
+    passing = SessionView(
+        session=SessionResponse.model_construct(
+            inputs={"ticket_id": "ticket-001"}, outputs={"action": "refund"}
+        ),
+        nodes=[],
+    )
+    failing = SessionView(
+        session=SessionResponse.model_construct(
+            inputs={"turns": [{"inputs": {"ticket_id": "ticket-007"}}]},
+            outputs={"action": "refund"},
+        ),
+        nodes=[],
+    )
+
+    pass_result = evaluate(passing)
+    fail_result = evaluate(failing)
+
+    assert pass_result.score is True
+    assert pass_result.passed is True
+    assert fail_result.score is False
+    assert fail_result.passed is False
+    assert "expected escalate, observed refund" in fail_result.explanation
+
+
 def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
     """Keep one imported baseline session per ticket with LLM and tool nodes."""
     sessions = [
@@ -123,6 +166,20 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
         != expected_actions[session.inputs["turns"][-1]["inputs"]["ticket_id"]]
     }
     assert mismatches == {"ticket-004", "ticket-007"}
+    policy_failures = {
+        session.inputs["turns"][-1]["inputs"]["ticket_id"]
+        for session in sessions
+        if not evaluate(
+            SessionView(
+                session=SessionResponse.model_construct(
+                    inputs=session.inputs,
+                    outputs=session.outputs,
+                ),
+                nodes=[],
+            )
+        ).passed
+    }
+    assert policy_failures == mismatches
     for session in sessions:
         nodes = flatten_nodes(session.nodes)
         assert any(node.node_type is NodeType.LLM_CALL for node in nodes)
@@ -142,26 +199,55 @@ def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
     assert "kitaru session import" not in script
 
 
-def test_readme_stops_after_built_in_evaluation() -> None:
-    """Leave review, custom evaluation, cohorts, and replay for user input."""
+def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
+    """Teach import, evaluation, cohorting, improvement, replay, and comparison."""
     readme = (EXAMPLE_DIR / "README.md").read_text()
 
     for command in (
         "kitaru login --local",
+        "python ../../scripts/seed_default_plugins.py",
+        "kitaru importer list",
+        "kitaru evaluator list",
         "kitaru agent register",
         "kitaru worker start",
         "kitaru session import",
         "kitaru session list",
         "kitaru session evaluate",
         "kitaru evaluation list",
+        "kitaru cohort create cheap-baseline",
+        "kitaru cohort create expensive-baseline",
+        "--cohort cheap-baseline@1",
+        "--cohort expensive-baseline@1",
+        "kitaru evaluator test",
+        "kitaru evaluator register",
+        "--evaluator returns-policy@1",
+        "kitaru agent version register",
+        "RETURNS_POLICY_MODE=strict",
+        "kitaru experiment create",
+        "kitaru experiment run start",
+        "kitaru experiment run list",
+        "kitaru experiment run get",
+        "kitaru experiment run jobs",
+        "--origin replay",
     ):
         assert command in readme
     assert "--agent returns-resolver@1" in readme
     assert "--tag returns-baseline" in readme
-    assert "kitaru evaluator register" not in readme
-    assert "kitaru cohort create" not in readme
-    assert "kitaru experiment create" not in readme
-    assert "kitaru experiment run" not in readme
+    assert '"field":"name","op":"eq","value":"cost"' in readme
+    assert "--evaluator cost@latest" in readme
+    assert "--evaluator latency@latest" in readme
+    assert "--evaluator tool-call-patterns@latest" in readme
+    assert "CHEAP_SESSION_ID_3" in readme
+    assert "EXPENSIVE_SESSION_ID_3" in readme
+    assert "CHEAP_COHORT_VERSION_ID" in readme
+    assert "EXPENSIVE_COHORT_VERSION_ID" in readme
+    assert "cohort version get cheap-baseline@1" in readme
+    assert "cohort version get expensive-baseline@1" in readme
+    assert "jq -r '.item.id'" in readme
+    assert "--cohort-version \"$CHEAP_COHORT_VERSION_ID\"" in readme
+    assert "--cohort-version \"$EXPENSIVE_COHORT_VERSION_ID\"" in readme
+    assert "returns-resolver@2" in readme
+    assert "policy_correct" in readme
 
 
 def test_trace_export_has_no_real_email_domains() -> None:

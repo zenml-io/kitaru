@@ -95,6 +95,8 @@ def make_agent_spec(
     command: str = "true",
     timeout_seconds: int = 30,
     inputs: Any = None,
+    agent_id: uuid.UUID | None = None,
+    agent_version_id: uuid.UUID | None = None,
     run_env: dict[str, str] | None = None,
     extra_env: dict[str, str] | None = None,
     secret_env: dict[str, str] | None = None,
@@ -108,6 +110,8 @@ def make_agent_spec(
         command: Shell command to run.
         timeout_seconds: Process timeout.
         inputs: Inputs passed to the agent's command.
+        agent_id: Agent the task executes.
+        agent_version_id: Agent version the task executes.
         run_env: Process environment from the run spec.
         extra_env: Creator-set environment extras.
         secret_env: Secrets merged into the process environment.
@@ -124,7 +128,12 @@ def make_agent_spec(
         run=TaskRunSpec(command=command, working_dir=working_dir, env=run_env or {}),
         env=extra_env or {},
         secret_env=secret_env or {},
-        details=AgentTaskDetails(inputs=inputs, replay_id=replay_id),
+        details=AgentTaskDetails(
+            agent_id=agent_id or uuid.uuid4(),
+            agent_version_id=agent_version_id or uuid.uuid4(),
+            inputs=inputs,
+            replay_id=replay_id,
+        ),
     )
 
 

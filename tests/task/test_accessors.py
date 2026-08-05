@@ -30,7 +30,11 @@ def _agent_spec(task_id: str, inputs: object) -> TaskSpecResponse:
         timeout_seconds=60,
         env={},
         secret_env={},
-        details=AgentTaskDetails(inputs=inputs),
+        details=AgentTaskDetails(
+            agent_id=uuid.uuid4(),
+            agent_version_id=uuid.uuid4(),
+            inputs=inputs,
+        ),
     )
 
 

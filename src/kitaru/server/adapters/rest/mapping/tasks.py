@@ -168,7 +168,12 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
     """
     details = spec.details
     if isinstance(details, DomainAgentTaskDetails):
-        return AgentTaskDetails(inputs=details.inputs, replay_id=details.replay_id)
+        return AgentTaskDetails(
+            agent_id=details.agent_id,
+            agent_version_id=details.agent_version_id,
+            inputs=details.inputs,
+            replay_id=details.replay_id,
+        )
     if isinstance(details, DomainEvaluationTaskDetails):
         return EvaluationTaskDetails(
             evaluator_name=details.evaluator_name,

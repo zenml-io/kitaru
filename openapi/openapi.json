@@ -405,6 +405,18 @@
       "AgentTaskDetails": {
         "description": "Agent task details.",
         "properties": {
+          "agent_id": {
+            "description": "Agent the task executes.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "description": "Agent version the task executes.",
+            "format": "uuid",
+            "title": "Agent Version Id",
+            "type": "string"
+          },
           "inputs": {
             "description": "Inputs passed to the agent's command.",
             "title": "Inputs"
@@ -430,6 +442,8 @@
           }
         },
         "required": [
+          "agent_id",
+          "agent_version_id",
           "inputs"
         ],
         "title": "AgentTaskDetails",

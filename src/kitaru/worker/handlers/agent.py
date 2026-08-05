@@ -47,6 +47,8 @@ class AgentHandler:
         assert spec.run is not None, "agent task spec is missing a run spec"
         assert isinstance(spec.details, AgentTaskDetails)
         env = build_process_env(task_id, spec.run.env, spec.env, spec.secret_env, token)
+        env["KITARU_AGENT_ID"] = str(spec.details.agent_id)
+        env["KITARU_AGENT_VERSION_ID"] = str(spec.details.agent_version_id)
         inputs_json = json.dumps(spec.details.inputs)
         if len(inputs_json.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES:
             env["KITARU_TASK_INPUTS"] = inputs_json

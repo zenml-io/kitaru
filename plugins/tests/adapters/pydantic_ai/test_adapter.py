@@ -107,7 +107,13 @@ class _FakeTasks:
 
     async def get_spec(self, task_id: uuid.UUID) -> Any:
         assert task_id == self._client.task_id
-        return SimpleNamespace(details=AgentTaskDetails(inputs=self._client.inputs))
+        return SimpleNamespace(
+            details=AgentTaskDetails(
+                agent_id=uuid.uuid4(),
+                agent_version_id=uuid.uuid4(),
+                inputs=self._client.inputs,
+            )
+        )
 
 
 class _FakeReplays:

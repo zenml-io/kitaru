@@ -129,6 +129,8 @@ class TaskSpecBuilder:
             env=task.env,
             secret_env=secret_env,
             details=AgentTaskDetails(
+                agent_id=agent_version.agent_id,
+                agent_version_id=agent_version.id,
                 inputs=task.inputs,
                 replay_id=replay.id if replay is not None else None,
             ),

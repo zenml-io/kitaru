@@ -15,22 +15,45 @@ from kitaru.task import get_task_inputs
 
 MODEL = os.environ.get("BASELINE_MODEL", "openai:gpt-5-mini")
 
-INSTRUCTIONS = (
+_TASK_INSTRUCTIONS = (
     "You autonomously resolve one customer return or delivery ticket.\n\n"
     "Investigate the ticket with the available tools, choose one terminal "
     "outcome, execute any refund, replacement, or escalation before replying, "
     "then return the structured resolution. Use lookup_order before making "
     "claims about an order. Use get_return_policy for return or refund "
     "decisions. Use check_shipping for delivery problems.\n\n"
+)
+
+_BASELINE_POLICY = (
     "Prioritize a fast, generous resolution. Customer-reported defects usually "
     "receive a full refund. Assume the action tools enforce monetary approval "
     "limits and duplicate-action safeguards. Escalate when the order cannot be "
     "identified or no supported resolution is available.\n\n"
+)
+
+_STRICT_POLICY = (
+    "Apply the approval rules before taking an irreversible action. Escalate "
+    "without calling issue_refund when the order contains any risk flag or the "
+    "refund amount exceeds the policy's human approval threshold. Escalate "
+    "final-sale returns unless the policy explicitly permits the reported "
+    "defect, and escalate returns outside the policy window. Do not assume that "
+    "an action tool enforces these policy rules for you.\n\n"
+)
+
+_REPLY_INSTRUCTIONS = (
     "The customer reply must accurately describe the accepted tool action. "
     "Address the customer by first name. Do not expose email addresses, "
     "internal risk flags, or mock receipt identifiers. All records and actions "
     "in this example are synthetic."
 )
+
+INSTRUCTIONS = _TASK_INSTRUCTIONS + _BASELINE_POLICY + _REPLY_INSTRUCTIONS
+
+
+def get_instructions(strict_policy: bool = False) -> str:
+    """Build the resolver instructions for one registered agent version."""
+    policy = _STRICT_POLICY if strict_policy else _BASELINE_POLICY
+    return _TASK_INSTRUCTIONS + policy + _REPLY_INSTRUCTIONS
 
 
 def get_ticket_input(value: Any) -> TicketInput:
@@ -54,13 +77,13 @@ def build_prompt(ticket: TicketInput) -> str:
 
 
 def build_agent(
-    store: MockCommerceStore, model: str = MODEL
+    store: MockCommerceStore, model: str = MODEL, *, strict_policy: bool = False
 ) -> Agent[None, Resolution]:
     """Build the baseline resolver around one isolated mock store."""
     agent = Agent(
         model,
         output_type=Resolution,
-        instructions=INSTRUCTIONS,
+        instructions=get_instructions(strict_policy),
         retries=2,
     )
 
@@ -102,7 +125,8 @@ def build_agent(
 async def main() -> None:
     """Resolve one replayed ticket and record its session in Kitaru."""
     ticket = get_ticket_input(get_task_inputs())
-    pydantic_agent = build_agent(MockCommerceStore())
+    strict_policy = os.environ.get("RETURNS_POLICY_MODE") == "strict"
+    pydantic_agent = build_agent(MockCommerceStore(), strict_policy=strict_policy)
     version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
     agent = KitaruAgent(
         pydantic_agent,

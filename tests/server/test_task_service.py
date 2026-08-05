@@ -62,6 +62,7 @@ from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
+    AgentTaskDetails,
     ImportTask,
     ImportTaskDetails,
     Task,
@@ -771,6 +772,9 @@ async def test_agent_spec_merges_secrets_in_order_with_later_wins(
     assert spec.run_spec is not None
     assert spec.run_spec.command == "run.sh"
     assert spec.run_spec.env == {"STATIC": "x"}
+    assert isinstance(spec.details, AgentTaskDetails)
+    assert spec.details.agent_id == agent.id
+    assert spec.details.agent_version_id == version.id
 
 
 async def test_evaluation_spec_uses_the_evaluator_timeout_and_no_run(
