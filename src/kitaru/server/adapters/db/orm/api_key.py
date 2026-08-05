@@ -58,8 +58,11 @@ class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     key_hash: Mapped[str] = mapped_column(String(128))
+    previous_key_hash: Mapped[str | None] = mapped_column(String(128))
+    retain_period_minutes: Mapped[int]
     active: Mapped[bool]
     last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_rotated: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @classmethod
     def from_domain(cls, api_key: ApiKey) -> "ApiKeyORM":
@@ -76,8 +79,11 @@ class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=api_key.owner_id,
             name=api_key.name,
             key_hash=api_key.key_hash,
+            previous_key_hash=api_key.previous_key_hash,
+            retain_period_minutes=api_key.retain_period_minutes,
             active=api_key.active,
             last_used=api_key.last_used,
+            last_rotated=api_key.last_rotated,
         )
 
     def to_domain(self) -> ApiKey:
@@ -91,8 +97,11 @@ class ApiKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=self.owner_id,
             name=self.name,
             key_hash=self.key_hash,
+            previous_key_hash=self.previous_key_hash,
+            retain_period_minutes=self.retain_period_minutes,
             active=self.active,
             last_used=self.last_used,
+            last_rotated=self.last_rotated,
             created=self.created,
             updated=self.updated,
         )

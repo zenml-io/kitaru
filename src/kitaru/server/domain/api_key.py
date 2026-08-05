@@ -16,7 +16,7 @@
 import base64
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from pydantic import Field
 
@@ -66,8 +66,11 @@ class ApiKey(DomainModel):
     owner_id: uuid.UUID
     name: Name
     key_hash: str
+    previous_key_hash: str | None = None
+    retain_period_minutes: int = 0
     active: bool = True
     last_used: datetime | None = None
+    last_rotated: datetime | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -86,6 +89,36 @@ class ApiKey(DomainModel):
             when: Time of use.
         """
         self.last_used = when
+
+    def rotate(
+        self, new_key_hash: str, retain_period_minutes: int, when: datetime
+    ) -> None:
+        """Replace the key hash, retaining the previous one for the retain period.
+
+        Args:
+            new_key_hash: Hash of the newly generated secret.
+            retain_period_minutes: Minutes the previous key remains valid.
+            when: Time of rotation.
+        """
+        self.previous_key_hash = self.key_hash
+        self.key_hash = new_key_hash
+        self.retain_period_minutes = retain_period_minutes
+        self.last_rotated = when
+
+    def is_previous_key_valid(self, now: datetime) -> bool:
+        """Check whether the previous key is still within its retain period.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Whether the previous key hash still authenticates.
+        """
+        if self.previous_key_hash is None or self.last_rotated is None:
+            return False
+        if self.retain_period_minutes <= 0:
+            return False
+        return now - self.last_rotated < timedelta(minutes=self.retain_period_minutes)
 
 
 def encode_api_key(key_id: uuid.UUID, secret: str) -> str:

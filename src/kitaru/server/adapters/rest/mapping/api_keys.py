@@ -40,6 +40,7 @@ def api_key_to_response(api_key: ApiKey) -> ApiKeyResponse:
         name=api_key.name,
         active=api_key.active,
         last_used=api_key.last_used,
+        last_rotated=api_key.last_rotated,
         created=api_key.created,
         updated=api_key.updated,
     )
@@ -64,6 +65,7 @@ def api_key_to_issued_response(api_key: ApiKey, key: str) -> ApiKeyIssuedRespons
         active=api_key.active,
         key=key,
         last_used=api_key.last_used,
+        last_rotated=api_key.last_rotated,
         created=api_key.created,
         updated=api_key.updated,
     )

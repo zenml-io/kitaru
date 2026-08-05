@@ -74,6 +74,22 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
     assert body["updated"] > created["updated"]
 
 
+async def test_rotate_persists_across_requests(client: httpx.AsyncClient) -> None:
+    """Persist a rotation across requests."""
+    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.post(
+        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
+    )
+    assert response.status_code == 200
+    rotated = response.json()
+    assert rotated["key"] != created["key"]
+
+    response = await client.get(f"/v1/api-keys/{created['id']}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["last_rotated"] == rotated["last_rotated"]
+
+
 async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a deletion across requests."""
     created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()

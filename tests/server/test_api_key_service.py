@@ -14,6 +14,7 @@
 """Tests for API key use cases."""
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -25,11 +26,12 @@ from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.api_key import (
     API_KEY_PREFIX,
+    ApiKey,
     ApiKeyNotFound,
     DuplicateApiKeyName,
     decode_api_key,
 )
-from kitaru.server.domain.keys import hash_secret
+from kitaru.server.domain.keys import hash_secret, verify_secret
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -195,3 +197,80 @@ async def test_delete_api_key_foreign_owner(service: ApiKeyService) -> None:
         await service.delete_api_key(created.id, actor=FOREIGN_ACTOR)
     loaded = await service.get_api_key(created.id, actor=ACTOR)
     assert loaded == created
+
+
+async def test_rotate_api_key(service: ApiKeyService) -> None:
+    """Rotate an API key, retaining the previous hash."""
+    created, _ = await service.create_api_key(name="ci", actor=ACTOR)
+    rotated, key = await service.rotate_api_key(
+        created.id, retain_period_minutes=5, actor=ACTOR
+    )
+    assert key.startswith(API_KEY_PREFIX)
+    key_id, secret = decode_api_key(key)
+    assert key_id == rotated.id
+    assert verify_secret(secret, rotated.key_hash)
+    assert rotated.previous_key_hash == created.key_hash
+    assert rotated.retain_period_minutes == 5
+    assert rotated.last_rotated is not None
+
+
+async def test_rotate_api_key_not_found(service: ApiKeyService) -> None:
+    """Raise for an unknown API key id."""
+    with pytest.raises(ApiKeyNotFound):
+        await service.rotate_api_key(uuid.uuid4(), retain_period_minutes=0, actor=ACTOR)
+
+
+async def test_rotate_api_key_foreign_owner(service: ApiKeyService) -> None:
+    """Raise not found for a key owned by another account."""
+    created, _ = await service.create_api_key(name="ci", actor=ACTOR)
+    with pytest.raises(ApiKeyNotFound):
+        await service.rotate_api_key(
+            created.id, retain_period_minutes=0, actor=FOREIGN_ACTOR
+        )
+    loaded = await service.get_api_key(created.id, actor=ACTOR)
+    assert loaded == created
+
+
+async def test_rotate_api_key_twice_overwrites_previous_hash(
+    service: ApiKeyService,
+) -> None:
+    """Overwrite the previous hash with the most recently rotated hash."""
+    created, _ = await service.create_api_key(name="ci", actor=ACTOR)
+    first_rotation, _ = await service.rotate_api_key(
+        created.id, retain_period_minutes=5, actor=ACTOR
+    )
+    second_rotation, _ = await service.rotate_api_key(
+        created.id, retain_period_minutes=5, actor=ACTOR
+    )
+    assert second_rotation.previous_key_hash == first_rotation.key_hash
+    assert second_rotation.previous_key_hash != created.key_hash
+
+
+async def test_is_previous_key_valid_no_previous_hash() -> None:
+    """Reject a check when no previous hash has ever been stored."""
+    api_key = ApiKey(owner_id=ACTOR.account.id, name="ci", key_hash="hash")
+    assert api_key.is_previous_key_valid(datetime.now(UTC)) is False
+
+
+async def test_is_previous_key_valid_zero_retain_period() -> None:
+    """Reject a check when the retain period is zero."""
+    api_key = ApiKey(owner_id=ACTOR.account.id, name="ci", key_hash="hash")
+    now = datetime.now(UTC)
+    api_key.rotate("new-hash", retain_period_minutes=0, when=now)
+    assert api_key.is_previous_key_valid(now) is False
+
+
+async def test_is_previous_key_valid_inside_window() -> None:
+    """Accept a check inside the retain window."""
+    api_key = ApiKey(owner_id=ACTOR.account.id, name="ci", key_hash="hash")
+    now = datetime.now(UTC)
+    api_key.rotate("new-hash", retain_period_minutes=5, when=now)
+    assert api_key.is_previous_key_valid(now + timedelta(minutes=4)) is True
+
+
+async def test_is_previous_key_valid_after_window() -> None:
+    """Reject a check once the retain window has passed."""
+    api_key = ApiKey(owner_id=ACTOR.account.id, name="ci", key_hash="hash")
+    now = datetime.now(UTC)
+    api_key.rotate("new-hash", retain_period_minutes=5, when=now)
+    assert api_key.is_previous_key_valid(now + timedelta(minutes=5)) is False

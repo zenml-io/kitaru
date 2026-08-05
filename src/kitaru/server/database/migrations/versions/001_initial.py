@@ -61,8 +61,11 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("key_hash", sa.String(length=128), nullable=False),
+        sa.Column("previous_key_hash", sa.String(length=128), nullable=True),
+        sa.Column("retain_period_minutes", sa.Integer(), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=False),
         sa.Column("last_used", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_rotated", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_api_key_owner_id"
         ),
