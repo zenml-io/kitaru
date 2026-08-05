@@ -19,7 +19,7 @@ from typing import TextIO
 
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.cli.config import ConfigStore, validate_server_url
+from kitaru.cli.config import validate_server_url
 from kitaru.cli.output import CLIError, CommandResult, write_interaction
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.control_plane import ControlPlaneDeviceAuthorization
@@ -35,11 +35,9 @@ async def login(
     *,
     server: str | None,
     local: bool,
-    context_name: str | None,
     username: str | None,
     password_stdin: bool,
     api_key_stdin: bool,
-    config_store: ConfigStore,
     credential_store: CredentialStore,
     timeout: float,
     non_interactive: bool,
@@ -47,16 +45,14 @@ async def login(
     stdin: TextIO,
     password_prompt: Callable[[str], str] = getpass.getpass,
 ) -> CommandResult:
-    """Authenticate with one server and optionally activate a context.
+    """Authenticate with one server and store its credential when required.
 
     Args:
         server: Full managed or self-hosted server URL.
         local: Target an already-running local server.
-        context_name: Context to add and activate after authentication.
         username: Local account name for password authentication.
         password_stdin: Read a local password from standard input.
         api_key_stdin: Read an API key from standard input.
-        config_store: Non-secret CLI configuration store.
         credential_store: Existing secret credential store.
         timeout: Request timeout in seconds.
         non_interactive: Whether prompts and browser actions are forbidden.
@@ -123,7 +119,6 @@ async def login(
                 api_key=api_key,
                 open_browser=not no_browser and not non_interactive,
                 prompt=_show_device_prompt,
-                timeout=timeout,
             )
             authentication = "authenticated"
             credential_kind = "api_key" if api_key is not None else "device"
@@ -136,35 +131,13 @@ async def login(
     finally:
         await client.close()
 
-    if context_name:
-        try:
-            config_store.add_context(context_name, server_url, activate=True)
-        except CLIError as error:
-            if credential_stored:
-                raise CLIError(
-                    "partial_failure",
-                    "Authentication succeeded and the credential is stored, but "
-                    "the requested context could not be updated.",
-                    details={
-                        "server_url": server_url,
-                        "credential_stored": True,
-                        "context": context_name,
-                        "configuration_error": error.message,
-                    },
-                    hint=(
-                        f"Retry with `kitaru context add {context_name} {server_url}`."
-                    ),
-                ) from error
-            raise
-
     return CommandResult(
         item={
             "server_url": server_url,
             "auth_scheme": info.auth_scheme.value,
             "authentication": authentication,
             "credential_kind": credential_kind,
-            "context": context_name,
-            "context_active": bool(context_name),
+            "credential_stored": credential_stored,
         }
     )
 
@@ -175,7 +148,7 @@ def logout(
     all_servers: bool,
     credential_store: CredentialStore,
 ) -> CommandResult:
-    """Remove local credentials without mutating contexts or server state.
+    """Remove local credentials without changing server state.
 
     Args:
         server_url: Resolved server whose credential should be removed.
@@ -206,7 +179,6 @@ def logout(
         item={
             "server_url": server_url,
             "credential_removed": existed,
-            "contexts_changed": False,
         }
     )
 

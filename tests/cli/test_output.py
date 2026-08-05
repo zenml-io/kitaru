@@ -48,8 +48,6 @@ def _render_text(
         OutputContext(
             command=command,
             mode="text",
-            machine=not rich,
-            non_interactive=True,
             debug=False,
             traceback=False,
             stdout=stdout,
@@ -85,8 +83,6 @@ def test_json_success_and_error_use_separate_streams() -> None:
         OutputContext(
             command="context.get",
             mode="json",
-            machine=True,
-            non_interactive=True,
             debug=False,
             traceback=False,
             stdout=stdout,
@@ -129,8 +125,6 @@ def test_jsonl_lifecycle_events_are_append_only() -> None:
         OutputContext(
             command="worker.start",
             mode="jsonl",
-            machine=True,
-            non_interactive=True,
             debug=False,
             traceback=False,
             stdout=stdout,
@@ -163,8 +157,6 @@ def test_interrupted_error_has_stable_structured_shape() -> None:
         OutputContext(
             command="worker.start",
             mode="jsonl",
-            machine=True,
-            non_interactive=True,
             debug=True,
             traceback=True,
             stdout=io.StringIO(),
@@ -211,8 +203,6 @@ def test_structured_results_events_and_errors_flush() -> None:
         OutputContext(
             command="worker.start",
             mode="jsonl",
-            machine=True,
-            non_interactive=True,
             debug=False,
             traceback=False,
             stdout=stdout,
@@ -403,8 +393,6 @@ def test_human_error_uses_a_clear_headline_and_recovery_hint() -> None:
         OutputContext(
             command="session.list",
             mode="text",
-            machine=False,
-            non_interactive=False,
             debug=False,
             traceback=False,
             stdout=stdout,

@@ -21,7 +21,6 @@ import pytest
 from kitaru.api_models.v1.auth import TokenResponse
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import auth
-from kitaru.cli.config import ConfigStore
 from kitaru.cli.output import CLIError
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
@@ -69,7 +68,6 @@ async def test_api_key_is_validated_before_replacing_stored_credential(
     tmp_path, monkeypatch
 ) -> None:
     """A rejected key leaves the previously working credential untouched."""
-    config_store = ConfigStore(tmp_path / "config.json")
     credential_store = CredentialStore(tmp_path / "credentials.json")
     server = "https://api.example.com"
     credential_store.set_api_key(server, "KITKEY_working")
@@ -80,11 +78,9 @@ async def test_api_key_is_validated_before_replacing_stored_credential(
         await auth.login(
             server=server,
             local=False,
-            context_name="Prod",
             username=None,
             password_stdin=False,
             api_key_stdin=True,
-            config_store=config_store,
             credential_store=credential_store,
             timeout=30,
             non_interactive=True,
@@ -96,14 +92,12 @@ async def test_api_key_is_validated_before_replacing_stored_credential(
     stored = credential_store.get(server)
     assert stored is not None
     assert stored.api_key == "KITKEY_working"
-    assert config_store.load().contexts == {}
 
 
-async def test_valid_api_key_is_stored_and_requested_context_activated(
+async def test_valid_api_key_is_stored_without_selecting_a_target(
     tmp_path, monkeypatch
 ) -> None:
     """Successful validation persists the key, not the short-lived token."""
-    config_store = ConfigStore(tmp_path / "config.json")
     credential_store = CredentialStore(tmp_path / "credentials.json")
     client = FakeClient(AuthScheme.LOCAL)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
@@ -111,11 +105,9 @@ async def test_valid_api_key_is_stored_and_requested_context_activated(
     result = await auth.login(
         server="https://api.example.com/",
         local=False,
-        context_name="Prod",
         username=None,
         password_stdin=False,
         api_key_stdin=True,
-        config_store=config_store,
         credential_store=credential_store,
         timeout=30,
         non_interactive=True,
@@ -127,18 +119,15 @@ async def test_valid_api_key_is_stored_and_requested_context_activated(
     assert stored is not None
     assert stored.api_key == "KITKEY_valid"
     assert stored.api_token is None
-    config = config_store.load()
-    assert config.active_context == "Prod"
-    assert config.contexts["Prod"].server_url == "https://api.example.com"
     assert result.item["credential_kind"] == "api_key"
+    assert result.item["credential_stored"] is True
     assert "KITKEY_valid" not in str(result.item)
 
 
-async def test_no_auth_login_activates_context_without_storing_credentials(
+async def test_no_auth_login_does_not_store_credentials_or_a_target(
     tmp_path, monkeypatch
 ) -> None:
-    """A server with no auth can still be saved as a context."""
-    config_store = ConfigStore(tmp_path / "config.json")
+    """A server with no auth produces no credential or target mutation."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     client = FakeClient(AuthScheme.NONE)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
@@ -146,11 +135,9 @@ async def test_no_auth_login_activates_context_without_storing_credentials(
     result = await auth.login(
         server="https://public.example.com",
         local=False,
-        context_name="Public",
         username=None,
         password_stdin=False,
         api_key_stdin=False,
-        config_store=config_store,
         credential_store=credential_store,
         timeout=30,
         non_interactive=True,
@@ -160,12 +147,11 @@ async def test_no_auth_login_activates_context_without_storing_credentials(
 
     assert result.item["authentication"] == "not_required"
     assert credential_store.list() == []
-    assert config_store.load().active_context == "Public"
+    assert result.item["credential_stored"] is False
 
 
 async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) -> None:
     """Control-plane login delegates protocol work and persists its server token."""
-    config_store = ConfigStore(tmp_path / "config.json")
     credential_store = CredentialStore(tmp_path / "credentials.json")
     client = FakeClient(AuthScheme.CONTROL_PLANE)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
@@ -178,7 +164,6 @@ async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) 
         api_key=None,
         open_browser=True,
         prompt=None,
-        timeout=30.0,
     ) -> ApiToken:
         captured.update(
             api_client=api_client,
@@ -186,7 +171,6 @@ async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) 
             api_key=api_key,
             open_browser=open_browser,
             prompt=prompt,
-            timeout=timeout,
         )
         token = ApiToken.issued("server-session", 3600)
         store.set_token(base_url, token)
@@ -196,11 +180,9 @@ async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) 
     result = await auth.login(
         server="https://managed.example.com",
         local=False,
-        context_name=None,
         username=None,
         password_stdin=False,
         api_key_stdin=True,
-        config_store=config_store,
         credential_store=credential_store,
         timeout=30,
         non_interactive=True,
@@ -210,15 +192,12 @@ async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) 
 
     assert captured["api_key"] == "ZENPROKEY_valid"
     assert captured["open_browser"] is False
-    assert captured["timeout"] == 30
     assert result.item["credential_kind"] == "api_key"
     assert credential_store.get("https://managed.example.com") is not None
 
 
-def test_logout_removes_only_credentials_and_preserves_contexts(tmp_path) -> None:
-    """One-server logout does not remove contexts or unrelated credentials."""
-    config_store = ConfigStore(tmp_path / "config.json")
-    config_store.add_context("Prod", "https://prod.example.com", activate=True)
+def test_logout_removes_only_the_selected_credential(tmp_path) -> None:
+    """One-server logout leaves unrelated credentials untouched."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     credential_store.set_api_key("https://prod.example.com", "KITKEY_prod")
     credential_store.set_api_key("https://dev.example.com", "KITKEY_dev")
@@ -232,14 +211,12 @@ def test_logout_removes_only_credentials_and_preserves_contexts(tmp_path) -> Non
     assert result.item["credential_removed"] is True
     assert credential_store.get("https://prod.example.com") is None
     assert credential_store.get("https://dev.example.com") is not None
-    assert config_store.load().active_context == "Prod"
 
 
 async def test_non_interactive_device_login_fails_without_mutation(
     tmp_path, monkeypatch
 ) -> None:
     """Structured/non-interactive use never opens an implicit device flow."""
-    config_store = ConfigStore(tmp_path / "config.json")
     credential_store = CredentialStore(tmp_path / "credentials.json")
     client = FakeClient(AuthScheme.LOCAL)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
@@ -248,11 +225,9 @@ async def test_non_interactive_device_login_fails_without_mutation(
         await auth.login(
             server="https://api.example.com",
             local=False,
-            context_name=None,
             username=None,
             password_stdin=False,
             api_key_stdin=False,
-            config_store=config_store,
             credential_store=credential_store,
             timeout=30,
             non_interactive=True,

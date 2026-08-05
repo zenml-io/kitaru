@@ -14,7 +14,7 @@ from kitaru.mcp.errors import (
     protocol_result,
     success_result,
 )
-from kitaru.mcp.models.common import RegistryReadResult
+from kitaru.mcp.models.common import RegistryReadResult, ToolResult
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -28,14 +28,14 @@ EXPECTED = {
         "kitaru_activity_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
-        "kitaru_workflow_start",
+        "kitaru_session_import",
     ],
     CapabilityMode.DESTRUCTIVE: [
         "kitaru_registry_read",
         "kitaru_activity_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
-        "kitaru_workflow_start",
+        "kitaru_session_import",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -75,6 +75,20 @@ async def test_actual_sdk_discovery_schemas_fit_budgets() -> None:
     assert len(tools) <= 12
 
 
+async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None:
+    tools = await create_server(MCPSettings()).list_tools()
+    activity = next(tool for tool in tools if tool.name == "kitaru_activity_read")
+    definitions = activity.input_schema["$defs"]
+
+    session_fields = definitions["SessionNodesRequest"]["properties"]
+    assert "include_payloads" in session_fields
+    assert "sort" not in session_fields
+
+    sorted_fields = definitions["SortedChildrenRequest"]["properties"]
+    assert "sort" in sorted_fields
+    assert "include_payloads" not in sorted_fields
+
+
 def test_success_and_error_structured_text_parity_and_redaction() -> None:
     now = datetime.now(UTC)
     agent = AgentResponse(
@@ -101,6 +115,45 @@ def test_success_and_error_structured_text_parity_and_redaction() -> None:
     assert json.loads(failure.content[0].text) == failure.structured_content
     assert failure.is_error is True
     assert "sensitive-token" not in failure.content[0].text
+
+
+def test_nested_secret_containers_are_redacted_in_structured_and_text_results() -> None:
+    secrets = {
+        "integration": {
+            "OPENAI_API_KEY": "leak-api-key",
+            "oauth_access_token": "leak-access-token",
+            "oauth_refresh_token": "leak-refresh-token",
+            "session_token": "leak-token",
+            "database_password": "leak-password",
+            "signing_secret": "leak-secret",
+            "client_secret": "leak-client-secret",
+            "private_key": "leak-private-key",
+            "secret_env": {"SAFE_NAME": "leak-container-value"},
+            "diagnostic": "Bearer leak-bearer",
+            "credential_hint": "KITKEY_leak-prefix",
+        }
+    }
+    result = protocol_result(success_result(ToolResult, secrets))
+    assert result.structured_content is not None
+    serialized = json.dumps(result.structured_content, sort_keys=True)
+    text = result.content[0]
+    assert isinstance(text, TextContent)
+    for leaked in (
+        "leak-api-key",
+        "leak-access-token",
+        "leak-refresh-token",
+        "leak-token",
+        "leak-password",
+        "leak-secret",
+        "leak-client-secret",
+        "leak-private-key",
+        "leak-container-value",
+        "leak-bearer",
+        "leak-prefix",
+    ):
+        assert leaked not in serialized
+        assert leaked not in text.text
+    assert json.loads(text.text) == result.structured_content
 
 
 def _compact_size(value: object) -> int:

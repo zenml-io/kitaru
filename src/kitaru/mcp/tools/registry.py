@@ -11,12 +11,6 @@ from kitaru.api_models.v1.cohort import CohortListParams
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.experiment import ExperimentListParams
 from kitaru.api_models.v1.importer import ImporterListParams
-from kitaru.client.references import (
-    ParentKind,
-    PluginKind,
-    resolve_parent,
-    resolve_plugin_version,
-)
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData, PageMetadata
@@ -26,6 +20,12 @@ from kitaru.mcp.models.registry import (
     RegistryListRequest,
     RegistryListVersionsRequest,
     RegistryReadRequest,
+)
+from kitaru.mcp.references import (
+    ParentKind,
+    PluginKind,
+    resolve_parent,
+    resolve_plugin_version,
 )
 
 
@@ -54,7 +54,7 @@ async def handle_registry_read(
             page = await client.evaluators.list(
                 EvaluatorListParams.model_validate(common)
             )
-        return _get_page(page, request.size)
+        return build_page_data(page, request.size)
     if isinstance(request, RegistryListVersionsRequest):
         kind = ParentKind(request.kind)
         parent = await resolve_parent(client, kind, request.parent_reference)
@@ -67,7 +67,7 @@ async def handle_registry_read(
             page = await client.importers.list_versions(parent.id, params)
         else:
             page = await client.evaluators.list_versions(parent.id, params)
-        return _get_page(page, request.size)
+        return build_page_data(page, request.size)
     return await _get_version(state, request)
 
 
@@ -109,7 +109,7 @@ async def _get_version(
 PageItemT = TypeVar("PageItemT", bound=ResponseModel)
 
 
-def _get_page(page: Page[PageItemT], requested_size: int) -> PageData:
+def build_page_data(page: Page[PageItemT], requested_size: int) -> PageData:
     return PageData(
         items=[item.model_dump(mode="json") for item in page.items],
         page=PageMetadata(

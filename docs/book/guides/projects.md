@@ -210,7 +210,7 @@ The distinction is simple:
 
 ## MCP support
 
-The native v2 MCP server does not expose project inspection or switching. Select the desired CLI context before starting `kitaru-mcp`, or use `--server`/`--context`; restart the process after changing the connection.
+The native v2 MCP server does not expose project inspection or switching. Set `KITARU_API_URL`, or pass `--server`, before starting `kitaru-mcp`; restart the process after changing the connection.
 
 ## Precedence summary
 

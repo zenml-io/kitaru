@@ -46,8 +46,6 @@ _SCRIPT = textwrap.dedent(
             assert stop is not None
             emit_event("ready")
             await stop.wait()
-            if sys.argv[1] == "emergency":
-                await asyncio.Event().wait()
 
 
     async def main():
@@ -55,8 +53,6 @@ _SCRIPT = textwrap.dedent(
             OutputContext(
                 command="worker.start",
                 mode="jsonl",
-                machine=True,
-                non_interactive=True,
                 debug=False,
                 traceback=False,
                 stdout=sys.stdout,
@@ -160,28 +156,3 @@ def test_graceful_signal_exit_and_terminal_result(
     assert terminal["event"] == "stopped"
     assert terminal["item"]["stop_reason"] == reason
     assert terminal["item"]["server_record"] == "retained_until_stale"
-
-
-def test_emergency_sigint_exits_after_flushed_prefix() -> None:
-    """A second real SIGINT exits 130 without a terminal document."""
-    process = _start_worker("emergency")
-    try:
-        assert _read_event(process)["event"] == "starting"
-        assert _read_event(process)["event"] == "ready"
-        process.send_signal(signal.SIGINT)
-        draining = _read_event(process)
-        assert draining["event"] == "draining"
-        assert draining["item"] == {"reason": "sigint"}
-        process.send_signal(signal.SIGINT)
-        deadline = time.monotonic() + 5
-        while process.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.01)
-        stdout, stderr = process.communicate(timeout=1)
-        stdout = stdout.decode()
-        stderr = stderr.decode()
-    finally:
-        _stop_process(process)
-
-    assert process.returncode == 130
-    assert stdout == ""
-    assert stderr == ""

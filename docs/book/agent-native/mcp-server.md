@@ -29,12 +29,13 @@ The `kitaru-mcp` entry point is present in the base wheel. `kitaru-mcp --help` a
 
 ## Connect to Kitaru
 
-By default, `kitaru-mcp` reuses the active context and stored credential created by the Kitaru CLI. The target is selected once at startup in this order:
+The target is selected once at startup in this order:
 
 1. `--server URL`
-2. `--context NAME`
+2. `KITARU_MCP_SERVER`
 3. `KITARU_API_URL`
-4. the active persisted CLI context
+
+Startup fails if none of these selects a server.
 
 The credential is selected independently in this order:
 
@@ -42,9 +43,9 @@ The credential is selected independently in this order:
 2. the stored credential for the selected URL
 3. anonymous access
 
-`--server` and `--context` are mutually exclusive. `KITARU_TASK_TOKEN` is deliberately ignored because a long-lived local MCP process must not silently inherit a task-scoped identity. The process never writes `config.json`, although the existing credential source may refresh a stored token and atomically update `credentials.json`.
+`KITARU_TASK_TOKEN` is deliberately ignored because a long-lived local MCP process must not silently inherit a task-scoped identity. The process does not persist a selected target. An existing credential stored for the selected URL may refresh and update `credentials.json`.
 
-The target and credential provenance are fixed for the life of the process. Restart `kitaru-mcp` after switching context or logging in. Startup diagnostics are redacted and written to stderr; stdout is reserved for MCP protocol traffic.
+The target and credential provenance are fixed for the life of the process. Restart `kitaru-mcp` after changing the connection or credential. Startup diagnostics are redacted and written to stderr; stdout is reserved for MCP protocol traffic.
 
 Run the read-only server:
 
@@ -63,10 +64,8 @@ All runtime options have `KITARU_MCP_*` environment equivalents. Command-line ar
 ```text
 --mode read-only|standard|destructive
 --server URL
---context NAME
 --timeout SECONDS
 --handler-timeout SECONDS
---retries COUNT
 --pool-size COUNT
 --max-concurrency COUNT
 --debug
@@ -128,7 +127,7 @@ Create `.cursor/mcp.json` for a project server or `~/.cursor/mcp.json` for a glo
 
 Cursor asks for tool approval by default. See the [Cursor MCP documentation](https://docs.cursor.com/context/model-context-protocol) for configuration locations and approval controls.
 
-Do not put API keys in committed MCP configuration. Prefer `kitaru login`, the process environment, or your MCP client's private environment configuration.
+Do not put API keys in committed MCP configuration. Prefer the process environment or your MCP client's private environment configuration. `kitaru login SERVER` may store a credential for an explicitly selected matching URL, but it does not persist the MCP target.
 
 ## Capability modes
 
@@ -156,7 +155,7 @@ kitaru-mcp --mode destructive
 
 ## Measured tool surface
 
-The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 110,552 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 31,782 bytes.
+The schemas below are generated through the public MCP SDK registry and checked into `tests/mcp/snapshots/`. The destructive discovery response is 91,951 bytes, below the 192 KiB budget. Every individual input-plus-output schema is below 32 KiB; the largest is `kitaru_activity_read` at 31,782 bytes.
 
 | Tool | First mode | Operations |
 |---|---|---|
@@ -164,7 +163,7 @@ The schemas below are generated through the public MCP SDK registry and checked 
 | `kitaru_activity_read` | read-only | `list` and `get` sessions, replays, evaluations, experiment runs, and jobs; `list_children` for session nodes, experiment-run jobs, and job tasks. |
 | `kitaru_cohorts_manage` | standard | `create`, `update`, `create_version`, `update_version`. |
 | `kitaru_experiments_manage` | standard | `create`, `update` with exact evaluator versions. |
-| `kitaru_workflow_start` | standard | `replay`, `session_run`, `session_import`, `session_evaluation`, `experiment_run`. |
+| `kitaru_session_import` | standard | Import sessions from one existing payload blob with exact importer and agent versions. |
 | `kitaru_workflow_cancel` | destructive | Cancel an exact job or experiment run. |
 | `kitaru_delete` | destructive | Delete an exact cohort, cohort version, experiment, or experiment run. |
 
@@ -188,27 +187,15 @@ List operations return one page only. The default size is 20 and the MCP maximum
 
 Session-node payloads are excluded by default. Set `include_payloads=true` only when stored inputs and outputs are safe to place in the MCP transcript.
 
-## Starting workflows
+## Importing sessions
 
-All workflow starts return immediately. Poll the returned job, replay, evaluation, or experiment-run identity with `kitaru_activity_read`; there is no wait or watch tool.
+`kitaru_session_import` accepts an existing payload blob ID only. It never reads a local path or uploads a blob. The operation performs exactly four bounded preflight reads: blob metadata, the exact importer version, its parent importer, and the exact agent version. It then submits one import and returns immediately. Poll the returned job with `kitaru_activity_read`; there is no wait or watch tool.
 
-Replay, session run, session evaluation, and experiment run require a stable `request_id`. Before mutation, the MCP server checks that the target advertises `idempotency.v1`; older servers are rejected with `unsupported_server`. Reusing the same request ID with the same request lets the API replay its authoritative response, while changing the request under the same ID returns `idempotency_mismatch`.
+Blob-backed import retains the existing API's domain deduplication only. It does not accept a caller-supplied request ID and is not protected across arbitrary repeated MCP invocations. After a dropped response, read the relevant jobs or sessions before deciding whether to retry.
 
-{% hint style="warning" %}
-Protected receipts confirm `idempotency="server-enforced"`, but they cannot distinguish whether that receipt was newly stored or replayed. The typed Kitaru resources intentionally return DTOs and discard response headers, including the server's stored-versus-replayed header.
-{% endhint %}
+### Evaluator selection bounds
 
-The combined `kitaru_workflow_start` tool is annotated non-idempotent because its `session_import` operation does not use the protected-request contract. After a dropped response from an unprotected operation or management call, read the relevant resource before deciding whether to retry.
-
-### Existing-blob import
-
-`session_import` accepts an existing payload blob ID only. It never reads a local path or uploads a blob. The operation performs exactly four bounded preflight reads: blob metadata, the exact importer version, its parent importer, and the exact agent version. It then submits one import and returns immediately.
-
-Blob-backed import retains the API's domain deduplication only. It does not accept a `request_id` and is not protected across arbitrary repeated MCP invocations.
-
-### Evaluation bounds
-
-A session evaluation accepts at most 100 unique sessions, 10 evaluator selections, and 100 session/evaluator pairs. Experiment and replay evaluator selections use exact evaluator IDs and positive version numbers.
+Experiment evaluator selections use exact evaluator IDs and positive version numbers. The MCP adapter resolves each selection to the existing API's evaluator name and version fields before submitting the request.
 
 ## Cancellation and deletion
 
@@ -231,7 +218,7 @@ Success:
 }
 ```
 
-Expected failures set MCP `isError=true` and return a redacted error envelope with a stable code, `retryable`, bounded details, and optional recovery guidance. Codes include `invalid_arguments`, `invalid_configuration`, `authentication_failed`, `permission_denied`, `not_found`, `unsupported_server`, `idempotency_mismatch`, `request_in_progress`, `conflict`, `rate_limited`, `timeout`, `network_error`, `remote_failed`, `remote_canceled`, `partial_failure`, and `internal_error`.
+Expected failures set MCP `isError=true` and return a redacted error envelope with a stable code, `retryable`, bounded details, and optional recovery guidance. Codes include `invalid_arguments`, `invalid_configuration`, `authentication_failed`, `permission_denied`, `not_found`, `conflict`, `rate_limited`, `timeout`, `network_error`, `remote_failed`, `remote_canceled`, `partial_failure`, and `internal_error`.
 
 Malformed tool arguments are rejected by the MCP SDK as a protocol-level invalid-params/tool-call validation error before a Kitaru handler runs. They do not produce a Kitaru error envelope and cannot trigger a remote API call.
 

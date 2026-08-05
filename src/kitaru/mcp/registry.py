@@ -26,25 +26,25 @@ from kitaru.mcp.models.common import (
     DeleteResult,
     ExperimentsManageResult,
     RegistryReadResult,
+    SessionImportResult,
     ToolResult,
     WorkflowCancelResult,
-    WorkflowStartResult,
 )
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
+    SessionImportRequest,
     WorkflowCancelRequest,
-    WorkflowStartRequest,
 )
+from kitaru.mcp.redaction import redact_data
 from kitaru.mcp.settings import CapabilityMode
 from kitaru.mcp.tools.activity import handle_activity_read
 from kitaru.mcp.tools.cohorts import handle_cohorts_manage
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
 from kitaru.mcp.tools.experiments import handle_experiments_manage
 from kitaru.mcp.tools.registry import handle_registry_read
-from kitaru.mcp.tools.workflows import handle_workflow_start
-from kitaru.redaction import redact_data
+from kitaru.mcp.tools.workflows import handle_session_import
 
 ToolHandler = Callable[[MCPServerState, Any], Awaitable[object]]
 
@@ -113,13 +113,13 @@ async def experiments_manage_tool(
     )
 
 
-async def workflow_start_tool(
-    request: WorkflowStartRequest, context: Context
-) -> WorkflowStartResult:
-    """Start one asynchronous workflow and return immediately without polling."""
+async def session_import_tool(
+    request: SessionImportRequest, context: Context
+) -> SessionImportResult:
+    """Import sessions from one existing blob and return the queued job."""
     return cast(
-        WorkflowStartResult,
-        await _invoke(context, request, WorkflowStartResult, handle_workflow_start),
+        SessionImportResult,
+        await _invoke(context, request, SessionImportResult, handle_session_import),
     )
 
 
@@ -188,11 +188,11 @@ TOOL_SPECS = (
         experiments_manage_tool,
     ),
     ToolSpec(
-        "kitaru_workflow_start",
+        "kitaru_session_import",
         CapabilityMode.STANDARD,
-        workflow_start_tool.__doc__ or "",
+        session_import_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
-        workflow_start_tool,
+        session_import_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",
