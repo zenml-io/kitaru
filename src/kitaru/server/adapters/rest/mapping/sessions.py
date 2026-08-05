@@ -42,7 +42,6 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
     return SessionCreate(
         agent_id=body.agent_id,
         agent_version_id=body.agent_version_id,
-        task_id=body.task_id,
         origin=body.origin,
         status=body.status,
         name=body.name,

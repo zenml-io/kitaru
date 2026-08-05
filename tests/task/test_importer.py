@@ -173,7 +173,6 @@ def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
 def test_session_request_maps_fields() -> None:
     """Build a session create request from importer details and a parsed item."""
     agent_id = uuid.uuid4()
-    task_id = uuid.uuid4()
     importer = ImportTaskDetails(
         plugin={
             "type": "package",
@@ -199,7 +198,7 @@ def test_session_request_maps_fields() -> None:
         nodes=[],
     )
 
-    request = session_request(importer, parsed, task_id)
+    request = session_request(importer, parsed)
 
     assert request.agent_id == agent_id
     assert request.origin == SessionOrigin.IMPORTED
@@ -211,7 +210,6 @@ def test_session_request_maps_fields() -> None:
     assert request.external_id == "ext-1"
     assert request.metadata == {"k": "v"}
     assert request.provider == "acme"
-    assert request.task_id == task_id
 
 
 _PARSER_SCRIPT = """

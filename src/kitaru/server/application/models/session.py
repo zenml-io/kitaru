@@ -73,7 +73,6 @@ class SessionCreate(FrozenModel):
 
     agent_id: uuid.UUID | None = None
     agent_version_id: uuid.UUID | None = None
-    task_id: uuid.UUID | None = None
     origin: SessionOrigin
     status: SessionStatus | None = None
     name: str | None = None
