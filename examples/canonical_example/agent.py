@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-import uuid
 from decimal import Decimal
 from typing import Any
 
@@ -127,11 +126,8 @@ async def main() -> None:
     ticket = get_ticket_input(get_task_inputs())
     strict_policy = os.environ.get("RETURNS_POLICY_MODE") == "strict"
     pydantic_agent = build_agent(MockCommerceStore(), strict_policy=strict_policy)
-    version_value = os.environ.get("KITARU_AGENT_VERSION_ID")
     agent = KitaruAgent(
         pydantic_agent,
-        agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
-        agent_version_id=uuid.UUID(version_value) if version_value else None,
         session_name=f"Returns ticket: {ticket.ticket_id}",
     )
     result = await agent.run(build_prompt(ticket))

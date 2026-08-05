@@ -60,15 +60,8 @@ def test_handlers_registry_covers_every_kind() -> None:
 async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> None:
     """The agent process uses the run spec's command and working dir verbatim."""
     task_id = uuid.uuid4()
-    agent_id = uuid.uuid4()
-    agent_version_id = uuid.uuid4()
     spec = make_agent_spec(
-        task_id,
-        command="run.sh --flag",
-        working_dir="/srv/agent",
-        inputs={"a": 1},
-        agent_id=agent_id,
-        agent_version_id=agent_version_id,
+        task_id, command="run.sh --flag", working_dir="/srv/agent", inputs={"a": 1}
     )
     ctx = _ctx(tmp_path, FakeKitaruAPIClient())
 
@@ -78,8 +71,6 @@ async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> N
     assert process.working_dir == "/srv/agent"
     assert process.timeout_seconds == spec.timeout_seconds
     assert json.loads(process.env["KITARU_TASK_INPUTS"]) == {"a": 1}
-    assert process.env["KITARU_AGENT_ID"] == str(agent_id)
-    assert process.env["KITARU_AGENT_VERSION_ID"] == str(agent_version_id)
 
 
 async def test_agent_handler_omits_inputs_over_the_env_byte_threshold(

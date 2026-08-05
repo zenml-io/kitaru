@@ -174,8 +174,6 @@ class AgentTaskDetails(ResponseModel):
     """Agent task details."""
 
     kind: Literal["agent"] = Field(default="agent")
-    agent_id: uuid.UUID = Field(description="Agent the task executes.")
-    agent_version_id: uuid.UUID = Field(description="Agent version the task executes.")
     inputs: JsonValue = Field(description="Inputs passed to the agent's command.")
     replay_id: uuid.UUID | None = Field(
         default=None, description="Replay the task runs for."

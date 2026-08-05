@@ -721,8 +721,6 @@ class AgentTaskDetails(FrozenModel):
     """Agent task details."""
 
     kind: Literal[TaskKind.AGENT] = TaskKind.AGENT
-    agent_id: uuid.UUID
-    agent_version_id: uuid.UUID
     inputs: Any = None
     replay_id: uuid.UUID | None = None
 

@@ -41,7 +41,7 @@ def test_agent_spec_grants_nothing() -> None:
         kind=TaskKind.AGENT,
         timeout_seconds=60,
         run_spec=TaskRunSpec(command="run.sh"),
-        details=AgentTaskDetails(agent_id=uuid.uuid4(), agent_version_id=uuid.uuid4()),
+        details=AgentTaskDetails(),
     )
     assert build_task_grants(spec) == {}
 
