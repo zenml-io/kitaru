@@ -19,7 +19,8 @@ from typing import Any
 
 import pytest
 
-import kitaru.importers.langfuse as langfuse_module
+import importers.langfuse as langfuse_module
+from importers.langfuse import LangfuseJSONLImporter, parse
 from kitaru.importers import (
     ImportContext,
     InvalidImport,
@@ -27,7 +28,6 @@ from kitaru.importers import (
     NodeType,
     SessionStatus,
 )
-from kitaru.importers.langfuse import LangfuseJSONLImporter, parse
 from kitaru.task.importer import ImportFailure, ParsedSession
 
 

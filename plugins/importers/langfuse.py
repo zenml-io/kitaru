@@ -15,7 +15,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Built-in Langfuse JSON and JSONL trace importer."""
+"""Langfuse JSON and JSONL trace importer plugin."""
 
 import hashlib
 import json

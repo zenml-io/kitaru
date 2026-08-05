@@ -57,7 +57,7 @@ PLUGIN_DEFINITIONS = (
     PluginDefinition(
         kind="importer",
         name="langfuse",
-        path=_REPOSITORY_ROOT / "src/kitaru/importers/langfuse.py",
+        path=_REPOSITORY_ROOT / "plugins/importers/langfuse.py",
         entrypoint="parse",
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
@@ -65,21 +65,21 @@ PLUGIN_DEFINITIONS = (
     PluginDefinition(
         kind="evaluator",
         name="cost",
-        path=_REPOSITORY_ROOT / "src/kitaru/evaluators/basic.py",
+        path=_REPOSITORY_ROOT / "plugins/evaluators/basic.py",
         entrypoint="cost",
         description="Report the total recorded session cost.",
     ),
     PluginDefinition(
         kind="evaluator",
         name="latency",
-        path=_REPOSITORY_ROOT / "src/kitaru/evaluators/basic.py",
+        path=_REPOSITORY_ROOT / "plugins/evaluators/basic.py",
         entrypoint="latency",
         description="Measure session wall-clock duration.",
     ),
     PluginDefinition(
         kind="evaluator",
         name="tool-call-patterns",
-        path=_REPOSITORY_ROOT / "src/kitaru/evaluators/basic.py",
+        path=_REPOSITORY_ROOT / "plugins/evaluators/basic.py",
         entrypoint="tool_call_patterns",
         description="Count repeated calls to the same tool.",
     ),
