@@ -17,9 +17,9 @@ from examples.canonical_example.fixtures import CASES
 from examples.canonical_example.models import ResolutionAction
 from examples.canonical_example.store import MockCommerceStore
 
+from importers.langfuse import parse
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
-from kitaru.importers.langfuse import parse
 from kitaru.task.evaluator import SessionView
 from kitaru.task.importer import ParsedSession, flatten_nodes
 
