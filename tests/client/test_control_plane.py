@@ -18,7 +18,7 @@ import uuid
 import httpx
 import pytest
 
-from kitaru.client.client_id import ENV_CLIENT_ID
+from kitaru.client.config import ENV_CLIENT_ID
 from kitaru.client.control_plane import (
     API_KEY_GRANT_TYPE,
     DEVICE_CODE_GRANT_TYPE,
@@ -30,8 +30,6 @@ from kitaru.client.device_grant import DeviceLoginError
 from kitaru.transport import RetryTransport
 
 CONTROL_PLANE_URL = "https://control-plane.example.com"
-
-pytestmark = pytest.mark.usefixtures("isolated_config_directory")
 
 
 class FakeControlPlane:

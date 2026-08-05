@@ -101,15 +101,25 @@ class KitaruAPIClient:
             base_url = os.environ.get("KITARU_API_URL") or get_server_url()
             if not base_url:
                 raise RuntimeError("No server URL is configured")
-        if api_key is None and credential_store is None:
-            api_key = os.environ.get("KITARU_API_TOKEN") or os.environ.get(
-                "KITARU_API_KEY"
-            )
-            if api_key is None:
-                credential_store = CredentialStore()
+
+        self._owns_transport = True
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
+        self._http = build_async_client(
+            base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
+        )
         self._auth: TokenAuth | None = None
+
+        if api_key is None and credential_store is None:
+            if api_token := os.environ.get("KITARU_API_TOKEN"):
+                self._auth = StaticTokenAuth(api_token)
+            elif api_key := os.environ.get("KITARU_API_KEY"):
+                # Used later
+                pass
+            else:
+                # Nothing configured, fall back to the on-disk credential store.
+                credential_store = CredentialStore()
+
         if api_key:
             if api_key.startswith(CONTROL_PLANE_API_KEY_PREFIX):
                 # Control plane API keys are exchanged for a session token, so
@@ -118,10 +128,7 @@ class KitaruAPIClient:
                 credential_store.set_api_key(base_url, api_key)
             else:
                 self._auth = StaticTokenAuth(api_key)
-        self._http = build_async_client(
-            base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
-        )
-        self._owns_transport = True
+
         self._bind_resources()
         if credential_store is not None:
             self._auth = RenewingTokenAuth(

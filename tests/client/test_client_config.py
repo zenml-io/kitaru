@@ -14,6 +14,7 @@
 """Tests for the on-disk client configuration."""
 
 import json
+import uuid
 from pathlib import Path
 
 import httpx
@@ -23,8 +24,10 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth, StaticTokenAuth
 from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
+    ENV_CLIENT_ID,
     ENV_CONFIG_PATH,
     ClientConfig,
+    get_client_id,
     get_server_url,
     load_config,
     set_server_url,
@@ -142,3 +145,53 @@ def test_kitaru_client_defaults_to_the_resolved_server() -> None:
     client = KitaruClient()
 
     assert client._api_client._http.base_url == httpx.URL("http://stored")
+
+
+def test_generated_client_id_is_reused_across_calls(tmp_path: Path) -> None:
+    """Write a generated id once and read it back on the next call."""
+    first = get_client_id()
+
+    assert (tmp_path / "config" / "kitaru" / "config.json").exists()
+    assert get_client_id() == first
+
+
+def test_environment_overrides_the_stored_client_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prefer the id the environment names over the stored one."""
+    stored = get_client_id()
+    override = uuid.uuid4()
+    monkeypatch.setenv(ENV_CLIENT_ID, str(override))
+
+    assert get_client_id() == override
+    assert override != stored
+
+
+def test_malformed_stored_client_id_is_replaced(tmp_path: Path) -> None:
+    """Generate a fresh id when the stored one cannot be parsed."""
+    path = tmp_path / "config" / "kitaru" / "config.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"client_id": "not-a-uuid"}), encoding="utf-8")
+
+    client_id = get_client_id()
+
+    assert get_client_id() == client_id
+
+
+def test_malformed_environment_client_id_falls_back_to_the_stored_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignore an unparsable environment id rather than failing the login."""
+    stored = get_client_id()
+    monkeypatch.setenv(ENV_CLIENT_ID, "not-a-uuid")
+
+    assert get_client_id() == stored
+
+
+def test_client_id_shares_the_file_with_the_server_url() -> None:
+    """Keep the stored server URL when generating an id."""
+    set_server_url("http://stored")
+    client_id = get_client_id()
+
+    assert get_server_url() == "http://stored"
+    assert get_client_id() == client_id

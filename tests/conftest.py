@@ -48,7 +48,6 @@ from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.client_id import ENV_CLIENT_ID
 from kitaru.client.credential_store import CredentialStore
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
@@ -485,18 +484,12 @@ def isolated_client_environment(
         "KITARU_API_URL",
         "KITARU_API_TOKEN",
         "KITARU_API_KEY",
+        "KITARU_CLIENT_ID",
         "KITARU_CONFIG_PATH",
         "KITARU_CREDENTIALS_PATH",
         "KITARU_DISABLE_CREDENTIALS_CACHE",
     ):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
-
-
-@pytest.fixture
-def isolated_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Point the client config directory at a fresh temporary directory."""
-    monkeypatch.delenv(ENV_CLIENT_ID, raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 

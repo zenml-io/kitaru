@@ -13,10 +13,12 @@
 #  permissions and limitations under the License.
 """On-disk client configuration."""
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
+import uuid
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
@@ -24,6 +26,7 @@ from pydantic import BaseModel, ValidationError
 logger = logging.getLogger(__name__)
 
 ENV_CONFIG_PATH = "KITARU_CONFIG_PATH"
+ENV_CLIENT_ID = "KITARU_CLIENT_ID"
 
 CONFIG_FILE_NAME = "config.json"
 # Only the owner may read the files or list the directory holding them.
@@ -97,6 +100,7 @@ class ClientConfig(BaseModel):
     """Client configuration."""
 
     server_url: str | None = None
+    client_id: uuid.UUID | None = None
 
 
 def load_config() -> ClientConfig:
@@ -148,3 +152,30 @@ def set_server_url(url: str | None) -> None:
     config = load_config()
     config.server_url = normalize_server_url(url) if url else None
     save_config(config)
+
+
+def get_client_id() -> uuid.UUID:
+    """Return the id the control plane knows this installation by.
+
+    The control plane device authorization grant keys a device on the client
+    id, so the same machine has to present the same one across logins.
+
+    Returns:
+        Id read from ``KITARU_CLIENT_ID``, from the configuration file, or
+        newly generated and written there.
+    """
+    override = os.environ.get(ENV_CLIENT_ID)
+    if override:
+        try:
+            return uuid.UUID(override)
+        except ValueError:
+            pass
+    config = load_config()
+    if config.client_id is not None:
+        return config.client_id
+    config.client_id = uuid.uuid4()
+    # A read-only config directory costs a new device per login, which is
+    # worse than reusing one but still authenticates.
+    with contextlib.suppress(OSError):
+        save_config(config)
+    return config.client_id

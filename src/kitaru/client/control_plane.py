@@ -20,8 +20,7 @@ from collections.abc import Callable
 import httpx
 from pydantic import BaseModel, ConfigDict
 
-from kitaru.client.client_id import get_client_id
-from kitaru.client.config import normalize_server_url
+from kitaru.client.config import get_client_id, normalize_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken, ApiType
 from kitaru.client.device_grant import describe_this_device, poll_for_token
