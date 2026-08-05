@@ -126,7 +126,8 @@ class _FakeClient:
     )
     next_ingest_error: ClassVar[BaseException | None] = None
 
-    def __init__(self, **_: Any) -> None:
+    def __init__(self, **kwargs: Any) -> None:
+        self.api_key = kwargs.get("api_key")
         self.session_id = uuid.uuid4()
         fixture = type(self).next_fixture
         self.task_id = fixture.task_id if fixture else None
@@ -150,6 +151,7 @@ class _FakeClient:
 def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "KITARU_API_KEY",
+        "KITARU_TASK_TOKEN",
         "KITARU_API_URL",
         "KITARU_TASK_ID",
         "KITARU_TASK_INPUTS",
@@ -279,6 +281,20 @@ def test_constructor_validates_configuration() -> None:
         KitaruAgent(
             agent, agent_id=uuid.uuid4(), api_url="http://kitaru.test", batch_size=0
         )
+
+
+def test_uses_task_token_before_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KITARU_TASK_TOKEN", "task-token")
+    monkeypatch.setenv("KITARU_API_KEY", "api-key")
+    agent = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        agent_id=uuid.uuid4(),
+        api_url="http://kitaru.test",
+    )
+
+    agent.run_sync("hello")
+
+    assert _FakeClient.instances[0].api_key == "task-token"
 
 
 def test_run_sync_preserves_result_and_records_lifecycle() -> None:
