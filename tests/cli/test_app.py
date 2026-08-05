@@ -28,6 +28,29 @@ from kitaru.cli.output import CommandResult, OutputMode, emit_event, get_output_
 from kitaru.client.exceptions import APIError
 
 
+@pytest.mark.parametrize(
+    ("tokens", "usage"),
+    [
+        ([], "Usage: kitaru COMMAND [OPTIONS]"),
+        (["worker"], "Usage: kitaru worker COMMAND [OPTIONS]"),
+    ],
+)
+def test_bare_command_path_prints_help_without_bootstrap(
+    tokens: list[str], usage: str, monkeypatch, capsys
+) -> None:
+    """A bare root or command group prints its help without local setup."""
+
+    def fail_config_store():
+        raise AssertionError("help read local config")
+
+    monkeypatch.setattr(app_module, "ConfigStore", fail_config_store)
+
+    assert app_module.main(tokens) == 0
+    captured = capsys.readouterr()
+    assert usage in captured.out
+    assert captured.err == ""
+
+
 def test_help_version_schema_and_scaffold_skip_bootstrap(
     monkeypatch, capsys, tmp_path: Path
 ) -> None:
