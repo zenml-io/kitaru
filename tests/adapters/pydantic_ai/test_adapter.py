@@ -269,11 +269,8 @@ async def test_task_bound_run_leaves_agent_identity_for_server_inference(
     await wrapped.run("ignored prompt")
 
     request = _FakeClient.instances[0].sessions.created[0]
-    assert request.task_id == spec.task_id
     assert request.agent_id is None
     assert request.agent_version_id is None
-    assert "agent_id" not in request.model_fields_set
-    assert "agent_version_id" not in request.model_fields_set
 
 
 def test_constructor_validates_batch_size() -> None:
@@ -429,7 +426,6 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
     assert user_prompts == ["environment prompt"]
     client = _FakeClient.instances[0]
     assert client.sessions.created[0].inputs == "environment prompt"
-    assert client.sessions.created[0].task_id == spec.task_id
 
 
 async def test_replay_json_input_is_encoded_and_recorded_original(

@@ -404,15 +404,11 @@ class _KitaruCapability(AbstractCapability[Any]):
         """Create the Kitaru session before executing the agent."""
         state = self._require_state()
         started_at = datetime.now(UTC)
-        identity: dict[str, uuid.UUID] = {}
-        if self.agent_id is not None:
-            identity["agent_id"] = self.agent_id
-        if self.agent_version_id is not None:
-            identity["agent_version_id"] = self.agent_version_id
         try:
             session = await state.client.sessions.create(
                 SessionCreateRequest(
-                    **identity,
+                    agent_id=self.agent_id,
+                    agent_version_id=self.agent_version_id,
                     origin=(
                         SessionOrigin.REPLAY
                         if state.replay is not None
@@ -425,7 +421,6 @@ class _KitaruCapability(AbstractCapability[Any]):
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                    task_id=state.task_id,
                 )
             )
             state.session_id = session.id
