@@ -9,8 +9,8 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from kitaru.api_models.v1.filter import Filter
-from kitaru.client.references import ParentKind
 from kitaru.mcp.models.common import MCPModel, PageOptions
+from kitaru.mcp.references import ParentKind
 
 VersionedKind = Literal["agent", "cohort", "importer", "evaluator"]
 

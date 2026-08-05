@@ -6,6 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from kitaru.client.exceptions import APIError
+from kitaru.mcp import connection as mcp_connection
+from kitaru.mcp import server as mcp_server
+from kitaru.mcp.connection import ConnectionConfigurationError, MCPConnection
 from kitaru.mcp.errors import MCPOutputValidationError, MCPToolError, map_exception
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
 
@@ -24,24 +27,31 @@ def test_settings_default_and_explicit_over_environment_precedence() -> None:
     assert settings.mode is CapabilityMode.DESTRUCTIVE
     assert settings.timeout == 20
     assert settings.debug is True
+    assert (
+        MCPSettings.from_environment(
+            {"KITARU_API_URL": "https://api.example"}
+        ).server_url
+        == "https://api.example"
+    )
+    assert (
+        MCPSettings.from_environment(
+            {
+                "KITARU_API_URL": "https://api.example",
+                "KITARU_MCP_SERVER": "https://mcp.example",
+            }
+        ).server_url
+        == "https://mcp.example"
+    )
 
 
-def test_settings_reject_conflicts_nonfinite_and_invalid_bounds() -> None:
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        MCPSettings(server_url="https://one", context_name="two")
-    for field in ("server_url", "context_name"):
-        with pytest.raises(ValueError, match="must not be blank"):
-            MCPSettings.model_validate({field: "  \t"})
-    for variable in ("KITARU_MCP_SERVER", "KITARU_MCP_CONTEXT"):
-        with pytest.raises(ValueError, match="must not be blank"):
-            MCPSettings.from_environment({variable: ""})
+def test_settings_reject_nonfinite_and_invalid_bounds() -> None:
+    with pytest.raises(ValueError, match="must not be blank"):
+        MCPSettings(server_url="  \t")
+    with pytest.raises(ValueError, match="must not be blank"):
+        MCPSettings.from_environment({"KITARU_MCP_SERVER": ""})
     with pytest.raises(ValueError, match="must not be blank"):
         MCPSettings.from_environment(
             {"KITARU_MCP_SERVER": "https://valid.example"}, server_url=""
-        )
-    with pytest.raises(ValueError, match="must not be blank"):
-        MCPSettings.from_environment(
-            {"KITARU_MCP_CONTEXT": "valid-context"}, context_name="  "
         )
     with pytest.raises(ValueError, match="finite"):
         MCPSettings(timeout=float("inf"))
@@ -56,16 +66,7 @@ def test_settings_reject_conflicts_nonfinite_and_invalid_bounds() -> None:
         (APIError(401, "bad"), "authentication_failed", False),
         (APIError(403, "bad"), "permission_denied", False),
         (APIError(404, "bad"), "not_found", False),
-        (
-            APIError(
-                409,
-                "The idempotency key was already used for a different request.",
-            ),
-            "idempotency_mismatch",
-            False,
-        ),
-        (APIError(409, "request in progress"), "request_in_progress", True),
-        (APIError(425, "in progress"), "request_in_progress", True),
+        (APIError(409, "conflict"), "conflict", False),
         (APIError(429, "slow down"), "rate_limited", True),
         (APIError(500, "failed"), "remote_failed", True),
         (httpx.ConnectError("offline"), "network_error", True),
@@ -114,3 +115,77 @@ def test_tool_error_keeps_bounded_recovery_contract() -> None:
     )
     assert mapped.details == {"completed": 1}
     assert mapped.recovery == "Inspect the returned receipt."
+
+
+def test_connection_requires_explicit_url_and_prefers_environment_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(ConnectionConfigurationError, match="No Kitaru server"):
+        mcp_server.resolve_connection(MCPSettings())
+    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_secret")
+    connection = mcp_server.resolve_connection(
+        MCPSettings(server_url="https://example.test/root/")
+    )
+    assert connection.server_url == "https://example.test/root"
+    assert connection.credential_source == "environment"
+    assert connection.api_key == "KITKEY_secret"
+    assert connection.credential_store is None
+
+
+def test_connection_uses_store_keyed_by_fixed_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[str] = []
+    stored = object()
+
+    class FakeStore:
+        def get(self, url: str) -> object:
+            requested.append(url)
+            return stored
+
+    fake_store = FakeStore()
+    monkeypatch.delenv("KITARU_API_KEY", raising=False)
+    monkeypatch.setattr(mcp_connection, "CredentialStore", lambda: fake_store)
+    connection = mcp_connection.resolve_connection("https://example.test/root/")
+    assert requested == ["https://example.test/root"]
+    assert connection.credential_source == "stored"
+    assert connection.api_key is None
+    assert connection.credential_store is fake_store
+
+
+def test_connection_rejects_malformed_port() -> None:
+    with pytest.raises(ConnectionConfigurationError, match="invalid port"):
+        mcp_connection.resolve_connection("https://example.test:not-a-port")
+
+
+@pytest.mark.parametrize("option", ["--context", "--retries"])
+def test_removed_connection_options_are_rejected(option: str) -> None:
+    with pytest.raises(SystemExit):
+        mcp_server._parse_arguments([option, "value"])
+
+
+def test_process_client_disables_transport_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_client(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(mcp_server, "KitaruAPIClient", fake_client)
+    connection = MCPConnection(
+        server_url="https://example.test",
+        credential_source="environment",
+        api_key="KITKEY_secret",
+        credential_store=None,
+    )
+    mcp_server._build_client(MCPSettings(), connection)
+    assert captured == {
+        "base_url": "https://example.test",
+        "api_key": "KITKEY_secret",
+        "credential_store": None,
+        "timeout": 30.0,
+        "retries": 0,
+        "pool_size": 20,
+    }

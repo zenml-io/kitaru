@@ -3,6 +3,9 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Experiment management handler."""
 
+import uuid
+
+from kitaru.api_models.v1.evaluator import EvaluatorResponse
 from kitaru.api_models.v1.experiment import (
     ExperimentCreateRequest,
     ExperimentUpdateRequest,
@@ -58,15 +61,29 @@ async def _get_evaluator_configs(
     if len(set(identities)) != len(identities):
         raise MCPToolError("invalid_arguments", "Evaluator selections must be unique.")
     configs: list[EvaluatorConfig] = []
+    parents: dict[uuid.UUID, EvaluatorResponse] = {}
     for selection in selections:
+        parent = parents.get(selection.evaluator_id)
+        if parent is None:
+            parent = await state.client.evaluators.get(selection.evaluator_id)
+            parents[selection.evaluator_id] = parent
         version = await state.client.evaluators.get_version(
             selection.evaluator_id, selection.version
         )
-        if version.evaluator_id != selection.evaluator_id:
+        if (
+            parent.id != selection.evaluator_id
+            or version.evaluator_id != selection.evaluator_id
+            or version.version != selection.version
+        ):
             raise MCPToolError(
-                "conflict", "Evaluator version resolved to a different parent."
+                "conflict",
+                "Evaluator selection resolved to a different parent or version.",
             )
         configs.append(
-            EvaluatorConfig(evaluator_version_id=version.id, params=selection.params)
+            EvaluatorConfig(
+                evaluator=parent.name,
+                version=version.version,
+                params=selection.params,
+            )
         )
     return configs

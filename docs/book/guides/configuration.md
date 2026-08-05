@@ -128,14 +128,14 @@ The v2 client and native MCP server use two independent environment variables fo
 - `KITARU_API_URL` selects the API target.
 - `KITARU_API_KEY` supplies a credential when the target is not anonymous.
 
-For normal interactive use, prefer `kitaru login SERVER` and a persisted context. For CI, Docker, and other headless environments, set the API URL and, when required, an API key:
+For interactive authentication, `kitaru login SERVER` can store a credential for that URL. Commands still need an explicit target through `--server` or `KITARU_API_URL`. For CI, Docker, and other headless environments, set the API URL and, when required, an API key:
 
 ```bash
 export KITARU_API_URL=https://my-server.example.com
 export KITARU_API_KEY=kat_abc123...
 ```
 
-The API key is optional so public servers can be used anonymously. Target resolution and credential resolution are independent: an explicit target can still use a stored credential for the same normalized URL, and `KITARU_API_KEY` overrides a stored credential. The native MCP server also accepts `--server` or `--context`, fixes the selected connection for the process lifetime, and intentionally ignores `KITARU_TASK_TOKEN`.
+The API key is optional so public servers can be used anonymously. Target resolution and credential resolution are independent: an explicit target can still use a stored credential for the same normalized URL, and `KITARU_API_KEY` overrides a stored credential. The native MCP server also accepts `--server`, fixes the selected connection for the process lifetime, and intentionally ignores `KITARU_TASK_TOKEN`.
 
 ### Execution
 

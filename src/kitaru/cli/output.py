@@ -15,7 +15,7 @@
 
 import json
 import traceback as traceback_module
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Literal, TextIO
@@ -26,7 +26,7 @@ from rich.table import Table
 from rich.text import Text
 
 from kitaru.cli.presentation import HumanField, HumanView, get_human_view
-from kitaru.redaction import redact, redact_data
+from kitaru.cli.redaction import redact, redact_data
 
 OutputMode = Literal["auto", "text", "json", "jsonl"]
 
@@ -101,8 +101,6 @@ class OutputContext:
 
     command: str
     mode: Literal["text", "json", "jsonl"]
-    machine: bool
-    non_interactive: bool
     debug: bool
     traceback: bool
     stdout: TextIO
@@ -116,7 +114,7 @@ _OUTPUT_CONTEXT: ContextVar[OutputContext | None] = ContextVar(
 )
 
 
-def set_output_context(context: OutputContext):
+def set_output_context(context: OutputContext) -> Token[OutputContext | None]:
     """Set the rendering context for this invocation.
 
     Args:
@@ -128,7 +126,7 @@ def set_output_context(context: OutputContext):
     return _OUTPUT_CONTEXT.set(context)
 
 
-def reset_output_context(token: Any) -> None:
+def reset_output_context(token: Token[OutputContext | None]) -> None:
     """Restore the rendering context after an invocation.
 
     Args:

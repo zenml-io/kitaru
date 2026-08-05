@@ -58,7 +58,6 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "agent",
         "cohort",
         "config",
-        "context",
         "doctor",
         "evaluation",
         "evaluator",
@@ -108,10 +107,9 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     [agent_register] = describe_schema(("agent", "register"))
     assert agent_register["mutating"] is True
     assert agent_register["side_effects"]["creates_remote_state"] is True
-    assert any(
-        parameter["name"] == "--entrypoint"
-        for parameter in agent_register["parameters"]
-    )
+    names = {parameter["name"] for parameter in agent_register["parameters"]}
+    assert "--command" in names
+    assert "--entrypoint" not in names
 
     [importer_scaffold] = describe_schema(("importer", "scaffold"))
     assert importer_scaffold["side_effects"]["writes_local_file"] is True
@@ -387,11 +385,6 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
     assert "NAME --name" not in help_text
     assert "--empty-env" not in help_text
     assert "JSONL is streaming-only" in help_text
-
-    assert app_module.main(["context", "remove", "--help"]) == 0
-    help_text = capsys.readouterr().out
-    assert "NAME --name" not in help_text
-    assert "--no-force" not in help_text
 
     assert app_module.main(["session", "list", "--help"]) == 0
     help_text = capsys.readouterr().out

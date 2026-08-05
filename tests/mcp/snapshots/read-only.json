@@ -150,7 +150,7 @@
           "type": "object"
         },
         "ParentKind": {
-          "description": "Parent resource families supporting bounded UUID-or-name lookup.",
+          "description": "Parent resource families supporting UUID-or-name lookup.",
           "enum": [
             "agent",
             "cohort",
@@ -750,31 +750,9 @@
           "description": "Evaluator config.",
           "properties": {
             "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
+              "title": "Evaluator",
+              "type": "string"
             },
             "params": {
               "additionalProperties": true,
@@ -796,6 +774,9 @@
               "title": "Version"
             }
           },
+          "required": [
+            "evaluator"
+          ],
           "title": "EvaluatorConfig",
           "type": "object"
         },
@@ -1814,68 +1795,6 @@
     "description": "Read Kitaru sessions, runs, jobs, and bounded child pages.",
     "inputSchema": {
       "$defs": {
-        "ActivityChildrenRequest": {
-          "additionalProperties": false,
-          "description": "List one page of a bounded child collection.",
-          "properties": {
-            "cursor": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Cursor"
-            },
-            "include_payloads": {
-              "default": false,
-              "title": "Include Payloads",
-              "type": "boolean"
-            },
-            "kind": {
-              "enum": [
-                "session_nodes",
-                "experiment_run_jobs",
-                "job_tasks"
-              ],
-              "title": "Kind",
-              "type": "string"
-            },
-            "operation": {
-              "const": "list_children",
-              "title": "Operation",
-              "type": "string"
-            },
-            "parent_id": {
-              "format": "uuid",
-              "title": "Parent Id",
-              "type": "string"
-            },
-            "size": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Size",
-              "type": "integer"
-            },
-            "sort": {
-              "default": "created:desc",
-              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
-              "title": "Sort",
-              "type": "string"
-            }
-          },
-          "required": [
-            "operation",
-            "kind",
-            "parent_id"
-          ],
-          "title": "ActivityChildrenRequest",
-          "type": "object"
-        },
         "ActivityGetRequest": {
           "additionalProperties": false,
           "description": "Get one activity record by exact UUID.",
@@ -2123,6 +2042,112 @@
           ],
           "title": "OrFilter",
           "type": "object"
+        },
+        "SessionNodesRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "include_payloads": {
+              "default": false,
+              "title": "Include Payloads",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "session_nodes",
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SessionNodesRequest",
+          "type": "object"
+        },
+        "SortedChildrenRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "kind": {
+              "enum": [
+                "experiment_run_jobs",
+                "job_tasks"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SortedChildrenRequest",
+          "type": "object"
         }
       },
       "properties": {
@@ -2131,7 +2156,24 @@
             "mapping": {
               "get": "#/$defs/ActivityGetRequest",
               "list": "#/$defs/ActivityListRequest",
-              "list_children": "#/$defs/ActivityChildrenRequest"
+              "list_children": {
+                "discriminator": {
+                  "mapping": {
+                    "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                    "job_tasks": "#/$defs/SortedChildrenRequest",
+                    "session_nodes": "#/$defs/SessionNodesRequest"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/SessionNodesRequest"
+                  },
+                  {
+                    "$ref": "#/$defs/SortedChildrenRequest"
+                  }
+                ]
+              }
             },
             "propertyName": "operation"
           },
@@ -2143,7 +2185,22 @@
               "$ref": "#/$defs/ActivityGetRequest"
             },
             {
-              "$ref": "#/$defs/ActivityChildrenRequest"
+              "discriminator": {
+                "mapping": {
+                  "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                  "job_tasks": "#/$defs/SortedChildrenRequest",
+                  "session_nodes": "#/$defs/SessionNodesRequest"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SessionNodesRequest"
+                },
+                {
+                  "$ref": "#/$defs/SortedChildrenRequest"
+                }
+              ]
             }
           ],
           "title": "Request"
@@ -2338,31 +2395,9 @@
           "description": "Evaluator config.",
           "properties": {
             "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
+              "title": "Evaluator",
+              "type": "string"
             },
             "params": {
               "additionalProperties": true,
@@ -2384,6 +2419,9 @@
               "title": "Version"
             }
           },
+          "required": [
+            "evaluator"
+          ],
           "title": "EvaluatorConfig",
           "type": "object"
         },

@@ -13,19 +13,13 @@ from contextlib import asynccontextmanager
 from mcp.server import MCPServer
 from pydantic import ValidationError
 
-from kitaru.analytics.source import AnalyticsSource
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.connection import (
-    ConfigStore,
-    build_api_client,
-    resolve_credential,
-    resolve_target,
-)
-from kitaru.client.credential_store import CredentialStore
-from kitaru.mcp.lifecycle import MCPConnection, MCPServerState
+from kitaru.mcp.connection import MCPConnection
+from kitaru.mcp.connection import resolve_connection as resolve_fixed_connection
+from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.redaction import redact
 from kitaru.mcp.registry import register_tools
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
-from kitaru.redaction import redact
 
 ClientFactory = Callable[[], KitaruAPIClient]
 logger = logging.getLogger("kitaru.mcp")
@@ -52,7 +46,7 @@ def create_server(
             if client_factory is not None
             else _build_client(settings, connection)
         )
-        state = MCPServerState(settings=settings, connection=connection, client=client)
+        state = MCPServerState(settings=settings, client=client)
         try:
             yield state
         finally:
@@ -73,10 +67,9 @@ async def run_stdio(settings: MCPSettings) -> None:
     """Resolve one fixed connection and run protocol-only stdio."""
     connection = resolve_connection(settings)
     logger.warning(
-        "Kitaru MCP target=%s target_source=%s credential_source=%s",
-        redact(connection.target.server_url),
-        connection.target.source,
-        connection.credential.source,
+        "Kitaru MCP target=%s credential_source=%s",
+        redact(connection.server_url),
+        connection.credential_source,
     )
     server = create_server(settings, connection)
     await server.run_stdio_async()
@@ -84,26 +77,17 @@ async def run_stdio(settings: MCPSettings) -> None:
 
 def resolve_connection(settings: MCPSettings) -> MCPConnection:
     """Resolve the fixed target and credential before protocol traffic."""
-    config_store = ConfigStore()
-    credential_store = CredentialStore()
-    target = resolve_target(
-        config_store,
-        explicit_server=settings.server_url,
-        context_name=settings.context_name,
-    )
-    credential = resolve_credential(target.server_url, credential_store)
-    return MCPConnection(target, credential, credential_store)
+    return resolve_fixed_connection(settings.server_url)
 
 
 def _build_client(settings: MCPSettings, connection: MCPConnection) -> KitaruAPIClient:
-    return build_api_client(
-        connection.target.server_url,
-        connection.credential,
-        connection.credential_store,
-        settings.timeout,
-        retries=settings.retries,
+    return KitaruAPIClient(
+        base_url=connection.server_url,
+        api_key=connection.api_key,
+        credential_store=connection.credential_store,
+        timeout=settings.timeout,
+        retries=0,
         pool_size=settings.pool_size,
-        source=AnalyticsSource.MCP,
     )
 
 
@@ -132,10 +116,8 @@ def _parse_arguments(argv: Sequence[str] | None) -> dict[str, object]:
     parser = argparse.ArgumentParser(prog="kitaru-mcp", add_help=False)
     parser.add_argument("--mode", choices=[mode.value for mode in CapabilityMode])
     parser.add_argument("--server", dest="server_url")
-    parser.add_argument("--context", dest="context_name")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--handler-timeout", type=float, dest="handler_timeout")
-    parser.add_argument("--retries", type=int)
     parser.add_argument("--pool-size", type=int, dest="pool_size")
     parser.add_argument("--max-concurrency", type=int, dest="max_concurrency")
     parser.add_argument("--debug", action="store_true", default=None)

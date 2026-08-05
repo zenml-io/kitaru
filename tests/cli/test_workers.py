@@ -18,19 +18,15 @@ import builtins
 import inspect
 import io
 import json
-import os
 import signal
-import stat
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.api_models.v1.task import LabelSelector, TaskKind
 from kitaru.api_models.v1.worker import WorkerListParams, WorkerResponse, WorkerRuntime
 from kitaru.cli import app as app_module
@@ -43,10 +39,6 @@ from kitaru.cli.output import (
     reset_output_context,
     set_output_context,
 )
-from kitaru.client.credential_store import CredentialStore
-from kitaru.client.credentials import ApiToken, ApiType
-from kitaru.server.adapters.rest.mapping.workers import worker_list_params_to_filter
-from kitaru.worker.process import build_process_env
 
 
 class DrainWorker:
@@ -106,8 +98,6 @@ def _output_context(stdout: io.StringIO, stderr: io.StringIO) -> OutputContext:
     return OutputContext(
         command="worker.start",
         mode="jsonl",
-        machine=True,
-        non_interactive=True,
         debug=False,
         traceback=False,
         stdout=stdout,
@@ -143,9 +133,7 @@ def test_config_merge_overrides_only_explicit_scope_fields(
     assert config.scope.job_id == job_id
     assert config.concurrency == 4
     assert config.metadata == {"source": "cli", "pool": "local"}
-    assert workers.build_worker_config(request_timeout=7.5).request_timeout == 7.5
-    with pytest.raises(ValueError, match="finite number"):
-        workers.build_worker_config(request_timeout=float("inf"))
+    assert "request_timeout" not in type(config).model_fields
 
 
 def test_selector_shorthand_and_json_cover_required_behavior() -> None:
@@ -166,80 +154,49 @@ def test_selector_shorthand_and_json_cover_required_behavior() -> None:
         workers.build_worker_config(concurrency=0)
 
 
-def test_contract_environment_isolates_selected_credentials_and_cleans_up(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_contract_environment_forwards_only_url_and_environment_api_key(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Task processes see only the selected credential for the worker lifetime."""
+    """Worker startup never creates or forwards a credential-store path."""
     selected_server = "https://selected.example.com"
-    other_server = "https://other.example.com"
-    source_path = tmp_path / "credentials.json"
-    store = CredentialStore(path=source_path)
-    store.set_api_key(selected_server, "KITKEY_selected")
-    store.set_api_key(other_server, "KITKEY_other")
     monkeypatch.setenv("KITARU_API_URL", "https://previous.example.com")
     monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/previous/credentials.json")
-    monkeypatch.delenv("KITARU_API_KEY", raising=False)
-    isolated_path: Path | None = None
+    monkeypatch.setenv("KITARU_API_KEY", "KITKEY_environment")
 
     with (
         pytest.raises(RuntimeError, match="startup failed"),
         workers.worker_contract_environment(
-            ResolvedTarget(selected_server, "explicit"), store
+            ResolvedTarget(selected_server, "explicit")
         ),
     ):
         assert workers.os.environ["KITARU_API_URL"] == selected_server
-        isolated_path = Path(workers.os.environ["KITARU_CREDENTIALS_PATH"])
-        assert isolated_path != source_path
-        payload = json.loads(isolated_path.read_text(encoding="utf-8"))
-        assert list(payload) == [selected_server]
-        assert payload[selected_server]["api_key"] == "KITKEY_selected"
-        task_env = build_process_env(uuid.uuid4(), {}, {}, {}, token="task-token")
-        assert task_env["KITARU_TASK_TOKEN"] == "task-token"
-        assert "KITARU_CREDENTIALS_PATH" not in task_env
-        if os.name == "posix":
-            assert stat.S_IMODE(isolated_path.stat().st_mode) == 0o600
-            assert stat.S_IMODE(isolated_path.parent.stat().st_mode) == 0o700
-        assert "KITARU_API_KEY" not in workers.os.environ
+        assert workers.os.environ["KITARU_API_KEY"] == "KITKEY_environment"
+        assert "KITARU_CREDENTIALS_PATH" not in workers.os.environ
         raise RuntimeError("startup failed")
 
-    assert isolated_path is not None
-    assert not isolated_path.exists()
-    assert not isolated_path.parent.exists()
     assert workers.os.environ["KITARU_API_URL"] == "https://previous.example.com"
-    assert workers.os.environ["KITARU_CREDENTIALS_PATH"] == (
-        "/previous/credentials.json"
-    )
-    assert "KITARU_API_KEY" not in workers.os.environ
+    assert workers.os.environ["KITARU_CREDENTIALS_PATH"] == "/previous/credentials.json"
+    assert workers.os.environ["KITARU_API_KEY"] == "KITKEY_environment"
 
 
-def test_contract_environment_keeps_required_control_plane_credential(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_contract_environment_rejects_stored_or_device_only_auth(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A selected delegated server retains only its renewal dependency."""
-    selected_server = "https://selected.example.com"
-    control_plane = "https://cloud.example.com"
-    unrelated_server = "https://other.example.com"
-    store = CredentialStore(path=tmp_path / "credentials.json")
-    store.set_api_key(
-        control_plane,
-        f"{CONTROL_PLANE_API_KEY_PREFIX}selected",
-        type=ApiType.CONTROL_PLANE,
-    )
-    store.set_token(
-        selected_server,
-        ApiToken.issued("server-token", 3600),
-        control_plane_api_url=control_plane,
-    )
-    store.set_api_key(unrelated_server, "KITKEY_unrelated")
+    """A credential-store path cannot substitute for the worker API-key contract."""
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
+    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/stored/credentials.json")
 
-    with workers.worker_contract_environment(
-        ResolvedTarget(selected_server, "explicit"), store
+    with (
+        pytest.raises(CLIError) as error,
+        workers.worker_contract_environment(
+            ResolvedTarget("https://selected.example.com", "explicit")
+        ),
     ):
-        path = Path(os.environ["KITARU_CREDENTIALS_PATH"])
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        assert set(payload) == {selected_server, control_plane}
-        assert unrelated_server not in payload
+        raise AssertionError("unreachable")
+    assert error.value.kind == "invalid_configuration"
+    assert error.value.message == (
+        "worker start requires KITARU_API_KEY in the environment."
+    )
 
 
 async def test_natural_completion_reports_completed_and_restores_signals() -> None:
@@ -275,21 +232,14 @@ async def test_natural_completion_reports_completed_and_restores_signals() -> No
         assert signal.getsignal(signal.SIGTERM) is previous_sigterm
 
 
-async def test_first_sigint_drains_and_second_uses_immediate_exit() -> None:
-    """The first interrupt waits for held work; the second skips that wait."""
+async def test_repeated_sigint_preserves_safe_drain() -> None:
+    """Repeated interrupts do not bypass held-task cleanup with a hard exit."""
     stdout = io.StringIO()
     stderr = io.StringIO()
     token = set_output_context(_output_context(stdout, stderr))
-    exits: list[int] = []
-    cleanups: list[bool] = []
     try:
         worker = DrainWorker()
-        process = workers.ForegroundWorkerProcess(
-            worker,
-            {"name": "local"},
-            immediate_exit=exits.append,
-            emergency_cleanup=lambda: cleanups.append(True),
-        )
+        process = workers.ForegroundWorkerProcess(worker, {"name": "local"})
         run = asyncio.create_task(process.run())
         await worker.started.wait()
 
@@ -297,11 +247,8 @@ async def test_first_sigint_drains_and_second_uses_immediate_exit() -> None:
         await asyncio.sleep(0)
         assert process.stop.is_set()
         assert not run.done()
-        assert exits == []
-
         process.handle_sigint()
-        assert cleanups == [True]
-        assert exits == [130]
+        assert not run.done()
 
         worker.release.set()
         result = await run
@@ -319,24 +266,17 @@ async def test_first_sigint_drains_and_second_uses_immediate_exit() -> None:
     assert stderr.getvalue() == ""
 
 
-async def test_sigterm_drains_and_later_sigint_is_emergency() -> None:
-    """SIGTERM exits 143 while a later SIGINT retains emergency behavior."""
+async def test_sigterm_then_sigint_preserves_first_stop_reason() -> None:
+    """A later SIGINT does not bypass or relabel an active SIGTERM drain."""
     if not hasattr(signal, "SIGTERM"):
         pytest.skip("SIGTERM is not available")
 
     stdout = io.StringIO()
     stderr = io.StringIO()
     token = set_output_context(_output_context(stdout, stderr))
-    exits: list[int] = []
-    cleanups: list[bool] = []
     try:
         worker = DrainWorker()
-        process = workers.ForegroundWorkerProcess(
-            worker,
-            {"name": "local"},
-            immediate_exit=exits.append,
-            emergency_cleanup=lambda: cleanups.append(True),
-        )
+        process = workers.ForegroundWorkerProcess(worker, {"name": "local"})
         run = asyncio.create_task(process.run())
         await worker.started.wait()
 
@@ -345,11 +285,8 @@ async def test_sigterm_drains_and_later_sigint_is_emergency() -> None:
         await asyncio.sleep(0)
         assert process.stop.is_set()
         assert not run.done()
-        assert exits == []
-
         process.handle_sigint()
-        assert cleanups == [True]
-        assert exits == [130]
+        assert not run.done()
 
         worker.release.set()
         result = await run
@@ -409,11 +346,11 @@ def test_closed_output_cannot_prevent_signal_drain(
     assert process.stop.is_set()
 
 
-def test_worker_start_schema_describes_graceful_and_emergency_signals() -> None:
-    """Offline discovery documents both graceful signals and emergency SIGINT."""
+def test_worker_start_schema_describes_safe_graceful_signals() -> None:
+    """Offline discovery promises only the safe first-signal drain."""
     description = app_module._FUNCTION_SPECS[app_module.worker_start].description
-    assert "first SIGINT or SIGTERM drains" in description
-    assert "SIGINT after either signal exits immediately" in description
+    assert "first SIGINT or SIGTERM requests a safe drain" in description
+    assert "exits immediately" not in description
 
 
 async def test_worker_failure_propagates_without_a_false_stopped_event() -> None:
@@ -474,13 +411,10 @@ async def test_worker_list_rejects_unsupported_sort_before_network_call() -> Non
     assert resource.list_calls == []
 
 
-def test_worker_list_default_sort_reaches_server_contract() -> None:
-    """The CLI default sort is accepted by the real server filter model."""
+def test_worker_list_defaults_to_newest_first() -> None:
+    """The CLI requests workers from newest to oldest by default."""
     default_sort = inspect.signature(app_module.worker_list).parameters["sort"].default
-
-    list_filter = worker_list_params_to_filter(WorkerListParams(sort=default_sort))
-
-    assert list_filter.sort == "created:desc"
+    assert WorkerListParams(sort=default_sort).sort == "created:desc"
 
 
 async def test_exact_worker_name_conflicts_before_returning_a_record() -> None:
@@ -519,20 +453,16 @@ def test_missing_worker_extra_has_actionable_hint(
 
 
 def test_cli_start_passes_kind_scope_and_emits_stream_result(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The app maps CLI kinds into the generic worker without provider state."""
     calls: list[tuple[ResolvedTarget, dict[str, Any]]] = []
 
-    async def fake_start(
-        target: ResolvedTarget, store: CredentialStore, **options: Any
-    ) -> CommandResult:
-        assert store.path == tmp_path / "credentials.json"
+    async def fake_start(target: ResolvedTarget, **options: Any) -> CommandResult:
         calls.append((target, options))
         return CommandResult(item={"status": "stopped"}, event="stopped")
 
     monkeypatch.setattr(workers, "start_worker", fake_start)
-    monkeypatch.setenv("KITARU_CREDENTIALS_PATH", str(tmp_path / "credentials.json"))
 
     assert (
         app_module.main(
@@ -566,5 +496,5 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
     assert options["kinds"] == [TaskKind.AGENT, TaskKind.IMPORTER]
     assert options["job_id"] == job_id
     assert options["concurrency"] == 3
-    assert options["request_timeout"] == 7.5
+    assert "request_timeout" not in options
     assert captured.err == ""

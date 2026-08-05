@@ -50,7 +50,7 @@ class HumanView:
     renderer: Literal["default", "doctor"] = "default"
 
 
-def _count(value: Any) -> str:
+def _format_count(value: Any) -> str:
     """Format a collection as its item count."""
     if value is None:
         return "0"
@@ -60,7 +60,7 @@ def _count(value: Any) -> str:
         return str(value)
 
 
-def _progress(value: Any) -> str:
+def _format_progress(value: Any) -> str:
     """Format experiment-run progress as completed over total."""
     if not isinstance(value, dict):
         return str(value)
@@ -72,7 +72,7 @@ def _progress(value: Any) -> str:
     return f"{settled}/{total}"
 
 
-def _runtime(value: Any) -> str:
+def _format_runtime(value: Any) -> str:
     """Format a worker runtime as a short platform summary."""
     if not isinstance(value, dict):
         return str(value)
@@ -80,7 +80,7 @@ def _runtime(value: Any) -> str:
     return " / ".join(str(part) for part in parts if part) or "-"
 
 
-def _scope(value: Any) -> str:
+def _format_scope(value: Any) -> str:
     """Format worker task kinds from its scope."""
     if not isinstance(value, dict):
         return str(value)
@@ -90,7 +90,7 @@ def _scope(value: Any) -> str:
     return ", ".join(str(kind) for kind in kinds)
 
 
-def _verdict(value: Any) -> str:
+def _format_verdict(value: Any) -> str:
     """Format a nullable evaluation verdict."""
     if value is True:
         return "pass"
@@ -193,7 +193,7 @@ _REGISTRATION_SECTIONS = (
 )
 
 
-def _view(
+def _build_view(
     title: str,
     fields: tuple[HumanField, ...],
     sections: tuple[HumanSection, ...] = (),
@@ -219,7 +219,6 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("server_url", "Server"),
                     HumanField("server_source", "Source"),
-                    HumanField("context", "Context"),
                 ),
             ),
             HumanSection(
@@ -259,7 +258,6 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("server_url", "URL"),
                     HumanField("server_source", "Source"),
-                    HumanField("context", "Context"),
                     HumanField("server.version", "Version"),
                     HumanField("compatibility", "Compatibility"),
                 ),
@@ -271,13 +269,17 @@ _VIEWS: dict[str, HumanView] = {
         fields=(),
         renderer="doctor",
     ),
-    "agent.list": _view("Agents", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "agent.get": _view("Agent", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "agent.register": _view("Agent", (), _REGISTRATION_SECTIONS),
-    "agent.version.list": _view("Agent versions", _VERSION_FIELDS, _VERSION_SECTIONS),
-    "agent.version.get": _view("Agent version", _VERSION_FIELDS, _VERSION_SECTIONS),
-    "agent.version.register": _view("Agent version", (), _REGISTRATION_SECTIONS),
-    "importer.list": _view(
+    "agent.list": _build_view("Agents", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "agent.get": _build_view("Agent", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "agent.register": _build_view("Agent", (), _REGISTRATION_SECTIONS),
+    "agent.version.list": _build_view(
+        "Agent versions", _VERSION_FIELDS, _VERSION_SECTIONS
+    ),
+    "agent.version.get": _build_view(
+        "Agent version", _VERSION_FIELDS, _VERSION_SECTIONS
+    ),
+    "agent.version.register": _build_view("Agent version", (), _REGISTRATION_SECTIONS),
+    "importer.list": _build_view(
         "Importers",
         (
             _NAME,
@@ -288,28 +290,30 @@ _VIEWS: dict[str, HumanView] = {
         ),
         _ASSET_SECTIONS,
     ),
-    "importer.get": _view("Importer", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "importer.register": _view("Importer", (), _REGISTRATION_SECTIONS),
-    "importer.version.list": _view(
+    "importer.get": _build_view("Importer", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "importer.register": _build_view("Importer", (), _REGISTRATION_SECTIONS),
+    "importer.version.list": _build_view(
         "Importer versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "importer.version.get": _view(
+    "importer.version.get": _build_view(
         "Importer version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "importer.version.register": _view("Importer version", (), _REGISTRATION_SECTIONS),
-    "evaluator.list": _view("Evaluators", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "evaluator.get": _view("Evaluator", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "evaluator.register": _view("Evaluator", (), _REGISTRATION_SECTIONS),
-    "evaluator.version.list": _view(
+    "importer.version.register": _build_view(
+        "Importer version", (), _REGISTRATION_SECTIONS
+    ),
+    "evaluator.list": _build_view("Evaluators", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "evaluator.get": _build_view("Evaluator", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "evaluator.register": _build_view("Evaluator", (), _REGISTRATION_SECTIONS),
+    "evaluator.version.list": _build_view(
         "Evaluator versions", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "evaluator.version.get": _view(
+    "evaluator.version.get": _build_view(
         "Evaluator version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "evaluator.version.register": _view(
+    "evaluator.version.register": _build_view(
         "Evaluator version", (), _REGISTRATION_SECTIONS
     ),
-    "cohort.list": _view(
+    "cohort.list": _build_view(
         "Cohorts",
         (
             _NAME,
@@ -320,10 +324,10 @@ _VIEWS: dict[str, HumanView] = {
         ),
         _ASSET_SECTIONS,
     ),
-    "cohort.get": _view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "cohort.create": _view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "cohort.update": _view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "cohort.version.list": _view(
+    "cohort.get": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "cohort.create": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "cohort.update": _build_view("Cohort", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "cohort.version.list": _build_view(
         "Cohort versions",
         (
             HumanField("version", "Version"),
@@ -334,43 +338,45 @@ _VIEWS: dict[str, HumanView] = {
         ),
         _VERSION_SECTIONS,
     ),
-    "cohort.version.get": _view("Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS),
-    "cohort.version.create": _view(
+    "cohort.version.get": _build_view(
         "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "cohort.version.update": _view(
+    "cohort.version.create": _build_view(
         "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
     ),
-    "experiment.list": _view(
+    "cohort.version.update": _build_view(
+        "Cohort version", _VERSION_FIELDS, _VERSION_SECTIONS
+    ),
+    "experiment.list": _build_view(
         "Experiments",
         (
             _NAME,
-            HumanField("evaluators", "Evaluators", 100, _count),
+            HumanField("evaluators", "Evaluators", 100, _format_count),
             HumanField("tool_policy", "Tool policy", 150),
             _ID,
             _CREATED,
         ),
         _ASSET_SECTIONS,
     ),
-    "experiment.get": _view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "experiment.create": _view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "experiment.update": _view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
-    "experiment.run.list": _view(
+    "experiment.get": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "experiment.create": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "experiment.update": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "experiment.run.list": _build_view(
         "Experiment runs",
         (
             _STATUS,
             HumanField("number", "Run"),
-            HumanField("progress", "Progress", 90, _progress),
+            HumanField("progress", "Progress", 90, _format_progress),
             _ID,
             _CREATED,
         ),
     ),
-    "experiment.run.get": _view(
+    "experiment.run.get": _build_view(
         "Experiment run",
         (
             _STATUS,
             HumanField("number", "Run"),
-            HumanField("progress", "Progress", 90, _progress),
+            HumanField("progress", "Progress", 90, _format_progress),
             _ID,
         ),
         (
@@ -379,7 +385,7 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     _STATUS,
                     HumanField("number", "Run"),
-                    HumanField("progress", "Progress", formatter=_progress),
+                    HumanField("progress", "Progress", formatter=_format_progress),
                     _ID,
                 ),
             ),
@@ -403,7 +409,7 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Error", (HumanField("error", "Error"),)),
         ),
     ),
-    "experiment.run.jobs": _view(
+    "experiment.run.jobs": _build_view(
         "Run jobs",
         (
             _STATUS,
@@ -413,7 +419,7 @@ _VIEWS: dict[str, HumanView] = {
             HumanField("error", "Error", 190),
         ),
     ),
-    "session.list": _view(
+    "session.list": _build_view(
         "Sessions",
         (
             _STATUS,
@@ -427,7 +433,7 @@ _VIEWS: dict[str, HumanView] = {
             _CREATED,
         ),
     ),
-    "session.get": _view(
+    "session.get": _build_view(
         "Session",
         (_STATUS, _NAME, _ID),
         (
@@ -481,7 +487,7 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Metadata", (_METADATA,)),
         ),
     ),
-    "session.nodes": _view(
+    "session.nodes": _build_view(
         "Session nodes",
         (
             HumanField("index", "#"),
@@ -493,10 +499,10 @@ _VIEWS: dict[str, HumanView] = {
             _ID,
         ),
     ),
-    "evaluation.list": _view(
+    "evaluation.list": _build_view(
         "Evaluations",
         (
-            HumanField("passed", "Verdict", formatter=_verdict),
+            HumanField("passed", "Verdict", formatter=_format_verdict),
             _NAME,
             HumanField("score|value", "Result"),
             HumanField("evaluator_name", "Evaluator", 110),
@@ -505,10 +511,10 @@ _VIEWS: dict[str, HumanView] = {
             _CREATED,
         ),
     ),
-    "evaluation.get": _view(
+    "evaluation.get": _build_view(
         "Evaluation",
         (
-            HumanField("passed", "Verdict", formatter=_verdict),
+            HumanField("passed", "Verdict", formatter=_format_verdict),
             _NAME,
             HumanField("score|value", "Result"),
             _ID,
@@ -517,7 +523,7 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection(
                 "Result",
                 (
-                    HumanField("passed", "Verdict", formatter=_verdict),
+                    HumanField("passed", "Verdict", formatter=_format_verdict),
                     _NAME,
                     HumanField("data_type", "Data type"),
                     HumanField("score", "Score"),
@@ -537,18 +543,18 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Identity and timing", (_ID, _CREATED, _UPDATED)),
         ),
     ),
-    "worker.list": _view(
+    "worker.list": _build_view(
         "Workers",
         (
             _STATUS,
             _NAME,
             _ID,
             HumanField("last_seen_at", "Last seen", 105),
-            HumanField("scope", "Kinds", 130, _scope),
-            HumanField("runtime", "Runtime", 160, _runtime),
+            HumanField("scope", "Kinds", 130, _format_scope),
+            HumanField("runtime", "Runtime", 160, _format_runtime),
         ),
     ),
-    "worker.get": _view(
+    "worker.get": _build_view(
         "Worker",
         (HumanField("live", "Live"), _NAME, _ID),
         (
@@ -562,13 +568,13 @@ _VIEWS: dict[str, HumanView] = {
                 ),
             ),
             HumanSection(
-                "Scope", (HumanField("scope", "Task kinds", formatter=_scope),)
+                "Scope", (HumanField("scope", "Task kinds", formatter=_format_scope),)
             ),
             HumanSection("Runtime", (HumanField("runtime", "Runtime"),)),
             HumanSection("Metadata", (_METADATA,)),
         ),
     ),
-    "job.get": _view(
+    "job.get": _build_view(
         "Job",
         (_STATUS, _ID),
         (
@@ -593,13 +599,13 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection("Tasks", (HumanField("tasks", "Tasks"),)),
         ),
     ),
-    "job.watch": _view("Job", (_STATUS, _ID), _JOB_SECTIONS),
-    "job.cancel": _view("Job", (_STATUS, _ID), _JOB_SECTIONS),
-    "session.import": _view("Import", (), _JOB_SECTIONS),
-    "session.evaluate": _view("Evaluation job", (), _JOB_SECTIONS),
-    "experiment.run.start": _view("Experiment run", (), _JOB_SECTIONS),
-    "experiment.run.watch": _view("Experiment run", (), _JOB_SECTIONS),
-    "config.list": _view(
+    "job.watch": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
+    "job.cancel": _build_view("Job", (_STATUS, _ID), _JOB_SECTIONS),
+    "session.import": _build_view("Import", (), _JOB_SECTIONS),
+    "session.evaluate": _build_view("Evaluation job", (), _JOB_SECTIONS),
+    "experiment.run.start": _build_view("Experiment run", (), _JOB_SECTIONS),
+    "experiment.run.watch": _build_view("Experiment run", (), _JOB_SECTIONS),
+    "config.list": _build_view(
         "Configuration",
         (
             HumanField("key", "Key"),
@@ -607,16 +613,7 @@ _VIEWS: dict[str, HumanView] = {
             HumanField("source", "Source"),
         ),
     ),
-    "context.list": _view(
-        "Contexts",
-        (
-            _NAME,
-            HumanField("server", "Server"),
-            HumanField("active", "Active"),
-            HumanField("credential_stored", "Credential"),
-        ),
-    ),
-    "schema": _view(
+    "schema": _build_view(
         "Commands",
         (
             HumanField("command|name", "Command"),

@@ -31,25 +31,21 @@ class MCPSettings(BaseModel):
 
     mode: CapabilityMode = CapabilityMode.READ_ONLY
     server_url: str | None = None
-    context_name: str | None = None
     timeout: float = Field(default=30.0, gt=0)
     handler_timeout: float = Field(default=120.0, gt=0)
-    retries: int = Field(default=3, ge=0, le=20)
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
     debug: bool = False
 
-    @field_validator("server_url", "context_name")
+    @field_validator("server_url")
     @classmethod
     def _reject_blank_target(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
-            raise ValueError("explicit server and context targets must not be blank")
+            raise ValueError("explicit server target must not be blank")
         return value
 
     @model_validator(mode="after")
     def _validate_settings(self) -> "MCPSettings":
-        if self.server_url is not None and self.context_name is not None:
-            raise ValueError("server_url and context_name are mutually exclusive")
         if not math.isfinite(self.timeout) or not math.isfinite(self.handler_timeout):
             raise ValueError("timeouts must be finite")
         return self
@@ -64,10 +60,8 @@ class MCPSettings(BaseModel):
         mapping = {
             "mode": "KITARU_MCP_MODE",
             "server_url": "KITARU_MCP_SERVER",
-            "context_name": "KITARU_MCP_CONTEXT",
             "timeout": "KITARU_MCP_TIMEOUT",
             "handler_timeout": "KITARU_MCP_HANDLER_TIMEOUT",
-            "retries": "KITARU_MCP_RETRIES",
             "pool_size": "KITARU_MCP_POOL_SIZE",
             "max_concurrency": "KITARU_MCP_MAX_CONCURRENCY",
             "debug": "KITARU_MCP_DEBUG",
@@ -76,6 +70,8 @@ class MCPSettings(BaseModel):
             value = env.get(variable)
             if value is not None:
                 values[field] = value
+        if "server_url" not in values and env.get("KITARU_API_URL") is not None:
+            values["server_url"] = env["KITARU_API_URL"]
         values.update(
             {key: value for key, value in overrides.items() if value is not None}
         )

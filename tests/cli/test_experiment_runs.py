@@ -218,8 +218,6 @@ def _output_context(
     return OutputContext(
         command="experiment.run.watch",
         mode=mode,
-        machine=True,
-        non_interactive=True,
         debug=False,
         traceback=False,
         stdout=stdout,

@@ -112,7 +112,6 @@ async def status(
         item = {
             "server_url": target.server_url,
             "server_source": target.source,
-            "context": target.context_name,
             "credential_status": _credential_summary(credential),
             "authentication": authentication,
             "server": info.model_dump(mode="json"),
@@ -159,7 +158,6 @@ async def info(
             "executable": sys.executable,
             "server_url": target.server_url,
             "server_source": target.source,
-            "context": target.context_name,
             "server": server.model_dump(mode="json"),
             "compatibility": compatibility,
         },
@@ -172,7 +170,6 @@ async def doctor(
     config_store: ConfigStore,
     credential_store: CredentialStore,
     explicit_server: str | None,
-    context_name: str | None,
     timeout: float,
 ) -> CommandResult:
     """Run every local and remote diagnostic in a fixed logical order.
@@ -181,7 +178,6 @@ async def doctor(
         config_store: Non-secret CLI configuration store.
         credential_store: Secret credential store.
         explicit_server: Explicit server override.
-        context_name: Explicit context override.
         timeout: Request timeout in seconds.
 
     Returns:
@@ -191,12 +187,7 @@ async def doctor(
     failure_categories: set[str] = set()
 
     try:
-        config = config_store.load()
-        if config.active_context and config.active_context not in config.contexts:
-            raise CLIError(
-                "invalid_configuration",
-                f"Active context {config.active_context!r} does not exist.",
-            )
+        config_store.load()
         _check_mode(
             config_store.path,
             require_private_parent=config_store.manages_parent_directory,
@@ -228,11 +219,7 @@ async def doctor(
 
     target: ResolvedTarget | None = None
     try:
-        target = resolve_target(
-            config_store,
-            explicit_server=explicit_server,
-            context_name=context_name,
-        )
+        target = resolve_target(explicit_server=explicit_server)
         checks.append(
             _check(
                 "server_resolution",

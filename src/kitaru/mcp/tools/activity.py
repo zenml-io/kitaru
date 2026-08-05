@@ -18,8 +18,9 @@ from kitaru.mcp.models.activity import (
     ActivityGetRequest,
     ActivityListRequest,
     ActivityReadRequest,
+    SessionNodesRequest,
 )
-from kitaru.mcp.tools.registry import _get_page
+from kitaru.mcp.tools.registry import build_page_data
 
 
 async def handle_activity_read(
@@ -53,20 +54,14 @@ async def handle_activity_read(
             )
         else:
             page = await client.jobs.list(JobListParams.model_validate(common))
-        return _get_page(page, request.size)
+        return build_page_data(page, request.size)
     return await _get_children(state, request)
 
 
 async def _get_children(
     state: MCPServerState, request: ActivityChildrenRequest
 ) -> object:
-    if request.kind != "session_nodes" and request.include_payloads:
-        from kitaru.mcp.errors import MCPToolError
-
-        raise MCPToolError(
-            "invalid_arguments", "include_payloads is only valid for session_nodes."
-        )
-    if request.kind == "session_nodes":
+    if isinstance(request, SessionNodesRequest):
         page = await state.client.sessions.list_nodes(
             request.parent_id,
             SessionNodeListParams(
@@ -89,4 +84,4 @@ async def _get_children(
                 cursor=request.cursor, size=request.size, sort=request.sort
             ),
         )
-    return _get_page(page, request.size)
+    return build_page_data(page, request.size)

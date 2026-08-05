@@ -16,9 +16,7 @@
 import asyncio
 import json
 import os
-import shutil
 import signal
-import tempfile
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -30,7 +28,7 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import LabelSelector, TaskKind, WorkerScope
 from kitaru.api_models.v1.worker import WorkerListParams
-from kitaru.cli.config import ResolvedTarget, resolve_credential
+from kitaru.cli.config import ResolvedTarget
 from kitaru.cli.output import (
     CLIError,
     CommandResult,
@@ -41,7 +39,6 @@ from kitaru.cli.output import (
     set_output_context,
 )
 from kitaru.cli.registration import build_list_params
-from kitaru.client.credential_store import DIRECTORY_MODE, FILE_MODE, CredentialStore
 
 _ENV_MISSING = object()
 _WORKER_CONTRACT_ENV = (
@@ -96,7 +93,6 @@ def build_worker_config(
     claim_batch_size: int | None = None,
     poll_interval: float | None = None,
     heartbeat_interval: float | None = None,
-    request_timeout: float | None = None,
     timeout: float | None = None,
     blob_cache_root: Path | None = None,
     payload_cache_root: Path | None = None,
@@ -125,7 +121,6 @@ def build_worker_config(
         "claim_batch_size": claim_batch_size,
         "poll_interval": poll_interval,
         "heartbeat_interval": heartbeat_interval,
-        "request_timeout": request_timeout,
         "timeout": timeout,
         "blob_cache_root": blob_cache_root,
         "payload_cache_root": payload_cache_root,
@@ -174,78 +169,46 @@ def _parse_metadata(values: list[str]) -> dict[str, str]:
 
 @contextmanager
 def worker_contract_environment(
-    target: ResolvedTarget, credential_store: CredentialStore
-) -> Iterator[Callable[[], None]]:
-    """Set an isolated foreground-worker environment and restore it afterward."""
+    target: ResolvedTarget,
+) -> Iterator[None]:
+    """Set the unchanged worker environment contract and restore it afterward."""
     original = {
         name: os.environ.get(name, _ENV_MISSING) for name in _WORKER_CONTRACT_ENV
     }
-    credential = resolve_credential(target.server_url, credential_store)
-    with tempfile.TemporaryDirectory(prefix="kitaru-worker-credentials-") as directory:
-        directory_path = Path(directory)
-        if os.name == "posix":
-            os.chmod(directory_path, DIRECTORY_MODE)
-        credentials_path = directory_path / "credentials.json"
-        payload = {}
-        if credential.stored is not None:
-            payload[target.server_url] = credential.stored.model_dump(
-                mode="json", exclude_none=True
-            )
-            control_plane_url = credential.stored.control_plane_api_url
-            if control_plane_url is not None:
-                control_plane = credential_store.get(control_plane_url)
-                if control_plane is not None:
-                    payload[control_plane_url] = control_plane.model_dump(
-                        mode="json", exclude_none=True
-                    )
-        handle = os.open(
-            credentials_path,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            FILE_MODE,
+    api_key = os.environ.get("KITARU_API_KEY")
+    if not api_key:
+        raise CLIError(
+            "invalid_configuration",
+            "worker start requires KITARU_API_KEY in the environment.",
+            hint=(
+                "Stored and device credentials are not supported by the worker; "
+                "export a server API key and retry."
+            ),
         )
-        with os.fdopen(handle, "w", encoding="utf-8") as file:
-            json.dump(payload, file, indent=2, sort_keys=True)
-        if os.name == "posix":
-            os.chmod(credentials_path, FILE_MODE)
-
+    try:
         os.environ["KITARU_API_URL"] = target.server_url
-        os.environ["KITARU_CREDENTIALS_PATH"] = str(credentials_path)
-        if credential.source == "environment":
-            assert credential.api_key is not None
-            os.environ["KITARU_API_KEY"] = credential.api_key
-        else:
-            os.environ.pop("KITARU_API_KEY", None)
-        try:
-            yield lambda: _remove_directory(directory_path)
-        finally:
-            for name, value in original.items():
-                if value is _ENV_MISSING:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = str(value)
-
-
-def _remove_directory(path: Path) -> None:
-    """Remove a scoped credential directory, including during emergency exit."""
-    shutil.rmtree(path, ignore_errors=True)
+        os.environ["KITARU_API_KEY"] = api_key
+        os.environ.pop("KITARU_CREDENTIALS_PATH", None)
+        yield
+    finally:
+        for name, value in original.items():
+            if value is _ENV_MISSING:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = str(value)
 
 
 class ForegroundWorkerProcess:
-    """Run one worker with portable graceful and emergency signal semantics."""
+    """Run one worker with portable graceful signal semantics."""
 
     def __init__(
         self,
         worker: WorkerRunner,
         summary: dict[str, Any],
-        *,
-        immediate_exit: Callable[[int], Any] = os._exit,
-        emergency_cleanup: Callable[[], None] | None = None,
     ) -> None:
         """Initialize a foreground lifecycle around a reusable worker runtime."""
         self._worker = worker
         self._summary = summary
-        self._immediate_exit = immediate_exit
-        self._emergency_cleanup = emergency_cleanup
         self.stop = asyncio.Event()
         self._stop_reason: _TerminationReason | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -273,13 +236,9 @@ class ForegroundWorkerProcess:
         )
 
     def handle_sigint(self, *_: Any) -> None:
-        """Drain on the first signal and exit on a later SIGINT."""
-        if self._stop_reason is not None:
-            if self._emergency_cleanup is not None:
-                self._emergency_cleanup()
-            self._immediate_exit(_TERMINATION_EXIT_CODES["sigint"])
-            return
-        self._request_stop("sigint")
+        """Request a graceful drain on the first SIGINT."""
+        if self._stop_reason is None:
+            self._request_stop("sigint")
 
     def handle_sigterm(self, *_: Any) -> None:
         """Request a graceful drain on the first SIGTERM."""
@@ -326,17 +285,14 @@ class ForegroundWorkerProcess:
 
 async def start_worker(
     target: ResolvedTarget,
-    credential_store: CredentialStore,
     **options: Any,
 ) -> CommandResult:
     """Build and run the generic worker without creating durable CLI state."""
-    worker_type, _ = load_worker_runtime()
-    config = build_worker_config(**options)
-    summary = _worker_summary(config)
-    with worker_contract_environment(target, credential_store) as emergency_cleanup:
-        process = ForegroundWorkerProcess(
-            worker_type(config), summary, emergency_cleanup=emergency_cleanup
-        )
+    with worker_contract_environment(target):
+        worker_type, _ = load_worker_runtime()
+        config = build_worker_config(**options)
+        summary = _worker_summary(config)
+        process = ForegroundWorkerProcess(worker_type(config), summary)
         return await process.run()
 
 

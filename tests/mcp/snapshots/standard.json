@@ -150,7 +150,7 @@
           "type": "object"
         },
         "ParentKind": {
-          "description": "Parent resource families supporting bounded UUID-or-name lookup.",
+          "description": "Parent resource families supporting UUID-or-name lookup.",
           "enum": [
             "agent",
             "cohort",
@@ -750,31 +750,9 @@
           "description": "Evaluator config.",
           "properties": {
             "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
+              "title": "Evaluator",
+              "type": "string"
             },
             "params": {
               "additionalProperties": true,
@@ -796,6 +774,9 @@
               "title": "Version"
             }
           },
+          "required": [
+            "evaluator"
+          ],
           "title": "EvaluatorConfig",
           "type": "object"
         },
@@ -1814,68 +1795,6 @@
     "description": "Read Kitaru sessions, runs, jobs, and bounded child pages.",
     "inputSchema": {
       "$defs": {
-        "ActivityChildrenRequest": {
-          "additionalProperties": false,
-          "description": "List one page of a bounded child collection.",
-          "properties": {
-            "cursor": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Cursor"
-            },
-            "include_payloads": {
-              "default": false,
-              "title": "Include Payloads",
-              "type": "boolean"
-            },
-            "kind": {
-              "enum": [
-                "session_nodes",
-                "experiment_run_jobs",
-                "job_tasks"
-              ],
-              "title": "Kind",
-              "type": "string"
-            },
-            "operation": {
-              "const": "list_children",
-              "title": "Operation",
-              "type": "string"
-            },
-            "parent_id": {
-              "format": "uuid",
-              "title": "Parent Id",
-              "type": "string"
-            },
-            "size": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Size",
-              "type": "integer"
-            },
-            "sort": {
-              "default": "created:desc",
-              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
-              "title": "Sort",
-              "type": "string"
-            }
-          },
-          "required": [
-            "operation",
-            "kind",
-            "parent_id"
-          ],
-          "title": "ActivityChildrenRequest",
-          "type": "object"
-        },
         "ActivityGetRequest": {
           "additionalProperties": false,
           "description": "Get one activity record by exact UUID.",
@@ -2123,6 +2042,112 @@
           ],
           "title": "OrFilter",
           "type": "object"
+        },
+        "SessionNodesRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "include_payloads": {
+              "default": false,
+              "title": "Include Payloads",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "session_nodes",
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SessionNodesRequest",
+          "type": "object"
+        },
+        "SortedChildrenRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "kind": {
+              "enum": [
+                "experiment_run_jobs",
+                "job_tasks"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SortedChildrenRequest",
+          "type": "object"
         }
       },
       "properties": {
@@ -2131,7 +2156,24 @@
             "mapping": {
               "get": "#/$defs/ActivityGetRequest",
               "list": "#/$defs/ActivityListRequest",
-              "list_children": "#/$defs/ActivityChildrenRequest"
+              "list_children": {
+                "discriminator": {
+                  "mapping": {
+                    "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                    "job_tasks": "#/$defs/SortedChildrenRequest",
+                    "session_nodes": "#/$defs/SessionNodesRequest"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/SessionNodesRequest"
+                  },
+                  {
+                    "$ref": "#/$defs/SortedChildrenRequest"
+                  }
+                ]
+              }
             },
             "propertyName": "operation"
           },
@@ -2143,7 +2185,22 @@
               "$ref": "#/$defs/ActivityGetRequest"
             },
             {
-              "$ref": "#/$defs/ActivityChildrenRequest"
+              "discriminator": {
+                "mapping": {
+                  "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                  "job_tasks": "#/$defs/SortedChildrenRequest",
+                  "session_nodes": "#/$defs/SessionNodesRequest"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SessionNodesRequest"
+                },
+                {
+                  "$ref": "#/$defs/SortedChildrenRequest"
+                }
+              ]
             }
           ],
           "title": "Request"
@@ -2338,31 +2395,9 @@
           "description": "Evaluator config.",
           "properties": {
             "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
+              "title": "Evaluator",
+              "type": "string"
             },
             "params": {
               "additionalProperties": true,
@@ -2384,6 +2419,9 @@
               "title": "Version"
             }
           },
+          "required": [
+            "evaluator"
+          ],
           "title": "EvaluatorConfig",
           "type": "object"
         },
@@ -5277,31 +5315,9 @@
           "description": "Evaluator config.",
           "properties": {
             "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
               "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
+              "title": "Evaluator",
+              "type": "string"
             },
             "params": {
               "additionalProperties": true,
@@ -5323,6 +5339,9 @@
               "title": "Version"
             }
           },
+          "required": [
+            "evaluator"
+          ],
           "title": "EvaluatorConfig",
           "type": "object"
         },
@@ -5816,366 +5835,12 @@
       "openWorldHint": true,
       "readOnlyHint": false
     },
-    "description": "Start one asynchronous workflow and return immediately without polling.",
+    "description": "Import sessions from one existing blob and return the queued job.",
     "inputSchema": {
       "$defs": {
-        "EvaluatorSelection": {
+        "SessionImportRequest": {
           "additionalProperties": false,
-          "description": "Exact evaluator parent/version selection for a mutation.",
-          "properties": {
-            "evaluator_id": {
-              "format": "uuid",
-              "title": "Evaluator Id",
-              "type": "string"
-            },
-            "params": {
-              "additionalProperties": true,
-              "title": "Params",
-              "type": "object"
-            },
-            "version": {
-              "minimum": 1,
-              "title": "Version",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "evaluator_id",
-            "version"
-          ],
-          "title": "EvaluatorSelection",
-          "type": "object"
-        },
-        "ExperimentRunStart": {
-          "additionalProperties": false,
-          "description": "Start one replay-protected experiment run.",
-          "properties": {
-            "agent_version_id": {
-              "format": "uuid",
-              "title": "Agent Version Id",
-              "type": "string"
-            },
-            "cohort_version_id": {
-              "format": "uuid",
-              "title": "Cohort Version Id",
-              "type": "string"
-            },
-            "evaluate_baselines": {
-              "default": false,
-              "title": "Evaluate Baselines",
-              "type": "boolean"
-            },
-            "experiment_id": {
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            },
-            "operation": {
-              "const": "experiment_run",
-              "title": "Operation",
-              "type": "string"
-            },
-            "request_id": {
-              "description": "Visible ASCII idempotency key without spaces.",
-              "maxLength": 255,
-              "minLength": 1,
-              "pattern": "^[!-~]+$",
-              "title": "Request Id",
-              "type": "string"
-            }
-          },
-          "required": [
-            "operation",
-            "request_id",
-            "experiment_id",
-            "cohort_version_id",
-            "agent_version_id"
-          ],
-          "title": "ExperimentRunStart",
-          "type": "object"
-        },
-        "HistoryConfig": {
-          "additionalProperties": false,
-          "description": "History tool config.",
-          "properties": {
-            "on_miss": {
-              "$ref": "#/$defs/ToolPolicyOnMiss",
-              "description": "Behavior when no recorded call matches."
-            },
-            "scope": {
-              "$ref": "#/$defs/HistoryScope",
-              "description": "Source of recorded calls to replay from."
-            },
-            "type": {
-              "const": "history",
-              "default": "history",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "scope",
-            "on_miss"
-          ],
-          "title": "HistoryConfig",
-          "type": "object"
-        },
-        "HistoryScope": {
-          "description": "Scope a history tool config draws recorded calls from.",
-          "enum": [
-            "baseline",
-            "cohort_version",
-            "agent"
-          ],
-          "title": "HistoryScope",
-          "type": "string"
-        },
-        "LLMConfig": {
-          "additionalProperties": false,
-          "description": "LLM tool config.",
-          "properties": {
-            "instructions": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Instructions guiding the generated result.",
-              "title": "Instructions"
-            },
-            "model": {
-              "description": "Model used to generate the tool result.",
-              "title": "Model",
-              "type": "string"
-            },
-            "type": {
-              "const": "llm",
-              "default": "llm",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "model"
-          ],
-          "title": "LLMConfig",
-          "type": "object"
-        },
-        "PassthroughConfig": {
-          "additionalProperties": false,
-          "description": "Passthrough tool config.",
-          "properties": {
-            "type": {
-              "const": "passthrough",
-              "default": "passthrough",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "title": "PassthroughConfig",
-          "type": "object"
-        },
-        "ReplayOverride": {
-          "additionalProperties": false,
-          "description": "Replay override.",
-          "properties": {
-            "model": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New model, or a map from old to new model.",
-              "title": "Model"
-            },
-            "model_params": {
-              "anyOf": [
-                {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New model parameters.",
-              "title": "Model Params"
-            },
-            "prompt": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New prompt.",
-              "title": "Prompt"
-            },
-            "system_prompt": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New system prompt.",
-              "title": "System Prompt"
-            }
-          },
-          "title": "ReplayOverride",
-          "type": "object"
-        },
-        "ReplayStart": {
-          "additionalProperties": false,
-          "description": "Start a replay-protected standalone replay.",
-          "properties": {
-            "agent_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Agent Version Id"
-            },
-            "baseline_session_id": {
-              "format": "uuid",
-              "title": "Baseline Session Id",
-              "type": "string"
-            },
-            "evaluate_baselines": {
-              "default": false,
-              "title": "Evaluate Baselines",
-              "type": "boolean"
-            },
-            "evaluators": {
-              "items": {
-                "$ref": "#/$defs/EvaluatorSelection"
-              },
-              "maxItems": 10,
-              "minItems": 1,
-              "title": "Evaluators",
-              "type": "array"
-            },
-            "operation": {
-              "const": "replay",
-              "title": "Operation",
-              "type": "string"
-            },
-            "override": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ReplayOverride"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "request_id": {
-              "description": "Visible ASCII idempotency key without spaces.",
-              "maxLength": 255,
-              "minLength": 1,
-              "pattern": "^[!-~]+$",
-              "title": "Request Id",
-              "type": "string"
-            },
-            "tool_policy": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ToolPolicy"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            }
-          },
-          "required": [
-            "operation",
-            "request_id",
-            "baseline_session_id",
-            "evaluators"
-          ],
-          "title": "ReplayStart",
-          "type": "object"
-        },
-        "SessionEvaluationStart": {
-          "additionalProperties": false,
-          "description": "Start replay-protected evaluations for bounded session/evaluator pairs.",
-          "properties": {
-            "evaluators": {
-              "items": {
-                "$ref": "#/$defs/EvaluatorSelection"
-              },
-              "maxItems": 10,
-              "minItems": 1,
-              "title": "Evaluators",
-              "type": "array"
-            },
-            "operation": {
-              "const": "session_evaluation",
-              "title": "Operation",
-              "type": "string"
-            },
-            "request_id": {
-              "description": "Visible ASCII idempotency key without spaces.",
-              "maxLength": 255,
-              "minLength": 1,
-              "pattern": "^[!-~]+$",
-              "title": "Request Id",
-              "type": "string"
-            },
-            "session_ids": {
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "maxItems": 100,
-              "minItems": 1,
-              "title": "Session Ids",
-              "type": "array"
-            }
-          },
-          "required": [
-            "operation",
-            "request_id",
-            "session_ids",
-            "evaluators"
-          ],
-          "title": "SessionEvaluationStart",
-          "type": "object"
-        },
-        "SessionImportStart": {
-          "additionalProperties": false,
-          "description": "Start a non-idempotent import from an existing payload blob.",
+          "description": "Import sessions from an existing payload blob.",
           "properties": {
             "agent_version_id": {
               "format": "uuid",
@@ -6192,11 +5857,6 @@
               "title": "Importer Version",
               "type": "integer"
             },
-            "operation": {
-              "const": "session_import",
-              "title": "Operation",
-              "type": "string"
-            },
             "params": {
               "additionalProperties": true,
               "title": "Params",
@@ -6209,576 +5869,29 @@
             }
           },
           "required": [
-            "operation",
             "payload_blob_id",
             "importer_id",
             "importer_version",
             "agent_version_id"
           ],
-          "title": "SessionImportStart",
+          "title": "SessionImportRequest",
           "type": "object"
-        },
-        "SessionRunStart": {
-          "additionalProperties": false,
-          "description": "Start a replay-protected direct session run.",
-          "properties": {
-            "agent_version_id": {
-              "format": "uuid",
-              "title": "Agent Version Id",
-              "type": "string"
-            },
-            "inputs": {
-              "title": "Inputs"
-            },
-            "name": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Name"
-            },
-            "operation": {
-              "const": "session_run",
-              "title": "Operation",
-              "type": "string"
-            },
-            "request_id": {
-              "description": "Visible ASCII idempotency key without spaces.",
-              "maxLength": 255,
-              "minLength": 1,
-              "pattern": "^[!-~]+$",
-              "title": "Request Id",
-              "type": "string"
-            }
-          },
-          "required": [
-            "operation",
-            "request_id",
-            "agent_version_id",
-            "inputs"
-          ],
-          "title": "SessionRunStart",
-          "type": "object"
-        },
-        "StaticCase": {
-          "additionalProperties": false,
-          "description": "Static tool call case.",
-          "properties": {
-            "match": {
-              "anyOf": [
-                {},
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Call arguments to match, unset matches any call.",
-              "title": "Match"
-            },
-            "match_mode": {
-              "$ref": "#/$defs/StaticMatchMode",
-              "description": "How the call arguments are matched."
-            },
-            "result": {
-              "description": "Result returned for a matching call.",
-              "title": "Result"
-            }
-          },
-          "required": [
-            "match_mode",
-            "result"
-          ],
-          "title": "StaticCase",
-          "type": "object"
-        },
-        "StaticConfig": {
-          "additionalProperties": false,
-          "description": "Static tool config.",
-          "properties": {
-            "cases": {
-              "description": "Cases tried in order for a matching call.",
-              "items": {
-                "$ref": "#/$defs/StaticCase"
-              },
-              "title": "Cases",
-              "type": "array"
-            },
-            "on_miss": {
-              "$ref": "#/$defs/ToolPolicyOnMiss",
-              "description": "Behavior when no case matches."
-            },
-            "type": {
-              "const": "static",
-              "default": "static",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "cases",
-            "on_miss"
-          ],
-          "title": "StaticConfig",
-          "type": "object"
-        },
-        "StaticMatchMode": {
-          "description": "How a static case matches a tool call.",
-          "enum": [
-            "exact",
-            "subset"
-          ],
-          "title": "StaticMatchMode",
-          "type": "string"
-        },
-        "ToolPolicy": {
-          "additionalProperties": false,
-          "description": "Tool policy.",
-          "properties": {
-            "default": {
-              "description": "Config applied to tools without an override.",
-              "discriminator": {
-                "mapping": {
-                  "history": "#/$defs/HistoryConfig",
-                  "llm": "#/$defs/LLMConfig",
-                  "passthrough": "#/$defs/PassthroughConfig",
-                  "static": "#/$defs/StaticConfig"
-                },
-                "propertyName": "type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/PassthroughConfig"
-                },
-                {
-                  "$ref": "#/$defs/HistoryConfig"
-                },
-                {
-                  "$ref": "#/$defs/StaticConfig"
-                },
-                {
-                  "$ref": "#/$defs/LLMConfig"
-                }
-              ],
-              "title": "Default"
-            },
-            "tools": {
-              "additionalProperties": {
-                "discriminator": {
-                  "mapping": {
-                    "history": "#/$defs/HistoryConfig",
-                    "llm": "#/$defs/LLMConfig",
-                    "passthrough": "#/$defs/PassthroughConfig",
-                    "static": "#/$defs/StaticConfig"
-                  },
-                  "propertyName": "type"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/PassthroughConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/HistoryConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/StaticConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/LLMConfig"
-                  }
-                ]
-              },
-              "description": "Per-tool config overrides.",
-              "title": "Tools",
-              "type": "object"
-            }
-          },
-          "required": [
-            "default"
-          ],
-          "title": "ToolPolicy",
-          "type": "object"
-        },
-        "ToolPolicyOnMiss": {
-          "description": "Behavior when a replayed tool call has no match.",
-          "enum": [
-            "fail",
-            "passthrough",
-            "error_result"
-          ],
-          "title": "ToolPolicyOnMiss",
-          "type": "string"
         }
       },
       "properties": {
         "request": {
-          "discriminator": {
-            "mapping": {
-              "experiment_run": "#/$defs/ExperimentRunStart",
-              "replay": "#/$defs/ReplayStart",
-              "session_evaluation": "#/$defs/SessionEvaluationStart",
-              "session_import": "#/$defs/SessionImportStart",
-              "session_run": "#/$defs/SessionRunStart"
-            },
-            "propertyName": "operation"
-          },
-          "oneOf": [
-            {
-              "$ref": "#/$defs/ReplayStart"
-            },
-            {
-              "$ref": "#/$defs/SessionRunStart"
-            },
-            {
-              "$ref": "#/$defs/SessionImportStart"
-            },
-            {
-              "$ref": "#/$defs/SessionEvaluationStart"
-            },
-            {
-              "$ref": "#/$defs/ExperimentRunStart"
-            }
-          ],
-          "title": "Request"
+          "$ref": "#/$defs/SessionImportRequest"
         }
       },
       "required": [
         "request"
       ],
-      "title": "workflow_start_toolArguments",
+      "title": "session_import_toolArguments",
       "type": "object"
     },
-    "name": "kitaru_workflow_start",
+    "name": "kitaru_session_import",
     "outputSchema": {
       "$defs": {
-        "EvaluatorConfig": {
-          "additionalProperties": false,
-          "description": "Evaluator config.",
-          "properties": {
-            "evaluator": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Evaluator name.",
-              "title": "Evaluator"
-            },
-            "evaluator_version_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Immutable evaluator version id; intended for retry-stable requests.",
-              "title": "Evaluator Version Id"
-            },
-            "params": {
-              "additionalProperties": true,
-              "description": "Parameters passed to the evaluator.",
-              "title": "Params",
-              "type": "object"
-            },
-            "version": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Evaluator version, an omitted value resolves to latest.",
-              "title": "Version"
-            }
-          },
-          "title": "EvaluatorConfig",
-          "type": "object"
-        },
-        "ExperimentRunProgress": {
-          "description": "Experiment run progress.",
-          "properties": {
-            "canceled": {
-              "description": "Replays canceled.",
-              "title": "Canceled",
-              "type": "integer"
-            },
-            "completed": {
-              "description": "Replays completed.",
-              "title": "Completed",
-              "type": "integer"
-            },
-            "evaluating": {
-              "description": "Replays evaluating.",
-              "title": "Evaluating",
-              "type": "integer"
-            },
-            "failed": {
-              "description": "Replays failed.",
-              "title": "Failed",
-              "type": "integer"
-            },
-            "pending": {
-              "description": "Replays pending.",
-              "title": "Pending",
-              "type": "integer"
-            },
-            "total": {
-              "description": "Total replays in the run.",
-              "title": "Total",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "pending",
-            "evaluating",
-            "completed",
-            "failed",
-            "canceled",
-            "total"
-          ],
-          "title": "ExperimentRunProgress",
-          "type": "object"
-        },
-        "ExperimentRunResponse": {
-          "description": "Experiment run response.",
-          "properties": {
-            "agent_version_id": {
-              "description": "Agent version to replay with.",
-              "format": "uuid",
-              "title": "Agent Version Id",
-              "type": "string"
-            },
-            "cohort_version_id": {
-              "description": "Cohort version whose sessions are replayed.",
-              "format": "uuid",
-              "title": "Cohort Version Id",
-              "type": "string"
-            },
-            "created": {
-              "description": "Creation time.",
-              "format": "date-time",
-              "title": "Created",
-              "type": "string"
-            },
-            "ended_at": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Time the run settled.",
-              "title": "Ended At"
-            },
-            "error": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Error from a failed run.",
-              "title": "Error"
-            },
-            "evaluate_baselines": {
-              "description": "Whether baseline sessions are also scored.",
-              "title": "Evaluate Baselines",
-              "type": "boolean"
-            },
-            "experiment_id": {
-              "description": "Experiment this run belongs to.",
-              "format": "uuid",
-              "title": "Experiment Id",
-              "type": "string"
-            },
-            "id": {
-              "description": "Experiment run id.",
-              "format": "uuid",
-              "title": "Id",
-              "type": "string"
-            },
-            "number": {
-              "description": "Run number within the experiment.",
-              "title": "Number",
-              "type": "integer"
-            },
-            "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
-            },
-            "progress": {
-              "$ref": "#/$defs/ExperimentRunProgress",
-              "description": "Replay counts by status."
-            },
-            "started_at": {
-              "anyOf": [
-                {
-                  "format": "date-time",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Time the run started.",
-              "title": "Started At"
-            },
-            "status": {
-              "$ref": "#/$defs/ExperimentRunStatus",
-              "description": "Run status."
-            },
-            "updated": {
-              "description": "Last modification time.",
-              "format": "date-time",
-              "title": "Updated",
-              "type": "string"
-            }
-          },
-          "required": [
-            "created",
-            "updated",
-            "owner_id",
-            "id",
-            "experiment_id",
-            "number",
-            "status",
-            "cohort_version_id",
-            "agent_version_id",
-            "evaluate_baselines",
-            "progress"
-          ],
-          "title": "ExperimentRunResponse",
-          "type": "object"
-        },
-        "ExperimentRunStatus": {
-          "description": "Experiment run status.",
-          "enum": [
-            "running",
-            "canceling",
-            "completed",
-            "failed",
-            "canceled"
-          ],
-          "title": "ExperimentRunStatus",
-          "type": "string"
-        },
-        "HistoryConfig": {
-          "additionalProperties": false,
-          "description": "History tool config.",
-          "properties": {
-            "on_miss": {
-              "$ref": "#/$defs/ToolPolicyOnMiss",
-              "description": "Behavior when no recorded call matches."
-            },
-            "scope": {
-              "$ref": "#/$defs/HistoryScope",
-              "description": "Source of recorded calls to replay from."
-            },
-            "type": {
-              "const": "history",
-              "default": "history",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "scope",
-            "on_miss"
-          ],
-          "title": "HistoryConfig",
-          "type": "object"
-        },
-        "HistoryScope": {
-          "description": "Scope a history tool config draws recorded calls from.",
-          "enum": [
-            "baseline",
-            "cohort_version",
-            "agent"
-          ],
-          "title": "HistoryScope",
-          "type": "string"
-        },
-        "ImportWorkflowReceipt": {
-          "additionalProperties": false,
-          "description": "Receipt for a blob-backed import workflow.",
-          "properties": {
-            "agent_id": {
-              "format": "uuid",
-              "title": "Agent Id",
-              "type": "string"
-            },
-            "agent_version_id": {
-              "format": "uuid",
-              "title": "Agent Version Id",
-              "type": "string"
-            },
-            "blob_id": {
-              "format": "uuid",
-              "title": "Blob Id",
-              "type": "string"
-            },
-            "idempotency": {
-              "const": "domain-deduplicated-only",
-              "title": "Idempotency",
-              "type": "string"
-            },
-            "importer_id": {
-              "format": "uuid",
-              "title": "Importer Id",
-              "type": "string"
-            },
-            "importer_version_id": {
-              "format": "uuid",
-              "title": "Importer Version Id",
-              "type": "string"
-            },
-            "operation": {
-              "const": "session_import",
-              "title": "Operation",
-              "type": "string"
-            },
-            "result": {
-              "$ref": "#/$defs/JobResponse"
-            }
-          },
-          "required": [
-            "operation",
-            "idempotency",
-            "blob_id",
-            "importer_id",
-            "importer_version_id",
-            "agent_id",
-            "agent_version_id",
-            "result"
-          ],
-          "title": "ImportWorkflowReceipt",
-          "type": "object"
-        },
         "JobResponse": {
           "description": "Job response.",
           "properties": {
@@ -6887,371 +6000,61 @@
           "title": "JobStatus",
           "type": "string"
         },
-        "LLMConfig": {
+        "SessionImportReceipt": {
           "additionalProperties": false,
-          "description": "LLM tool config.",
+          "description": "Receipt for a blob-backed import workflow.",
           "properties": {
-            "instructions": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Instructions guiding the generated result.",
-              "title": "Instructions"
-            },
-            "model": {
-              "description": "Model used to generate the tool result.",
-              "title": "Model",
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
               "type": "string"
             },
-            "type": {
-              "const": "llm",
-              "default": "llm",
-              "title": "Type",
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
               "type": "string"
-            }
-          },
-          "required": [
-            "model"
-          ],
-          "title": "LLMConfig",
-          "type": "object"
-        },
-        "PassthroughConfig": {
-          "additionalProperties": false,
-          "description": "Passthrough tool config.",
-          "properties": {
-            "type": {
-              "const": "passthrough",
-              "default": "passthrough",
-              "title": "Type",
+            },
+            "blob_id": {
+              "format": "uuid",
+              "title": "Blob Id",
               "type": "string"
-            }
-          },
-          "title": "PassthroughConfig",
-          "type": "object"
-        },
-        "ProtectedWorkflowReceipt": {
-          "additionalProperties": false,
-          "description": "Receipt for a replay-protected asynchronous workflow.",
-          "properties": {
+            },
             "idempotency": {
-              "const": "server-enforced",
+              "const": "domain-deduplicated-only",
               "title": "Idempotency",
               "type": "string"
             },
+            "importer_id": {
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            },
+            "importer_version_id": {
+              "format": "uuid",
+              "title": "Importer Version Id",
+              "type": "string"
+            },
             "operation": {
-              "enum": [
-                "replay",
-                "session_run",
-                "session_evaluation",
-                "experiment_run"
-              ],
+              "const": "session_import",
               "title": "Operation",
               "type": "string"
             },
-            "request_id": {
-              "title": "Request Id",
-              "type": "string"
-            },
             "result": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ReplayResponse"
-                },
-                {
-                  "$ref": "#/$defs/ExperimentRunResponse"
-                },
-                {
-                  "$ref": "#/$defs/JobResponse"
-                }
-              ],
-              "title": "Result"
+              "$ref": "#/$defs/JobResponse"
             }
           },
           "required": [
             "operation",
-            "request_id",
             "idempotency",
+            "blob_id",
+            "importer_id",
+            "importer_version_id",
+            "agent_id",
+            "agent_version_id",
             "result"
           ],
-          "title": "ProtectedWorkflowReceipt",
+          "title": "SessionImportReceipt",
           "type": "object"
-        },
-        "ReplayOverride": {
-          "additionalProperties": false,
-          "description": "Replay override.",
-          "properties": {
-            "model": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New model, or a map from old to new model.",
-              "title": "Model"
-            },
-            "model_params": {
-              "anyOf": [
-                {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New model parameters.",
-              "title": "Model Params"
-            },
-            "prompt": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New prompt.",
-              "title": "Prompt"
-            },
-            "system_prompt": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "New system prompt.",
-              "title": "System Prompt"
-            }
-          },
-          "title": "ReplayOverride",
-          "type": "object"
-        },
-        "ReplayResponse": {
-          "description": "Replay response.",
-          "properties": {
-            "baseline_session_id": {
-              "description": "Session replayed.",
-              "format": "uuid",
-              "title": "Baseline Session Id",
-              "type": "string"
-            },
-            "created": {
-              "description": "Creation time.",
-              "format": "date-time",
-              "title": "Created",
-              "type": "string"
-            },
-            "error": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Error from a failed replay.",
-              "title": "Error"
-            },
-            "evaluate_baselines": {
-              "description": "Whether the baseline session is also scored.",
-              "title": "Evaluate Baselines",
-              "type": "boolean"
-            },
-            "evaluators": {
-              "description": "Evaluators run against the result session.",
-              "items": {
-                "$ref": "#/$defs/EvaluatorConfig"
-              },
-              "title": "Evaluators",
-              "type": "array"
-            },
-            "experiment_run_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Experiment run this replay belongs to.",
-              "title": "Experiment Run Id"
-            },
-            "id": {
-              "description": "Replay id.",
-              "format": "uuid",
-              "title": "Id",
-              "type": "string"
-            },
-            "job_id": {
-              "description": "Job running the replay.",
-              "format": "uuid",
-              "title": "Job Id",
-              "type": "string"
-            },
-            "override": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ReplayOverride"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Override applied."
-            },
-            "result_session_id": {
-              "anyOf": [
-                {
-                  "format": "uuid",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Session produced by the replay.",
-              "title": "Result Session Id"
-            },
-            "status": {
-              "$ref": "#/$defs/ReplayStatus"
-            },
-            "tool_policy": {
-              "$ref": "#/$defs/ToolPolicy",
-              "description": "Tool policy applied."
-            },
-            "updated": {
-              "description": "Last modification time.",
-              "format": "date-time",
-              "title": "Updated",
-              "type": "string"
-            }
-          },
-          "required": [
-            "created",
-            "updated",
-            "id",
-            "job_id",
-            "baseline_session_id",
-            "override",
-            "tool_policy",
-            "evaluators",
-            "evaluate_baselines",
-            "status"
-          ],
-          "title": "ReplayResponse",
-          "type": "object"
-        },
-        "ReplayStatus": {
-          "description": "Replay status.",
-          "enum": [
-            "pending",
-            "evaluating",
-            "completed",
-            "failed",
-            "canceled"
-          ],
-          "title": "ReplayStatus",
-          "type": "string"
-        },
-        "StaticCase": {
-          "additionalProperties": false,
-          "description": "Static tool call case.",
-          "properties": {
-            "match": {
-              "anyOf": [
-                {},
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Call arguments to match, unset matches any call.",
-              "title": "Match"
-            },
-            "match_mode": {
-              "$ref": "#/$defs/StaticMatchMode",
-              "description": "How the call arguments are matched."
-            },
-            "result": {
-              "description": "Result returned for a matching call.",
-              "title": "Result"
-            }
-          },
-          "required": [
-            "match_mode",
-            "result"
-          ],
-          "title": "StaticCase",
-          "type": "object"
-        },
-        "StaticConfig": {
-          "additionalProperties": false,
-          "description": "Static tool config.",
-          "properties": {
-            "cases": {
-              "description": "Cases tried in order for a matching call.",
-              "items": {
-                "$ref": "#/$defs/StaticCase"
-              },
-              "title": "Cases",
-              "type": "array"
-            },
-            "on_miss": {
-              "$ref": "#/$defs/ToolPolicyOnMiss",
-              "description": "Behavior when no case matches."
-            },
-            "type": {
-              "const": "static",
-              "default": "static",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "cases",
-            "on_miss"
-          ],
-          "title": "StaticConfig",
-          "type": "object"
-        },
-        "StaticMatchMode": {
-          "description": "How a static case matches a tool call.",
-          "enum": [
-            "exact",
-            "subset"
-          ],
-          "title": "StaticMatchMode",
-          "type": "string"
         },
         "ToolError": {
           "additionalProperties": false,
@@ -7302,103 +6105,21 @@
           ],
           "title": "ToolError",
           "type": "object"
-        },
-        "ToolPolicy": {
-          "additionalProperties": false,
-          "description": "Tool policy.",
-          "properties": {
-            "default": {
-              "description": "Config applied to tools without an override.",
-              "discriminator": {
-                "mapping": {
-                  "history": "#/$defs/HistoryConfig",
-                  "llm": "#/$defs/LLMConfig",
-                  "passthrough": "#/$defs/PassthroughConfig",
-                  "static": "#/$defs/StaticConfig"
-                },
-                "propertyName": "type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/PassthroughConfig"
-                },
-                {
-                  "$ref": "#/$defs/HistoryConfig"
-                },
-                {
-                  "$ref": "#/$defs/StaticConfig"
-                },
-                {
-                  "$ref": "#/$defs/LLMConfig"
-                }
-              ],
-              "title": "Default"
-            },
-            "tools": {
-              "additionalProperties": {
-                "discriminator": {
-                  "mapping": {
-                    "history": "#/$defs/HistoryConfig",
-                    "llm": "#/$defs/LLMConfig",
-                    "passthrough": "#/$defs/PassthroughConfig",
-                    "static": "#/$defs/StaticConfig"
-                  },
-                  "propertyName": "type"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/PassthroughConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/HistoryConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/StaticConfig"
-                  },
-                  {
-                    "$ref": "#/$defs/LLMConfig"
-                  }
-                ]
-              },
-              "description": "Per-tool config overrides.",
-              "title": "Tools",
-              "type": "object"
-            }
-          },
-          "required": [
-            "default"
-          ],
-          "title": "ToolPolicy",
-          "type": "object"
-        },
-        "ToolPolicyOnMiss": {
-          "description": "Behavior when a replayed tool call has no match.",
-          "enum": [
-            "fail",
-            "passthrough",
-            "error_result"
-          ],
-          "title": "ToolPolicyOnMiss",
-          "type": "string"
         }
       },
       "additionalProperties": false,
-      "description": "Workflow start result with an authoritative typed receipt.",
+      "description": "Session import result with an authoritative typed receipt.",
       "properties": {
         "data": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ProtectedWorkflowReceipt"
-            },
-            {
-              "$ref": "#/$defs/ImportWorkflowReceipt"
+              "$ref": "#/$defs/SessionImportReceipt"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Data"
+          "default": null
         },
         "error": {
           "anyOf": [
@@ -7432,7 +6153,7 @@
       "required": [
         "ok"
       ],
-      "title": "WorkflowStartResult",
+      "title": "SessionImportResult",
       "type": "object"
     }
   }

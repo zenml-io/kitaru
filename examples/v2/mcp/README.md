@@ -8,7 +8,7 @@ This example configures Kitaru's native local MCP server in its default read-onl
 uv sync --extra mcp
 ```
 
-Log in with the Kitaru CLI or set `KITARU_API_URL` and, when required, `KITARU_API_KEY` in your private environment. The MCP process selects its target and credential once at startup.
+Set `KITARU_API_URL` and, when required, `KITARU_API_KEY` in your private environment. Alternatively, pass `--server URL`; an existing credential stored for that exact URL can still be used. The MCP process selects its target and credential once at startup.
 
 ## Configure
 

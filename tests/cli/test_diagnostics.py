@@ -74,14 +74,13 @@ async def test_status_reports_provenance_and_live_worker_count(
     credential_store = CredentialStore(tmp_path / "credentials.json")
 
     result = await diagnostics.status(
-        target=ResolvedTarget("https://api.example.com", "active_context", "Prod"),
+        target=ResolvedTarget("https://api.example.com", "environment"),
         credential_store=credential_store,
         timeout=30,
     )
 
     assert result.exit_code == 0
-    assert result.item["server_source"] == "active_context"
-    assert result.item["context"] == "Prod"
+    assert result.item["server_source"] == "environment"
     assert result.item["authentication"] == "not_required"
     assert result.item["live_worker_count"] == 2
     assert result.item["credential_status"]["source"] == "none"
@@ -107,7 +106,7 @@ async def test_status_and_info_add_non_blocking_compatibility_warnings(
 ) -> None:
     """Compatibility diagnostics warn without changing successful exits."""
     monkeypatch.setattr(diagnostics, "package_version", lambda: client_version)
-    target = ResolvedTarget("https://api.example.com", "explicit", None)
+    target = ResolvedTarget("https://api.example.com", "explicit")
     credential_store = CredentialStore(tmp_path / "credentials.json")
 
     status_client = FakeClient(server_version)
@@ -143,7 +142,7 @@ async def test_info_reports_runtime_and_server_details(tmp_path, monkeypatch) ->
     monkeypatch.setattr(diagnostics, "build_api_client", lambda *args: client)
 
     result = await diagnostics.info(
-        target=ResolvedTarget("https://api.example.com", "explicit", "Prod"),
+        target=ResolvedTarget("https://api.example.com", "explicit"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         timeout=30,
     )
@@ -151,7 +150,6 @@ async def test_info_reports_runtime_and_server_details(tmp_path, monkeypatch) ->
     assert result.exit_code == 0
     assert result.item["server_url"] == "https://api.example.com"
     assert result.item["server_source"] == "explicit"
-    assert result.item["context"] == "Prod"
     assert result.item["server"]["version"] == "0.21.0"
     assert result.item["python_version"]
     assert client.closed is True
@@ -166,7 +164,6 @@ async def test_doctor_reports_every_check_when_no_server_is_configured(
         config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server=None,
-        context_name=None,
         timeout=0.1,
     )
 
@@ -218,7 +215,6 @@ async def test_doctor_compatibility_check_is_non_failing(
         config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server="https://api.example.com",
-        context_name=None,
         timeout=0.1,
     )
 
@@ -257,7 +253,6 @@ async def test_doctor_skips_compatibility_when_server_info_is_unavailable(
         config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server="https://api.example.com",
-        context_name=None,
         timeout=0.1,
     )
 
@@ -348,7 +343,6 @@ async def test_doctor_worker_extra_hint_names_cli_and_worker(
         config_store=ConfigStore(tmp_path / "config.json"),
         credential_store=CredentialStore(tmp_path / "credentials.json"),
         explicit_server=None,
-        context_name=None,
         timeout=0.1,
     )
 

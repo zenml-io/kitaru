@@ -207,7 +207,7 @@ jobs:
 
       # --- Run CI checks ---
       - name: Install dependencies
-        run: uv sync --frozen --extra mcp
+        run: uv sync --frozen --extra cli --extra mcp --extra worker
       - name: Check typos
         uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
       - name: Lint
@@ -218,10 +218,13 @@ jobs:
         run: uv run ty check
       - name: Check MCP schemas
         run: uv run python scripts/report_mcp_schema.py --check
-      - name: Test base and MCP suites
+      - name: Test base, CLI, and MCP suites
         run: |
-          uv run pytest --ignore=tests/mcp
-          uv run pytest tests/mcp tests/client/test_api_client.py tests/client/test_references.py tests/cli/test_config.py
+          uv run pytest --ignore=tests/cli --ignore=tests/mcp
+          uv run pytest tests/cli
+          uv run pytest tests/mcp
+      - name: Test clean CLI wheel and source installations
+        run: uv run --no-sync python scripts/smoke_cli_artifacts.py
       - name: Check migration consistency
         run: |
           uv sync --frozen --extra server --extra otel

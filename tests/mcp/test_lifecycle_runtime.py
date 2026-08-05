@@ -2,30 +2,20 @@
 """Lifecycle, concurrency, timeout, cancellation, and capability tests."""
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
 from kitaru.analytics.source import AnalyticsSource, current_source
-from kitaru.mcp.errors import MCPToolError
-from kitaru.mcp.lifecycle import MCPConnection, MCPServerState
+from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.settings import MCPSettings
 
 
 class FakeClient:
     """Small lifecycle fake."""
 
-    def __init__(self, features: list[str] | None = None) -> None:
+    def __init__(self) -> None:
         self.close_count = 0
-        self.info_count = 0
-        self.info = SimpleNamespace(get=self._get_info)
-        self.features = features or []
-
-    async def _get_info(self) -> object:
-        self.info_count += 1
-        await asyncio.sleep(0)
-        return SimpleNamespace(features=self.features)
 
     async def close(self) -> None:
         self.close_count += 1
@@ -34,7 +24,6 @@ class FakeClient:
 def _get_state(client: FakeClient, **settings: Any) -> MCPServerState:
     return MCPServerState(
         settings=MCPSettings(**settings),
-        connection=cast(MCPConnection, object()),
         client=cast(Any, client),
     )
 
@@ -102,18 +91,3 @@ async def test_handler_timeout_includes_concurrency_queue_time() -> None:
     finally:
         state.semaphore.release()
     assert current_source.get() is AnalyticsSource.PYTHON
-
-
-async def test_capability_discovery_is_lazy_concurrent_and_cached() -> None:
-    client = FakeClient(["idempotency.v1"])
-    state = _get_state(client)
-    await asyncio.gather(
-        state.require_feature("idempotency.v1"),
-        state.require_feature("idempotency.v1"),
-    )
-    assert client.info_count == 1
-
-    unsupported = _get_state(FakeClient())
-    with pytest.raises(MCPToolError, match="does not advertise") as raised:
-        await unsupported.require_feature("idempotency.v1")
-    assert raised.value.code == "unsupported_server"

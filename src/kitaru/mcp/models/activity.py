@@ -12,7 +12,6 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
 ActivityKind = Literal["session", "replay", "evaluation", "experiment_run", "job"]
-ChildKind = Literal["session_nodes", "experiment_run_jobs", "job_tasks"]
 
 
 class ActivityListRequest(PageOptions):
@@ -31,13 +30,25 @@ class ActivityGetRequest(MCPModel):
     id: uuid.UUID
 
 
-class ActivityChildrenRequest(PageOptions):
-    """List one page of a bounded child collection."""
-
+class SessionNodesRequest(MCPModel):
     operation: Literal["list_children"]
-    kind: ChildKind
+    kind: Literal["session_nodes"]
     parent_id: uuid.UUID
+    cursor: str | None = None
+    size: int = Field(default=20, ge=1, le=100)
     include_payloads: bool = False
+
+
+class SortedChildrenRequest(PageOptions):
+    operation: Literal["list_children"]
+    kind: Literal["experiment_run_jobs", "job_tasks"]
+    parent_id: uuid.UUID
+
+
+ActivityChildrenRequest = Annotated[
+    SessionNodesRequest | SortedChildrenRequest,
+    Field(discriminator="kind"),
+]
 
 
 ActivityReadRequest = Annotated[

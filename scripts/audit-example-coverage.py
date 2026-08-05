@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Audit the public example coverage manifest without running examples."""
 
-from __future__ import annotations
-
 import re
 import shlex
 import sys

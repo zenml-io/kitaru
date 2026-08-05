@@ -146,16 +146,17 @@ class StubClient:
         self.blobs = StubBlobs()
 
 
-def test_agent_source_normalization_preserves_commands_and_quotes_entrypoints() -> None:
-    """Explicit commands stay verbatim while Python references use the shared runner."""
+def test_agent_source_normalization_accepts_only_explicit_commands() -> None:
+    """Agent registration stores commands and rejects removed entrypoint syntax."""
     assert normalize_agent_source(command="run-agent --fast", entrypoint=None) == (
         "run-agent --fast"
     )
-    assert normalize_agent_source(command=None, entrypoint="pkg.agent:run") == (
-        "python -m kitaru.worker.python_entrypoint pkg.agent:run"
-    )
-    with pytest.raises(CLIError, match="Exactly one"):
+    with pytest.raises(CLIError, match="not supported"):
+        normalize_agent_source(command=None, entrypoint="pkg.agent:run")
+    with pytest.raises(CLIError, match="not supported"):
         normalize_agent_source(command="run", entrypoint="pkg.agent:run")
+    with pytest.raises(CLIError, match="requires --command"):
+        normalize_agent_source(command=None, entrypoint=None)
     with pytest.raises(CLIError, match="cannot be blank"):
         normalize_agent_source(command="  ", entrypoint=None)
 
@@ -303,8 +304,8 @@ def test_cli_agent_register_uses_shared_runner_and_output_contract(
                 "agent",
                 "register",
                 "demo",
-                "--entrypoint",
-                "example.agent:run",
+                "--command",
+                "python -m example.agent",
                 "--env",
                 "MODE=test",
                 "--tool",
@@ -317,11 +318,33 @@ def test_cli_agent_register_uses_shared_runner_and_output_contract(
     payload = json.loads(captured.out)
     assert payload["command"] == "agent.register"
     request = client.agents.version_requests[0][1]
-    assert request.run_spec.command == (
-        "python -m kitaru.worker.python_entrypoint example.agent:run"
-    )
+    assert request.run_spec.command == "python -m example.agent"
     assert request.run_spec.env == {"MODE": "test"}
     assert request.capabilities.tools == ["search"]
+
+
+def test_cli_agent_entrypoint_is_rejected_before_api_mutation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Removed agent entrypoint syntax cannot create a parent or version."""
+    client = StubClient()
+
+    @asynccontextmanager
+    async def fake_open_client():
+        yield client
+
+    monkeypatch.setattr(app_module, "_open_asset_client", fake_open_client)
+
+    assert (
+        app_module.main(
+            ["agent", "register", "demo", "--entrypoint", "example.agent:run"]
+        )
+        == 2
+    )
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["error"]["kind"] == "invalid_arguments"
+    assert client.agents.created_requests == []
+    assert client.agents.version_requests == []
 
 
 def test_page_result_preserves_server_order_and_cursor() -> None:
