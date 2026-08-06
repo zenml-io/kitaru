@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Default plugin registration at server startup."""
+"""Default account and default plugin bootstrap at server startup."""
 
 import hashlib
 import logging
@@ -19,8 +19,13 @@ from importlib.metadata import version
 from pathlib import Path
 
 from kitaru.base import FrozenModel
+from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
+from kitaru.server.application.interfaces.account_repository import AccountRepository
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
 from kitaru.server.domain.plugin import (
@@ -32,10 +37,28 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource,
 )
 
-_PLUGINS_ROOT = Path(__file__).resolve().parents[5] / "plugins"
+_PLUGINS_ROOT = Path(__file__).resolve().parents[4] / "plugins"
 _SOURCE_MEDIA_TYPE = "text/x-python"
 
 logger = logging.getLogger(__name__)
+
+
+async def ensure_default_account(
+    repository: AccountRepository, name: str, password: str | None
+) -> None:
+    """Create the default account when it does not exist.
+
+    Args:
+        repository: Account repository.
+        name: Account name.
+        password: Login password, hashed before storage.
+    """
+    account_service = AccountService(
+        repository=repository,
+        password_hasher=BcryptPasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+    )
+    await account_service.ensure_account(name, password)
 
 
 class DefaultPluginDefinition(FrozenModel):

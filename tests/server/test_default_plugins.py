@@ -18,8 +18,8 @@ from collections.abc import Callable
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository
-from kitaru.server.application.services import default_plugins
-from kitaru.server.application.services.default_plugins import (
+from kitaru.server.api import bootstrap
+from kitaru.server.api.bootstrap import (
     DEFAULT_PLUGIN_DEFINITIONS,
     register_default_plugins,
 )
@@ -54,7 +54,7 @@ async def test_register_creates_default_plugins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create every default plugin ownerless with one version on first startup."""
-    monkeypatch.setattr(default_plugins, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
 
     await register_default_plugins(repository, blob_repository)
 
@@ -75,7 +75,7 @@ async def test_register_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Leave version numbers unchanged when nothing about the source changed."""
-    monkeypatch.setattr(default_plugins, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
     await register_default_plugins(repository, blob_repository)
 
     await register_default_plugins(repository, blob_repository)
@@ -91,11 +91,11 @@ async def test_register_creates_new_version_on_content_change(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create version 2 only for plugins whose source file changed."""
-    monkeypatch.setattr(default_plugins, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
     await register_default_plugins(repository, blob_repository)
 
     monkeypatch.setattr(
-        default_plugins,
+        bootstrap,
         "_read_source",
         _source_reader({"evaluators/basic.py": b"changed"}),
     )
