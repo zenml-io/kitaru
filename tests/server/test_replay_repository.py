@@ -23,7 +23,7 @@ from conftest import (
     FakeReplayRepository,
     FakeSessionRepository,
     create_job,
-    pg_session,
+    pg_session_with_engine,
     postgres_available,
 )
 from kitaru.api_models.v1.filter import FilterOp
@@ -97,6 +97,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
                 Session(
                     owner_id=owner_id,
                     agent_id=uuid.uuid4(),
+                    number=1,
                     origin=SessionOrigin.RECORDED,
                 )
             )
@@ -112,11 +113,11 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner = await SQLAccountRepository(session).create(Account(name="owner"))
         jobs_repository = SQLJobRepository(session)
         experiments_repository = SQLExperimentRepository(session)
-        sessions_repository = SQLSessionRepository(session)
+        sessions_repository = SQLSessionRepository(session, engine)
 
         async def make_job_id() -> uuid.UUID:
             job = await jobs_repository.create(
@@ -140,7 +141,10 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             )
             created = await sessions_repository.create(
                 Session(
-                    owner_id=owner.id, agent_id=agent.id, origin=SessionOrigin.RECORDED
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=1,
+                    origin=SessionOrigin.RECORDED,
                 )
             )
             return created.id

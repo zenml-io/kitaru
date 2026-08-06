@@ -47,6 +47,9 @@ from kitaru.server.domain.session import Session
 SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["provider", "external_id"]
 )
+SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["agent_id", "number"]
+)
 SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
@@ -70,6 +73,11 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "provider",
             "external_id",
             name=SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+        ),
+        UniqueConstraint(
+            "agent_id",
+            "number",
+            name=SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT,
         ),
         ForeignKeyConstraint(
             ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
@@ -100,6 +108,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     owner_id: Mapped[uuid.UUID]
     agent_id: Mapped[uuid.UUID]
+    number: Mapped[int]
     agent_version_id: Mapped[uuid.UUID | None]
     task_id: Mapped[uuid.UUID | None]
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
@@ -142,6 +151,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=session.id,
             owner_id=session.owner_id,
             agent_id=session.agent_id,
+            number=session.number,
             agent_version_id=session.agent_version_id,
             task_id=session.task_id,
             origin=session.origin.value,
@@ -201,6 +211,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=self.id,
             owner_id=self.owner_id,
             agent_id=self.agent_id,
+            number=self.number,
             agent_version_id=self.agent_version_id,
             task_id=self.task_id,
             origin=SessionOrigin(self.origin),

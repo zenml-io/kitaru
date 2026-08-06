@@ -24,6 +24,23 @@ from kitaru.server.domain.session import Session, SessionRollups
 class SessionRepository(Protocol):
     """Session persistence operations."""
 
+    async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
+        """Bump the agent's session counter and return the new value.
+
+        The bump commits in its own transaction, so the agent row lock is
+        held for the bump alone and a rolled back create leaves a gap.
+
+        Args:
+            agent_id: Id of the agent to bump.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            New session number.
+        """
+        ...
+
     async def create(self, session: Session) -> Session:
         """Persist a new session.
 

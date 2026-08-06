@@ -134,6 +134,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("latest_version", sa.Integer(), nullable=False),
+        sa.Column("latest_session_number", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(["owner_id"], ["account.id"], name="fk_agent_owner_id"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_agent_name"),
@@ -485,6 +486,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("agent_id", sa.Uuid(), nullable=False),
+        sa.Column("number", sa.Integer(), nullable=False),
         sa.Column("agent_version_id", sa.Uuid(), nullable=True),
         sa.Column("task_id", sa.Uuid(), nullable=True),
         sa.Column("origin", sa.String(length=32), nullable=False),
@@ -533,6 +535,7 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "provider", "external_id", name="uq_session_provider_external_id"
         ),
+        sa.UniqueConstraint("agent_id", "number", name="uq_session_agent_id_number"),
     )
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.create_index(

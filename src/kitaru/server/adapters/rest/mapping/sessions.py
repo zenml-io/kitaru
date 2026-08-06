@@ -74,6 +74,7 @@ def session_to_response(session: Session) -> SessionResponse:
         id=session.id,
         owner_id=session.owner_id,
         agent_id=session.agent_id,
+        number=session.number,
         agent_version_id=session.agent_version_id,
         task_id=session.task_id,
         origin=session.origin,

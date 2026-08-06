@@ -91,7 +91,9 @@ class SessionService:
         must be running. An agent task links exactly one session and gets its
         result session written in the same transaction, an import task links
         every session it creates. The task is the source of truth for the
-        agent and the agent version.
+        agent and the agent version. The session takes the next number of
+        its agent, allocated outside the request transaction, so a failed
+        create leaves a gap.
 
         Args:
             command: Fields for the new session.
@@ -111,6 +113,7 @@ class SessionService:
             AgentVersionNotFound: No agent version has the resolved id.
             AgentVersionAgentMismatch: The resolved agent version belongs to
                 another agent.
+            AgentNotFound: No agent has the resolved id.
             DuplicateSessionExternalId: The provider and external id pair is
                 already registered.
 
@@ -127,9 +130,11 @@ class SessionService:
             if isinstance(task, AgentTask) and task.result_session_id is not None:
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
+        number = await self._repository.allocate_session_number(agent_id)
         session = Session(
             owner_id=actor.account.id,
             agent_id=agent_id,
+            number=number,
             agent_version_id=agent_version_id,
             task_id=task_id,
             origin=command.origin,

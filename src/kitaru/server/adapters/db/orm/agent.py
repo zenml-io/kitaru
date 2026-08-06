@@ -52,6 +52,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     latest_version: Mapped[int]
+    latest_session_number: Mapped[int]
 
     @classmethod
     def from_domain(cls, agent: Agent) -> "AgentORM":
@@ -69,6 +70,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=agent.name,
             description=agent.description,
             latest_version=agent.latest_version,
+            latest_session_number=agent.latest_session_number,
         )
 
     def to_domain(self) -> Agent:
@@ -83,6 +85,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             description=self.description,
             latest_version=self.latest_version,
+            latest_session_number=self.latest_session_number,
             created=self.created,
             updated=self.updated,
         )

@@ -72,6 +72,7 @@ class Agent(DomainModel):
     name: Name
     description: str | None = None
     latest_version: int = 0
+    latest_session_number: int = 0
     created: datetime | None = None
     updated: datetime | None = None
 

@@ -192,6 +192,29 @@ async def test_create_session_defaults_status_in_progress(
     assert session.updated is not None
 
 
+async def test_create_session_numbers_sessions_per_agent(
+    service: SessionService,
+) -> None:
+    """Number an agent's sessions sequentially, each agent counting alone."""
+    agent_id = uuid.uuid4()
+    other_agent_id = uuid.uuid4()
+    first = await service.create_session(
+        SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    second = await service.create_session(
+        SessionCreate(agent_id=agent_id, origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    other = await service.create_session(
+        SessionCreate(agent_id=other_agent_id, origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    assert first.number == 1
+    assert second.number == 2
+    assert other.number == 1
+
+
 async def test_create_session_honors_explicit_status(
     service: SessionService,
 ) -> None:

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Contract tests for cohort version repositories."""
 
+import itertools
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 
@@ -26,7 +27,7 @@ from conftest import (
     FakeTagRepository,
     create_cohort,
     create_session,
-    pg_session,
+    pg_session_with_engine,
     postgres_available,
 )
 from kitaru.api_models.v1.filter import FilterOp
@@ -139,7 +140,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
@@ -148,15 +149,19 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         cohort = await cohorts_repository.create(
             Cohort(owner_id=owner.id, name="cohort", agent_id=agent.id)
         )
-        sessions_repository = SQLSessionRepository(session)
+        sessions_repository = SQLSessionRepository(session, engine)
         agent_versions_repository = SQLAgentVersionRepository(session)
         experiments_repository = SQLExperimentRepository(session)
         experiment_run_repository = SQLExperimentRunRepository(session)
+        session_numbers = itertools.count(1)
 
         async def make_session_id() -> uuid.UUID:
             created = await sessions_repository.create(
                 Session(
-                    owner_id=owner.id, agent_id=agent.id, origin=SessionOrigin.RECORDED
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=next(session_numbers),
+                    origin=SessionOrigin.RECORDED,
                 )
             )
             return created.id

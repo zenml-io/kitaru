@@ -18,12 +18,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from conftest import (
     FakeEvaluationRepository,
     FakePluginRepository,
-    pg_session,
+    pg_session_with_engine,
     postgres_available,
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResult
@@ -106,15 +106,19 @@ async def _create_owner_and_agent(session: AsyncSession) -> tuple[uuid.UUID, uui
 
 
 async def _create_session_row(
-    session: AsyncSession, owner_id: uuid.UUID, agent_id: uuid.UUID
+    session: AsyncSession,
+    engine: AsyncEngine,
+    owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    number: int = 1,
 ) -> uuid.UUID:
     """Create a session row for a postgres-backed fixture.
 
     Returns:
         Id of the stored session.
     """
-    stored = await SQLSessionRepository(session).create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin="recorded")
+    stored = await SQLSessionRepository(session, engine).create(
+        Session(owner_id=owner_id, agent_id=agent_id, number=number, origin="recorded")
     )
     return stored.id
 
@@ -128,9 +132,9 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
-        session_id = await _create_session_row(session, owner_id, agent_id)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
         yield SQLEvaluationRepository(session), owner_id, session_id
 
 
@@ -277,10 +281,10 @@ async def session_pair(
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
-        first_id = await _create_session_row(session, owner_id, agent_id)
-        second_id = await _create_session_row(session, owner_id, agent_id)
+        first_id = await _create_session_row(session, engine, owner_id, agent_id, 1)
+        second_id = await _create_session_row(session, engine, owner_id, agent_id, 2)
         yield SQLEvaluationRepository(session), owner_id, first_id, second_id
 
 
@@ -397,9 +401,9 @@ async def plugin_setup(
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
-        session_id = await _create_session_row(session, owner_id, agent_id)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
         yield (
             SQLPluginRepository(session),
             SQLEvaluationRepository(session),
@@ -479,9 +483,9 @@ async def test_check_constraint_rejects_mismatched_columns() -> None:
     """Surface the CHECK constraint violation on a direct bad write."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
-        session_id = await _create_session_row(session, owner_id, agent_id)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
         bad_row = EvaluationORM(
             owner_id=owner_id,
             session_id=session_id,

@@ -68,6 +68,21 @@ async def test_sessions_persist_across_requests(
     assert body["items"][0] == created
 
 
+async def test_sessions_number_sequentially_per_agent(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Number an agent's sessions sequentially, each agent counting alone."""
+    first = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
+    second = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
+    other_agent = (await client.post("/v1/agents", json={"name": "other"})).json()
+    other = (
+        await client.post("/v1/sessions", json=_session_body(other_agent["id"]))
+    ).json()
+    assert first["number"] == 1
+    assert second["number"] == 2
+    assert other["number"] == 1
+
+
 async def test_duplicate_external_id_conflict(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

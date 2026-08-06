@@ -134,7 +134,7 @@ async def test_finalize_runs_if_drained_serializes_concurrent_settlements() -> N
         )
 
         replay_ids = []
-        for _ in range(2):
+        for number in range(1, 3):
             job = await SQLJobRepository(seed_session).create(
                 Job(
                     owner_id=owner.id,
@@ -142,9 +142,12 @@ async def test_finalize_runs_if_drained_serializes_concurrent_settlements() -> N
                     status=JobStatus.RUNNING,
                 )
             )
-            baseline = await SQLSessionRepository(seed_session).create(
+            baseline = await SQLSessionRepository(seed_session, engine).create(
                 Session(
-                    owner_id=owner.id, agent_id=agent.id, origin=SessionOrigin.RECORDED
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=number,
+                    origin=SessionOrigin.RECORDED,
                 )
             )
             replay = await SQLReplayRepository(seed_session).create(
