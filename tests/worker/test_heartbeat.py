@@ -23,26 +23,15 @@ from fakes import FakeKitaruAPIClient, as_client
 from kitaru.api_models.v1.worker import WorkerHeartbeatResponse
 from kitaru.client.exceptions import ServerError
 from kitaru.worker.heartbeat import WorkerHeartbeat
-
-
-def test_register_returns_an_event_and_unregister_drops_it() -> None:
-    """register() returns a fresh event, unregister() drops the entry."""
-    client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
-    task_id = uuid.uuid4()
-
-    event = heartbeat.register(task_id)
-    assert isinstance(event, asyncio.Event)
-    assert not event.is_set()
-
-    heartbeat.unregister(task_id)
-    assert task_id not in heartbeat._registered
+from kitaru.worker.inflight import InflightTasks
 
 
 async def test_run_skips_the_request_when_nothing_is_registered() -> None:
     """An interval with no registered tasks sends no heartbeat request."""
     client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
+    heartbeat = WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), InflightTasks(), interval=0.01
+    )
 
     task = asyncio.create_task(heartbeat.run())
     await asyncio.sleep(0.03)
@@ -57,12 +46,13 @@ async def test_run_sends_registered_task_ids_and_sets_canceled_events() -> None:
     """A heartbeat batches registered ids and sets events the server cancels."""
     client = FakeKitaruAPIClient()
     worker_id = uuid.uuid4()
-    heartbeat = WorkerHeartbeat(as_client(client), worker_id, interval=0.01)
+    inflight = InflightTasks()
+    heartbeat = WorkerHeartbeat(as_client(client), worker_id, inflight, interval=0.01)
 
     task_id_a = uuid.uuid4()
     task_id_b = uuid.uuid4()
-    event_a = heartbeat.register(task_id_a)
-    event_b = heartbeat.register(task_id_b)
+    event_a = inflight.register(task_id_a)
+    event_b = inflight.register(task_id_b)
 
     client.workers.heartbeat_responses.append(
         WorkerHeartbeatResponse(cancel_task_ids=[task_id_a])
@@ -82,16 +72,19 @@ async def test_run_sends_registered_task_ids_and_sets_canceled_events() -> None:
     assert not event_b.is_set()
 
 
-async def test_run_resolves_cancel_ids_against_the_live_dict() -> None:
+async def test_run_resolves_cancel_ids_against_the_live_registry() -> None:
     """A cancel id for a task unregistered before the response arrives is ignored."""
     client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
+    inflight = InflightTasks()
+    heartbeat = WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), inflight, interval=0.01
+    )
     task_id = uuid.uuid4()
-    heartbeat.register(task_id)
+    inflight.register(task_id)
     client.workers.heartbeat_responses.append(
         WorkerHeartbeatResponse(cancel_task_ids=[task_id])
     )
-    heartbeat.unregister(task_id)
+    inflight.unregister(task_id)
 
     task = asyncio.create_task(heartbeat.run())
     await asyncio.sleep(0.03)
@@ -100,15 +93,18 @@ async def test_run_resolves_cancel_ids_against_the_live_dict() -> None:
         await task
 
     # No error raised despite the cancel id no longer being registered.
-    assert task_id not in heartbeat._registered
+    assert task_id not in inflight.get_ids()
 
 
 async def test_run_tolerates_a_failed_heartbeat_request() -> None:
     """A failed heartbeat request is logged and does not stop the loop."""
     client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
+    inflight = InflightTasks()
+    heartbeat = WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), inflight, interval=0.01
+    )
     task_id = uuid.uuid4()
-    heartbeat.register(task_id)
+    inflight.register(task_id)
     client.workers.heartbeat_responses.append(ServerError(500, "boom"))
     client.workers.heartbeat_responses.append(
         WorkerHeartbeatResponse(cancel_task_ids=[task_id])
@@ -126,8 +122,11 @@ async def test_run_tolerates_a_failed_heartbeat_request() -> None:
 async def test_run_tolerates_a_transport_error() -> None:
     """A raw transport error is logged and does not stop the loop."""
     client = FakeKitaruAPIClient()
-    heartbeat = WorkerHeartbeat(as_client(client), uuid.uuid4(), interval=0.01)
-    heartbeat.register(uuid.uuid4())
+    inflight = InflightTasks()
+    heartbeat = WorkerHeartbeat(
+        as_client(client), uuid.uuid4(), inflight, interval=0.01
+    )
+    inflight.register(uuid.uuid4())
     client.workers.heartbeat_responses.append(httpx.ConnectError("down"))
 
     task = asyncio.create_task(heartbeat.run())

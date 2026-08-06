@@ -26,7 +26,7 @@ from kitaru.worker.handlers.base import materialize_blob
 from kitaru.worker.process import (
     TaskProcess,
     build_process_env,
-    get_python_run_command,
+    get_python_run_argv,
     parse_inline_dependencies,
 )
 
@@ -75,9 +75,9 @@ class ImportHandler:
             )
             dependencies = [details.plugin.requirement]
         env["KITARU_TASK_PAYLOAD_PATH"] = str(payload_path)
-        command = get_python_run_command("kitaru.task", ["import"], dependencies)
+        argv = get_python_run_argv("kitaru.task", ["import"], dependencies)
         return TaskProcess(
-            command=command,
+            command=argv,
             working_dir=None,
             env=env,
             timeout_seconds=spec.timeout_seconds,

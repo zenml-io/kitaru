@@ -154,7 +154,16 @@ async def test_evaluation_handler_script_plugin_materializes_and_sets_path(
     assert plugin_path.read_bytes() == content
     assert client.blobs.download_calls == [blob_id]
     assert process.working_dir is None
-    assert process.command == ("uv run --with numpy python -m kitaru.task evaluate")
+    assert process.command == [
+        "uv",
+        "run",
+        "--with",
+        "numpy",
+        "python",
+        "-m",
+        "kitaru.task",
+        "evaluate",
+    ]
     assert process.env["KITARU_API_TOKEN"] == "task-token"
 
 
@@ -172,7 +181,16 @@ async def test_evaluation_handler_package_plugin_skips_materialization(
 
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert client.blobs.download_calls == []
-    assert process.command == ("uv run --with pkg==1.0 python -m kitaru.task evaluate")
+    assert process.command == [
+        "uv",
+        "run",
+        "--with",
+        "pkg==1.0",
+        "python",
+        "-m",
+        "kitaru.task",
+        "evaluate",
+    ]
 
 
 async def test_evaluation_handler_reuses_cached_plugin(tmp_path: Path) -> None:
@@ -248,4 +266,13 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
 
     assert "KITARU_TASK_PLUGIN_PATH" not in process.env
     assert client.blobs.download_calls == [payload_blob_id]
-    assert process.command == ("uv run --with pkg==2.0 python -m kitaru.task import")
+    assert process.command == [
+        "uv",
+        "run",
+        "--with",
+        "pkg==2.0",
+        "python",
+        "-m",
+        "kitaru.task",
+        "import",
+    ]

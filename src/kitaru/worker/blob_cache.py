@@ -14,6 +14,7 @@
 """Content-addressed on-disk cache for blob content."""
 
 import asyncio
+import contextlib
 import hashlib
 import os
 import tempfile
@@ -118,7 +119,14 @@ class BlobCache:
                 file.write(content)
             if self._max_bytes is not None:
                 self._evict_to_fit(len(content))
-            os.replace(temp_name, path)
+            try:
+                os.replace(temp_name, path)
+            except OSError:
+                # Content-addressed, so an existing destination already holds
+                # the right content even when the rename itself failed.
+                if not path.exists():
+                    raise
+                Path(temp_name).unlink(missing_ok=True)
         except BaseException:
             Path(temp_name).unlink(missing_ok=True)
             raise
@@ -130,16 +138,24 @@ class BlobCache:
         Args:
             incoming_bytes: Size of the content about to be written.
         """
-        entries = [
-            entry
-            for entry in self._root.iterdir()
-            if entry.is_file() and not entry.name.endswith(".part")
-        ]
-        entries.sort(key=lambda entry: entry.stat().st_mtime)
-        total = incoming_bytes + sum(entry.stat().st_size for entry in entries)
+        candidates: list[tuple[Path, float, int]] = []
+        for entry in self._root.iterdir():
+            if not entry.is_file() or entry.name.endswith(".part"):
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                # Another process sharing the cache evicted the entry first.
+                continue
+            candidates.append((entry, stat.st_mtime, stat.st_size))
+        candidates.sort(key=lambda candidate: candidate[1])
+
         assert self._max_bytes is not None
-        for entry in entries:
+        total = incoming_bytes + sum(size for _, _, size in candidates)
+        for entry, _, size in candidates:
             if total <= self._max_bytes:
                 break
-            total -= entry.stat().st_size
-            entry.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                entry.unlink()
+                # Only counts as reclaimed space once the unlink succeeds.
+                total -= size

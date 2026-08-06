@@ -106,7 +106,9 @@ class TaskRunner:
                 client, task, attempt, f"Failed to prepare the {label} process: {exc}"
             )
 
-        with tempfile.TemporaryDirectory(prefix="kitaru-task-") as work_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="kitaru-task-", ignore_cleanup_errors=True
+        ) as work_dir:
             result_path = Path(work_dir) / "result.json"
             process = process._replace(
                 env={**process.env, "KITARU_TASK_RESULT_PATH": str(result_path)}

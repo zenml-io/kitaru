@@ -23,8 +23,15 @@ import socket
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import httpx
+
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.task import TaskClaimRequest, TaskWithSpec
+from kitaru.api_models.v1.task import (
+    TaskClaimRequest,
+    TaskStatus,
+    TaskUpdateRequest,
+    TaskWithSpec,
+)
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth
@@ -35,6 +42,7 @@ from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.heartbeat import WorkerHeartbeat
+from kitaru.worker.inflight import InflightTasks
 from kitaru.worker.task_runner import TaskRunner
 
 logger = logging.getLogger(__name__)
@@ -131,6 +139,11 @@ class Worker:
             config: Worker configuration.
         """
         self._config = config
+        self._inflight = InflightTasks()
+
+    def cancel_inflight(self) -> None:
+        """Request cancellation of every task the worker currently holds."""
+        self._inflight.cancel_all()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         """Register, claim, and execute tasks until the scope drains or stops.
@@ -176,28 +189,42 @@ class Worker:
             heartbeat = WorkerHeartbeat(
                 client=client,
                 worker_id=worker.id,
+                inflight=self._inflight,
                 interval=self._config.heartbeat_interval,
             )
-            heartbeat_task = asyncio.create_task(heartbeat.run())
+            heartbeat_task = asyncio.create_task(self._supervise_heartbeat(heartbeat))
             try:
-                await self._claim_loop(ctx, heartbeat, stop)
+                await self._claim_loop(ctx, stop)
             finally:
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await heartbeat_task
                 logger.info("Worker %s stopped.", name)
 
+    async def _supervise_heartbeat(self, heartbeat: WorkerHeartbeat) -> None:
+        """Run the heartbeat, restarting it after an unexpected exception.
+
+        Args:
+            heartbeat: Heartbeat to run.
+        """
+        while True:
+            try:
+                await heartbeat.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Heartbeat failed unexpectedly, restarting.")
+                await asyncio.sleep(self._config.heartbeat_interval)
+
     async def _claim_loop(
         self,
         ctx: ExecutionContext,
-        heartbeat: WorkerHeartbeat,
         stop: asyncio.Event,
     ) -> None:
         """Claim to capacity, dispatch runners, and stop when the scope drains.
 
         Args:
             ctx: Execution context.
-            heartbeat: Heartbeat tracking in-flight tasks.
             stop: Event that ends the loop when set.
         """
         deadline = None
@@ -208,46 +235,79 @@ class Worker:
         running: set[asyncio.Task[None]] = set()
         backoff = self._config.poll_interval
 
-        while True:
-            free_slots = self._config.concurrency - len(running)
-            if free_slots <= 0:
-                _, running = await asyncio.wait(
-                    running, return_when=asyncio.FIRST_COMPLETED
+        try:
+            while True:
+                running = {task for task in running if not task.done()}
+                if stop.is_set():
+                    logger.info("Stop requested, ending the claim loop.")
+                    break
+                if (
+                    deadline is not None
+                    and asyncio.get_running_loop().time() >= deadline
+                ):
+                    logger.info("Lifetime timeout reached, ending the claim loop.")
+                    break
+
+                free_slots = self._config.concurrency - len(running)
+                if free_slots <= 0:
+                    await _wait_for_slot(running, stop, deadline)
+                    continue
+
+                max_tasks = min(
+                    free_slots,
+                    self._config.claim_batch_size or free_slots,
+                    _MAX_CLAIM_BATCH,
                 )
-                continue
+                try:
+                    claimed = await ctx.client.tasks.claim(
+                        TaskClaimRequest(max_tasks=max_tasks)
+                    )
+                except (APIError, httpx.TransportError) as exc:
+                    logger.warning("Failed to claim tasks: %s", exc)
+                    await _sleep_until_stop(stop, backoff, deadline)
+                    backoff = min(backoff * 2, CLAIM_BACKOFF_MAX_SECONDS)
+                    continue
 
-            max_tasks = min(
-                free_slots,
-                self._config.claim_batch_size or free_slots,
-                _MAX_CLAIM_BATCH,
-            )
-            try:
-                claimed = await ctx.client.tasks.claim(
-                    TaskClaimRequest(max_tasks=max_tasks)
-                )
-            except APIError as exc:
-                logger.warning("Failed to claim tasks: %s", exc)
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, CLAIM_BACKOFF_MAX_SECONDS)
-                continue
+                backoff = self._config.poll_interval
+                if claimed.tasks:
+                    logger.info("Claimed %d task(s).", len(claimed.tasks))
+                for item in claimed.tasks:
+                    running.add(asyncio.create_task(self._run_task(ctx, runner, item)))
 
-            backoff = self._config.poll_interval
-            if claimed.tasks:
-                logger.info("Claimed %d task(s).", len(claimed.tasks))
-            for item in claimed.tasks:
-                running.add(
-                    asyncio.create_task(self._run_task(ctx, heartbeat, runner, item))
-                )
+                if len(claimed.tasks) == max_tasks:
+                    continue
 
-            if len(claimed.tasks) == max_tasks:
-                continue
+                if await self._should_stop(ctx, stop, deadline):
+                    break
+                await _sleep_until_stop(stop, self._config.poll_interval, deadline)
 
-            if await self._should_stop(ctx, stop, deadline):
-                break
-            await asyncio.sleep(self._config.poll_interval)
+            running = {task for task in running if not task.done()}
+            if running:
+                await self._drain(running)
+        finally:
+            pending = {task for task in running if not task.done()}
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
 
-        if running:
+    async def _drain(self, running: set[asyncio.Task[None]]) -> None:
+        """Wait for the running tasks, canceling them past the drain timeout.
+
+        Args:
+            running: Running task set.
+        """
+        logger.info("Draining %d running task(s).", len(running))
+        if self._config.drain_timeout is None:
             await asyncio.wait(running)
+            return
+        _, pending = await asyncio.wait(running, timeout=self._config.drain_timeout)
+        if pending:
+            logger.info(
+                "Drain timeout reached, canceling %d remaining task(s).", len(pending)
+            )
+            self._inflight.cancel_all()
+            await asyncio.wait(pending)
 
     async def _should_stop(
         self, ctx: ExecutionContext, stop: asyncio.Event, deadline: float | None
@@ -258,9 +318,6 @@ class Worker:
             ctx: Execution context.
             stop: Event that ends the loop when set.
             deadline: Loop time the lifetime timeout expires at, if any.
-
-        Raises:
-            APIError: The scope's pinned job was not found.
 
         Returns:
             Whether the stop event is set, the deadline has passed, or the
@@ -274,7 +331,11 @@ class Worker:
             return True
         job_id = self._config.scope.job_id
         if job_id is not None:
-            job = await ctx.client.jobs.get(job_id)
+            try:
+                job = await ctx.client.jobs.get(job_id)
+            except (APIError, httpx.TransportError) as exc:
+                logger.warning("Failed to read job %s: %s", job_id, exc)
+                return False
             if job.status in _SETTLED_JOB_STATUSES:
                 logger.info(
                     "Job %s settled as %s, ending the claim loop.", job_id, job.status
@@ -285,23 +346,102 @@ class Worker:
     async def _run_task(
         self,
         ctx: ExecutionContext,
-        heartbeat: WorkerHeartbeat,
         runner: TaskRunner,
         claimed: TaskWithSpec,
     ) -> None:
-        """Register a claimed task with the heartbeat and execute it.
+        """Register a claimed task as in flight and execute it.
 
         Args:
             ctx: Execution context.
-            heartbeat: Heartbeat tracking in-flight tasks.
             runner: Task runner.
             claimed: Claimed task and its execution spec.
         """
         task_id = claimed.task.id
-        canceled = heartbeat.register(task_id)
+        canceled = self._inflight.register(task_id)
         try:
             await runner.execute(claimed, canceled)
-        except Exception:
+        except Exception as exc:
             logger.exception("Task %s runner failed.", task_id)
+            await self._fail_crashed_task(ctx, claimed, exc)
         finally:
-            heartbeat.unregister(task_id)
+            self._inflight.unregister(task_id)
+
+    async def _fail_crashed_task(
+        self, ctx: ExecutionContext, claimed: TaskWithSpec, exc: Exception
+    ) -> None:
+        """Fail a task whose runner crashed, so it does not stay running.
+
+        Args:
+            ctx: Execution context.
+            claimed: Claimed task and its execution spec.
+            exc: Exception the runner crashed with.
+        """
+        client = ctx.client.with_token(claimed.token.get_secret_value())
+        request = TaskUpdateRequest(
+            status=TaskStatus.FAILED, error=f"Task runner failed: {exc}"
+        )
+        try:
+            await client.tasks.update(claimed.task.id, request)
+        except (APIError, httpx.TransportError) as failure:
+            logger.warning(
+                "Failed to update task %s to %s: %s",
+                claimed.task.id,
+                request.status,
+                failure,
+            )
+
+
+async def _wait_for_slot(
+    running: set[asyncio.Task[None]],
+    stop: asyncio.Event,
+    deadline: float | None,
+) -> None:
+    """Wait until a running task finishes, stop fires, or the deadline hits.
+
+    Args:
+        running: Running task set.
+        stop: Event that ends the wait when set.
+        deadline: Loop time the lifetime timeout expires at, if any.
+    """
+    stop_wait: asyncio.Task[object] = asyncio.create_task(stop.wait())
+    try:
+        await asyncio.wait(
+            {*running, stop_wait},
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=_get_remaining_time(deadline),
+        )
+    finally:
+        stop_wait.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stop_wait
+
+
+async def _sleep_until_stop(
+    stop: asyncio.Event, duration: float, deadline: float | None
+) -> None:
+    """Sleep for a duration, ending early when stop fires or the deadline hits.
+
+    Args:
+        stop: Event that ends the sleep when set.
+        duration: Seconds to sleep.
+        deadline: Loop time the lifetime timeout expires at, if any.
+    """
+    remaining = _get_remaining_time(deadline)
+    if remaining is not None:
+        duration = min(duration, remaining)
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(stop.wait(), timeout=duration)
+
+
+def _get_remaining_time(deadline: float | None) -> float | None:
+    """Compute the time left until a loop deadline.
+
+    Args:
+        deadline: Loop time the lifetime timeout expires at, if any.
+
+    Returns:
+        Seconds remaining clamped at zero, or None without a deadline.
+    """
+    if deadline is None:
+        return None
+    return max(0.0, deadline - asyncio.get_running_loop().time())

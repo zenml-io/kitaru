@@ -39,6 +39,7 @@ class WorkerConfig(BaseSettings):
     poll_interval: float = Field(default=RUN_POLL_INTERVAL_SECONDS, gt=0)
     heartbeat_interval: float = Field(default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS, gt=0)
     timeout: float | None = Field(default=None, gt=0)
+    drain_timeout: float | None = Field(default=None, gt=0)
     blob_cache_root: Path | None = None
     payload_cache_root: Path | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
