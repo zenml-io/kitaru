@@ -203,6 +203,8 @@ Experiment evaluator selections use exact evaluator IDs and positive version num
 
 `kitaru_workflow_start` uses the same exact evaluator selection for session evaluations. Each request may contain at most 100 distinct session/evaluator pairs and returns the submitted job immediately. Experiment runs require exact experiment, cohort-version, and agent-version IDs and also return immediately.
 
+Kitaru's released offline evaluator catalog and a complete manual-start example are documented in [Deterministic Evaluations](../guides/deterministic-evaluations.md).
+
 ### Evaluator registration
 
 `kitaru_evaluators_manage` creates evaluator parents separately from their versions. A new version may reference an existing script blob or an exactly pinned PEP 508 package requirement. The MCP server does not read local files, upload blobs, or resolve unpinned package ranges.

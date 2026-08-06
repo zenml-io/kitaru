@@ -29,6 +29,7 @@ from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
 from kitaru.server.domain.plugin import (
+    DefaultPluginReadOnly,
     Plugin,
     PluginKind,
     PluginSource,
@@ -60,6 +61,21 @@ class PluginService:
         self._repository = repository
         self._blob_repository = blob_repository
         self._analytics = analytics
+
+    @staticmethod
+    def _validate_plugin_mutation(plugin: Plugin) -> None:
+        """Reject public mutation of a released default plugin.
+
+        Args:
+            plugin: Plugin targeted by the mutation.
+
+        Raises:
+            DefaultPluginReadOnly: The plugin is ownerless and reserved.
+        """
+        if plugin.owner_id is None and plugin.name.startswith(
+            RESERVED_PLUGIN_NAME_PREFIX
+        ):
+            raise DefaultPluginReadOnly(plugin.name)
 
     async def create_plugin(
         self,
@@ -148,6 +164,7 @@ class PluginService:
         """
         _ = actor
         plugin = await self._repository.get(plugin_id)
+        self._validate_plugin_mutation(plugin)
         if "description" in update.model_fields_set:
             plugin.update_description(update.description)
         if "metadata" in update.model_fields_set:
@@ -167,6 +184,8 @@ class PluginService:
             PluginInUse: A version is referenced by a stored evaluation.
         """
         _ = actor
+        plugin = await self._repository.get(plugin_id)
+        self._validate_plugin_mutation(plugin)
         await self._repository.delete(plugin_id)
 
     async def create_version(
@@ -191,6 +210,8 @@ class PluginService:
         Returns:
             Created plugin version.
         """
+        plugin = await self._repository.get(plugin_id)
+        self._validate_plugin_mutation(plugin)
         if isinstance(source, ScriptPluginSource):
             await self._blob_repository.get(source.blob_id)
         version = await self._repository.create_version(
@@ -262,6 +283,8 @@ class PluginService:
             Updated plugin version.
         """
         _ = actor
+        plugin = await self._repository.get(plugin_id)
+        self._validate_plugin_mutation(plugin)
         plugin_version = await self._repository.get_version(plugin_id, version)
         if display_version is not None:
             plugin_version.update_display_version(display_version)

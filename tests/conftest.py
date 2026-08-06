@@ -3293,11 +3293,12 @@ class FakePluginRepository:
         self._plugins[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, plugin_id: uuid.UUID) -> Plugin:
+    async def get(self, plugin_id: uuid.UUID, exclusive: bool = False) -> Plugin:
         """Load a plugin by id.
 
         Args:
             plugin_id: Id of the plugin.
+            exclusive: Ignored because the fake has no concurrent transactions.
 
         Raises:
             PluginNotFound: No plugin has this id.
@@ -3305,10 +3306,28 @@ class FakePluginRepository:
         Returns:
             Stored plugin.
         """
+        _ = exclusive
         plugin = self._plugins.get(plugin_id)
         if plugin is None:
             raise PluginNotFound(plugin_id)
         return plugin.model_copy()
+
+    async def get_many_locked(
+        self, plugin_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, Plugin]:
+        """Bulk-load plugins by id, mirroring the SQL lock operation.
+
+        Args:
+            plugin_ids: Ids of the plugins to load.
+
+        Returns:
+            Stored plugins keyed by id, with missing ids omitted.
+        """
+        return {
+            plugin_id: self._plugins[plugin_id].model_copy()
+            for plugin_id in sorted(plugin_ids)
+            if plugin_id in self._plugins
+        }
 
     async def get_by_name(self, kind: PluginKind, name: str) -> Plugin:
         """Load a plugin by kind and name.

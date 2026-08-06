@@ -25,6 +25,7 @@ from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
+    ForbiddenError,
     NotFoundError,
     ValidationError,
 )
@@ -86,6 +87,18 @@ class ReservedPluginName(ValidationError):
             f"Plugin name '{name}' uses the reserved prefix "
             f"'{RESERVED_PLUGIN_NAME_PREFIX}'"
         )
+
+
+class DefaultPluginReadOnly(ForbiddenError):
+    """Raised when a caller attempts to mutate a released default plugin."""
+
+    def __init__(self, name: str) -> None:
+        """Initialize the error.
+
+        Args:
+            name: Name of the released default plugin.
+        """
+        super().__init__(f"Default plugin '{name}' is read-only")
 
 
 class DuplicatePluginVersion(ConflictError):
