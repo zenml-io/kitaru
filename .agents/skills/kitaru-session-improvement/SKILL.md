@@ -1,192 +1,130 @@
 ---
 name: kitaru-session-improvement
-description: Guide a first-time Kitaru user from imported agent traces to an evidence-backed improvement. Use when working with examples/canonical_example or a similar agent repository to inspect real sessions, interview a domain expert in plain language, organize observations into behavioral cohorts, create and register an evaluator from the approved behavior, replay a candidate agent version, and compare the result. Explain Kitaru concepts only when they become useful and do not require the user to operate Kitaru resources or write evaluator code.
+description: Guide a first-time Kitaru user from imported agent traces to an evidence-backed improvement. Use to inspect sessions, interview a domain expert in plain language, persist review answers as investigation annotations, create behavioral cohorts and an evaluator, replay a candidate agent version, and compare the result. Explain Kitaru concepts only when they become useful and operate Kitaru resources for the user.
 ---
 
 # Kitaru Session Improvement
 
-Lead the user through one complete improvement loop. The user supplies domain judgment. Handle Kitaru concepts, identifiers, filters, evaluator code, and workflow operations for them.
+Lead one complete improvement loop. The user supplies domain judgment. Handle Kitaru concepts, identifiers, filters, code, and workflow operations for them.
 
 ## Load the contracts
 
-Read these files before acting:
+Read these references before acting:
 
-- `examples/canonical_example/agent.py`
-- `examples/canonical_example/fixtures.py`
-- `examples/canonical_example/README_AGENT_GUIDED.md`
-- [references/current-cli.md](references/current-cli.md) before registration, import, or local evaluator commands
+- [references/current-cli.md](references/current-cli.md) before registration, import, investigation, or local evaluator commands
 - [references/current-mcp.md](references/current-mcp.md) before the first MCP call
 - [references/cohort-interview.md](references/cohort-interview.md) before asking the first improvement question
+- [references/current-investigations.md](references/current-investigations.md) before creating an investigation or annotation
 
-Do not look for a completed evaluator before the interview. The evaluator is an output of the approved behavior, not an input to discovering it.
+Inspect the agent repository, its trace source, and any walkthrough named by the user. Do not assume a particular agent, ticket set, cohort, evaluator, or improvement goal.
 
-Read [references/future-investigations.md](references/future-investigations.md) only when the user asks about persistence, investigations, annotations, or the future product path.
+Do not look for a completed custom evaluator before the interview. The evaluator is an output of the approved behavior.
 
-## Keep the experience fast and understandable
+## Keep the experience understandable
 
 - Reach the first business question after one bounded preflight and baseline summary. Do not front-load a glossary.
-- Explain one concept in one or two sentences immediately before using it.
-- Ask one plain-language question at a time. Avoid questions that can be answered with an ambiguous yes.
-- Refer to tickets, scenarios, and observed actions in user-facing text. Carry UUIDs and version references yourself.
-- Batch independent read-only checks. Cache resolved IDs and do not resolve them again without evidence that server state changed.
-- After one MCP validation or capability failure for a resource family, use the structured CLI fallback for that family for the rest of the task. Do not repeat probes that are expected to fail.
-- Use standard-mode MCP for registry reads, activity reads, cohort management, and experiment management. Use the CLI for agent and evaluator registration, local trace upload, session-evaluation starts, and experiment-run starts. Do not call MCP tools that are absent from the current registry.
-- Anchor commands to the repository root or `examples/canonical_example` as required by the CLI reference. Do not depend on an accidental current directory.
-- Treat every coding-agent shell call as a fresh process. Load the example environment in each automated CLI call or use `uv run --env-file .env`; do not assume an earlier `source .env` persists across tool calls or parallel shells.
-- Report outcomes and decisions. Keep compatibility details to one sentence unless they block progress.
+- Ask one plain-language question at a time.
+- Refer to cases and observed actions in user-facing text. Carry UUIDs and version references yourself.
+- Explain each Kitaru concept in one or two sentences immediately before using it.
+- Batch independent reads and cache exact identities.
+- Use standard-mode MCP for supported reads, investigation review, cohort and experiment management, and workflow starts. Use the CLI for local file upload, agent registration, and evaluator scaffold, test, and registration.
+- After one capability or response-validation failure for a resource family, use the documented fallback for that family.
+- Do not require the user to choose session IDs, write evaluator code, or translate their goals into Kitaru objects.
+- Treat coding-agent shell calls as fresh processes. Load the environment in each automated call.
 
-Use these explanations when the concept first becomes necessary:
+Use these explanations when each concept becomes necessary:
 
-- Session: "A session is one recorded run of your agent. Here, each session is one resolved customer email."
-- Built-in evaluator: "An evaluator applies the same check to every session. The built-in checks measure cost, latency, and tool use, which help us decide what to inspect."
-- Observation: "An observation records what you noticed in one run and why it matters. For now I will retain it in our investigation brief because persistent observations are planned but not available."
+- Session: "A session is one recorded run of your agent."
+- Built-in evaluator: "An evaluator applies the same check to every session. The built-in checks measure cost, latency, and tool use, which help us choose what to inspect."
+- Investigation: "An investigation is a bounded review of selected sessions. It stores the questions, progress, and answers so the review can resume later."
+- Annotation: "An annotation stores one review answer and can point to the exact trace node that supports it."
 - Cohort: "A cohort is a saved group of sessions that show the same behavior. It lets us replay and compare those cases together."
-- Custom evaluator: "I will turn the behavior we agreed on into a repeatable check. Kitaru will apply the same check to the recorded baseline and the replayed candidate."
+- Custom evaluator: "I will turn the behavior we agreed on into a repeatable check for baseline and replayed sessions."
 - Replay: "A replay runs the same recorded input through the candidate agent. This can make paid model calls."
-- Experiment: "An experiment keeps the evaluator versions together so baseline and candidate are measured by the same rules."
+- Experiment: "An experiment keeps evaluator versions together so baseline and candidate are measured by the same rules."
 
-## Respect the current boundary
+## Respect the product boundary
 
 - Do not depend on replay-readiness metadata. Prove compatibility by completing a replay.
-- Do not request score sorting from Kitaru. Sort bounded evaluator results locally when needed.
-- Do not claim that interview observations are persisted in Kitaru. Keep them in the conversation and encode accepted behavior in cohorts and evaluators.
+- Do not request server score sorting. Sort bounded results locally when needed.
+- Persist per-session review answers and evidence as investigation annotations. Keep investigation-wide shipping criteria in the approved brief because investigations currently have no global-answer field.
 - Do not edit Kitaru core or importers.
-- Do not edit the example agent unless the user asks for a code change after reviewing a proposal.
-- Do not start paid model calls without approval. Import and deterministic evaluation do not make model calls. Replays do.
+- Do not edit the agent until the user asks for the proposed improvement.
+- Do not start paid model calls without approval.
 - Ask before cohort writes when the user requested that boundary.
-- Treat approval of the investigation brief as approval to create, test, and register the evaluator that implements it. Ask again only if implementation requires a material behavior choice absent from the brief or would create an ambiguous competing version.
-- Do not print secrets or place them in reports or MCP requests.
+- Treat approval of the behavior brief as approval to create, test, and register its evaluator. Ask again only when implementation requires a missing behavior choice.
 - Use exact IDs and immutable versions after discovery.
-- Read server state after an uncertain mutation before retrying.
+- Read remote state after an uncertain mutation before retrying.
+- Never print secrets.
 
 ## Keep an evidence ledger
 
-Maintain these values in the conversation:
-
-- baseline agent and version identity;
-- imported session IDs and their user-facing case labels;
-- exact built-in evaluator identities and results;
-- observations, supporting sessions, counterexamples, and unresolved ambiguities;
-- the approved investigation brief and evaluator rubric;
-- proposed and approved cohort membership plus rationale;
-- generated evaluator path, tests, result contract, and registered version;
-- candidate agent identity;
-- experiment runs, replays, result sessions, and comparison evidence.
-
-Do not create a repository state file. Keep UUIDs out of the main explanation unless the user asks, but retain enough exact identifiers to recover the workflow in a later turn.
+Track the exact baseline agent version, session IDs and case labels, built-in evaluator versions and results, investigation identity and questions, annotations and node selectors, approved cohort memberships, evaluator version, candidate version, experiment runs, replay sessions, and comparison evidence. Do not create a repository state file.
 
 ## 1. Inspect and preflight
 
-Describe the agent's purpose, input, output, state, tools, and side effects in plain language. Confirm whether its actions are real or mocked.
+Describe the agent's purpose, input, output, state, tools, and side effects in plain language. Confirm whether actions are real or mocked.
 
-Run one bounded preflight using [references/current-cli.md](references/current-cli.md). Confirm the server, selected agent identity, worker, importer, bundled evaluators, and trace count. Show the selected server and agent dashboard link before creating resources so duplicate agent records are visible early.
-
-If a worker or bundled plugin is missing, explain why it matters and give the shortest recovery command.
+Confirm the server, exact agent identity, worker, importer, bundled evaluators, and trace count. Show the selected server and dashboard link before creating resources. Give the shortest recovery command for a missing worker or bundled plugin.
 
 ## 2. Resolve the baseline
 
-Resolve or register the exact baseline agent version. Reuse an existing version only when its run specification and capabilities match. Do not assume a version number.
-
-List imported sessions through the exact baseline agent-version ID, origin, and tag. Import the checked-in traces only when the expected set is absent. If source trace deduplication attaches the traces to another agent, use the temporary remapping command in the CLI reference after user approval. Do not propose deleting shared server data for this example.
-
-Verify the expected ten completed baseline sessions and cache their IDs. Never use a shared tag alone for subsequent evaluations or cohort membership.
+Resolve or register the exact baseline version. Import traces only when the expected set is absent. List sessions by exact agent-version identity plus source attributes such as origin and tag. Never use a shared tag alone for later selection.
 
 ## 3. Gather broad signals
 
-Run the bundled cost, latency, and tool-call-pattern evaluators through the CLI against the cached baseline session IDs. Explain the evaluator concept at this point.
+Run cost, latency, and tool-call-pattern evaluators against the bounded baseline set through `kitaru_workflow_start` when available. Poll with `kitaru_activity_read`. Join results to sessions and summarize the range, repeated tool paths, terminal actions, failures, and case families. These signals help select review cases but do not define good behavior.
 
-Join results to sessions and summarize the observed range, repeated tool paths, terminal actions, and case families. Show a compact table using case labels. These signals choose useful starting points but do not define good behavior.
+Ask: "What is the most important outcome for this agent to get right?"
 
-Ask the first business question immediately after this summary.
+## 4. Select and create an investigation
 
-## 4. Review and interview
+The investigation must choose its own bounded review set. The user does not choose session IDs.
 
-Follow [references/cohort-interview.md](references/cohort-interview.md). Alternate focused review with comparison:
+Use the stated goal, broad evaluator signals, final outputs, errors, and trace patterns to select a small diverse set containing likely problems, nearby successes, and counterexamples. Explain the selection using case labels.
 
-1. Inspect the final output.
-2. Check whether the trace evidence supports it.
-3. Expand the relevant tool calls and results.
-4. Find the first earlier decision that made the result wrong, risky, or unsupported.
-5. Capture a plain-language observation with an optional status of acceptable, problematic, or uncertain.
-6. Show a related session and a counterexample to test the emerging rule.
+Before creating the investigation, define a fixed ordered question set that can be asked for every selected session:
 
-Ask at most the questions needed to learn the outcome, unacceptable behavior, expected behavior in concrete cases, nearby behavior that must remain correct, and the evidence needed to ship. When the user is uncertain, show two or three trace patterns and recommend a starting point with its trade-off.
+1. an outcome judgment such as acceptable, problematic, or uncertain, with a reason;
+2. the expected behavior for this case;
+3. when useful, one goal-specific evidence question derived from the user's outcome.
 
-Propose one to three behavior hypotheses. Each hypothesis must contain one observable behavior, supporting sessions, counterexample sessions, and the main unresolved ambiguity.
+Create an investigation with those questions, ordered sessions, and curated views. Every curated view item must contain a non-empty selector that points to exact session evidence. Follow [references/current-investigations.md](references/current-investigations.md).
 
-End with an investigation brief containing:
+## 5. Interview and persist answers
 
-- improvement goal;
-- reviewed observations;
-- observable failure rule;
-- expected behavior;
-- target-group inclusion rule;
-- control-group inclusion rule;
-- primary success measure;
-- regression guardrails;
-- supporting examples and counterexamples.
+Work through one investigation session at a time. Show its curated evidence, ask one fixed question at a time, and persist each answer immediately as an annotation. Use a node selector when the answer concerns a specific call, output, error, or metadata value. Mark the investigation session complete only after every question has an answer. Skip only when the case cannot be judged and record why.
 
-Ask the user to correct or approve the brief. This confirmation is the behavior decision. Do not ask them to design Python or Kitaru objects.
+Alternate likely problems with comparison cases. Find the earliest decision or tool action that made a result wrong, risky, or unsupported. Resume an existing investigation by reading its status, linked sessions, and annotations rather than repeating answered questions.
 
-## 5. Propose and create cohorts
+After the bounded review, summarize one to three behavior hypotheses. Each must include an observable behavior, supporting annotations, counterexamples, and unresolved ambiguity.
 
-Explain the cohort concept. Map the approved rules to exact sessions by inspecting inputs, outputs, evaluations, and relevant nodes. Present a proposal with cohort purpose, included cases, evidence, counterexamples, and excluded near-misses.
+## 6. Approve the behavior brief
 
-For the canonical policy-safety path, the evidence should support:
+Prepare a brief containing the improvement goal, reviewed observations, failure rule, expected behavior, target inclusion rule, control inclusion rule, primary success measure, guardrails, examples, counterexamples, and missing-evidence behavior. Ask the user to correct or approve it. This is the behavior decision.
 
-- `unsafe-refund-baseline`: tickets 004 and 007, where the baseline accepted a refund despite an approval threshold or risk flag requiring escalation;
-- `safe-refund-control`: tickets 001, 009, and 010, where a refund is the reviewed outcome and the candidate must preserve it.
+## 7. Create target and control cohorts
 
-Treat these memberships as the result of the interview. If the user chooses another goal, derive different cohorts or explain that the checked-in candidate does not target it.
+Map the approved rules to exact reviewed sessions. Propose separate target and control cohorts with purpose, included case labels, annotation evidence, counterexamples, and excluded near-misses. After approval, create exact immutable versions and verify their membership. Reuse only an exact matching version.
 
-Ask for cohort-write approval when required by the user's boundary. Create exact immutable versions after approval. Reuse an exact matching version on reruns. Never overwrite earlier membership.
+## 8. Author the evaluator
 
-## 6. Turn the approved behavior into an evaluator
+Turn one approved behavior into a binary observable rubric with explicit pass and fail definitions, representative examples, explanations, and missing-data behavior. Invoke `$kitaru-evaluator-authoring` in autonomous mode with the approved brief and representative target and control sessions. The evaluator must use evidence available in both imported and replayed sessions.
 
-Explain the custom evaluator concept. Convert one accepted behavior into a binary, observable rubric containing:
+Report the plain-language criterion, generated file, behavioral tests, immutable evaluator version, and baseline distribution. Revisit the brief if the measured distribution disagrees with reviewed evidence.
 
-- one criterion;
-- an explicit pass definition;
-- an explicit fail definition;
-- two to four reviewed examples with at least one pass and one fail;
-- a short reason for every example;
-- behavior for missing or ambiguous evidence.
+## 9. Select and replay the candidate
 
-The approved investigation brief confirms this rubric when all of these fields are present. If one is missing, ask one domain question to fill the gap.
+Explain which approved failure the proposed code or configuration change targets and which control behavior could regress. Resolve or register an exact candidate version. Ask for approval before paid replay.
 
-Invoke `$kitaru-evaluator-authoring` in autonomous implementation mode. Give it the approved brief, rubric, representative target and control sessions, agent input and output contracts, output path `examples/canonical_example/evaluator.py`, and approval to create, test, and register the matching evaluator. If the skill is unavailable, read `.agents/skills/kitaru-evaluator-authoring/SKILL.md` and follow it directly.
+Create or reuse an experiment with exact evaluator versions. Include the custom evaluator as the primary measure and only relevant guardrails. Set the replay tool policy explicitly. Start target and control runs through `kitaru_workflow_start`, then poll runs and child jobs through `kitaru_activity_read` until terminal.
 
-Do not ask the user for a second code-design or registration approval. Report the plain-language criterion, evidence used, generated file, tests, registered immutable version, and baseline result distribution.
+## 10. Decide from evidence
 
-For the canonical path, the generated evaluator must inspect `ticket_id`, final action and amount, and accepted terminal tool calls. A reported escalation must fail if an accepted refund occurred earlier. Missing required evidence must fail the evaluation task clearly. Verify eight baseline passes and failures on tickets 004 and 007.
+Compare baseline and candidate by case label. Report terminal action, primary evaluation transition, comparable guardrail deltas, tool-path change, replay status, and exact resource identities. Keep failed replays visible. Mark a metric unavailable when baseline and replay do not record comparable evidence.
 
-Stop and revisit the brief if the baseline distribution disagrees with reviewed evidence.
-
-## 7. Select the candidate
-
-Inspect the proposed agent change before registration. For the canonical path, verify that `RETURNS_POLICY_MODE=strict` checks approval thresholds, risk flags, final-sale rules, and return windows before refunding. Explain which approved failure it targets and which control behavior could regress.
-
-Resolve or register an exact candidate agent version without assuming its number. Ask for approval before replay because it makes paid model calls.
-
-## 8. Run the experiment
-
-Explain replay and experiment when each becomes necessary. Create or reuse an experiment only when its exact evaluator selections match the approved rubric and guardrails.
-
-For the canonical path, include the generated `returns-policy` version plus cost, latency, and tool-call patterns. Create the experiment through MCP and start each run through the CLI. Run the candidate against both approved cohort versions with baseline evaluation enabled. Poll every run and child job until terminal. A completed replay is the current readiness proof for that session.
-
-## 9. Decide from evidence
-
-Compare each baseline and candidate by case label. Report terminal action, policy transition, cost and latency deltas, tool-path change, replay status, and exact resource IDs. Mark a metric unavailable when the baseline and replay do not record comparable evidence. In particular, do not interpret a replay cost of zero as an improvement when native replay sessions lack model-cost data.
-
-Answer the approved decision rule directly:
-
-- Did every target failure become correct?
-- Did every control case remain correct?
-- Did a guardrail regress?
-- Is the evidence sufficient under the user's shipping criterion?
-
-Keep failed replays visible. Separate Kitaru facts from interpretation. Recommend ship, revise, or gather more evidence with a short reason.
+Answer the approved decision rule: did every target failure become correct, did every control remain correct, did a guardrail regress, and is the evidence sufficient? Recommend use, revision, or more evidence with a short reason.
 
 ## Completion criteria
 
-Finish only when the baseline is understood, observations and counterexamples support an approved behavior brief, meaningful cohorts exist, the generated evaluator matches the approved rubric, paid replay approval has been handled, both cohort runs are terminal, and the decision traces back to exact evidence.
+Finish only when the baseline is understood, investigation answers and exact evidence are persisted, the behavior brief is approved, meaningful target and control cohorts exist, the evaluator matches the approved rubric, paid replay approval has been handled, both runs are terminal, and the recommendation traces back to exact evidence.

@@ -346,11 +346,12 @@ def test_agent_guided_readme_delegates_evaluator_authoring() -> None:
     readme = (EXAMPLE_DIR / "README_AGENT_GUIDED.md").read_text()
 
     assert "You do not need to know Kitaru terminology" in readme
-    assert "No completed `evaluator.py` exists" in readme
-    assert "creates it" in readme
-    assert "You do not need to approve Python details separately" in readme
+    assert "does not contain `evaluator.py`" in readme
+    assert "$kitaru-evaluator-authoring" in readme
+    assert "You do not select IDs" in readme
+    assert "stores the answer as an annotation" in readme
+    assert "exact node selector" in readme
     assert "accepted terminal tool calls" in readme
-    assert "observations" in readme
     assert "counterexamples" in readme
 
 

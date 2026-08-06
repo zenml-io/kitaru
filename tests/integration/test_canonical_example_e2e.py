@@ -217,6 +217,151 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "180",
             )
 
+            reviewed_tickets = {
+                "ticket-004": ("problematic", "escalate"),
+                "ticket-007": ("problematic", "escalate"),
+                "ticket-001": ("acceptable", "refund"),
+                "ticket-009": ("acceptable", "refund"),
+                "ticket-010": ("acceptable", "refund"),
+            }
+            terminal_tools = {
+                "issue_refund",
+                "create_replacement",
+                "escalate_to_human",
+            }
+            evidence_nodes: dict[str, str] = {}
+            investigation_arguments = [
+                "investigation",
+                "create",
+                "refund-policy-review",
+                "--agent",
+                "returns-resolver",
+                "--description",
+                "Review risky refunds and nearby valid refund behavior.",
+                "--question",
+                (
+                    "outcome=Is this outcome acceptable, problematic, or "
+                    "uncertain, and why?"
+                ),
+                "--question",
+                "expected=What should the agent have done in this case?",
+            ]
+            for ticket_id in reviewed_tickets:
+                session_id = sessions_by_ticket[ticket_id]
+                nodes = _items(
+                    "session",
+                    "nodes",
+                    session_id,
+                    "--include-payloads",
+                    "--size",
+                    "100",
+                )
+                evidence = next(
+                    node for node in nodes if node.get("tool_name") in terminal_tools
+                )
+                evidence_nodes[ticket_id] = evidence["id"]
+                view = {
+                    "summary": f"Review the terminal action for {ticket_id}.",
+                    "items": [
+                        {
+                            "label": "Terminal action",
+                            "description": "The accepted action used for the review.",
+                            "selectors": [
+                                {"node_id": evidence["id"], "part": "output"}
+                            ],
+                        }
+                    ],
+                }
+                investigation_arguments.extend(
+                    [
+                        "--session",
+                        session_id,
+                        "--session-view",
+                        f"{session_id}={json.dumps(view, separators=(',', ':'))}",
+                    ]
+                )
+
+            investigation = _cli(*investigation_arguments)["item"]
+            investigation_id = investigation["id"]
+            linked_sessions = _items(
+                "investigation",
+                "session",
+                "list",
+                investigation_id,
+                "--size",
+                "20",
+            )
+            assert len(linked_sessions) == 5
+            links_by_session = {
+                item["session_id"]: item["id"] for item in linked_sessions
+            }
+            for ticket_id, (judgment, expected_action) in reviewed_tickets.items():
+                session_id = sessions_by_ticket[ticket_id]
+                investigation_session_id = links_by_session[session_id]
+                selector = json.dumps(
+                    {"node_id": evidence_nodes[ticket_id], "part": "output"},
+                    separators=(",", ":"),
+                )
+                _cli(
+                    "annotation",
+                    "create",
+                    "--investigation-session",
+                    investigation_session_id,
+                    "--question-key",
+                    "outcome",
+                    "--selector",
+                    selector,
+                    "--value",
+                    json.dumps(
+                        {
+                            "judgment": judgment,
+                            "reason": "Reviewed against the automatic refund policy.",
+                        },
+                        separators=(",", ":"),
+                    ),
+                )
+                _cli(
+                    "annotation",
+                    "create",
+                    "--investigation-session",
+                    investigation_session_id,
+                    "--question-key",
+                    "expected",
+                    "--value",
+                    json.dumps({"action": expected_action}, separators=(",", ":")),
+                )
+                _cli(
+                    "investigation",
+                    "session",
+                    "complete",
+                    investigation_id,
+                    session_id,
+                )
+
+            completed_investigation = _cli("investigation", "get", investigation_id)[
+                "item"
+            ]
+            assert completed_investigation["status"] == "completed"
+            assert completed_investigation["completed_sessions"] == 5
+            annotation_filter = json.dumps(
+                {
+                    "field": "investigation_id",
+                    "op": "eq",
+                    "value": investigation_id,
+                },
+                separators=(",", ":"),
+            )
+            annotations = _items(
+                "annotation",
+                "list",
+                "--filter",
+                annotation_filter,
+                "--size",
+                "100",
+            )
+            assert len(annotations) == 10
+            assert sum(item["selector"] is not None for item in annotations) == 5
+
             evaluator_path = tmp_path / "returns_policy.py"
             _write_documented_evaluator(evaluator_path)
             _cli(
@@ -318,6 +463,8 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "experiment",
                 "create",
                 "improve-returns-policy",
+                "--tool-policy",
+                '{"default":{"type":"passthrough"},"tools":{}}',
                 "--evaluator",
                 "returns-policy@1",
                 "--evaluator",

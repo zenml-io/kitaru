@@ -19,13 +19,13 @@ examples:
   - id: canonical-returns
     path: examples/canonical_example
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: trace import, evaluation, cohorts, and experiment replay
+    owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
     coverage:
       deterministic_pytest:
         status: covered
         test_file: tests/test_canonical_example.py
         notes: provider-free contracts for the agent, checked-in traces, evaluator,
-          and walkthrough
+          investigation walkthrough, and replay
       local_smoke:
         status: covered
         command: KITARU_CANONICAL_E2E=1 KITARU_CANONICAL_SERVER_URL=http://127.0.0.1:8000
@@ -33,8 +33,8 @@ examples:
         requires_server: true
         required_env: [KITARU_CANONICAL_SERVER_URL, KITARU_CANONICAL_API_KEY]
         timeout_seconds: 600
-        notes: CI supplies PostgreSQL and a local Kitaru server; the replay uses a
-          provider-free PydanticAI FunctionModel.
+        notes: CI covers import, built-in evaluation, persisted investigation answers,
+          cohort creation, evaluator registration, and provider-free replay.
       live_provider:
         status: manual_only
         provider: openai-langfuse

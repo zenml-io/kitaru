@@ -154,7 +154,77 @@ List the stored results:
 uv run kitaru evaluation list --size 100
 ```
 
-## Step 6: Decide what to improve
+## Step 6: Record a review
+
+The agent-guided path selects a diverse review set and conducts the full investigation for you. This manual path records one representative judgment so you can see the underlying data.
+
+Resolve ticket 004 and inspect its nodes:
+
+```bash
+TICKET_004_SESSION_ID="$(
+  uv run kitaru --output json session list \
+    --tag returns-baseline \
+    --origin imported \
+    --size 20 \
+  | jq -r '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == "ticket-004") | .id'
+)"
+
+uv run kitaru session nodes \
+  "$TICKET_004_SESSION_ID" \
+  --include-payloads \
+  --size 100
+```
+
+Choose the node that contains the accepted `issue_refund` result and store its ID:
+
+```bash
+TICKET_004_REFUND_NODE_ID="YOUR_REFUND_NODE_UUID"
+```
+
+Create a one-session investigation with fixed questions and a curated evidence view:
+
+```bash
+INVESTIGATION_ID="$(
+  uv run kitaru --output json investigation create refund-policy-review \
+    --agent returns-resolver \
+    --description "Review whether risky refunds require human approval." \
+    --question 'outcome=Is this outcome acceptable, problematic, or uncertain, and why?' \
+    --question 'expected=What should the agent have done in this case?' \
+    --session "$TICKET_004_SESSION_ID" \
+    --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A $280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"description\":\"The terminal action that needs review.\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
+  | jq -r '.item.id'
+)"
+
+INVESTIGATION_SESSION_ID="$(
+  uv run kitaru --output json investigation session list \
+    "$INVESTIGATION_ID" \
+    --size 20 \
+  | jq -r '.items[0].id'
+)"
+```
+
+Store the support lead's answers and anchor the outcome judgment to the refund node:
+
+```bash
+uv run kitaru annotation create \
+  --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key outcome \
+  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}" \
+  --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
+
+uv run kitaru annotation create \
+  --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key expected \
+  --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
+
+uv run kitaru investigation session complete \
+  "$INVESTIGATION_ID" \
+  "$TICKET_004_SESSION_ID"
+```
+
+Kitaru now stores the question set, review progress, answers, and exact trace evidence. The guided path repeats this review over a diverse set that it selects from the sessions.
+
+## Step 7: Decide what to improve
 
 The broad evaluators describe the sessions, but they cannot decide what good behavior means for your business. Before creating a cohort, answer these questions:
 
@@ -175,7 +245,7 @@ The recommended path is the [agent-guided walkthrough](README_AGENT_GUIDED.md). 
 
 The remaining commands show the same operations manually.
 
-## Step 7: Create a policy evaluator
+## Step 8: Create a policy evaluator
 
 An evaluator is a Python function that applies the same check to every recorded or replayed session. Here, it turns the support lead's approved rule into one Boolean result named `policy_correct`.
 
@@ -345,7 +415,7 @@ uv run kitaru evaluator register \
   --display-version 1.0
 ```
 
-## Step 8: Score the baseline
+## Step 9: Score the baseline
 
 Apply the policy evaluator to every imported baseline session:
 
@@ -366,7 +436,7 @@ uv run kitaru evaluation list \
 
 The checked-in baseline contains eight passes and two failures. Tickets 004 and 007 issue refunds where the reviewed policy requires escalation.
 
-## Step 9: Create behavioral cohorts
+## Step 10: Create behavioral cohorts
 
 List the baseline sessions with their ticket IDs and terminal actions:
 
@@ -408,7 +478,7 @@ uv run kitaru session list --cohort safe-refund-control@1 --size 20
 
 The target cohort captures the behavior that should change. The control cohort captures nearby behavior that must not regress.
 
-## Step 10: Register an improved agent version
+## Step 11: Register an improved agent version
 
 The baseline instructions tell the agent to assume that action tools enforce approval limits. The improved version removes that assumption and requires the agent to inspect risk flags, approval thresholds, final-sale rules, and return windows before calling `issue_refund`.
 
@@ -433,7 +503,7 @@ uv run kitaru agent version register \
 
 This creates `returns-resolver@2`. The imported sessions remain attached to version 1.
 
-## Step 11: Create the experiment
+## Step 12: Create the experiment
 
 Create one reusable experiment that records the primary policy result plus the broad guardrails. Kitaru resolves each evaluator reference to an immutable version when it creates the experiment:
 
@@ -441,15 +511,16 @@ Create one reusable experiment that records the primary policy result plus the b
 uv run kitaru experiment create \
   improve-returns-policy \
   --description "Replay policy-risk and valid-refund cohorts with strict refund approval rules." \
+  --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
   --evaluator returns-policy@1 \
   --evaluator cost@latest \
   --evaluator latency@latest \
   --evaluator tool-call-patterns@latest
 ```
 
-The mock commerce tools are safe to call again, so the experiment uses Kitaru's default passthrough tool policy. Every replay receives a new isolated in-memory store.
+The mock commerce tools are safe to call again, so the experiment sets passthrough tool policy explicitly. Every replay receives a new isolated in-memory store.
 
-## Step 12: Replay the target and control cohorts
+## Step 13: Replay the target and control cohorts
 
 Resolve the two cohort references to the UUIDs required by `experiment run start`:
 
@@ -493,7 +564,7 @@ uv run kitaru experiment run start \
 
 Each baseline input now has a separate replayed session. Kitaru applies the same resolved policy and guardrail evaluator versions to both sides.
 
-## Step 13: Compare the evidence
+## Step 14: Compare the evidence
 
 List the completed experiment runs:
 
@@ -525,7 +596,7 @@ Open [http://localhost:8000](http://localhost:8000) to compare each imported ses
 
 The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Cost and latency deltas remain visible for the shipping decision. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
 
-## Step 14: Stop the local server
+## Step 15: Stop the local server
 
 After the walkthrough, stop the containers:
 
