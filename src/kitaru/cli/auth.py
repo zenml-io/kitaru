@@ -19,6 +19,7 @@ from typing import TextIO
 
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.cli import local_runtime
 from kitaru.cli.config import validate_server_url
 from kitaru.cli.output import CLIError, CommandResult, write_interaction
 from kitaru.client.api_client import KitaruAPIClient
@@ -44,13 +45,16 @@ async def login(
     non_interactive: bool,
     no_browser: bool,
     stdin: TextIO,
+    upgrade: bool = False,
     password_prompt: Callable[[str], str] = getpass.getpass,
+    package_version: str = "",
 ) -> CommandResult:
     """Authenticate with one server and store its credential when required.
 
     Args:
         server: Full managed or self-hosted server URL.
-        local: Target an already-running local server.
+        local: Provision and target the local server.
+        upgrade: Replace an existing local server with the requested image.
         username: Local account name for password authentication.
         password_stdin: Read a local password from standard input.
         api_key_stdin: Read an API key from standard input.
@@ -60,6 +64,7 @@ async def login(
         no_browser: Whether browser launch is forbidden.
         stdin: Stream used for secret input.
         password_prompt: Hidden password prompt implementation.
+        package_version: Installed Kitaru version used for the local image.
 
     Returns:
         Secret-safe login receipt.
@@ -71,10 +76,67 @@ async def login(
             "invalid_arguments",
             "Login requires a SERVER argument or --local.",
         )
+    if upgrade and not local:
+        raise CLIError("invalid_arguments", "--upgrade requires --local.")
     if password_stdin and api_key_stdin:
         raise CLIError(
             "invalid_arguments",
             "--password-stdin and --api-key-stdin cannot be combined.",
+        )
+    if local:
+        _reject_auth_inputs(
+            username=username,
+            password_stdin=password_stdin,
+            api_key_stdin=api_key_stdin,
+            scheme=AuthScheme.NONE,
+        )
+        if not non_interactive:
+            write_interaction(
+                "Checking the local Docker Compose deployment. "
+                "The first run may download images."
+            )
+        item, warnings = await local_runtime.start_local_runtime(
+            package_version=package_version,
+            upgrade=upgrade,
+            timeout=timeout,
+        )
+        client = KitaruAPIClient(
+            base_url=local_runtime.LOCAL_SERVER_URL, timeout=timeout
+        )
+        try:
+            info = await client.info.get()
+            if info.auth_scheme is not AuthScheme.NONE:
+                raise CLIError(
+                    "conflict",
+                    "The CLI-owned local deployment unexpectedly requires "
+                    "authentication.",
+                    hint="Run `kitaru local logs` to inspect its configuration.",
+                )
+            set_server_url(local_runtime.LOCAL_SERVER_URL)
+        except OSError as error:
+            raise CLIError(
+                "invalid_configuration",
+                f"The local server started but could not be selected: {error}",
+            ) from error
+        finally:
+            await client.close()
+        item["auth_scheme"] = info.auth_scheme.value
+        item["server_version"] = info.version
+        if not no_browser and not non_interactive:
+            opened = await local_runtime.open_local_dashboard()
+            if not opened:
+                warnings.append(
+                    "The dashboard could not be opened. Visit "
+                    f"{local_runtime.LOCAL_DASHBOARD_URL}."
+                )
+        return CommandResult(
+            item=item,
+            warnings=warnings,
+            links={
+                "dashboard": local_runtime.LOCAL_DASHBOARD_URL,
+                "cloud": "https://cloud.zenml.io/",
+            },
+            next_actions=["Run `kitaru status` to inspect the local server."],
         )
     server_url = validate_server_url(LOCAL_SERVER_URL if local else str(server))
     client = KitaruAPIClient(base_url=server_url, timeout=timeout)
@@ -145,17 +207,19 @@ async def login(
     )
 
 
-def logout(
+async def logout(
     *,
     server_url: str | None,
     all_servers: bool,
     credential_store: CredentialStore,
+    delete_volumes: bool = False,
 ) -> CommandResult:
     """Remove local credentials without changing server state.
 
     Args:
         server_url: Resolved server whose credential should be removed.
         all_servers: Whether to clear the complete credential store.
+        delete_volumes: Whether to delete CLI-owned local deployment data.
         credential_store: Existing secret credential store.
 
     Returns:
@@ -163,6 +227,8 @@ def logout(
     """
     if all_servers and server_url is not None:
         raise CLIError("invalid_arguments", "SERVER and --all cannot be combined.")
+    if all_servers and delete_volumes:
+        raise CLIError("invalid_arguments", "--all and --volumes cannot be combined.")
     try:
         if all_servers:
             count = len(credential_store.list())
@@ -171,6 +237,29 @@ def logout(
         if server_url is None:
             raise CLIError(
                 "invalid_configuration", "No server was resolved for logout."
+            )
+        if server_url == local_runtime.LOCAL_SERVER_URL:
+            if delete_volumes and not local_runtime.is_local_runtime_owned():
+                raise CLIError(
+                    "invalid_configuration",
+                    "The selected localhost server is not owned by the Kitaru CLI.",
+                )
+            if local_runtime.is_local_runtime_owned():
+                item = await local_runtime.stop_local_runtime(
+                    delete_volumes=delete_volumes
+                )
+                credential_store.clear(server_url)
+                set_server_url(None)
+                warnings = (
+                    ["The local Kitaru database and its stored data were deleted."]
+                    if delete_volumes
+                    else []
+                )
+                return CommandResult(item=item, warnings=warnings)
+        elif delete_volumes:
+            raise CLIError(
+                "invalid_arguments",
+                "--volumes is only valid for the CLI-owned local deployment.",
             )
         existed = credential_store.get(server_url) is not None
         credential_store.clear(server_url)

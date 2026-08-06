@@ -68,7 +68,7 @@ Add new subcommands in the appropriate `src/kitaru/cli/*.py` module and register
 
 Agent-facing commands use the version-1 structured contract. Success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` for one result or `items`, `count`, and `page` for a list. Structured errors are one JSON object on stderr with a stable error kind and exit code.
 
-Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` targets an already-running server at `http://localhost:8000`; it never starts a local server.
+Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment at `http://localhost:8000`. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
 
 ## Diagnostics and Cleanup
 
