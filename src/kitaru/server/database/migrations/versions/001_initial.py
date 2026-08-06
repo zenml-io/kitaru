@@ -146,7 +146,7 @@ def upgrade() -> None:
         "blob",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=True),
         sa.Column("sha256", sa.String(length=64), nullable=False),
         sa.Column("size", sa.Integer(), nullable=False),
         sa.Column("media_type", sa.String(length=255), nullable=False),

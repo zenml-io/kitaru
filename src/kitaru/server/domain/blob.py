@@ -80,7 +80,7 @@ class Blob(DomainModel):
     """Blob."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
-    owner_id: uuid.UUID
+    owner_id: uuid.UUID | None
     sha256: str
     size: int
     media_type: str

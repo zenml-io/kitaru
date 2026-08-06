@@ -39,7 +39,7 @@ from kitaru.server.domain.plugin import (
 Setup = tuple[BlobRepository, uuid.UUID]
 
 
-def _blob(owner_id: uuid.UUID, content: bytes = b"content") -> Blob:
+def _blob(owner_id: uuid.UUID | None, content: bytes = b"content") -> Blob:
     return Blob(
         owner_id=owner_id,
         sha256=hashlib.sha256(content).hexdigest(),
@@ -72,6 +72,15 @@ async def test_create_sets_timestamp(setup: Setup) -> None:
     assert blob.media_type == "text/plain"
     assert blob.data == b"content"
     assert blob.created is not None
+
+
+async def test_create_and_round_trip_without_owner(setup: Setup) -> None:
+    """Store and reload a default plugin blob with no owner."""
+    repository, _ = setup
+    created, _ = await repository.create(_blob(None))
+    assert created.owner_id is None
+    loaded = await repository.get(created.id)
+    assert loaded.owner_id is None
 
 
 async def test_create_dedup(setup: Setup) -> None:

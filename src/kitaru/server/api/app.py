@@ -37,6 +37,10 @@ from kitaru.server.adapters.db.errors import is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.routers import (
     accounts,
@@ -72,6 +76,9 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.application.services.account_service import AccountService
+from kitaru.server.application.services.default_plugins import (
+    register_default_plugins,
+)
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
@@ -246,6 +253,11 @@ def create_app(settings: APISettings) -> FastAPI:
                     settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
                 )
                 await session.commit()
+        async for session in database.get_async_session():
+            await register_default_plugins(
+                SQLPluginRepository(session), SQLBlobRepository(session)
+            )
+            await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
