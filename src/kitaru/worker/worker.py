@@ -250,7 +250,7 @@ class Worker:
 
                 free_slots = self._config.concurrency - len(running)
                 if free_slots <= 0:
-                    await _wait_for_a_slot(running, stop, deadline)
+                    await _wait_for_slot(running, stop, deadline)
                     continue
 
                 max_tasks = min(
@@ -391,7 +391,7 @@ class Worker:
             )
 
 
-async def _wait_for_a_slot(
+async def _wait_for_slot(
     running: set[asyncio.Task[None]],
     stop: asyncio.Event,
     deadline: float | None,
