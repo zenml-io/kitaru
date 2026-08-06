@@ -3481,6 +3481,13 @@ _WORKER_START_PARAMETERS = (
         "--timeout", "positive float", "option", False, "Worker lifetime in seconds."
     ),
     ParameterSpec(
+        "--drain-timeout",
+        "positive float",
+        "option",
+        False,
+        "Seconds to wait for held tasks before canceling them.",
+    ),
+    ParameterSpec(
         "--blob-cache-root", "path", "option", False, "Blob cache directory."
     ),
     ParameterSpec(
@@ -3524,6 +3531,7 @@ async def worker_start(
     poll_interval: float | None = None,
     heartbeat_interval: float | None = None,
     timeout: float | None = None,
+    drain_timeout: float | None = None,
     blob_cache_root: Path | None = None,
     payload_cache_root: Path | None = None,
     metadata: list[str] | None = None,
@@ -3542,6 +3550,7 @@ async def worker_start(
         poll_interval=poll_interval,
         heartbeat_interval=heartbeat_interval,
         timeout=timeout,
+        drain_timeout=drain_timeout,
         blob_cache_root=blob_cache_root,
         payload_cache_root=payload_cache_root,
         metadata=metadata,

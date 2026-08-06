@@ -60,6 +60,9 @@ class WorkerRunner(Protocol):
     async def run(self, stop: asyncio.Event | None = None) -> None:
         """Run until the supplied event requests a drain."""
 
+    def cancel_inflight(self) -> None:
+        """Request cancellation of every task the worker currently holds."""
+
 
 def load_worker_runtime() -> tuple[type[Any], type[Any]]:
     """Import worker-only dependencies when foreground execution is requested.
@@ -94,6 +97,7 @@ def build_worker_config(
     poll_interval: float | None = None,
     heartbeat_interval: float | None = None,
     timeout: float | None = None,
+    drain_timeout: float | None = None,
     blob_cache_root: Path | None = None,
     payload_cache_root: Path | None = None,
     metadata: list[str] | None = None,
@@ -122,6 +126,7 @@ def build_worker_config(
         "poll_interval": poll_interval,
         "heartbeat_interval": heartbeat_interval,
         "timeout": timeout,
+        "drain_timeout": drain_timeout,
         "blob_cache_root": blob_cache_root,
         "payload_cache_root": payload_cache_root,
     }
@@ -211,6 +216,7 @@ class ForegroundWorkerProcess:
         self._summary = summary
         self.stop = asyncio.Event()
         self._stop_reason: _TerminationReason | None = None
+        self._cancel_requested = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._output_context: OutputContext | None = None
         self._signal_handlers: dict[int, Any] = {}
@@ -236,14 +242,19 @@ class ForegroundWorkerProcess:
         )
 
     def handle_sigint(self, *_: Any) -> None:
-        """Request a graceful drain on the first SIGINT."""
-        if self._stop_reason is None:
-            self._request_stop("sigint")
+        """Request a drain on the first SIGINT, cancel held tasks on the second."""
+        self._handle_signal("sigint")
 
     def handle_sigterm(self, *_: Any) -> None:
-        """Request a graceful drain on the first SIGTERM."""
+        """Request a drain on the first SIGTERM, cancel held tasks on the second."""
+        self._handle_signal("sigterm")
+
+    def _handle_signal(self, reason: _TerminationReason) -> None:
+        """Escalate a graceful drain to canceling held tasks on repeated signals."""
         if self._stop_reason is None:
-            self._request_stop("sigterm")
+            self._request_stop(reason)
+        elif not self._cancel_requested:
+            self._request_cancel(reason)
 
     def _request_stop(self, reason: _TerminationReason) -> None:
         """Record the first signal and request a best-effort graceful drain."""
@@ -251,13 +262,24 @@ class ForegroundWorkerProcess:
         self.stop.set()
         if self._loop is not None:
             self._loop.call_soon_threadsafe(self.stop.set)
+        self._emit_signal_event("draining", reason)
+
+    def _request_cancel(self, reason: _TerminationReason) -> None:
+        """Record the second signal and cancel every task the worker holds."""
+        self._cancel_requested = True
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._worker.cancel_inflight)
+        self._emit_signal_event("canceling", reason)
+
+    def _emit_signal_event(self, event: str, reason: _TerminationReason) -> None:
+        """Emit a signal lifecycle event, tolerating a closed output stream."""
         token = (
             set_output_context(self._output_context)
             if self._output_context is not None
             else None
         )
         try:
-            emit_event("draining", {"reason": reason})
+            emit_event(event, {"reason": reason})
         except (OSError, ValueError):
             pass
         finally:
@@ -267,11 +289,15 @@ class ForegroundWorkerProcess:
     @contextmanager
     def _installed_signal_handlers(self) -> Iterator[None]:
         """Install available process signals and restore the prior handlers."""
+        from kitaru.worker.platforms import current_platform
+
         handlers: list[tuple[int, Callable[..., None]]] = [
-            (signal.SIGINT, self.handle_sigint)
+            (
+                signum,
+                self.handle_sigterm if signum == signal.SIGTERM else self.handle_sigint,
+            )
+            for signum in current_platform().stop_signals()
         ]
-        if hasattr(signal, "SIGTERM"):
-            handlers.append((signal.SIGTERM, self.handle_sigterm))
         try:
             for signum, handler in handlers:
                 self._signal_handlers[signum] = signal.getsignal(signum)

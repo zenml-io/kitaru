@@ -53,6 +53,7 @@ class DrainWorker:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.stop: asyncio.Event | None = None
+        self.canceled = asyncio.Event()
 
     async def run(self, stop: asyncio.Event | None = None) -> None:
         """Wait for stop, then model a held task that drains later."""
@@ -61,6 +62,10 @@ class DrainWorker:
         self.started.set()
         await stop.wait()
         await self.release.wait()
+
+    def cancel_inflight(self) -> None:
+        """Record that cancellation of held tasks was requested."""
+        self.canceled.set()
 
 
 @dataclass
@@ -141,6 +146,19 @@ def test_config_merge_overrides_only_explicit_scope_fields(
     assert "request_timeout" not in type(config).model_fields
 
 
+def test_drain_timeout_merges_explicit_over_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--drain-timeout overrides KITARU_WORKER_DRAIN_TIMEOUT when both are set."""
+    monkeypatch.setenv("KITARU_WORKER_DRAIN_TIMEOUT", "5")
+
+    explicit = workers.build_worker_config(drain_timeout=30.0)
+    assert explicit.drain_timeout == 30.0
+
+    from_env = workers.build_worker_config()
+    assert from_env.drain_timeout == 5.0
+
+
 def test_selector_shorthand_and_json_cover_required_behavior() -> None:
     """Compact selectors stay convenient while JSON exposes `required`."""
     config = workers.build_worker_config(
@@ -211,6 +229,9 @@ async def test_natural_completion_reports_completed_and_restores_signals() -> No
         async def run(self, stop: asyncio.Event | None = None) -> None:
             assert stop is not None
 
+        def cancel_inflight(self) -> None:
+            """Not exercised by this test."""
+
     stdout = io.StringIO()
     stderr = io.StringIO()
     token = set_output_context(_output_context(stdout, stderr))
@@ -238,7 +259,7 @@ async def test_natural_completion_reports_completed_and_restores_signals() -> No
 
 
 async def test_repeated_sigint_preserves_safe_drain() -> None:
-    """Repeated interrupts do not bypass held-task cleanup with a hard exit."""
+    """A second interrupt cancels held tasks without bypassing the drain wait."""
     stdout = io.StringIO()
     stderr = io.StringIO()
     token = set_output_context(_output_context(stdout, stderr))
@@ -251,8 +272,12 @@ async def test_repeated_sigint_preserves_safe_drain() -> None:
         process.handle_sigint()
         await asyncio.sleep(0)
         assert process.stop.is_set()
+        assert not worker.canceled.is_set()
         assert not run.done()
+
         process.handle_sigint()
+        await asyncio.sleep(0)
+        assert worker.canceled.is_set()
         assert not run.done()
 
         worker.release.set()
@@ -266,9 +291,40 @@ async def test_repeated_sigint_preserves_safe_drain() -> None:
         reset_output_context(token)
 
     events = [json.loads(line) for line in stdout.getvalue().splitlines()]
-    assert [event["event"] for event in events] == ["starting", "draining"]
+    assert [event["event"] for event in events] == ["starting", "draining", "canceling"]
     assert events[1]["item"] == {"reason": "sigint"}
+    assert events[2]["item"] == {"reason": "sigint"}
     assert stderr.getvalue() == ""
+
+
+async def test_third_signal_is_ignored_after_drain_and_cancel() -> None:
+    """A signal past the second is a no-op once a cancel is already in flight."""
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    token = set_output_context(_output_context(stdout, stderr))
+    try:
+        worker = DrainWorker()
+        process = workers.ForegroundWorkerProcess(worker, {"name": "local"})
+        run = asyncio.create_task(process.run())
+        await worker.started.wait()
+
+        process.handle_sigint()
+        process.handle_sigint()
+        await asyncio.sleep(0)
+        assert worker.canceled.is_set()
+        worker.canceled.clear()
+
+        process.handle_sigint()
+        await asyncio.sleep(0)
+        assert not worker.canceled.is_set()
+
+        worker.release.set()
+        await run
+    finally:
+        reset_output_context(token)
+
+    events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [event["event"] for event in events] == ["starting", "draining", "canceling"]
 
 
 async def test_sigterm_then_sigint_preserves_first_stop_reason() -> None:
@@ -289,8 +345,13 @@ async def test_sigterm_then_sigint_preserves_first_stop_reason() -> None:
         process.handle_sigterm()
         await asyncio.sleep(0)
         assert process.stop.is_set()
+        assert worker.canceled.is_set()
         assert not run.done()
+        worker.canceled.clear()
+
         process.handle_sigint()
+        await asyncio.sleep(0)
+        assert not worker.canceled.is_set()
         assert not run.done()
 
         worker.release.set()
@@ -303,8 +364,9 @@ async def test_sigterm_then_sigint_preserves_first_stop_reason() -> None:
         reset_output_context(token)
 
     events = [json.loads(line) for line in stdout.getvalue().splitlines()]
-    assert [event["event"] for event in events] == ["starting", "draining"]
+    assert [event["event"] for event in events] == ["starting", "draining", "canceling"]
     assert events[1]["item"] == {"reason": "sigterm"}
+    assert events[2]["item"] == {"reason": "sigterm"}
     assert stderr.getvalue() == ""
 
 
@@ -365,6 +427,9 @@ async def test_worker_failure_propagates_without_a_false_stopped_event() -> None
         async def run(self, stop: asyncio.Event | None = None) -> None:
             del stop
             raise RuntimeError("worker failed")
+
+        def cancel_inflight(self) -> None:
+            """Not exercised by this test."""
 
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -485,6 +550,8 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
                 str(job_id := uuid.uuid4()),
                 "--concurrency",
                 "3",
+                "--drain-timeout",
+                "15",
                 "--request-timeout",
                 "7.5",
             ]
@@ -501,5 +568,6 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
     assert options["kinds"] == [TaskKind.AGENT, TaskKind.IMPORTER]
     assert options["job_id"] == job_id
     assert options["concurrency"] == 3
+    assert options["drain_timeout"] == 15.0
     assert "request_timeout" not in options
     assert captured.err == ""
