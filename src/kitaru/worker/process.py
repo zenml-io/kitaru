@@ -18,17 +18,26 @@ import contextlib
 import logging
 import os
 import re
-import shlex
-import signal
 import sys
 import tomllib
 import uuid
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
+
+from kitaru.worker.platforms import WorkerPlatform, current_platform
 
 logger = logging.getLogger(__name__)
 
 LOG_TAIL_MAX_BYTES = 8192
+
+# Bound on the wait for the process to exit after it has been killed.
+PROCESS_KILL_WAIT_TIMEOUT_SECONDS = 5.0
+
+# Bound on draining stdout/stderr to EOF after the process tree is killed.
+PROCESS_DRAIN_TIMEOUT_SECONDS = 1.0
+
+# Interval polled for a process's exit code.
+_EXIT_POLL_INTERVAL_SECONDS = 0.05
 
 # Contract variables the worker owns. Any inherited copy is cleared before a
 # task process starts, then reset from the worker's own state.
@@ -43,6 +52,7 @@ _CONTRACT_ENV_VARIABLES = frozenset(
         "KITARU_TASK_PLUGIN_PATH",
         "KITARU_TASK_PAYLOAD_PATH",
         "KITARU_TASK_RESULT_PATH",
+        "KITARU_CREDENTIALS_PATH",
     }
 )
 
@@ -55,7 +65,7 @@ _PEP723_BLOCK_REGEX = (
 class TaskProcess(NamedTuple):
     """Task process."""
 
-    command: str
+    command: str | list[str]
     working_dir: str | None
     env: dict[str, str]
     timeout_seconds: int
@@ -105,35 +115,31 @@ async def run_task_process(
 ) -> ProcessResult:
     """Run a task process to completion, cancellation, or timeout.
 
-    Starts the command through a shell in its own session so the whole
-    process group can be killed, and always reaps the process before
-    returning.
+    Spawns through the platform for the running OS and always kills the
+    whole process tree during teardown, on every exit path including
+    cancellation of the caller, so a descendant that outlives the process
+    never keeps the caller waiting.
 
     Args:
         process: Process to run.
-        canceled: Event that kills the process group when set.
+        canceled: Event that kills the process tree when set.
 
     Returns:
         Exit code, None when killed on cancel or timeout, and the captured
         stdout/stderr tail.
     """
+    platform = current_platform()
     logger.debug("Spawning task process: %s", process.command)
-    child = await asyncio.create_subprocess_shell(
-        process.command,
-        cwd=process.working_dir,
-        env=process.env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-    )
+    child = await platform.spawn(process.command, process.working_dir, process.env)
     logger.debug("Task process started with pid %d.", child.pid)
     stdout_tail = TailBuffer()
     stderr_tail = TailBuffer()
     stdout_drain = asyncio.create_task(_drain(child.stdout, stdout_tail))
     stderr_drain = asyncio.create_task(_drain(child.stderr, stderr_tail))
-    wait_task = asyncio.create_task(child.wait())
+    wait_task = asyncio.create_task(_wait_for_exit(child))
     cancel_task = asyncio.create_task(canceled.wait())
 
+    returncode: int | None = None
     try:
         await asyncio.wait(
             {wait_task, cancel_task},
@@ -141,22 +147,80 @@ async def run_task_process(
             return_when=asyncio.FIRST_COMPLETED,
         )
         if wait_task.done():
-            returncode: int | None = wait_task.result()
-        else:
-            returncode = None
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(child.pid, signal.SIGKILL)
-            await wait_task
+            returncode = wait_task.result()
     finally:
-        for task in (wait_task, cancel_task):
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(
-            wait_task, cancel_task, stdout_drain, stderr_drain, return_exceptions=True
+        await _teardown(
+            platform, child, wait_task, cancel_task, stdout_drain, stderr_drain
         )
 
     tail = _format_tail(stdout_tail.decode(), stderr_tail.decode())
     return ProcessResult(returncode=returncode, tail=tail)
+
+
+async def _teardown(
+    platform: WorkerPlatform,
+    child: asyncio.subprocess.Process,
+    wait_task: asyncio.Task[int],
+    cancel_task: asyncio.Task[bool],
+    stdout_drain: asyncio.Task[None],
+    stderr_drain: asyncio.Task[None],
+) -> None:
+    """Kill the process tree and bound every remaining await.
+
+    Runs on every exit path of run_task_process, including cancellation of
+    the caller, so no path awaits anything unbounded after the kill.
+
+    Args:
+        platform: Platform the process was spawned through.
+        child: Process to kill.
+        wait_task: Task awaiting the process's exit.
+        cancel_task: Task awaiting the cancel event.
+        stdout_drain: Task draining stdout into its tail buffer.
+        stderr_drain: Task draining stderr into its tail buffer.
+    """
+    await platform.kill_tree(child)
+    await _await_bounded((wait_task,), PROCESS_KILL_WAIT_TIMEOUT_SECONDS)
+    await _await_bounded((stdout_drain, stderr_drain), PROCESS_DRAIN_TIMEOUT_SECONDS)
+    if not cancel_task.done():
+        cancel_task.cancel()
+    await asyncio.gather(cancel_task, return_exceptions=True)
+
+
+async def _await_bounded(tasks: tuple[asyncio.Task[Any], ...], timeout: float) -> None:
+    """Await tasks up to a timeout, then cancel and await whatever remains.
+
+    Args:
+        tasks: Tasks to await.
+        timeout: Seconds to wait before canceling.
+    """
+    with contextlib.suppress(TimeoutError, asyncio.CancelledError):
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True), timeout=timeout
+        )
+    pending = [task for task in tasks if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def _wait_for_exit(child: asyncio.subprocess.Process) -> int:
+    """Poll for a process's exit code.
+
+    Process.wait() only resolves once every pipe transport attached to the
+    process has also closed. A descendant that inherited the pipes and
+    outlives the process can withhold that closure indefinitely, so poll
+    the exit code directly instead.
+
+    Args:
+        child: Process to wait for.
+
+    Returns:
+        Exit code.
+    """
+    while child.returncode is None:
+        await asyncio.sleep(_EXIT_POLL_INTERVAL_SECONDS)
+    return child.returncode
 
 
 async def _drain(stream: asyncio.StreamReader | None, tail: TailBuffer) -> None:
@@ -261,10 +325,10 @@ def parse_inline_dependencies(path: Path) -> list[str]:
     return list(dependencies)
 
 
-def get_python_run_command(
+def get_python_run_argv(
     module: str, args: list[str], dependencies: list[str]
-) -> str:
-    """Build the shell command running a python module with its arguments.
+) -> list[str]:
+    """Build the argv running a python module with its arguments.
 
     Runs the module directly when there are no dependencies, otherwise
     through ``uv run`` with each dependency passed as ``--with``.
@@ -275,13 +339,12 @@ def get_python_run_command(
         dependencies: Extra dependencies the module needs.
 
     Returns:
-        Quoted shell command.
+        Argument vector.
     """
     if not dependencies:
-        parts = [sys.executable, "-m", module, *args]
-    else:
-        parts = ["uv", "run"]
-        for dependency in dependencies:
-            parts.extend(["--with", dependency])
-        parts.extend(["python", "-m", module, *args])
-    return shlex.join(parts)
+        return [sys.executable, "-m", module, *args]
+    parts = ["uv", "run"]
+    for dependency in dependencies:
+        parts.extend(["--with", dependency])
+    parts.extend(["python", "-m", module, *args])
+    return parts
