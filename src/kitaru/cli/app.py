@@ -3750,12 +3750,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
         if _is_root_help_invocation(tokens):
+            output_value = _extract_output_value(tokens)
+            if output_value is not None and output_value not in {
+                "auto",
+                "text",
+                "json",
+                "jsonl",
+            }:
+                return _emit_unparsed_error(
+                    CLIError(
+                        "invalid_arguments",
+                        f"Invalid output mode {output_value!r}.",
+                    ),
+                    tokens=tokens,
+                )
             return _emit_root_result(
                 lambda: app.help_print([]),
-                output="text",
+                output="text" if output_value is None else _extract_output(tokens),
                 machine="--machine" in tokens,
-                debug=False,
-                traceback=False,
+                debug="--debug" in tokens,
+                traceback="--traceback" in tokens,
             )
         try:
             result = app.meta(
@@ -3914,16 +3928,20 @@ def _validate_config_key(key: str) -> None:
 
 def _extract_output(tokens: Sequence[str]) -> OutputMode:
     """Best-effort extraction of serialization mode for parser failures."""
-    for index, token in enumerate(tokens):
-        if token.startswith("--output="):
-            value = token.partition("=")[2]
-        elif token in {"--output", "-o"} and index + 1 < len(tokens):
-            value = tokens[index + 1]
-        else:
-            continue
-        if value in {"auto", "text", "json", "jsonl"}:
-            return value  # type: ignore[return-value]
+    value = _extract_output_value(tokens)
+    if value in {"auto", "text", "json", "jsonl"}:
+        return value  # type: ignore[return-value]
     return "auto"
+
+
+def _extract_output_value(tokens: Sequence[str]) -> str | None:
+    """Extract the raw explicit serialization mode when one is present."""
+    for index, token in enumerate(tokens):
+        if token.startswith(("--output=", "-o=")):
+            return token.partition("=")[2]
+        if token in {"--output", "-o"} and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
 
 
 def _is_root_help_invocation(tokens: Sequence[str]) -> bool:

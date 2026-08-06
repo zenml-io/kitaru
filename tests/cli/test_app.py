@@ -78,6 +78,41 @@ def test_root_help_adds_skill_onboarding(argv, monkeypatch, capsys) -> None:
     assert captured.err == ""
 
 
+def test_root_help_honors_json_output(monkeypatch, capsys) -> None:
+    """Explicit JSON root help emits one structured onboarding document."""
+    monkeypatch.setattr(
+        app_module,
+        "get_kitaru_skill_status",
+        lambda: {
+            "installed": False,
+            "skill_count": 0,
+            "skills": [],
+            "installations": [],
+            "locations_checked": [],
+        },
+    )
+
+    assert app_module.main(["--help", "--output", "json"]) == 0
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["command"] == "kitaru"
+    assert payload["item"]["skills"]["installed"] is False
+    assert payload["next_actions"] == [INSTALL_COMMAND]
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("output", ["jsonl", "yaml"])
+def test_root_help_validates_explicit_output(output, capsys) -> None:
+    """Unsupported root-help output modes remain argument errors."""
+    assert app_module.main(["--help", "--output", output]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["kind"] == "invalid_arguments"
+
+
 def test_bare_root_emits_structured_skill_onboarding_for_machines(
     monkeypatch, capsys
 ) -> None:

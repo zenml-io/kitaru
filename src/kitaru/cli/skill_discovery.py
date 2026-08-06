@@ -195,7 +195,7 @@ def _get_skill_name(path: Path) -> str | None:
             return None
     except OSError:
         return None
-    document = _read_regular_text(path, max_bytes=_MAX_SKILL_DOCUMENT_BYTES)
+    document = _read_skill_frontmatter(path)
     if document is None:
         return None
     lines = document.splitlines()
@@ -222,8 +222,33 @@ def _get_skill_name(path: Path) -> str | None:
     return name.strip()
 
 
-def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
-    """Read one regular, non-symlinked UTF-8 file within a byte limit."""
+def _read_skill_frontmatter(path: Path) -> str | None:
+    """Read complete YAML frontmatter within the skill metadata byte limit."""
+    contents = _read_regular_bytes(
+        path,
+        max_bytes=_MAX_SKILL_DOCUMENT_BYTES,
+        reject_oversized=False,
+    )
+    if contents is None:
+        return None
+    lines = contents.splitlines(keepends=True)
+    if not lines or lines[0].strip() != b"---":
+        return None
+    frontmatter_bytes = len(lines[0])
+    for line in lines[1:]:
+        frontmatter_bytes += len(line)
+        if line.rstrip(b"\r\n") == b"---":
+            try:
+                return contents[:frontmatter_bytes].decode("utf-8")
+            except UnicodeError:
+                return None
+    return None
+
+
+def _read_regular_bytes(
+    path: Path, *, max_bytes: int, reject_oversized: bool
+) -> bytes | None:
+    """Read a bounded prefix from one regular, non-symlinked file."""
     try:
         if not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
             return None
@@ -236,7 +261,7 @@ def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 return None
             chunks: list[bytes] = []
-            remaining = max_bytes + 1
+            remaining = max_bytes + int(reject_oversized)
             while remaining:
                 chunk = os.read(descriptor, min(8192, remaining))
                 if not chunk:
@@ -248,7 +273,19 @@ def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
     except OSError:
         return None
     contents = b"".join(chunks)
-    if len(contents) > max_bytes:
+    if reject_oversized and len(contents) > max_bytes:
+        return None
+    return contents
+
+
+def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
+    """Read one regular, non-symlinked UTF-8 file within a byte limit."""
+    contents = _read_regular_bytes(
+        path,
+        max_bytes=max_bytes,
+        reject_oversized=True,
+    )
+    if contents is None:
         return None
     try:
         return contents.decode("utf-8")
