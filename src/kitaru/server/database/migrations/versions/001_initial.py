@@ -296,7 +296,6 @@ def upgrade() -> None:
         ),
     )
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
-        batch_op.create_index("ix_agent_version_agent_id", ["agent_id"], unique=False)
         batch_op.create_index("ix_agent_version_owner_id", ["owner_id"], unique=False)
 
     op.create_table(
@@ -973,11 +972,6 @@ def upgrade() -> None:
         ),
     )
     with op.batch_alter_table("annotation", schema=None) as batch_op:
-        batch_op.create_index(
-            "ix_annotation_investigation_session_id",
-            ["investigation_session_id"],
-            unique=False,
-        )
         batch_op.create_index("ix_annotation_owner_id", ["owner_id"], unique=False)
         batch_op.create_index("ix_annotation_session_id", ["session_id"], unique=False)
 
@@ -987,7 +981,6 @@ def downgrade() -> None:
     with op.batch_alter_table("annotation", schema=None) as batch_op:
         batch_op.drop_index("ix_annotation_session_id")
         batch_op.drop_index("ix_annotation_owner_id")
-        batch_op.drop_index("ix_annotation_investigation_session_id")
 
     op.drop_table("annotation")
     with op.batch_alter_table("investigation_session", schema=None) as batch_op:
@@ -1068,7 +1061,6 @@ def downgrade() -> None:
     op.drop_table("cohort")
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
         batch_op.drop_index("ix_agent_version_owner_id")
-        batch_op.drop_index("ix_agent_version_agent_id")
 
     op.drop_table("agent_version")
     with op.batch_alter_table("worker", schema=None) as batch_op:
