@@ -3457,6 +3457,11 @@
               "description": "Session name.",
               "title": "Name"
             },
+            "number": {
+              "description": "Session number within the agent.",
+              "title": "Number",
+              "type": "integer"
+            },
             "origin": {
               "$ref": "#/$defs/SessionOrigin",
               "description": "How the session came to exist."
@@ -3545,6 +3550,7 @@
             "owner_id",
             "id",
             "agent_id",
+            "number",
             "origin",
             "status",
             "inputs",

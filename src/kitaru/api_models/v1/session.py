@@ -133,6 +133,7 @@ class SessionResponse(OwnedResponseModel):
 
     id: uuid.UUID = Field(description="Session id.")
     agent_id: uuid.UUID = Field(description="Agent the session belongs to.")
+    number: int = Field(description="Session number within the agent.")
     agent_version_id: uuid.UUID | None = Field(
         default=None, description="Agent version recorded for the session."
     )

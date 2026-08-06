@@ -61,7 +61,7 @@ async def _run_unit(
     async for session in database.get_async_session():
         try:
             tracker = get_server_analytics(session, settings, analytics)
-            await unit(get_task_service(session, settings, tracker))
+            await unit(get_task_service(session, database.engine, settings, tracker))
             await session.commit()
         except Exception as exc:
             await session.rollback()
@@ -91,7 +91,7 @@ async def _read_candidates(
     async for session in database.get_async_session():
         try:
             tracker = get_server_analytics(session, settings, analytics)
-            service = get_task_service(session, settings, tracker)
+            service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
             return task_ids, job_ids

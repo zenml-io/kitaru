@@ -15,12 +15,13 @@
 
 import uuid
 
-from sqlalchemy import ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import Base, TimestampMixin
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
+    index_name,
     unique_constraint_name,
 )
 
@@ -32,6 +33,9 @@ COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY = foreign_key_name(
 )
 COHORT_VERSION_SESSION_INDEX_UNIQUE_CONSTRAINT = unique_constraint_name(
     "cohort_version_session", ["cohort_version_id", "index"]
+)
+COHORT_VERSION_SESSION_SESSION_ID_COHORT_VERSION_ID_INDEX = index_name(
+    "cohort_version_session", ["session_id", "cohort_version_id"]
 )
 
 
@@ -59,6 +63,11 @@ class CohortVersionSessionORM(TimestampMixin, Base):
             "cohort_version_id",
             "index",
             name=COHORT_VERSION_SESSION_INDEX_UNIQUE_CONSTRAINT,
+        ),
+        Index(
+            COHORT_VERSION_SESSION_SESSION_ID_COHORT_VERSION_ID_INDEX,
+            "session_id",
+            "cohort_version_id",
         ),
     )
 

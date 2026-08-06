@@ -87,10 +87,13 @@ async def test_advance_job_serializes_concurrent_task_completions() -> None:
         )
 
         task_ids = []
-        for _ in range(2):
-            result_session = await SQLSessionRepository(seed_session).create(
+        for number in range(1, 3):
+            result_session = await SQLSessionRepository(seed_session, engine).create(
                 Session(
-                    owner_id=owner.id, agent_id=agent.id, origin=SessionOrigin.REPLAY
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=number,
+                    origin=SessionOrigin.REPLAY,
                 )
             )
             task = await SQLTaskRepository(seed_session).create(

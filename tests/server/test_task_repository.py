@@ -20,13 +20,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from conftest import (
     FakeJobRepository,
     FakeTaskRepository,
     create_job,
-    pg_session,
     pg_session_with_engine,
     postgres_available,
 )
@@ -90,7 +89,7 @@ class Setup(NamedTuple):
     worker_id: uuid.UUID
 
 
-async def _seed_postgres(session: AsyncSession) -> Setup:
+async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
     """Create the account, job, and code rows postgres-backed tasks reference.
 
     Returns:
@@ -129,8 +128,8 @@ async def _seed_postgres(session: AsyncSession) -> Setup:
             data=b"data",
         )
     )
-    stored_session = await SQLSessionRepository(session).create(
-        Session(owner_id=owner.id, agent_id=agent.id, origin="recorded")
+    stored_session = await SQLSessionRepository(session, engine).create(
+        Session(owner_id=owner.id, agent_id=agent.id, number=1, origin="recorded")
     )
     job = await SQLJobRepository(session).create(
         Job(owner_id=owner.id, kind=JobKind.SESSION_RUN)
@@ -182,8 +181,8 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
-        yield await _seed_postgres(session)
+    async with pg_session_with_engine() as (session, engine):
+        yield await _seed_postgres(session, engine)
 
 
 def _agent_task(setup: Setup, **overrides: Any) -> AgentTask:
@@ -569,7 +568,7 @@ async def test_claim_pending_skip_locked_never_double_claims() -> None:
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (seed_session, engine):
-        setup = await _seed_postgres(seed_session)
+        setup = await _seed_postgres(seed_session, engine)
         tasks = [
             await SQLTaskRepository(seed_session).create(_agent_task(setup))
             for _ in range(10)
