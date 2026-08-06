@@ -53,13 +53,40 @@ AGENT_VERSION_LABEL = "agent_version"
 SESSION_NAME_ENV = "KITARU_SESSION_NAME"
 
 
+async def add_tasks(
+    tasks: list[Task], repository: JobRepository, task_repository: TaskRepository
+) -> list[Task]:
+    """Append many tasks to an unsettled job under one job row lock.
+
+    Shared with the replay pipeline, which appends tasks to a replay's job
+    from outside the request that created it. Every task must belong to the
+    same job, so the settled check taken under the one lock covers all of
+    them.
+
+    Args:
+        tasks: Tasks to append, every one belonging to the same job.
+        repository: Job repository.
+        task_repository: Task repository.
+
+    Raises:
+        JobNotFound: No job has the tasks' job id.
+        JobAlreadySettled: The job already reached a terminal status.
+
+    Returns:
+        Created tasks, in the given order.
+    """
+    if not tasks:
+        return []
+    job = await repository.get(tasks[0].job_id, exclusive=True)
+    if job.settled:
+        raise JobAlreadySettled(job.id)
+    return [await task_repository.create(task) for task in tasks]
+
+
 async def add_task(
     task: Task, repository: JobRepository, task_repository: TaskRepository
 ) -> Task:
     """Append a task to an unsettled job.
-
-    Shared with the replay pipeline, which appends tasks to a replay's job
-    from outside the request that created it.
 
     Args:
         task: Task to append.
@@ -73,10 +100,8 @@ async def add_task(
     Returns:
         Created task.
     """
-    job = await repository.get(task.job_id, exclusive=True)
-    if job.settled:
-        raise JobAlreadySettled(job.id)
-    return await task_repository.create(task)
+    created = await add_tasks([task], repository, task_repository)
+    return created[0]
 
 
 class JobService:

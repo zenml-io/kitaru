@@ -20,6 +20,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from conftest import (
@@ -33,6 +34,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskKind, TaskStatus
 from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -514,7 +516,7 @@ async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
     stored_completed = await setup.tasks.create(completed)
 
     now = datetime.now(UTC)
-    stamped = await setup.tasks.stamp_heartbeats(
+    stamped, skipped = await setup.tasks.stamp_heartbeats(
         [stored_held.id, stored_canceling.id, stored_completed.id],
         setup.worker_id,
         now,
@@ -523,7 +525,11 @@ async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
         stored_held.id: None,
         stored_canceling.id: stored_canceling.cancel_requested_at,
     }
-    assert await setup.tasks.stamp_heartbeats([stored_held.id], uuid.uuid4(), now) == {}
+    assert skipped == set()
+    assert await setup.tasks.stamp_heartbeats([stored_held.id], uuid.uuid4(), now) == (
+        {},
+        set(),
+    )
 
     reloaded_held = await setup.tasks.get(stored_held.id)
     assert isinstance(reloaded_held, AgentTask)
@@ -549,16 +555,20 @@ async def test_stamp_heartbeats_falls_back_to_the_jobs_cancel_request(
     assert stored.cancel_requested_at is None
 
     now = datetime.now(UTC)
-    assert await setup.tasks.stamp_heartbeats([stored.id], setup.worker_id, now) == {
-        stored.id: None
-    }
+    assert await setup.tasks.stamp_heartbeats([stored.id], setup.worker_id, now) == (
+        {stored.id: None},
+        set(),
+    )
 
     job = await setup.jobs.get(setup.job_id)
     job.request_cancel(now)
     await setup.jobs.update(job)
 
-    stamped = await setup.tasks.stamp_heartbeats([stored.id], setup.worker_id, now)
+    stamped, skipped = await setup.tasks.stamp_heartbeats(
+        [stored.id], setup.worker_id, now
+    )
     assert stamped == {stored.id: job.cancel_requested_at}
+    assert skipped == set()
     # The stamp is read through, not written onto the task row.
     assert (await setup.tasks.get(stored.id)).cancel_requested_at is None
 
@@ -592,3 +602,58 @@ async def test_claim_pending_skip_locked_never_double_claims() -> None:
         assert len(claimed_ids) == len(tasks)
         assert len(set(claimed_ids)) == len(tasks)
         assert set(claimed_ids) == {task.id for task in tasks}
+
+
+async def test_stamp_heartbeats_skips_a_task_row_locked_elsewhere() -> None:
+    """A heartbeat on a task locked by another transaction returns promptly.
+
+    The locked task comes back neither stamped nor cancelable, and a sibling
+    task in the same request still gets stamped.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (seed_session, engine):
+        setup = await _seed_postgres(seed_session, engine)
+        start = datetime.now(UTC)
+        locked_task = _agent_task(setup)
+        locked_task.claim(setup.worker_id, start)
+        locked_task.start(start)
+        stored_locked = await SQLTaskRepository(seed_session).create(locked_task)
+
+        free_task = _agent_task(setup)
+        free_task.claim(setup.worker_id, start)
+        free_task.start(start)
+        stored_free = await SQLTaskRepository(seed_session).create(free_task)
+        await seed_session.commit()
+
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+
+        async with session_factory() as holder_session:
+            await holder_session.execute(
+                select(TaskORM).where(TaskORM.id == stored_locked.id).with_for_update()
+            )
+
+            async with session_factory() as heartbeat_session:
+                now = datetime.now(UTC)
+                stamped, skipped = await asyncio.wait_for(
+                    SQLTaskRepository(heartbeat_session).stamp_heartbeats(
+                        [stored_locked.id, stored_free.id], setup.worker_id, now
+                    ),
+                    timeout=5,
+                )
+                await heartbeat_session.commit()
+                reloaded_locked = await SQLTaskRepository(heartbeat_session).get(
+                    stored_locked.id
+                )
+                reloaded_free = await SQLTaskRepository(heartbeat_session).get(
+                    stored_free.id
+                )
+
+            await holder_session.rollback()
+
+        assert skipped == {stored_locked.id}
+        assert stamped == {stored_free.id: None}
+        assert reloaded_locked.heartbeat_at is None
+        assert reloaded_free.heartbeat_at == now

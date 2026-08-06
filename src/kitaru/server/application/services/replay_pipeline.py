@@ -31,7 +31,7 @@ from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.job_service import add_task
+from kitaru.server.application.services.job_service import add_tasks
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, effective_inputs
@@ -135,7 +135,9 @@ async def append_result_evaluations(
     """Append the replay's result evaluator tasks when its agent task completes.
 
     A no-op when the terminal task is not an agent task, did not complete, or
-    does not belong to a replay's job.
+    does not belong to a replay's job. The evaluator tasks are built before
+    the job row is locked, so the lock only spans the settled check and the
+    inserts it guards.
 
     Args:
         event: TaskTerminal event.
@@ -152,18 +154,18 @@ async def append_result_evaluations(
         return
     config = await experiment_repository.get_replay_config(replay.replay_config_id)
     assert task.result_session_id is not None
-    for evaluator in config.evaluators:
-        await add_task(
-            EvaluationTask(
-                job_id=task.job_id,
-                plugin_version_id=evaluator.evaluator_version_id,
-                input_session_id=task.result_session_id,
-                params=evaluator.params,
-                on_failure=TaskOnFailure.ABORT,
-            ),
-            job_repository,
-            task_repository,
+    evaluator_tasks: list[Task] = [
+        EvaluationTask(
+            job_id=task.job_id,
+            plugin_version_id=evaluator.evaluator_version_id,
+            input_session_id=task.result_session_id,
+            params=evaluator.params,
+            on_failure=TaskOnFailure.ABORT,
         )
+        for evaluator in config.evaluators
+    ]
+    if evaluator_tasks:
+        await add_tasks(evaluator_tasks, job_repository, task_repository)
     replay.start_evaluating()
     await replay_repository.update(replay)
 

@@ -4982,8 +4982,11 @@ class FakeTaskRepository:
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
-    ) -> dict[uuid.UUID, datetime | None]:
+    ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:
         """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
+
+        Row locking has no in-memory counterpart, so no candidate is ever
+        reported skipped.
 
         Args:
             task_ids: Candidate task ids.
@@ -4992,7 +4995,8 @@ class FakeTaskRepository:
 
         Returns:
             Cancel request time of the task, falling back to its job's, by id
-            for every stamped task.
+            for every stamped task, and the owned in-flight candidates whose
+            lock was held elsewhere and so were left unstamped.
         """
         stamped: dict[uuid.UUID, datetime | None] = {}
         for task_id in task_ids:
@@ -5014,7 +5018,7 @@ class FakeTaskRepository:
                 owner = (await self.jobs.get_many([task.job_id])).get(task.job_id)
                 if owner is not None:
                     stamped[task_id] = owner.cancel_requested_at
-        return stamped
+        return stamped, set()
 
     async def lock_by_jobs(
         self, job_ids: Sequence[uuid.UUID], nowait: bool = False
