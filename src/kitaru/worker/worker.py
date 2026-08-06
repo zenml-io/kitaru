@@ -26,7 +26,12 @@ from pathlib import Path
 import httpx
 
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.task import TaskClaimRequest, TaskWithSpec
+from kitaru.api_models.v1.task import (
+    TaskClaimRequest,
+    TaskStatus,
+    TaskUpdateRequest,
+    TaskWithSpec,
+)
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth
@@ -355,10 +360,35 @@ class Worker:
         canceled = self._inflight.register(task_id)
         try:
             await runner.execute(claimed, canceled)
-        except Exception:
+        except Exception as exc:
             logger.exception("Task %s runner failed.", task_id)
+            await self._fail_crashed_task(ctx, claimed, exc)
         finally:
             self._inflight.unregister(task_id)
+
+    async def _fail_crashed_task(
+        self, ctx: ExecutionContext, claimed: TaskWithSpec, exc: Exception
+    ) -> None:
+        """Fail a task whose runner crashed, so it does not stay running.
+
+        Args:
+            ctx: Execution context.
+            claimed: Claimed task and its execution spec.
+            exc: Exception the runner crashed with.
+        """
+        client = ctx.client.with_token(claimed.token.get_secret_value())
+        request = TaskUpdateRequest(
+            status=TaskStatus.FAILED, error=f"Task runner failed: {exc}"
+        )
+        try:
+            await client.tasks.update(claimed.task.id, request)
+        except (APIError, httpx.TransportError) as failure:
+            logger.warning(
+                "Failed to update task %s to %s: %s",
+                claimed.task.id,
+                request.status,
+                failure,
+            )
 
 
 async def _wait_for_a_slot(

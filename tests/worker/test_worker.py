@@ -34,6 +34,7 @@ from kitaru.api_models.v1.job import JobStatus
 from kitaru.api_models.v1.task import (
     TaskClaimResponse,
     TaskKind,
+    TaskResponse,
     TaskStatus,
 )
 from kitaru.api_models.v1.worker import (
@@ -44,6 +45,7 @@ from kitaru.worker import worker as worker_module
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig
 from kitaru.worker.context import ExecutionContext
+from kitaru.worker.task_runner import TaskRunner
 from kitaru.worker.worker import Worker, detect_runtime
 
 
@@ -515,6 +517,33 @@ def test_cancel_inflight_sets_registered_cancel_events() -> None:
     worker.cancel_inflight()
 
     assert event.is_set()
+
+
+async def test_run_task_reports_a_runner_crash_as_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash escaping the runner fails the task instead of leaving it running."""
+    client = FakeKitaruAPIClient()
+    worker = Worker(WorkerConfig())
+    ctx = _ctx(tmp_path, client)
+    task = make_task(kind=TaskKind.AGENT)
+    claimed = make_claimed(task, make_agent_spec(task.id))
+    client.tasks.update_responses.append(make_task(status=TaskStatus.FAILED))
+
+    async def crash(
+        self_: TaskRunner, claimed_: Any, canceled_: asyncio.Event
+    ) -> TaskResponse:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(TaskRunner, "execute", crash)
+
+    await worker._run_task(ctx, TaskRunner(ctx), claimed)
+
+    assert len(client.tasks.update_calls) == 1
+    _, request = client.tasks.update_calls[0]
+    assert request.status is TaskStatus.FAILED
+    assert "boom" in request.error
+    assert worker._inflight.get_ids() == []
 
 
 async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
