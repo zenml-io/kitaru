@@ -122,6 +122,33 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             for row in rows
         ], next_cursor
 
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
+
+        Args:
+            session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
+
+        Returns:
+            Every node of the session.
+        """
+        statement = (
+            select(SessionNodeORM)
+            .where(SessionNodeORM.session_id == session_id)
+            .order_by(SessionNodeORM.index)
+        )
+        if not include_payloads:
+            statement = statement.options(
+                defer(SessionNodeORM.inputs),
+                defer(SessionNodeORM.outputs),
+                defer(SessionNodeORM.attributes),
+            )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain(include_payloads=include_payloads) for row in rows]
+
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, int]:

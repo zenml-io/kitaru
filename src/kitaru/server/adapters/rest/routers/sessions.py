@@ -31,6 +31,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
     SessionNodeListParams,
     SessionNodeResponse,
+    SessionWithNodesResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
@@ -258,6 +259,45 @@ async def list_session_nodes(
             for node in nodes
         ],
         next_cursor=next_cursor,
+    )
+
+
+@router.get("/{session_id}/full")
+async def get_session_with_nodes(
+    session_id: uuid.UUID,
+    service: Annotated[SessionService, Depends(get_session_service)],
+    node_service: Annotated[SessionNodeService, Depends(get_session_node_service)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
+) -> SessionWithNodesResponse:
+    """Get a session together with every one of its nodes.
+
+    The node list is not paginated, so one call carries a whole session.
+
+    Clients observe HTTP 200 on success, 403 when a task token neither owns
+    nor reads this session, and 404 when no session has this id.
+
+    Args:
+        session_id: Id of the session.
+        service: Session service.
+        node_service: Session node service.
+        actor: Caller context.
+
+    Returns:
+        Session with every node, ordered by index.
+    """
+    session = await service.get_session(session_id, actor=actor)
+    nodes = await node_service.list_all_nodes(
+        session_id, include_payloads=True, actor=actor
+    )
+    index_by_id = await node_service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
+    return SessionWithNodesResponse(
+        session=session_to_response(session),
+        nodes=[
+            session_node_to_response(node, index_by_id, include_payloads=True)
+            for node in nodes
+        ],
     )
 
 

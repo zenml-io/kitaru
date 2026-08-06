@@ -68,6 +68,21 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
+
+        Args:
+            session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
+
+        Returns:
+            Every node of the session.
+        """
+        ...
+
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, int]:

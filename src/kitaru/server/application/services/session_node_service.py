@@ -209,6 +209,34 @@ class SessionNodeService:
             check_task_session_read(session.id, session.task_id, actor)
         return await self._repository.query(session_node_filter)
 
+    async def list_all_nodes(
+        self, session_id: uuid.UUID, include_payloads: bool, actor: AuthContext
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
+
+        A task principal reads only a session it owns or holds as its
+        task's input session.
+
+        Args:
+            session_id: Id of the session whose nodes to read.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
+            actor: Caller context.
+
+        Raises:
+            SessionNotFound: A task principal names a session that does not
+                exist.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
+
+        Returns:
+            Every node of the session.
+        """
+        if isinstance(actor.principal, TaskPrincipal):
+            session = await self._sessions.get(session_id)
+            check_task_session_read(session_id, session.task_id, actor)
+        return await self._repository.list_all(session_id, include_payloads)
+
     async def get_indexes_by_ids(
         self,
         session_id: uuid.UUID,

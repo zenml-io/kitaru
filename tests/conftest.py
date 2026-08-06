@@ -2436,6 +2436,22 @@ class FakeSessionNodeRepository:
                 )
         return result, next_cursor
 
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
+
+        Args:
+            session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
+
+        Returns:
+            Every node of the session.
+        """
+        nodes = [node for node in self._nodes.values() if node.session_id == session_id]
+        return sorted(nodes, key=lambda node: node.index)
+
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
     ) -> dict[uuid.UUID, int]:
