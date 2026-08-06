@@ -124,6 +124,36 @@ publish.
   rewritten around it; surface changes from the merge are in the Aug 5
   afternoon deltas.
 
+## Aug 6 deltas (docs updated Aug 6)
+
+- **Branch consolidation** — `feat/kitaru-v2-cli-620` was deleted; the
+  CLI + MCP now live on **`v2-spec-consolidated`** ("Restore CLI-only
+  branch boundary"), which is effectively the mainline. `v2-importer`
+  was rebuilt on top of it and now carries the plugins + adapter.
+- **Importer scope cut to Langfuse** — the Braintrust and OTLP
+  importers were deleted ("Focus initial importer scope");
+  `codex/v2-importer-braintrust-otlp` is re-adding them. Docs now claim
+  only the Langfuse importer as built in, with Braintrust/OTLP "in the
+  works" (import pages, adapters/README, workers, evaluators).
+- **Plugins and the adapter moved OUT of the kitaru wheel**
+  (`650ca1ca`, `37d73ccf`): importers/evaluators and the PydanticAI
+  adapter now live in a repo-level `plugins/` tree, the wheel builds
+  only `src/kitaru`, the **`pydantic-ai` extra is gone**, and the
+  example imports `plugins.adapters.pydantic_ai` — a repo-relative
+  path a pip user cannot import. **Launch blocker question: how does an
+  end user install the adapter?** Docs keep `kitaru[pydantic-ai]` +
+  `kitaru.adapters.pydantic_ai` as the assumed launch surface with
+  TODO(v2-launch) markers (adapters/README) — do not publish until
+  packaging settles. (The canonical example's README still says
+  `--extra pydantic-ai`, contradicting the same-day pyproject.)
+- **CLI preferences unified into the client config file (#671)** —
+  `kitaru config list/get/set/path` all survive; no doc changes needed.
+- **Investigations + annotations in flight** — a ~13k-line feature
+  (`feature/investigations`, server API + services) with a follow-up
+  CLI/MCP branch (`feat/audit-investigation-evaluation-commands`). Not
+  merged into the mainline; not documented. If it ships for launch, it
+  needs its own concept/guide coverage — budget for it.
+
 ## Claims that need verification before publish
 
 1. **Branch union** — mostly closed: as of Aug 5 13:36, `cli-620`

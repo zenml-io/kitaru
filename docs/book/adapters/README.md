@@ -27,15 +27,21 @@ replaying are two modes of one wrapper.
 
 <!-- TODO(v2-launch): confirm the adapter list shipping in v2.0. The v1
      adapters (OpenAI Agents SDK, Claude Agent SDK, LangGraph, Gemini,
-     Google ADK) have not been ported to the v2 recording API yet. -->
+     Google ADK) have not been ported to the v2 recording API yet.
+     Also confirm packaging: on Aug 6 the PydanticAI adapter moved out
+     of the kitaru wheel into a repo-level plugins/ tree
+     (plugins.adapters.pydantic_ai) and the pydantic-ai extra was
+     dropped — the install story and import path here assume it returns
+     to the published package. -->
 
 More adapters are on the way; the v1 line of Kitaru shipped six, and they
 are being ported to the v2 recording API. If your framework isn't covered
 yet, you have two options today:
 
-* **Import** — your framework already emits traces to Langfuse or
-  OpenTelemetry? [Import them](../getting-started/import-your-traces.md);
-  sessions from imports are replayable and scorable like any other.
+* **Import** — your framework already emits traces to Langfuse?
+  [Import them](../getting-started/import-your-traces.md); sessions from
+  imports can be replayed and evaluated like any other. (Braintrust and
+  OpenTelemetry importers are in the works.)
 * **Record directly** — the recording API is small: create a session,
   ingest nodes. `client.sessions.create(...)` and
   `client.sessions.ingest_nodes(...)` are all an adapter does, and they're

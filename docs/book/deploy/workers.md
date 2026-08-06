@@ -94,7 +94,7 @@ own checkout as the agent environment.
   `uv` in isolated per-plugin environments, cached by content hash;
   agent tasks run the agent version's command in the worker's own
   environment plus the version's [secrets](secrets.md). The default
-  plugins (the `langfuse`/`braintrust`/`otlp` importers and
-  `cost`/`latency`/`tool-call-patterns` evaluators) ship inside the
-  `kitaru` package and are registered as ordinary script plugins, so
-  they run under the same isolation as plugins you write yourself.
+  plugins (the `langfuse` importer and the
+  `cost`/`latency`/`tool-call-patterns` evaluators) are registered as
+  ordinary script plugins, so they run under the same isolation as
+  plugins you write yourself.

@@ -62,7 +62,8 @@ same rows. The walkthrough is in
 
 Three evaluators come **built in** — `cost`, `latency`, and
 `tool-call-patterns` (does the session repeat calls to the same tool?),
-seeded alongside the default importers when the server is set up. They
+seeded alongside the default Langfuse importer when the server is set
+up. They
 make no model calls; they're cheap signals for triaging which sessions
 deserve a closer look, available as `cost@latest` before you've written
 anything.
