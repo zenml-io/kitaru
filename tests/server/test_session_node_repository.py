@@ -376,15 +376,42 @@ async def test_query_scoped_to_session(setup: Setup) -> None:
     assert nodes[0].session_id == session_id
 
 
-async def test_get_index_by_id_returns_every_node_index(setup: Setup) -> None:
-    """Map every node id in a session to its index."""
+async def test_get_indexes_by_ids_returns_the_requested_node_indexes(
+    setup: Setup,
+) -> None:
+    """Map each requested node id in a session to its index."""
     repository, session_id, _ = setup
     nodes = [_node(0, session_id=session_id), _node(1, session_id=session_id)]
     stored = await repository.upsert_batch(session_id, nodes)
 
-    index_by_id = await repository.get_index_by_id(session_id)
+    index_by_id = await repository.get_indexes_by_ids(
+        session_id, [stored[0].id, stored[1].id]
+    )
 
     assert index_by_id == {stored[0].id: 0, stored[1].id: 1}
+
+
+async def test_get_indexes_by_ids_omits_ids_it_was_not_asked_for(
+    setup: Setup,
+) -> None:
+    """Leave out the nodes of a session the caller did not name."""
+    repository, session_id, _ = setup
+    nodes = [_node(0, session_id=session_id), _node(1, session_id=session_id)]
+    stored = await repository.upsert_batch(session_id, nodes)
+
+    index_by_id = await repository.get_indexes_by_ids(session_id, [stored[1].id])
+
+    assert index_by_id == {stored[1].id: 1}
+
+
+async def test_get_indexes_by_ids_takes_no_query_for_an_empty_request(
+    setup: Setup,
+) -> None:
+    """Return an empty mapping when no ids are named."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(session_id, [_node(0, session_id=session_id)])
+
+    assert await repository.get_indexes_by_ids(session_id, []) == {}
 
 
 async def test_find_latest_by_cache_key_in_agent_scopes_to_agent(

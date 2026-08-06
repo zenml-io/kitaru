@@ -45,6 +45,7 @@ from kitaru.server.adapters.rest.mapping.evaluations import (
     session_evaluations_request_to_merges,
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
+    referenced_parent_ids,
     session_node_batch_to_upserts,
     session_node_list_params_to_filter,
     session_node_to_response,
@@ -214,7 +215,9 @@ async def ingest_session_nodes(
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
-    index_by_id = await service.get_index_by_id(session_id, actor=actor)
+    index_by_id = await service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
     return [
         session_node_to_response(node, index_by_id, include_payloads=True)
         for node in nodes
@@ -244,7 +247,9 @@ async def list_session_nodes(
     """
     session_node_filter = session_node_list_params_to_filter(session_id, params)
     nodes, next_cursor = await service.list_nodes(session_node_filter, actor=actor)
-    index_by_id = await service.get_index_by_id(session_id, actor=actor)
+    index_by_id = await service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
     return Page[SessionNodeResponse](
         items=[
             session_node_to_response(

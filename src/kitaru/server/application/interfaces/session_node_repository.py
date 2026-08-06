@@ -14,7 +14,7 @@
 """Session node repository interface."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
@@ -68,14 +68,17 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
-    async def get_index_by_id(self, session_id: uuid.UUID) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of every node in a session, keyed by node id.
+    async def get_indexes_by_ids(
+        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Bulk-load the index of the named nodes of a session, keyed by node id.
 
         Args:
             session_id: Id of the owning session.
+            node_ids: Ids to look up.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Each requested node id mapped to its index, missing ids omitted.
         """
         ...
 

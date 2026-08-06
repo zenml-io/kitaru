@@ -14,6 +14,7 @@
 """Session node use cases."""
 
 import uuid
+from collections.abc import Collection
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -208,16 +209,20 @@ class SessionNodeService:
             check_task_session_read(session.id, session.task_id, actor)
         return await self._repository.query(session_node_filter)
 
-    async def get_index_by_id(
-        self, session_id: uuid.UUID, actor: AuthContext
+    async def get_indexes_by_ids(
+        self,
+        session_id: uuid.UUID,
+        node_ids: Collection[uuid.UUID],
+        actor: AuthContext,
     ) -> dict[uuid.UUID, int]:
-        """Look up the index of every node in a session, keyed by node id.
+        """Look up the index of the named nodes of a session, keyed by node id.
 
         A task principal reads only a session it owns or holds as its
         task's input session.
 
         Args:
             session_id: Id of the session whose nodes to look up.
+            node_ids: Ids to look up.
             actor: Caller context.
 
         Raises:
@@ -227,9 +232,9 @@ class SessionNodeService:
                 holds it as its task's input session.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Each requested node id mapped to its index, missing ids omitted.
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
             check_task_session_read(session_id, session.task_id, actor)
-        return await self._repository.get_index_by_id(session_id)
+        return await self._repository.get_indexes_by_ids(session_id, node_ids)

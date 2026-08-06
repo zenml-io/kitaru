@@ -80,7 +80,9 @@ class AnnotationService:
         """
         if selector is None or selector.node_id is None:
             return
-        index_by_id = await self._nodes.get_index_by_id(session_id)
+        index_by_id = await self._nodes.get_indexes_by_ids(
+            session_id, [selector.node_id]
+        )
         if selector.node_id not in index_by_id:
             raise ValidationError(
                 f"Node {selector.node_id} does not belong to session {session_id}"
