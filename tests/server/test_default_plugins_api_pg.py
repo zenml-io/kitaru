@@ -13,37 +13,33 @@
 #  permissions and limitations under the License.
 """End-to-end default plugin registration tests against PostgreSQL."""
 
-from collections.abc import AsyncGenerator
-
-import httpx
 import pytest
 
 from conftest import db_settings, lifespan_client
+from kitaru.server.api import bootstrap
+from kitaru.server.api.bootstrap import DefaultPluginDefinition
 from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
-
-
-@pytest.fixture
-async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Provide an HTTP client for the app running its full lifespan."""
-    async with lifespan_client(db_settings()) as client:
-        yield client
+from kitaru.server.domain.plugin import PluginKind
 
 
 async def test_default_plugins_are_registered_at_startup(
-    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """List the packaged default plugins with a null owner after startup."""
-    evaluators = (await client.get("/v1/evaluators")).json()["items"]
-    importers = (await client.get("/v1/importers")).json()["items"]
-
-    evaluator_names = {item["name"] for item in evaluators}
-    importer_names = {item["name"] for item in importers}
-    assert f"{RESERVED_PLUGIN_NAME_PREFIX}cost" in evaluator_names
-    assert f"{RESERVED_PLUGIN_NAME_PREFIX}latency" in evaluator_names
-    assert f"{RESERVED_PLUGIN_NAME_PREFIX}tool-call-patterns" in evaluator_names
-    assert f"{RESERVED_PLUGIN_NAME_PREFIX}langfuse" in importer_names
-    assert all(
-        item["owner_id"] is None
-        for item in evaluators + importers
-        if item["name"].startswith(RESERVED_PLUGIN_NAME_PREFIX)
+    """List a catalog-declared default plugin with a null owner after startup."""
+    definition = DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
+        description="Test evaluator.",
+        provider=None,
+        entrypoint="evaluate",
+        content=b"def evaluate(): ...",
+        version=1,
     )
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", (definition,))
+
+    async with lifespan_client(db_settings()) as client:
+        evaluators = (await client.get("/v1/evaluators")).json()["items"]
+
+    matches = [item for item in evaluators if item["name"] == definition.name]
+    assert len(matches) == 1
+    assert matches[0]["owner_id"] is None

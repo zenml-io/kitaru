@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- The server registers a set of built-in default plugins at startup, under the reserved `kitaru/` name prefix: the `kitaru/langfuse` importer and the `kitaru/cost`, `kitaru/latency`, and `kitaru/tool-call-patterns` evaluators. Registration is idempotent and creates a new version only when the declared plugin version is bumped.
+- The `kitaru/` plugin name prefix is reserved for built-in default plugins, which are registered at server startup without an owner. Creating a plugin whose name starts with `kitaru/` via the API is rejected.
 - Sessions carry a per-agent sequential `number`, assigned at creation and returned in session responses. Numbers may skip when a create fails after its number was allocated.
 - CLI investigation and annotation commands, plus MCP commands for review workflows, evaluator registration, and starting bounded evaluations or experiment runs. The new operations use existing API and SDK resources, require exact IDs and evaluator versions, and return submitted workflows without polling.
 - Investigations and annotations, managed via `/v1/investigations` and `/v1/annotations`. An investigation asks a set of questions about a set of sessions, each optionally carrying a curated view, and answers are stored as annotations. Annotations also attach directly to a session, targeting the whole session or a part of it through a selector.

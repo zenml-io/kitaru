@@ -16,7 +16,6 @@
 import hashlib
 import logging
 from importlib.metadata import version
-from pathlib import Path
 
 from kitaru.base import FrozenModel
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
@@ -27,7 +26,6 @@ from kitaru.server.application.interfaces.plugin_repository import PluginReposit
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.blob import Blob
-from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
@@ -37,7 +35,6 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource,
 )
 
-_PLUGINS_ROOT = Path(__file__).resolve().parents[4] / "plugins"
 _SOURCE_MEDIA_TYPE = "text/x-python"
 
 logger = logging.getLogger(__name__)
@@ -69,60 +66,11 @@ class DefaultPluginDefinition(FrozenModel):
     description: str
     provider: str | None
     entrypoint: str
-    source_file: str
+    content: bytes
     version: int
 
 
-DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
-    DefaultPluginDefinition(
-        kind=PluginKind.IMPORTER,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}langfuse",
-        description="Import Langfuse JSON and JSONL trace exports.",
-        provider="langfuse",
-        entrypoint="parse",
-        source_file="importers/langfuse.py",
-        version=1,
-    ),
-    DefaultPluginDefinition(
-        kind=PluginKind.EVALUATOR,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}cost",
-        description="Report the total recorded session cost.",
-        provider=None,
-        entrypoint="cost",
-        source_file="evaluators/basic.py",
-        version=1,
-    ),
-    DefaultPluginDefinition(
-        kind=PluginKind.EVALUATOR,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}latency",
-        description="Measure session wall-clock duration.",
-        provider=None,
-        entrypoint="latency",
-        source_file="evaluators/basic.py",
-        version=1,
-    ),
-    DefaultPluginDefinition(
-        kind=PluginKind.EVALUATOR,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}tool-call-patterns",
-        description="Count repeated calls to the same tool.",
-        provider=None,
-        entrypoint="tool_call_patterns",
-        source_file="evaluators/basic.py",
-        version=1,
-    ),
-)
-
-
-def _read_source(source_file: str) -> bytes:
-    """Read one default plugin source file.
-
-    Args:
-        source_file: File path relative to the repository plugins directory.
-
-    Returns:
-        Source file content.
-    """
-    return (_PLUGINS_ROOT / source_file).read_bytes()
+DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = ()
 
 
 async def _get_or_create_plugin(
@@ -173,14 +121,13 @@ async def register_default_plugins(
         if plugin.latest_version >= definition.version:
             logger.debug("Default plugin %s is already current.", definition.name)
             continue
-        content = _read_source(definition.source_file)
         blob, _ = await blob_repository.create(
             Blob(
                 owner_id=None,
-                sha256=hashlib.sha256(content).hexdigest(),
-                size=len(content),
+                sha256=hashlib.sha256(definition.content).hexdigest(),
+                size=len(definition.content),
                 media_type=_SOURCE_MEDIA_TYPE,
-                data=content,
+                data=definition.content,
             )
         )
         try:

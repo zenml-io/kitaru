@@ -13,27 +13,37 @@
 #  permissions and limitations under the License.
 """Tests for default plugin registration."""
 
-from collections.abc import Callable
-
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
-    DEFAULT_PLUGIN_DEFINITIONS,
+    DefaultPluginDefinition,
     register_default_plugins,
 )
-from kitaru.server.domain.plugin import ScriptPluginSource
+from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
+from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
-
-def _source_reader(
-    overrides: dict[str, bytes] | None = None,
-) -> Callable[[str], bytes]:
-    """Build a deterministic stand-in for reading plugin source files."""
-    overrides = overrides or {}
-    return lambda source_file: overrides.get(
-        source_file, f"content-of-{source_file}".encode()
-    )
+DEFINITIONS = (
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name=f"{RESERVED_PLUGIN_NAME_PREFIX}importer",
+        description="Test importer.",
+        provider="langfuse",
+        entrypoint="parse",
+        content=b"def parse(): ...",
+        version=1,
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
+        description="Test evaluator.",
+        provider=None,
+        entrypoint="evaluate",
+        content=b"def evaluate(): ...",
+        version=1,
+    ),
+)
 
 
 @pytest.fixture
@@ -54,11 +64,11 @@ async def test_register_creates_default_plugins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create every default plugin ownerless with one version on first startup."""
-    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
 
     await register_default_plugins(repository, blob_repository)
 
-    for definition in DEFAULT_PLUGIN_DEFINITIONS:
+    for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
         assert plugin.owner_id is None
         assert plugin.description == definition.description
@@ -67,6 +77,9 @@ async def test_register_creates_default_plugins(
         version = await repository.get_version(plugin.id, 1)
         assert isinstance(version.source, ScriptPluginSource)
         assert version.source.entrypoint == definition.entrypoint
+        blob = await blob_repository.get(version.source.blob_id)
+        assert blob.owner_id is None
+        assert blob.data == definition.content
 
 
 async def test_register_is_idempotent(
@@ -75,12 +88,12 @@ async def test_register_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Leave version numbers unchanged when the declared versions are unchanged."""
-    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
     await register_default_plugins(repository, blob_repository)
 
     await register_default_plugins(repository, blob_repository)
 
-    for definition in DEFAULT_PLUGIN_DEFINITIONS:
+    for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
         assert plugin.latest_version == 1
 
@@ -91,24 +104,20 @@ async def test_register_creates_new_version_on_version_bump(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create version 2 only for plugins whose declared version was bumped."""
-    monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
     await register_default_plugins(repository, blob_repository)
 
-    bumped_names = {
-        definition.name
-        for definition in DEFAULT_PLUGIN_DEFINITIONS
-        if definition.source_file == "evaluators/basic.py"
-    }
+    bumped_name = DEFINITIONS[0].name
     bumped = tuple(
         definition.model_copy(update={"version": 2})
-        if definition.name in bumped_names
+        if definition.name == bumped_name
         else definition
-        for definition in DEFAULT_PLUGIN_DEFINITIONS
+        for definition in DEFINITIONS
     )
     monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", bumped)
     await register_default_plugins(repository, blob_repository)
 
-    for definition in DEFAULT_PLUGIN_DEFINITIONS:
+    for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
-        expected_version = 2 if definition.name in bumped_names else 1
+        expected_version = 2 if definition.name == bumped_name else 1
         assert plugin.latest_version == expected_version
