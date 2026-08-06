@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Secure CLI-local config and environment-only target resolution."""
+"""Secure shared config and environment-only target resolution."""
 
 import json
 import os
@@ -20,29 +20,55 @@ import stat
 import pytest
 
 from kitaru.cli.app import main
-from kitaru.cli.config import ConfigStore, resolve_target, validate_server_url
-from kitaru.cli.diagnostics import _check_mode
+from kitaru.cli.config import (
+    read_config,
+    resolve_target,
+    validate_server_url,
+    write_config,
+)
+from kitaru.cli.diagnostics import _validate_private_path_mode
 from kitaru.cli.output import CLIError
-from kitaru.client.config import set_server_url
+from kitaru.client.config import get_config_path, get_server_url, set_server_url
 
 
-def test_cli_preferences_do_not_overwrite_client_connection_config(
+def _set_machine_mode(value: bool) -> None:
+    """Persist the machine-rendering preference the way `config set` does."""
+    config = read_config()
+    config.cli.machine_mode = value
+    write_config(config)
+
+
+def test_cli_preferences_and_connection_state_share_one_document(
     tmp_path, monkeypatch
 ) -> None:
-    """Presentation preferences and client connection state use separate files."""
+    """Presentation preferences and connection state persist in the same file."""
     config_dir = tmp_path / "client-config"
     monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
 
     set_server_url("https://api.example.com")
-    ConfigStore().set_machine_mode(True)
+    _set_machine_mode(True)
 
     assert json.loads((config_dir / "config.json").read_text(encoding="utf-8")) == {
-        "server_url": "https://api.example.com"
-    }
-    assert json.loads((config_dir / "cli.json").read_text(encoding="utf-8")) == {
         "cli": {"machine_mode": True},
-        "schema_version": 1,
+        "server_url": "https://api.example.com",
     }
+    assert not (config_dir / "cli.json").exists()
+
+
+def test_either_writer_preserves_the_other_writers_fields(
+    tmp_path, monkeypatch
+) -> None:
+    """Writing one section of the document leaves the other section intact."""
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(tmp_path / "client-config"))
+
+    _set_machine_mode(True)
+    set_server_url("https://api.example.com")
+
+    assert read_config().cli.machine_mode is True
+
+    _set_machine_mode(False)
+
+    assert get_server_url() == "https://api.example.com"
 
 
 def test_context_configuration_is_removed_and_legacy_fields_are_dropped(
@@ -50,7 +76,7 @@ def test_context_configuration_is_removed_and_legacy_fields_are_dropped(
 ) -> None:
     """The CLI rejects context commands and never rewrites legacy targets."""
     config_path = tmp_path / "kitaru" / "config.json"
-    monkeypatch.setenv("KITARU_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_path.parent))
     monkeypatch.delenv("KITARU_API_URL", raising=False)
     config_path.parent.mkdir(parents=True)
     config_path.write_text(
@@ -74,29 +100,27 @@ def test_context_configuration_is_removed_and_legacy_fields_are_dropped(
     assert main(["config", "set", "cli.machine_mode", "true"]) == 0
     capsys.readouterr()
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload == {"cli": {"machine_mode": True}, "schema_version": 1}
+    assert payload == {"cli": {"machine_mode": True}}
 
     if os.name == "posix":
         assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission behavior")
-def test_explicit_config_override_preserves_existing_parent_mode(
+def test_writing_the_config_restricts_an_existing_shared_directory(
     tmp_path, monkeypatch
 ) -> None:
-    """Writing an override secures its file without taking over its parent."""
-    parent = tmp_path / "shared"
-    parent.mkdir(mode=0o755)
-    os.chmod(parent, 0o755)
-    config_path = parent / "config.json"
-    monkeypatch.setenv("KITARU_CONFIG_PATH", str(config_path))
+    """A write tightens a config directory that others could already list."""
+    config_dir = tmp_path / "shared"
+    config_dir.mkdir(mode=0o755)
+    os.chmod(config_dir, 0o755)
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(config_dir))
 
-    store = ConfigStore()
-    store.set_machine_mode(True)
-    _check_mode(config_path, require_private_parent=store.manages_parent_directory)
+    _set_machine_mode(True)
+    config_path = get_config_path()
+    _validate_private_path_mode(config_path)
 
-    assert store.manages_parent_directory is False
-    assert stat.S_IMODE(parent.stat().st_mode) == 0o755
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
     assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
@@ -105,7 +129,7 @@ def test_config_is_allowlisted_and_malformed_state_is_refused(
 ) -> None:
     """Unknown preferences and malformed documents fail before mutation."""
     config_path = tmp_path / "config.json"
-    monkeypatch.setenv("KITARU_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("KITARU_CONFIG_DIR", str(tmp_path))
 
     assert main(["config", "set", "server_url", "true"]) == 2
     error = json.loads(capsys.readouterr().err)

@@ -51,11 +51,11 @@ from kitaru.cli import (
 from kitaru.cli import auth as auth_commands
 from kitaru.cli.config import (
     CONFIG_KEYS,
-    ConfigStore,
     ResolvedTarget,
-    get_config_path,
+    read_config,
     resolve_target,
     validate_server_url,
+    write_config,
 )
 from kitaru.cli.output import (
     CLIError,
@@ -79,6 +79,7 @@ from kitaru.cli.schema import (
     is_offline,
     register_spec,
 )
+from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.device_grant import DeviceLoginError
@@ -216,15 +217,7 @@ class Invocation:
     non_interactive: bool
     no_browser: bool
     stdin: TextIO
-    _config_store: ConfigStore | None = None
     _credential_store: CredentialStore | None = None
-
-    @property
-    def config_store(self) -> ConfigStore:
-        """Return the lazily constructed local config store."""
-        if self._config_store is None:
-            self._config_store = ConfigStore()
-        return self._config_store
 
     @property
     def credential_store(self) -> CredentialStore:
@@ -357,7 +350,6 @@ async def _launch(
             debug=debug,
             traceback=traceback,
         )
-    config_store: ConfigStore | None = None
     try:
         mode = resolve_output_mode(
             output, is_tty=sys.stdout.isatty(), streaming=spec.streams
@@ -365,8 +357,7 @@ async def _launch(
         if mode in {"json", "jsonl"}:
             non_interactive = True
         if machine is None and not is_offline(spec.path) and spec.path != ("doctor",):
-            config_store = ConfigStore()
-            machine = config_store.load().cli.machine_mode
+            machine = read_config().cli.machine_mode
         machine = bool(machine) or mode != "text" or not sys.stdout.isatty()
         output_context = OutputContext(
             command=spec.command,
@@ -394,7 +385,6 @@ async def _launch(
         non_interactive=non_interactive,
         no_browser=no_browser or non_interactive,
         stdin=sys.stdin,
-        _config_store=config_store,
     )
     invocation_token = _INVOCATION.set(invocation)
     try:
@@ -716,7 +706,6 @@ async def doctor() -> CommandResult:
     """Run every diagnostic and report failures in a fixed order."""
     invocation = _invocation()
     return await diagnostics.doctor(
-        config_store=invocation.config_store,
         credential_store=invocation.credential_store,
         explicit_server=invocation.server,
         timeout=invocation.request_timeout,
@@ -766,9 +755,8 @@ def schema(*command: str) -> CommandResult:
 )
 def config_list() -> CommandResult:
     """List the only Stage 1 persisted CLI preference."""
-    store = _invocation().config_store
-    config = store.load()
-    source = "persisted" if store.path.exists() else "default"
+    config = read_config()
+    source = "persisted" if get_config_path().exists() else "default"
     return CommandResult(
         items=[
             {
@@ -797,13 +785,12 @@ def config_list() -> CommandResult:
 def config_get(key: str, /) -> CommandResult:
     """Get an allowlisted preference and its provenance."""
     _validate_config_key(key)
-    store = _invocation().config_store
-    config = store.load()
+    config = read_config()
     return CommandResult(
         item={
             "key": key,
             "value": config.cli.machine_mode,
-            "source": "persisted" if store.path.exists() else "default",
+            "source": "persisted" if get_config_path().exists() else "default",
         }
     )
 
@@ -831,10 +818,10 @@ def config_set(key: str, value: str, /) -> CommandResult:
     """Set an allowlisted preference after strict value parsing."""
     _validate_config_key(key)
     parsed = _parse_bool(value)
-    config = _invocation().config_store.set_machine_mode(parsed)
-    return CommandResult(
-        item={"key": key, "value": config.cli.machine_mode, "source": "persisted"}
-    )
+    config = read_config()
+    config.cli.machine_mode = parsed
+    write_config(config)
+    return CommandResult(item={"key": key, "value": parsed, "source": "persisted"})
 
 
 @_register(
