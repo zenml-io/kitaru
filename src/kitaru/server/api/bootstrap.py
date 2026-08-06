@@ -70,6 +70,7 @@ class DefaultPluginDefinition(FrozenModel):
     provider: str | None
     entrypoint: str
     source_file: str
+    version: int
 
 
 DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
@@ -80,6 +81,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         provider="langfuse",
         entrypoint="parse",
         source_file="importers/langfuse.py",
+        version=1,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -88,6 +90,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         provider=None,
         entrypoint="cost",
         source_file="evaluators/basic.py",
+        version=1,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -96,6 +99,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         provider=None,
         entrypoint="latency",
         source_file="evaluators/basic.py",
+        version=1,
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
@@ -104,6 +108,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         provider=None,
         entrypoint="tool_call_patterns",
         source_file="evaluators/basic.py",
+        version=1,
     ),
 )
 
@@ -153,38 +158,10 @@ async def _get_or_create_plugin(
         return await repository.get_by_name(definition.kind, definition.name)
 
 
-async def _version_is_current(
-    repository: PluginRepository,
-    blob_repository: BlobRepository,
-    plugin: Plugin,
-    definition: DefaultPluginDefinition,
-    digest: str,
-) -> bool:
-    """Return whether a plugin's latest version already matches its packaged source.
-
-    Args:
-        repository: Plugin repository.
-        blob_repository: Blob repository.
-        plugin: Plugin the candidate version belongs to.
-        definition: Default plugin definition.
-        digest: sha256 digest of the packaged source.
-
-    Returns:
-        Whether the latest version's source and entrypoint already match.
-    """
-    if plugin.latest_version < 1:
-        return False
-    latest = await repository.get_version(plugin.id, plugin.latest_version)
-    if not isinstance(latest.source, ScriptPluginSource):
-        return False
-    blob = await blob_repository.get_metadata(latest.source.blob_id)
-    return blob.sha256 == digest and latest.source.entrypoint == definition.entrypoint
-
-
 async def register_default_plugins(
     repository: PluginRepository, blob_repository: BlobRepository
 ) -> None:
-    """Create or update the built-in default plugins for the installed version.
+    """Create the built-in default plugins and their declared versions.
 
     Args:
         repository: Plugin repository.
@@ -192,18 +169,15 @@ async def register_default_plugins(
     """
     installed_version = version("kitaru")
     for definition in DEFAULT_PLUGIN_DEFINITIONS:
-        content = _read_source(definition.source_file)
-        digest = hashlib.sha256(content).hexdigest()
         plugin = await _get_or_create_plugin(repository, definition)
-        if await _version_is_current(
-            repository, blob_repository, plugin, definition, digest
-        ):
+        if plugin.latest_version >= definition.version:
             logger.debug("Default plugin %s is already current.", definition.name)
             continue
+        content = _read_source(definition.source_file)
         blob, _ = await blob_repository.create(
             Blob(
                 owner_id=None,
-                sha256=digest,
+                sha256=hashlib.sha256(content).hexdigest(),
                 size=len(content),
                 media_type=_SOURCE_MEDIA_TYPE,
                 data=content,

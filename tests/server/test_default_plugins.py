@@ -74,7 +74,7 @@ async def test_register_is_idempotent(
     blob_repository: FakeBlobRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Leave version numbers unchanged when nothing about the source changed."""
+    """Leave version numbers unchanged when the declared versions are unchanged."""
     monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
     await register_default_plugins(repository, blob_repository)
 
@@ -85,28 +85,30 @@ async def test_register_is_idempotent(
         assert plugin.latest_version == 1
 
 
-async def test_register_creates_new_version_on_content_change(
+async def test_register_creates_new_version_on_version_bump(
     repository: FakePluginRepository,
     blob_repository: FakeBlobRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Create version 2 only for plugins whose source file changed."""
+    """Create version 2 only for plugins whose declared version was bumped."""
     monkeypatch.setattr(bootstrap, "_read_source", _source_reader())
     await register_default_plugins(repository, blob_repository)
 
-    monkeypatch.setattr(
-        bootstrap,
-        "_read_source",
-        _source_reader({"evaluators/basic.py": b"changed"}),
-    )
-    await register_default_plugins(repository, blob_repository)
-
-    changed_names = {
+    bumped_names = {
         definition.name
         for definition in DEFAULT_PLUGIN_DEFINITIONS
         if definition.source_file == "evaluators/basic.py"
     }
+    bumped = tuple(
+        definition.model_copy(update={"version": 2})
+        if definition.name in bumped_names
+        else definition
+        for definition in DEFAULT_PLUGIN_DEFINITIONS
+    )
+    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", bumped)
+    await register_default_plugins(repository, blob_repository)
+
     for definition in DEFAULT_PLUGIN_DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
-        expected_version = 2 if definition.name in changed_names else 1
+        expected_version = 2 if definition.name in bumped_names else 1
         assert plugin.latest_version == expected_version
