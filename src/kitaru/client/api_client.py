@@ -104,6 +104,7 @@ class KitaruAPIClient:
             if not base_url:
                 raise RuntimeError("No server URL is configured")
 
+        self._base_url = base_url
         self._owns_transport = True
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
@@ -177,6 +178,15 @@ class KitaruAPIClient:
             Client view authenticating with the given token.
         """
         return self.with_auth(StaticTokenAuth(token))
+
+    @property
+    def base_url(self) -> str:
+        """Return the server base URL this client resolved.
+
+        Returns:
+            Server base URL.
+        """
+        return self._base_url
 
     def with_auth(self, auth: TokenAuth) -> "KitaruAPIClient":
         """Return a view of this client authenticating with the given auth flow.
