@@ -82,7 +82,8 @@ support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
 Already tracing elsewhere? Import instead of wrapping — same result. The
-Langfuse, Braintrust, and OpenTelemetry importers are built in:
+Langfuse importer is built in (Braintrust and OpenTelemetry are on the
+way):
 
 ```bash
 kitaru session import langfuse-export.jsonl \
