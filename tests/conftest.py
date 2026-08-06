@@ -18,7 +18,7 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -41,6 +41,7 @@ from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
@@ -66,6 +67,7 @@ from kitaru.server.application.interfaces.evaluation_repository import (
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.application.models.agent_version import AgentVersionFilter
+from kitaru.server.application.models.annotation import AnnotationFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import (
     GrantKind,
@@ -79,6 +81,10 @@ from kitaru.server.application.models.device import DeviceFilter
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentFilter
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.application.models.investigation import (
+    InvestigationFilter,
+    InvestigationSessionFilter,
+)
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
 from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
@@ -117,6 +123,10 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
+from kitaru.server.domain.annotation import (
+    Annotation,
+    AnnotationNotFound,
+)
 from kitaru.server.domain.api_key import (
     ApiKey,
     ApiKeyNotFound,
@@ -143,6 +153,12 @@ from kitaru.server.domain.experiment_run import (
     DuplicateExperimentRunNumber,
     ExperimentRun,
     ExperimentRunNotFound,
+)
+from kitaru.server.domain.investigation import (
+    Investigation,
+    InvestigationNotFound,
+    InvestigationSession,
+    InvestigationSessionNotFound,
 )
 from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
@@ -2266,36 +2282,35 @@ async def create_session(
 
 
 def _paginate_fake_by_index(
-    nodes: list[SessionNode], session_node_filter: SessionNodeFilter
-) -> tuple[list[SessionNode], str | None]:
-    """Apply index-ascending cursor pagination to an in-memory node list.
+    items: list[ListItemT],
+    list_filter: ListFilter,
+    index: Callable[[ListItemT], int],
+) -> tuple[list[ListItemT], str | None]:
+    """Apply index-ascending cursor pagination to an in-memory list.
 
     Args:
-        nodes: Candidate nodes already filtered by session id.
-        session_node_filter: Filter carrying the cursor and size.
+        items: Candidate domain objects, already scoped by the caller.
+        list_filter: Filter carrying the cursor and size.
+        index: Item index accessor.
 
     Returns:
-        Page of matching nodes and the next cursor.
+        Page of matching items and the next cursor.
     """
-    filter_hash = session_node_filter.compute_filter_hash()
+    filter_hash = list_filter.compute_filter_hash()
     cursor = None
-    if session_node_filter.cursor is not None:
-        cursor = decode_cursor(
-            session_node_filter.cursor, session_node_filter.sort, filter_hash
-        )
+    if list_filter.cursor is not None:
+        cursor = decode_cursor(list_filter.cursor, list_filter.sort, filter_hash)
 
-    ordered = sorted(nodes, key=lambda node: node.index)
+    ordered = sorted(items, key=index)
     if cursor is not None:
         last_index = int(cursor.id)
-        ordered = [node for node in ordered if node.index > last_index]
+        ordered = [item for item in ordered if index(item) > last_index]
 
-    page = ordered[: session_node_filter.size + 1]
+    page = ordered[: list_filter.size + 1]
     next_cursor = None
-    if len(page) > session_node_filter.size:
-        page = page[: session_node_filter.size]
-        next_cursor = encode_cursor(
-            session_node_filter.sort, str(page[-1].index), filter_hash
-        )
+    if len(page) > list_filter.size:
+        page = page[: list_filter.size]
+        next_cursor = encode_cursor(list_filter.sort, str(index(page[-1])), filter_hash)
     return page, next_cursor
 
 
@@ -2380,7 +2395,9 @@ class FakeSessionNodeRepository:
             for node in self._nodes.values()
             if node.session_id == session_node_filter.session_id
         ]
-        page, next_cursor = _paginate_fake_by_index(nodes, session_node_filter)
+        page, next_cursor = _paginate_fake_by_index(
+            nodes, session_node_filter, lambda node: node.index
+        )
         result = []
         for node in page:
             if session_node_filter.include_payloads:
@@ -5608,3 +5625,473 @@ def build_task_actor(
             grants=grants,
         ),
     )
+
+
+class FakeInvestigationRepository:
+    """In-memory investigation repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._investigations: dict[uuid.UUID, Investigation] = {}
+        self._sessions: dict[uuid.UUID, InvestigationSession] = {}
+        self._annotations: FakeAnnotationRepository | None = None
+
+    def _counts(self, investigation_id: uuid.UUID) -> tuple[int, int]:
+        """Count an investigation's linked and completed or skipped sessions.
+
+        Args:
+            investigation_id: Id of the investigation.
+
+        Returns:
+            Total and completed or skipped linked session counts.
+        """
+        links = [
+            session
+            for session in self._sessions.values()
+            if session.investigation_id == investigation_id
+        ]
+        completed = sum(
+            1
+            for session in links
+            if session.status is not InvestigationSessionStatus.PENDING
+        )
+        return len(links), completed
+
+    def _with_counts(self, investigation: Investigation) -> Investigation:
+        """Attach freshly computed progress counts to an investigation.
+
+        Args:
+            investigation: Investigation to annotate.
+
+        Returns:
+            Investigation with total_sessions and completed_sessions set.
+        """
+        total, completed = self._counts(investigation.id)
+        return investigation.model_copy(
+            update={"total_sessions": total, "completed_sessions": completed}
+        )
+
+    async def create(
+        self, investigation: Investigation, sessions: Sequence[InvestigationSession]
+    ) -> Investigation:
+        """Persist a new investigation with its linked sessions.
+
+        Args:
+            investigation: Investigation to store.
+            sessions: Ordered investigation_session rows to link.
+
+        Returns:
+            Stored investigation with timestamps set.
+        """
+        now = datetime.now(UTC)
+        stored = investigation.model_copy(
+            update={
+                "created": now,
+                "updated": now,
+                "total_sessions": 0,
+                "completed_sessions": 0,
+            }
+        )
+        self._investigations[stored.id] = stored
+        for session in sessions:
+            self._sessions[session.id] = session.model_copy(
+                update={"created": now, "updated": now}
+            )
+        return self._with_counts(stored)
+
+    async def get(
+        self, investigation_id: uuid.UUID, exclusive: bool = False
+    ) -> Investigation:
+        """Load an investigation by id.
+
+        Args:
+            investigation_id: Id of the investigation.
+            exclusive: Ignored, the fake holds no rows to lock.
+
+        Raises:
+            InvestigationNotFound: No investigation has this id.
+
+        Returns:
+            Stored investigation.
+        """
+        _ = exclusive
+        stored = self._investigations.get(investigation_id)
+        if stored is None:
+            raise InvestigationNotFound(investigation_id)
+        return self._with_counts(stored)
+
+    async def query(
+        self, investigation_filter: InvestigationFilter
+    ) -> tuple[list[Investigation], str | None]:
+        """Query investigations matching a filter.
+
+        Args:
+            investigation_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching investigations and the next cursor.
+        """
+        investigations = list(self._investigations.values())
+        if investigation_filter.expression is not None:
+            investigations = [
+                investigation
+                for investigation in investigations
+                if _evaluate_filter_expression(
+                    investigation, investigation_filter.expression
+                )
+            ]
+        page, next_cursor = _paginate_fake(investigations, investigation_filter)
+        return [self._with_counts(investigation) for investigation in page], next_cursor
+
+    async def update(self, investigation: Investigation) -> Investigation:
+        """Persist changes to an existing investigation.
+
+        Args:
+            investigation: Investigation with modified fields.
+
+        Raises:
+            InvestigationNotFound: No investigation has this id.
+
+        Returns:
+            Stored investigation with the updated timestamp renewed.
+        """
+        stored = self._investigations.get(investigation.id)
+        if stored is None:
+            raise InvestigationNotFound(investigation.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = investigation.model_copy(
+            update={
+                "created": stored.created,
+                "updated": now,
+                "total_sessions": 0,
+                "completed_sessions": 0,
+            }
+        )
+        self._investigations[investigation.id] = updated
+        return self._with_counts(updated)
+
+    async def delete(self, investigation_id: uuid.UUID) -> None:
+        """Delete an investigation by id, cascading its links and answers.
+
+        Args:
+            investigation_id: Id of the investigation.
+
+        Raises:
+            InvestigationNotFound: No investigation has this id.
+        """
+        if investigation_id not in self._investigations:
+            raise InvestigationNotFound(investigation_id)
+        del self._investigations[investigation_id]
+        cascaded_session_ids = {
+            session.id
+            for session in self._sessions.values()
+            if session.investigation_id == investigation_id
+        }
+        for session_id in cascaded_session_ids:
+            del self._sessions[session_id]
+        if self._annotations is not None:
+            self._annotations.cascade_investigation_session_delete(cascaded_session_ids)
+
+    async def get_session(
+        self, investigation_session_id: uuid.UUID, exclusive: bool = False
+    ) -> InvestigationSession:
+        """Load an investigation session by id.
+
+        Args:
+            investigation_session_id: Id of the investigation session.
+            exclusive: Ignored, the fake holds no rows to lock.
+
+        Raises:
+            InvestigationSessionNotFound: No investigation session has this
+                id.
+
+        Returns:
+            Stored investigation session.
+        """
+        _ = exclusive
+        stored = self._sessions.get(investigation_session_id)
+        if stored is None:
+            raise InvestigationSessionNotFound(investigation_session_id)
+        return stored.model_copy()
+
+    async def get_session_by_session_id(
+        self,
+        investigation_id: uuid.UUID,
+        session_id: uuid.UUID,
+        exclusive: bool = False,
+    ) -> InvestigationSession:
+        """Load an investigation session by investigation id and session id.
+
+        Args:
+            investigation_id: Id of the investigation.
+            session_id: Id of the linked session.
+            exclusive: Ignored, the fake holds no rows to lock.
+
+        Raises:
+            InvestigationSessionNotFound: No investigation session links this
+                investigation and session.
+
+        Returns:
+            Stored investigation session.
+        """
+        _ = exclusive
+        for stored in self._sessions.values():
+            if (
+                stored.investigation_id == investigation_id
+                and stored.session_id == session_id
+            ):
+                return stored.model_copy()
+        raise InvestigationSessionNotFound(session_id)
+
+    async def query_sessions(
+        self, session_filter: InvestigationSessionFilter
+    ) -> tuple[list[InvestigationSession], str | None]:
+        """Query an investigation's sessions, ordered by position ascending.
+
+        Args:
+            session_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching investigation sessions and the next cursor.
+        """
+        sessions = [
+            session
+            for session in self._sessions.values()
+            if session.investigation_id == session_filter.investigation_id
+        ]
+        if session_filter.expression is not None:
+            sessions = [
+                session
+                for session in sessions
+                if _evaluate_filter_expression(session, session_filter.expression)
+            ]
+        page, next_cursor = _paginate_fake_by_index(
+            sessions, session_filter, lambda session: session.position
+        )
+        return [session.model_copy() for session in page], next_cursor
+
+    async def update_session(
+        self, session: InvestigationSession
+    ) -> InvestigationSession:
+        """Persist changes to an existing investigation session.
+
+        Args:
+            session: Investigation session with modified fields.
+
+        Raises:
+            InvestigationSessionNotFound: No investigation session has this
+                id.
+
+        Returns:
+            Stored investigation session with the updated timestamp renewed.
+        """
+        stored = self._sessions.get(session.id)
+        if stored is None:
+            raise InvestigationSessionNotFound(session.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = session.model_copy(update={"created": stored.created, "updated": now})
+        self._sessions[session.id] = updated
+        return updated.model_copy()
+
+
+class FakeAnnotationRepository:
+    """In-memory annotation repository."""
+
+    def __init__(
+        self, investigations: FakeInvestigationRepository | None = None
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            investigations: Fake investigation repository sharing session
+                links, consulted by the investigation_id filter and wired
+                back onto the investigation repository to cascade its
+                deletes.
+        """
+        self._annotations: dict[uuid.UUID, Annotation] = {}
+        self._investigations = investigations
+        if investigations is not None:
+            investigations._annotations = self
+
+    def _find_upsert_target(self, annotation: Annotation) -> uuid.UUID | None:
+        """Resolve the id of the row an insert would upsert onto.
+
+        Manual annotations, and any insert missing either half of the
+        (investigation_session_id, question_key) pair, never conflict,
+        mirroring Postgres treating null as distinct within a unique index.
+
+        Args:
+            annotation: Annotation about to be inserted.
+
+        Returns:
+            Id of the conflicting row, or None when the insert is a plain
+            create.
+        """
+        if (
+            annotation.investigation_session_id is None
+            or annotation.question_key is None
+        ):
+            return None
+        for stored in self._annotations.values():
+            if (
+                stored.investigation_session_id == annotation.investigation_session_id
+                and stored.question_key == annotation.question_key
+            ):
+                return stored.id
+        return None
+
+    async def create(self, annotation: Annotation) -> Annotation:
+        """Persist a new annotation, upserting an investigation answer.
+
+        An investigation answer upserts on (investigation_session_id,
+        question_key), renewing the selector, value, and updated timestamp
+        of the existing row. A manual annotation always inserts, since
+        Postgres treats its null investigation_session_id as distinct from
+        every other row.
+
+        Args:
+            annotation: Annotation to store.
+
+        Returns:
+            Stored annotation with timestamps set.
+        """
+        target_id = self._find_upsert_target(annotation)
+        if target_id is not None:
+            stored = self._annotations[target_id]
+            updated = stored.model_copy(
+                update={
+                    "selector": annotation.selector,
+                    "value": annotation.value,
+                    "updated": _renewed_timestamp(stored.updated),
+                }
+            )
+            self._annotations[target_id] = updated
+            return updated.model_copy()
+        now = datetime.now(UTC)
+        stored = annotation.model_copy(update={"created": now, "updated": now})
+        self._annotations[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, annotation_id: uuid.UUID) -> Annotation:
+        """Load an annotation by id.
+
+        Args:
+            annotation_id: Id of the annotation.
+
+        Raises:
+            AnnotationNotFound: No annotation has this id.
+
+        Returns:
+            Stored annotation.
+        """
+        stored = self._annotations.get(annotation_id)
+        if stored is None:
+            raise AnnotationNotFound(annotation_id)
+        return stored.model_copy()
+
+    def _evaluate_investigation_id_condition(
+        self, annotation: Annotation, condition: FilterCondition
+    ) -> bool:
+        """Evaluate an investigation id condition against an annotation.
+
+        Annotation rows only carry an investigation_session_id, so the
+        investigation id is resolved through the investigation repository's
+        session links.
+
+        Args:
+            annotation: Annotation to evaluate.
+            condition: Validated investigation id condition.
+
+        Returns:
+            Whether the annotation's linked investigation matches.
+        """
+        matched = False
+        if (
+            self._investigations is not None
+            and annotation.investigation_session_id is not None
+        ):
+            session = self._investigations._sessions.get(
+                annotation.investigation_session_id
+            )
+            if session is not None:
+                ids = (
+                    condition.value
+                    if condition.op is FilterOp.IN
+                    else (condition.value,)
+                )
+                matched = session.investigation_id in ids
+        return not matched if condition.op is FilterOp.NE else matched
+
+    async def query(
+        self, annotation_filter: AnnotationFilter
+    ) -> tuple[list[Annotation], str | None]:
+        """Query annotations matching a filter.
+
+        Args:
+            annotation_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching annotations and the next cursor.
+        """
+        annotations = list(self._annotations.values())
+        if annotation_filter.expression is not None:
+            resolvers = {"investigation_id": self._evaluate_investigation_id_condition}
+            annotations = [
+                annotation
+                for annotation in annotations
+                if _evaluate_filter_expression(
+                    annotation, annotation_filter.expression, resolvers
+                )
+            ]
+        page, next_cursor = _paginate_fake(annotations, annotation_filter)
+        return [annotation.model_copy() for annotation in page], next_cursor
+
+    async def update(self, annotation: Annotation) -> Annotation:
+        """Persist changes to an existing annotation.
+
+        Args:
+            annotation: Annotation with modified fields.
+
+        Raises:
+            AnnotationNotFound: No annotation has this id.
+
+        Returns:
+            Stored annotation with the updated timestamp renewed.
+        """
+        stored = self._annotations.get(annotation.id)
+        if stored is None:
+            raise AnnotationNotFound(annotation.id)
+        now = _renewed_timestamp(stored.updated)
+        updated = stored.model_copy(update={"value": annotation.value, "updated": now})
+        self._annotations[annotation.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, annotation_id: uuid.UUID) -> None:
+        """Delete an annotation by id.
+
+        Args:
+            annotation_id: Id of the annotation.
+
+        Raises:
+            AnnotationNotFound: No annotation has this id.
+        """
+        if annotation_id not in self._annotations:
+            raise AnnotationNotFound(annotation_id)
+        del self._annotations[annotation_id]
+
+    def cascade_investigation_session_delete(
+        self, investigation_session_ids: Iterable[uuid.UUID]
+    ) -> None:
+        """Drop the answers of deleted investigation sessions.
+
+        Manual annotations, whose investigation_session_id is null, are
+        unaffected.
+
+        Args:
+            investigation_session_ids: Ids of the deleted investigation
+                sessions.
+        """
+        deleted = set(investigation_session_ids)
+        for annotation_id, annotation in list(self._annotations.items()):
+            if annotation.investigation_session_id in deleted:
+                del self._annotations[annotation_id]

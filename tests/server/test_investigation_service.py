@@ -1,0 +1,619 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Tests for investigation use cases."""
+
+import uuid
+
+import pytest
+
+from conftest import (
+    FakeAgentRepository,
+    FakeInvestigationRepository,
+    FakeSessionRepository,
+    create_agent,
+    create_session,
+)
+from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.investigation import (
+    InvestigationSessionStatus,
+    InvestigationStatus,
+    QuestionItem,
+)
+from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.investigation import (
+    InvestigationCreate,
+    InvestigationFilter,
+    InvestigationSessionFilter,
+    InvestigationSessionInput,
+    InvestigationUpdate,
+)
+from kitaru.server.application.services.investigation_service import (
+    InvestigationService,
+)
+from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import AgentNotFound
+from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.investigation import (
+    DuplicateQuestionKey,
+    IllegalInvestigationSessionStatusTransition,
+    InvestigationNotFound,
+    InvestigationSessionNotFound,
+)
+from kitaru.server.filtering import FilterCondition
+
+ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+@pytest.fixture
+def agent_repository() -> FakeAgentRepository:
+    """Provide a fake agent repository."""
+    return FakeAgentRepository()
+
+
+@pytest.fixture
+def session_repository() -> FakeSessionRepository:
+    """Provide a fake session repository."""
+    return FakeSessionRepository()
+
+
+@pytest.fixture
+def investigation_repository() -> FakeInvestigationRepository:
+    """Provide a fake investigation repository."""
+    return FakeInvestigationRepository()
+
+
+@pytest.fixture
+def service(
+    investigation_repository: FakeInvestigationRepository,
+    agent_repository: FakeAgentRepository,
+    session_repository: FakeSessionRepository,
+) -> InvestigationService:
+    """Provide an investigation service backed by fake repositories."""
+    return InvestigationService(
+        repository=investigation_repository,
+        agent_repository=agent_repository,
+        session_repository=session_repository,
+    )
+
+
+@pytest.fixture
+async def agent_id(agent_repository: FakeAgentRepository) -> uuid.UUID:
+    """Provide an agent id owned by the actor."""
+    agent = await create_agent(agent_repository, ACTOR.account.id)
+    return agent.id
+
+
+@pytest.fixture
+async def session_ids(
+    session_repository: FakeSessionRepository, agent_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Provide two session ids belonging to the agent."""
+    sessions = [
+        await create_session(session_repository, ACTOR.account.id, agent_id=agent_id)
+        for _ in range(2)
+    ]
+    return [session.id for session in sessions]
+
+
+async def test_create_investigation(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Assign session position from list order and initialize progress counts."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            description="curator rationale",
+            questions=[QuestionItem(key="root_cause", question="What caused it?")],
+            sessions=[
+                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(session_id=session_ids[1]),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    assert investigation.owner_id == ACTOR.account.id
+    assert investigation.agent_id == agent_id
+    assert investigation.name == "investigation"
+    assert investigation.description == "curator rationale"
+    assert investigation.status is InvestigationStatus.PENDING
+    assert investigation.questions == [
+        QuestionItem(key="root_cause", question="What caused it?")
+    ]
+    assert investigation.total_sessions == 2
+    assert investigation.completed_sessions == 0
+    assert investigation.created is not None
+
+    sessions, _ = await service.list_investigation_sessions(
+        InvestigationSessionFilter(investigation_id=investigation.id), actor=ACTOR
+    )
+    assert [session.session_id for session in sessions] == session_ids
+    assert [session.position for session in sessions] == [0, 1]
+
+
+async def test_create_investigation_missing_agent(
+    service: InvestigationService,
+) -> None:
+    """Raise when the agent does not exist."""
+    with pytest.raises(AgentNotFound):
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=uuid.uuid4(), name="investigation", questions=[], sessions=[]
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_investigation_duplicate_question_key(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Reject questions containing a repeated key."""
+    with pytest.raises(DuplicateQuestionKey):
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=agent_id,
+                name="investigation",
+                questions=[
+                    QuestionItem(key="root_cause", question="What caused it?"),
+                    QuestionItem(key="root_cause", question="Again?"),
+                ],
+                sessions=[],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_investigation_missing_session(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Reject a linked session id that does not exist."""
+    missing_session_id = uuid.uuid4()
+    with pytest.raises(
+        ValidationError, match=f"Session {missing_session_id} was not found"
+    ):
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=agent_id,
+                name="investigation",
+                questions=[],
+                sessions=[InvestigationSessionInput(session_id=missing_session_id)],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_investigation_session_wrong_agent(
+    service: InvestigationService,
+    agent_repository: FakeAgentRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Reject a linked session that belongs to a different agent."""
+    other_agent = await create_agent(agent_repository, ACTOR.account.id, name="other")
+    other_session = await create_session(
+        session_repository, ACTOR.account.id, agent_id=other_agent.id
+    )
+    with pytest.raises(
+        ValidationError,
+        match=f"Session {other_session.id} does not belong to agent {agent_id}",
+    ):
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=agent_id,
+                name="investigation",
+                questions=[],
+                sessions=[InvestigationSessionInput(session_id=other_session.id)],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_investigation_duplicate_session_ids(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Reject a session list naming the same session twice."""
+    with pytest.raises(
+        ValidationError, match="Investigation session list contains duplicate ids"
+    ):
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=agent_id,
+                name="investigation",
+                questions=[],
+                sessions=[
+                    InvestigationSessionInput(session_id=session_ids[0]),
+                    InvestigationSessionInput(session_id=session_ids[0]),
+                ],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_get_investigation(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Load a stored investigation by id."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    loaded = await service.get_investigation(created.id, actor=ACTOR)
+    assert loaded == created
+
+
+async def test_get_investigation_not_found(service: InvestigationService) -> None:
+    """Raise for an unknown investigation id."""
+    missing_id = uuid.uuid4()
+    with pytest.raises(
+        InvestigationNotFound, match=f"Investigation {missing_id} was not found"
+    ):
+        await service.get_investigation(missing_id, actor=ACTOR)
+
+
+async def test_list_investigations(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """List investigations and filter by status."""
+    for name in ["alpha", "beta"]:
+        await service.create_investigation(
+            InvestigationCreate(
+                agent_id=agent_id, name=name, questions=[], sessions=[]
+            ),
+            actor=ACTOR,
+        )
+
+    investigations, next_cursor = await service.list_investigations(
+        InvestigationFilter(), actor=ACTOR
+    )
+    assert next_cursor is None
+    assert [investigation.name for investigation in investigations] == [
+        "beta",
+        "alpha",
+    ]
+
+    investigations, _ = await service.list_investigations(
+        InvestigationFilter(
+            expression=FilterCondition(
+                field="status", op=FilterOp.EQ, value=InvestigationStatus.COMPLETED
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert investigations == []
+
+
+async def test_list_investigations_filters_by_agent_id(
+    service: InvestigationService,
+    agent_repository: FakeAgentRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Filter investigations scoped to one agent."""
+    matching = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    other_agent = await create_agent(agent_repository, ACTOR.account.id, name="other")
+    await service.create_investigation(
+        InvestigationCreate(
+            agent_id=other_agent.id, name="other", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+
+    investigations, _ = await service.list_investigations(
+        InvestigationFilter(
+            expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+        ),
+        actor=ACTOR,
+    )
+    assert [investigation.id for investigation in investigations] == [matching.id]
+
+
+async def test_update_investigation_name(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Update an investigation's name."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_investigation(
+        created.id, InvestigationUpdate(name="renamed"), actor=ACTOR
+    )
+    assert updated.name == "renamed"
+    assert updated.updated is not None
+    assert created.updated is not None
+    assert updated.updated >= created.updated
+
+
+async def test_update_investigation_description(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Update an investigation's description without touching its name."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            description="old",
+            questions=[],
+            sessions=[],
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_investigation(
+        created.id, InvestigationUpdate(description="new"), actor=ACTOR
+    )
+    assert updated.name == "investigation"
+    assert updated.description == "new"
+
+
+async def test_update_investigation_omitted_fields_unchanged(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Leave every field unchanged when the command sets none of it."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            description="old",
+            questions=[],
+            sessions=[],
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_investigation(
+        created.id, InvestigationUpdate(), actor=ACTOR
+    )
+    assert updated.name == "investigation"
+    assert updated.description == "old"
+
+
+async def test_update_investigation_cannot_clear_name(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Reject clearing the investigation name with an explicit null."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(ValidationError, match="Investigation name cannot be cleared"):
+        await service.update_investigation(
+            created.id, InvestigationUpdate(name=None), actor=ACTOR
+        )
+
+
+async def test_update_investigation_not_found(
+    service: InvestigationService,
+) -> None:
+    """Raise for an unknown investigation id."""
+    with pytest.raises(InvestigationNotFound):
+        await service.update_investigation(
+            uuid.uuid4(), InvestigationUpdate(name="x"), actor=ACTOR
+        )
+
+
+async def test_delete_investigation(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Delete a stored investigation."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    await service.delete_investigation(created.id, actor=ACTOR)
+    with pytest.raises(InvestigationNotFound):
+        await service.get_investigation(created.id, actor=ACTOR)
+
+
+async def test_delete_investigation_not_found(
+    service: InvestigationService,
+) -> None:
+    """Raise for an unknown investigation id."""
+    with pytest.raises(InvestigationNotFound):
+        await service.delete_investigation(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_list_investigation_sessions_not_found(
+    service: InvestigationService,
+) -> None:
+    """Raise for an unknown investigation id."""
+    with pytest.raises(InvestigationNotFound):
+        await service.list_investigation_sessions(
+            InvestigationSessionFilter(investigation_id=uuid.uuid4()), actor=ACTOR
+        )
+
+
+async def test_update_investigation_session_status_completed(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Mark a linked session completed without completing the investigation."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[
+                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(session_id=session_ids[1]),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    session = await service.update_investigation_session_status(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionStatus.COMPLETED,
+        actor=ACTOR,
+    )
+    assert session.status is InvestigationSessionStatus.COMPLETED
+    reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
+    assert reloaded.status is InvestigationStatus.PENDING
+    assert reloaded.completed_sessions == 1
+    assert reloaded.ended_at is None
+
+
+async def test_update_investigation_session_status_skipped(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Mark a linked session skipped and count it toward completed_sessions."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[
+                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(session_id=session_ids[1]),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    session = await service.update_investigation_session_status(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionStatus.SKIPPED,
+        actor=ACTOR,
+    )
+    assert session.status is InvestigationSessionStatus.SKIPPED
+    reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
+    assert reloaded.completed_sessions == 1
+
+
+async def test_update_investigation_session_status_completes_investigation(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Flip the investigation to completed once the last pending link settles."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[
+                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(session_id=session_ids[1]),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    await service.update_investigation_session_status(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionStatus.COMPLETED,
+        actor=ACTOR,
+    )
+    await service.update_investigation_session_status(
+        investigation.id,
+        session_ids[1],
+        InvestigationSessionStatus.SKIPPED,
+        actor=ACTOR,
+    )
+    reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
+    assert reloaded.status is InvestigationStatus.COMPLETED
+    assert reloaded.completed_sessions == 2
+    assert reloaded.ended_at is not None
+
+
+async def test_update_investigation_session_status_illegal_transition(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Reject settling a session that already settled."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[InvestigationSessionInput(session_id=session_ids[0])],
+        ),
+        actor=ACTOR,
+    )
+    await service.update_investigation_session_status(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionStatus.COMPLETED,
+        actor=ACTOR,
+    )
+    with pytest.raises(IllegalInvestigationSessionStatusTransition):
+        await service.update_investigation_session_status(
+            investigation.id,
+            session_ids[0],
+            InvestigationSessionStatus.SKIPPED,
+            actor=ACTOR,
+        )
+
+
+async def test_update_investigation_session_status_invalid_target(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Reject setting a linked session's status back to pending."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[InvestigationSessionInput(session_id=session_ids[0])],
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(
+        ValidationError,
+        match="Investigation session status cannot be set to 'pending'",
+    ):
+        await service.update_investigation_session_status(
+            investigation.id,
+            session_ids[0],
+            InvestigationSessionStatus.PENDING,
+            actor=ACTOR,
+        )
+
+
+async def test_update_investigation_session_status_investigation_not_found(
+    service: InvestigationService,
+) -> None:
+    """Raise for an unknown investigation id."""
+    with pytest.raises(InvestigationNotFound):
+        await service.update_investigation_session_status(
+            uuid.uuid4(),
+            uuid.uuid4(),
+            InvestigationSessionStatus.COMPLETED,
+            actor=ACTOR,
+        )
+
+
+async def test_update_investigation_session_status_session_not_found(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Raise when no linked session matches the investigation and session pair."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(InvestigationSessionNotFound):
+        await service.update_investigation_session_status(
+            investigation.id,
+            uuid.uuid4(),
+            InvestigationSessionStatus.COMPLETED,
+            actor=ACTOR,
+        )

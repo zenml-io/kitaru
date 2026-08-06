@@ -861,9 +861,134 @@ def upgrade() -> None:
             postgresql_where=sa.text("task_id IS NULL"),
         )
 
+    op.create_table(
+        "investigation",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("agent_id", sa.Uuid(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("questions", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["agent_id"], ["agent.id"], name="fk_investigation_agent_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name="fk_investigation_owner_id"
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    with op.batch_alter_table("investigation", schema=None) as batch_op:
+        batch_op.create_index("ix_investigation_agent_id", ["agent_id"], unique=False)
+        batch_op.create_index("ix_investigation_owner_id", ["owner_id"], unique=False)
+
+    op.create_table(
+        "investigation_session",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("investigation_id", sa.Uuid(), nullable=False),
+        sa.Column("session_id", sa.Uuid(), nullable=False),
+        sa.Column("position", sa.Integer(), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column(
+            "view",
+            postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
+            nullable=True,
+        ),
+        sa.ForeignKeyConstraint(
+            ["investigation_id"],
+            ["investigation.id"],
+            name="fk_investigation_session_investigation_id",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["session_id"],
+            ["session.id"],
+            name="fk_investigation_session_session_id",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "investigation_id",
+            "session_id",
+            name="uq_investigation_session_investigation_id_session_id",
+        ),
+    )
+    with op.batch_alter_table("investigation_session", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_investigation_session_session_id", ["session_id"], unique=False
+        )
+
+    op.create_table(
+        "annotation",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("session_id", sa.Uuid(), nullable=False),
+        sa.Column("investigation_session_id", sa.Uuid(), nullable=True),
+        sa.Column("question_key", sa.String(length=255), nullable=True),
+        sa.Column(
+            "selector",
+            postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
+            nullable=True,
+        ),
+        sa.Column("value", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["investigation_session_id"],
+            ["investigation_session.id"],
+            name="fk_annotation_investigation_session_id",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name="fk_annotation_owner_id"
+        ),
+        sa.ForeignKeyConstraint(
+            ["session_id"],
+            ["session.id"],
+            name="fk_annotation_session_id",
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "investigation_session_id",
+            "question_key",
+            name="uq_annotation_investigation_session_id_question_key",
+        ),
+    )
+    with op.batch_alter_table("annotation", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_annotation_investigation_session_id",
+            ["investigation_session_id"],
+            unique=False,
+        )
+        batch_op.create_index("ix_annotation_owner_id", ["owner_id"], unique=False)
+        batch_op.create_index("ix_annotation_session_id", ["session_id"], unique=False)
+
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
+    with op.batch_alter_table("annotation", schema=None) as batch_op:
+        batch_op.drop_index("ix_annotation_session_id")
+        batch_op.drop_index("ix_annotation_owner_id")
+        batch_op.drop_index("ix_annotation_investigation_session_id")
+
+    op.drop_table("annotation")
+    with op.batch_alter_table("investigation_session", schema=None) as batch_op:
+        batch_op.drop_index("ix_investigation_session_session_id")
+
+    op.drop_table("investigation_session")
+    with op.batch_alter_table("investigation", schema=None) as batch_op:
+        batch_op.drop_index("ix_investigation_owner_id")
+        batch_op.drop_index("ix_investigation_agent_id")
+
+    op.drop_table("investigation")
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.drop_constraint("fk_session_task_id", type_="foreignkey")
 
