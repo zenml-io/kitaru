@@ -101,6 +101,7 @@ exclude-newer = "3 days"
 
 [dependency-groups]
 dev = [
+    "pydantic-ai-slim[openai]>=2.14.1,<3",
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
@@ -111,7 +112,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py311"
-src = ["src", "scripts", "tests"]
+src = ["src", "scripts", "tests", "plugins"]
 line-length = 88
 exclude = [
     ".git",
@@ -138,7 +139,7 @@ extend-immutable-calls = ["fastapi.Depends"]
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["kitaru"]
+known-first-party = ["adapters", "evaluators", "importers", "kitaru", "plugins"]
 
 [tool.ty.src]
 # TODO: Re-enable once the examples are migrated to the v2 SDK.
@@ -146,10 +147,11 @@ exclude = ["examples/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
-root = ["src", "scripts", "tests"]
+root = ["src", "scripts", "tests", "plugins"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "plugins/tests"]
+pythonpath = [".", "plugins"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
