@@ -555,7 +555,6 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("inputs", "Inputs"),
                     HumanField("outputs", "Outputs"),
-                    HumanField("expected", "Expected"),
                 ),
             ),
             HumanSection("Error", (HumanField("error", "Error"),)),

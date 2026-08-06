@@ -77,7 +77,6 @@ def _session_view() -> SessionView:
         status=SessionStatus.COMPLETED,
         inputs=None,
         outputs=None,
-        expected=None,
         metadata={},
         llm_call_count=0,
         tool_call_count=0,
@@ -254,7 +253,6 @@ async def test_evaluator_flow_end_to_end(
             origin=SessionOrigin.RECORDED,
             inputs={"prompt": "hi"},
             outputs={"answer": "hello"},
-            expected=None,
             metadata={},
         )
     )

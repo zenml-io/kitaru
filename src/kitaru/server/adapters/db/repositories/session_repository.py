@@ -292,7 +292,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.name = session.name
         row.inputs = session.inputs
         row.outputs = session.outputs
-        row.expected = session.expected
         row.error = session.error
         row.started_at = session.started_at
         row.ended_at = session.ended_at

@@ -42,7 +42,6 @@ def _session_body(agent_id: str, **overrides: object) -> dict[str, object]:
         "origin": "recorded",
         "inputs": {"prompt": "hi"},
         "outputs": None,
-        "expected": None,
         "metadata": {},
     }
     body.update(overrides)

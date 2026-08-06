@@ -47,7 +47,6 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         name=body.name,
         inputs=body.inputs,
         outputs=body.outputs,
-        expected=body.expected,
         error=body.error,
         started_at=body.started_at,
         ended_at=body.ended_at,
@@ -82,7 +81,6 @@ def session_to_response(session: Session) -> SessionResponse:
         name=session.name,
         inputs=session.inputs,
         outputs=session.outputs,
-        expected=session.expected,
         error=session.error,
         started_at=session.started_at,
         ended_at=session.ended_at,
@@ -130,7 +128,7 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     """
     fields = body.model_fields_set
     values: dict[str, Any] = {}
-    for field in ("status", "outputs", "error", "ended_at", "name", "expected"):
+    for field in ("status", "outputs", "error", "ended_at", "name"):
         if field in fields:
             values[field] = getattr(body, field)
     if "metadata" in fields:

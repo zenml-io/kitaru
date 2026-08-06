@@ -68,7 +68,6 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
                     "origin": "recorded",
                     "inputs": {"q": "hi"},
                     "outputs": None,
-                    "expected": None,
                 },
             )
         ).json()

@@ -501,11 +501,6 @@ def upgrade() -> None:
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
             nullable=True,
         ),
-        sa.Column(
-            "expected",
-            postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
-            nullable=True,
-        ),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),

@@ -3407,10 +3407,6 @@
               "description": "Error from a failed session.",
               "title": "Error"
             },
-            "expected": {
-              "description": "Expected outputs.",
-              "title": "Expected"
-            },
             "external_id": {
               "anyOf": [
                 {
@@ -3569,7 +3565,6 @@
             "status",
             "inputs",
             "outputs",
-            "expected",
             "metadata",
             "llm_call_count",
             "tool_call_count"

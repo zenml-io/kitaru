@@ -53,7 +53,6 @@ async def _make_session_id(client: httpx.AsyncClient, agent_id: str) -> str:
             "origin": "recorded",
             "inputs": None,
             "outputs": None,
-            "expected": None,
         },
     )
     return response.json()["id"]

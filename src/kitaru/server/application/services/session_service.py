@@ -144,7 +144,6 @@ class SessionService:
             name=command.name,
             inputs=command.inputs,
             outputs=command.outputs,
-            expected=command.expected,
             error=command.error,
             started_at=command.started_at,
             ended_at=command.ended_at,
@@ -345,8 +344,6 @@ class SessionService:
                 )
         if "name" in fields:
             session.update_name(command.name)
-        if "expected" in fields:
-            session.update_expected(command.expected)
         if "metadata" in fields:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}

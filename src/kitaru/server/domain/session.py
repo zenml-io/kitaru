@@ -280,7 +280,6 @@ class Session(DomainModel):
     name: str | None = None
     inputs: Any = None
     outputs: Any = None
-    expected: Any = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -303,14 +302,6 @@ class Session(DomainModel):
             name: New name.
         """
         self.name = name
-
-    def update_expected(self, expected: Any) -> None:
-        """Set new expected outputs.
-
-        Args:
-            expected: New expected outputs.
-        """
-        self.expected = expected
 
     def update_metadata(self, metadata: dict[str, Any]) -> None:
         """Set new metadata.

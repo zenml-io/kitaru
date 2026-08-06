@@ -102,7 +102,6 @@ async def session_id(client: httpx.AsyncClient) -> str:
                 "origin": "recorded",
                 "inputs": None,
                 "outputs": None,
-                "expected": None,
                 "metadata": {},
             },
         )

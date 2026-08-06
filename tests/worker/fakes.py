@@ -299,7 +299,6 @@ def make_session_response(
         "status": status,
         "inputs": None,
         "outputs": None,
-        "expected": None,
         "metadata": {},
         "llm_call_count": 0,
         "tool_call_count": 0,

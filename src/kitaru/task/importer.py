@@ -103,7 +103,6 @@ class ParsedSession(BaseModel):
     name: str | None
     inputs: Any
     outputs: Any
-    expected: Any
     error: str | None
     started_at: datetime | None
     ended_at: datetime | None
@@ -177,7 +176,6 @@ def session_request(
         name=parsed.name,
         inputs=parsed.inputs,
         outputs=parsed.outputs,
-        expected=parsed.expected,
         error=parsed.error,
         started_at=parsed.started_at,
         ended_at=parsed.ended_at,

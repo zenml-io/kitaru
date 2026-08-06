@@ -77,7 +77,6 @@ class SessionCreateRequest(RequestModel):
     name: str | None = Field(default=None, description="Session name.")
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
-    expected: Any = Field(description="Expected outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: AwareDatetime | None = Field(
         default=None, description="Time the session started."
@@ -110,7 +109,6 @@ class SessionUpdateRequest(RequestModel):
     error: str | None = Field(default=None, description="New error.")
     ended_at: AwareDatetime | None = Field(default=None, description="New end time.")
     name: str | None = Field(default=None, description="New session name.")
-    expected: Any = Field(default=None, description="New expected outputs.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -145,7 +143,6 @@ class SessionResponse(OwnedResponseModel):
     name: str | None = Field(default=None, description="Session name.")
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
-    expected: Any = Field(description="Expected outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: datetime | None = Field(
         default=None, description="Time the session started."
