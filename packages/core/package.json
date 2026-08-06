@@ -1,0 +1,50 @@
+{
+  "name": "@zenml-io/kitaru",
+  "version": "0.1.0-experimental.0",
+  "description": "Experimental TypeScript SDK and adapter foundation for Kitaru agent tracing and replay",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0 <23"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./environment": {
+      "types": "./dist/environment.d.ts",
+      "import": "./dist/environment.js"
+    },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js"
+    },
+    "./adapter": {
+      "types": "./dist/adapter/index.d.ts",
+      "import": "./dist/adapter/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "kitaru",
+    "zenml",
+    "agents",
+    "tracing",
+    "replay",
+    "typescript-sdk"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.build.json",
+    "generate": "node scripts/generate-openapi.mjs",
+    "generate:check": "node scripts/generate-openapi.mjs --check",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

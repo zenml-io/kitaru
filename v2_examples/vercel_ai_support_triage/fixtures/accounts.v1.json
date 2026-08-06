@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "accountId": "acct-1001",
+      "email": "alex@example.com",
+      "name": "Alex Rivera",
+      "standing": "good"
+    }
+  ]
+}

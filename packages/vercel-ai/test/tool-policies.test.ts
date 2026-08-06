@@ -1,0 +1,233 @@
+import { jsonSchema, tool } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
+import { describe, expect, it, vi } from "vitest";
+
+import { createKitaruGenerateText } from "../src/index.js";
+import {
+  AGENT_ID,
+  FakeClient,
+  replayEnvironment,
+  replaySpec,
+  TEST_USAGE,
+  toolResponse,
+} from "./helpers.js";
+
+const VALUE_INPUT = jsonSchema<{ value: string }>(
+  {
+    additionalProperties: false,
+    properties: { value: { type: "string" } },
+    required: ["value"],
+    type: "object",
+  },
+  {
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as { value?: unknown }).value === "string"
+        ? { success: true, value: value as { value: string } }
+        : { success: false, error: new TypeError("invalid value") },
+  },
+);
+
+function modelForValue() {
+  return new MockLanguageModelV4({
+    doGenerate: toolResponse([
+      { id: "call-1", input: '{"value":"a"}', name: "write" },
+    ]),
+  });
+}
+
+describe("replay tool policies", () => {
+  it.each([
+    ["provider", { type: "provider" }],
+    ["dynamic", { type: "dynamic", execute: async () => "done" }],
+  ])("rejects a passthrough %s tool before model execution", async (_name, replayTool) => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const model = modelForValue();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model,
+        prompt: "go",
+        tools: { write: replayTool as never },
+      }),
+    ).rejects.toThrow(/provider|dynamic/);
+    expect(client.created).toHaveLength(0);
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("runs passthrough once with unchanged execution options", async () => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const execute = vi.fn(async (_input, options) => options.toolCallId);
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: modelForValue(),
+      prompt: "go",
+      tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+    });
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[1].toolCallId).toBe("call-1");
+    expect(result.toolResults[0]?.output).toBe("call-1");
+  });
+
+  it.each([
+    {
+      name: "static",
+      client: () =>
+        new FakeClient({
+          replay: replaySpec({
+            cases: [
+              {
+                match: { value: "a" },
+                match_mode: "exact",
+                result: { source: "static" },
+              },
+            ],
+            on_miss: "fail",
+            type: "static",
+          }),
+        }),
+      expected: { source: "static" },
+    },
+    {
+      name: "history",
+      client: () =>
+        new FakeClient({
+          lookup: () => ({ found: true, result: { source: "history" } }),
+          replay: replaySpec({ on_miss: "fail", type: "history" }),
+        }),
+      expected: { source: "history" },
+    },
+  ])("returns a validated $name result without executing", async (scenario) => {
+    const client = scenario.client();
+    const execute = vi.fn(async () => ({ source: "live" }));
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: modelForValue(),
+      prompt: "go",
+      tools: {
+        write: tool({ execute, inputSchema: VALUE_INPUT }),
+      },
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolResults[0]?.output).toEqual(scenario.expected);
+  });
+
+  it("blocks later tools and the next model call on a history miss", async () => {
+    const client = new FakeClient({
+      replay: replaySpec({ on_miss: "fail", type: "history" }),
+    });
+    const later = vi.fn(async () => "later");
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        toolResponse([
+          { id: "call-1", input: '{"value":"a"}', name: "write" },
+          { id: "call-2", input: '{"value":"b"}', name: "later" },
+        ]),
+        {
+          content: [{ text: "must not run", type: "text" }],
+          finishReason: { raw: "stop", unified: "stop" },
+          usage: TEST_USAGE,
+          warnings: [],
+        },
+      ],
+    });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model,
+        prompt: "go",
+        stopWhen: () => false,
+        tools: {
+          later: tool({ execute: later, inputSchema: VALUE_INPUT }),
+          write: tool({
+            execute: async () => "write",
+            inputSchema: VALUE_INPUT,
+          }),
+        },
+      }),
+    ).rejects.toThrow("No history result for tool 'write'");
+
+    expect(later).not.toHaveBeenCalled();
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(client.updated.at(-1)?.status).toBe("failed");
+  });
+
+  it("isolates ticket and failure state across concurrent invocations", async () => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+    const execute = vi.fn(async (input: { value: string }) => input.value);
+
+    const results = await Promise.all([
+      generate({
+        model: modelForValue(),
+        prompt: "one",
+        tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+      }),
+      generate({
+        model: modelForValue(),
+        prompt: "two",
+        tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+      }),
+    ]);
+
+    expect(results.map((result) => result.toolResults[0]?.output)).toEqual([
+      "a",
+      "a",
+    ]);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps an ordinary replay passthrough error native", async () => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: modelForValue(),
+      prompt: "go",
+      tools: {
+        write: tool({
+          execute: async (): Promise<string> => {
+            throw new Error("application failure");
+          },
+          inputSchema: VALUE_INPUT,
+        }),
+      },
+    });
+
+    expect(result.content.some((part) => part.type === "tool-error")).toBe(
+      true,
+    );
+    expect(client.updated.at(-1)?.status).toBe("completed");
+  });
+});

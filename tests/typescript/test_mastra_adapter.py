@@ -1,0 +1,95 @@
+"""Cross-language proof for the compiled Mastra support-triage example."""
+
+import asyncio
+import importlib
+import socket
+import subprocess
+import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import pytest
+import uvicorn
+
+from conftest import db_settings, drop_test_database, postgres_available
+from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.server.api.app import create_app
+from kitaru.server.database.service import DatabaseService
+
+
+def _available_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+@asynccontextmanager
+async def _network_server() -> AsyncIterator[str]:
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    settings = db_settings()
+    await DatabaseService.create_db(settings)
+    port = _available_port()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(settings),
+            host="127.0.0.1",
+            port=port,
+            lifespan="on",
+            log_level="error",
+        )
+    )
+    task = asyncio.create_task(server.serve())
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            if task.done():
+                task.result()
+            await asyncio.sleep(0.01)
+        else:
+            raise RuntimeError("Timed out starting the Kitaru test server")
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        await task
+        await drop_test_database(settings)
+
+
+async def test_worker_records_and_history_replays_compiled_mastra(tmp_path) -> None:
+    """Prove worker, Node/Mastra, history replay, overrides, and scoring."""
+    repo_root = Path(__file__).resolve().parents[2]
+    subprocess.run(
+        [
+            "pnpm",
+            "--filter",
+            "@zenml-io/kitaru-example-mastra-support-triage",
+            "build",
+        ],
+        cwd=repo_root,
+        check=True,
+    )
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    demo = importlib.import_module("v2_examples.mastra_support_triage.demo")
+
+    async with _network_server() as api_url:
+        result = await demo.run_demo(
+            api_url=api_url,
+            state_dir=tmp_path,
+            test_model=True,
+        )
+
+    assert result.initial_outbox_count == 1
+    assert result.replay_outbox_count == 1
+    assert result.replay.status is ReplayStatus.COMPLETED
+    assert all(evaluation.passed is True for evaluation in result.evaluations)
+    assert (
+        sum(node.node_type is NodeType.LLM_CALL for node in result.initial_nodes) >= 2
+    )
+    assert {
+        node.tool_name
+        for node in result.initial_nodes
+        if node.node_type is NodeType.TOOL_CALL
+    } == {"lookupAccount", "lookupOrder", "queueRefundReview"}

@@ -1,0 +1,42 @@
+{
+  "name": "@zenml-io/kitaru-mastra",
+  "version": "0.1.0-experimental.0",
+  "description": "Experimental Mastra adapter for Kitaru agent tracing and replay",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0 <23"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "kitaru",
+    "zenml",
+    "agents",
+    "tracing",
+    "replay",
+    "mastra"
+  ],
+  "dependencies": {
+    "@zenml-io/kitaru": "workspace:0.1.0-experimental.0"
+  },
+  "peerDependencies": {
+    "@mastra/core": ">=1.51.0 <1.52.0"
+  },
+  "devDependencies": {
+    "@mastra/core": "1.51.0",
+    "zod": "3.25.76"
+  },
+  "scripts": {
+    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.build.json",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
