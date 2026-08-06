@@ -27,11 +27,13 @@ from kitaru.server.application.models.plugin import (
 )
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
 from kitaru.server.domain.plugin import (
     Plugin,
     PluginKind,
     PluginSource,
     PluginVersion,
+    ReservedPluginName,
     ScriptPluginSource,
 )
 
@@ -79,10 +81,14 @@ class PluginService:
         Raises:
             DuplicatePluginName: The (kind, name) pair is already registered.
             InvalidPluginProvider: The kind is evaluator and provider is set.
+            ReservedPluginName: ``name`` starts with the reserved default-plugin
+                prefix.
 
         Returns:
             Created plugin.
         """
+        if name.startswith(RESERVED_PLUGIN_NAME_PREFIX):
+            raise ReservedPluginName(name)
         plugin = Plugin(
             owner_id=actor.account.id,
             kind=self.kind,

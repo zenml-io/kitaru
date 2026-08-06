@@ -22,12 +22,7 @@ instead of duplicating them.
 import uuid
 from typing import TypeVar
 
-from kitaru.api_models.v1.base import (
-    ListParams,
-    OwnedResponseModel,
-    Page,
-    TimestampedResponseModel,
-)
+from kitaru.api_models.v1.base import ListParams, Page, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
@@ -46,7 +41,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import PluginVersionFilter
 from kitaru.server.application.services.plugin_service import PluginService
 
-PluginResponseT = TypeVar("PluginResponseT", bound=OwnedResponseModel)
+PluginResponseT = TypeVar("PluginResponseT", bound=TimestampedResponseModel)
 PluginVersionResponseT = TypeVar(
     "PluginVersionResponseT", bound=TimestampedResponseModel
 )

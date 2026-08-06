@@ -99,6 +99,12 @@ async def test_create_evaluator_duplicate_name(client: httpx.AsyncClient) -> Non
     }
 
 
+async def test_create_evaluator_reserved_name(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a name using the reserved default-plugin prefix."""
+    response = await client.post("/v1/evaluators", json={"name": "kitaru/accuracy"})
+    assert response.status_code == 422
+
+
 async def test_create_evaluator_rejects_provider(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 when the request carries a provider field."""
     response = await client.post(
