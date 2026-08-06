@@ -102,6 +102,68 @@ def test_discovery_ignores_invalid_skills_and_reports_checked_locations(
     assert str(home / ".claude" / "skills") in status["locations_checked"]
 
 
+@pytest.mark.parametrize(
+    "frontmatter",
+    [
+        "---\nname: kitaru-incomplete\n---\n",
+        "---\nname: kitaru-invalid\ndescription: Test skill.\ninvalid: [\n---\n",
+    ],
+)
+def test_discovery_rejects_incomplete_or_invalid_frontmatter(
+    tmp_path: Path, frontmatter: str
+) -> None:
+    """Only loadable skill metadata counts as an installed skill."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(frontmatter, encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_rejects_oversized_skill_documents(tmp_path: Path) -> None:
+    """A bounded read prevents one skill document from delaying CLI startup."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: kitaru-oversized\ndescription: " + "x" * 70_000 + "\n---\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_rejects_symlinked_skill_documents(tmp_path: Path) -> None:
+    """Discovery does not follow a skill document outside the scanned tree."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    target = tmp_path / "external-skill.md"
+    target.write_text(
+        "---\nname: kitaru-linked\ndescription: Test skill.\n---\n",
+        encoding="utf-8",
+    )
+    try:
+        (skill / "SKILL.md").symlink_to(target)
+    except OSError:
+        pytest.skip("Symlinks are unavailable on this platform")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
 def test_discovery_counts_shared_skill_once_but_reports_each_host(
     tmp_path: Path,
 ) -> None:
@@ -154,8 +216,8 @@ def test_discovery_returns_empty_status_when_default_path_is_unavailable(
     }
 
 
-def test_discovery_uses_first_top_level_frontmatter_name(tmp_path: Path) -> None:
-    """Nested and later name fields cannot create or overwrite a skill name."""
+def test_discovery_ignores_nested_frontmatter_names(tmp_path: Path) -> None:
+    """A nested name cannot overwrite the required top-level skill name."""
     project = tmp_path / "project"
     project.mkdir()
     home = tmp_path / "home"
@@ -165,9 +227,9 @@ def test_discovery_uses_first_top_level_frontmatter_name(tmp_path: Path) -> None
     (skill / "SKILL.md").write_text(
         "---\n"
         "name: kitaru-first\n"
+        "description: Test skill.\n"
         "metadata:\n"
         "  name: kitaru-nested\n"
-        "name: kitaru-later\n"
         "---\n",
         encoding="utf-8",
     )

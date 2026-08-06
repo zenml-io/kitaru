@@ -13,9 +13,13 @@
 #  permissions and limitations under the License.
 """Discover Kitaru agent skills in supported project and user locations."""
 
+import os
+import stat
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, TypedDict
+
+import yaml
 
 INSTALL_COMMAND = "npx skills add zenml-io/kitaru-skills"
 SKILLS_URL = "https://github.com/zenml-io/kitaru-skills"
@@ -49,6 +53,7 @@ _SKILL_DIRECTORIES: tuple[tuple[SkillHost, Path], ...] = (
     ("codex", Path(".codex") / "skills"),
 )
 _KITARU_SKILL_PREFIX = "kitaru-"
+_MAX_SKILL_DOCUMENT_BYTES = 64 * 1024
 
 
 def _get_empty_skill_status() -> KitaruSkillStatus:
@@ -175,23 +180,62 @@ def _is_git_root(path: Path) -> bool:
 
 
 def _get_skill_name(path: Path) -> str | None:
-    """Read a simple skill name from bounded YAML frontmatter."""
-    try:
-        with path.open(encoding="utf-8") as skill_file:
-            if skill_file.readline().strip() != "---":
-                return None
-            name: str | None = None
-            for _ in range(100):
-                line = skill_file.readline()
-                if not line:
-                    return None
-                if line.strip() == "---":
-                    break
-                key, separator, value = line.partition(":")
-                if name is None and separator and key == "name":
-                    name = value.strip().strip("'\"")
-            else:
-                return None
-    except (OSError, UnicodeError):
+    """Read a valid skill name from bounded YAML frontmatter."""
+    document = _read_skill_document(path)
+    if document is None:
         return None
-    return name or None
+    lines = document.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    try:
+        closing_line = next(
+            index for index, line in enumerate(lines[1:], start=1) if line == "---"
+        )
+    except StopIteration:
+        return None
+    try:
+        metadata = yaml.safe_load("\n".join(lines[1:closing_line]))
+    except yaml.YAMLError:
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    name = metadata.get("name")
+    description = metadata.get("description")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if not isinstance(description, str) or not description.strip():
+        return None
+    return name.strip()
+
+
+def _read_skill_document(path: Path) -> str | None:
+    """Read one regular, non-symlinked skill document within a byte limit."""
+    try:
+        if path.is_symlink():
+            return None
+        flags = os.O_RDONLY
+        flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(path, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return None
+            chunks: list[bytes] = []
+            remaining = _MAX_SKILL_DOCUMENT_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, min(8192, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return None
+    contents = b"".join(chunks)
+    if len(contents) > _MAX_SKILL_DOCUMENT_BYTES:
+        return None
+    try:
+        return contents.decode("utf-8")
+    except UnicodeError:
+        return None
