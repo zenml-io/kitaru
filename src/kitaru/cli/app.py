@@ -343,8 +343,7 @@ async def _launch(
     if command == app.help_print:
         if not tokens:
             return _emit_root_result(
-                command,
-                bound,
+                lambda: command(*bound.args, **bound.kwargs),
                 output=output,
                 machine=bool(machine),
                 debug=debug,
@@ -429,15 +428,14 @@ async def _launch(
 
 
 def _emit_root_result(
-    help_command: Callable[..., Any],
-    bound: Any,
+    render_help: Callable[[], Any],
     *,
     output: OutputMode,
     machine: bool,
     debug: bool,
     traceback: bool,
 ) -> int:
-    """Render bare root help with agent-skill onboarding."""
+    """Render root help with agent-skill onboarding."""
     try:
         mode = resolve_output_mode(output, is_tty=sys.stdout.isatty())
     except CLIError as error:
@@ -463,7 +461,7 @@ def _emit_root_result(
     output_token = set_output_context(context)
     try:
         if mode == "text":
-            help_command(*bound.args, **bound.kwargs)
+            render_help()
         skill_status = get_kitaru_skill_status()
         return emit_result(
             CommandResult(
@@ -3751,6 +3749,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
+        if tokens in (["--help"], ["-h"]):
+            return _emit_root_result(
+                lambda: app.help_print([]),
+                output="text",
+                machine=False,
+                debug=False,
+                traceback=False,
+            )
         try:
             result = app.meta(
                 tokens,

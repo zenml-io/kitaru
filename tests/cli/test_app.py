@@ -40,6 +40,32 @@ def test_bare_command_group_prints_help_without_bootstrap(monkeypatch, capsys) -
     assert app_module.main(["worker"]) == 0
     captured = capsys.readouterr()
     assert "Usage: kitaru worker COMMAND [OPTIONS]" in captured.out
+    assert INSTALL_COMMAND not in captured.out
+    assert SKILLS_URL not in captured.out
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("help_flag", ["--help", "-h"])
+def test_root_help_adds_skill_onboarding(help_flag, monkeypatch, capsys) -> None:
+    """Explicit root help includes the same skill guidance as bare Kitaru."""
+    monkeypatch.setattr(
+        app_module,
+        "get_kitaru_skill_status",
+        lambda: {
+            "installed": False,
+            "skill_count": 0,
+            "skills": [],
+            "installations": [],
+            "locations_checked": [],
+        },
+    )
+
+    assert app_module.main([help_flag]) == 0
+
+    captured = capsys.readouterr()
+    assert "Usage: kitaru COMMAND [OPTIONS]" in captured.out
+    assert f"skills: {SKILLS_URL}" in captured.out
+    assert f"Next: {INSTALL_COMMAND}" in captured.out
     assert captured.err == ""
 
 
@@ -193,12 +219,23 @@ def test_help_version_schema_and_scaffold_skip_bootstrap(
         raise AssertionError("offline command read local config")
 
     monkeypatch.setattr(app_module, "read_config", fail_read_config)
+    monkeypatch.setattr(
+        app_module,
+        "get_kitaru_skill_status",
+        lambda: {
+            "installed": True,
+            "skill_count": 1,
+            "skills": ["kitaru-investigation"],
+            "installations": [],
+            "locations_checked": [],
+        },
+    )
 
     assert app_module.main(["--help"]) == 0
     help_output = capsys.readouterr()
     assert "Connect to, inspect, and configure Kitaru" in help_output.out
     assert INSTALL_COMMAND not in help_output.out
-    assert SKILLS_URL not in help_output.out
+    assert SKILLS_URL in help_output.out
 
     assert app_module.main(["version"]) == 0
     version_output = capsys.readouterr()
