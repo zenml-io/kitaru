@@ -24,20 +24,32 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_canonical_example.py
+        notes: provider-free contracts for the agent, checked-in traces, evaluator,
+          and walkthrough
       local_smoke:
         status: covered
-        command: PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py
-        requires_server: false
-        timeout_seconds: 60
+        command: KITARU_CANONICAL_E2E=1 KITARU_CANONICAL_SERVER_URL=http://127.0.0.1:8000
+          KITARU_CANONICAL_API_KEY=local-development-worker uv run pytest -q tests/integration/test_canonical_example_e2e.py
+        requires_server: true
+        required_env: [KITARU_CANONICAL_SERVER_URL, KITARU_CANONICAL_API_KEY]
+        timeout_seconds: 600
+        notes: CI supplies PostgreSQL and a local Kitaru server; the replay uses a
+          provider-free PydanticAI FunctionModel.
       live_provider:
         status: manual_only
         provider: openai-langfuse
-        required_env: [OPENAI_API_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST]
+        required_env:
+          - OPENAI_API_KEY
+          - LANGFUSE_PUBLIC_KEY
+          - LANGFUSE_SECRET_KEY
+          - LANGFUSE_HOST
         timeout_seconds: 900
         cost_class: low
         command: cd examples/canonical_example && ./generate.sh
         waiver:
-          reason: Trace generation makes paid model calls and writes to a user-selected Langfuse project.
-          reviewer_action: Regenerate the traces manually when the agent or trace export changes.
+          reason: Trace generation makes paid model calls and writes to a user-selected
+            Langfuse project.
+          reviewer_action: Regenerate the traces manually when the agent or trace
+            export changes.
     release_policy:
       required_when_changed: true

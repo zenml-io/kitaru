@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 from examples.canonical_example.agent import (
+    _build_ci_model,
     build_agent,
     build_prompt,
     get_instructions,
@@ -115,6 +116,37 @@ def test_strict_agent_instructions_require_approval_before_refunds() -> None:
     assert "Assume the action tools enforce" not in strict
     assert "human approval threshold" in strict
     assert "risk flag" in strict
+
+
+@pytest.mark.parametrize(
+    ("ticket_id", "expected_action", "expected_amount"),
+    [
+        ("ticket-001", ResolutionAction.REFUND, Decimal("98.00")),
+        ("ticket-004", ResolutionAction.ESCALATE, None),
+        ("ticket-007", ResolutionAction.ESCALATE, None),
+        ("ticket-009", ResolutionAction.REFUND, Decimal("80.00")),
+        ("ticket-010", ResolutionAction.REFUND, Decimal("98.00")),
+    ],
+)
+def test_ci_model_replays_target_and_control_cases_without_provider_calls(
+    ticket_id: str,
+    expected_action: ResolutionAction,
+    expected_amount: Decimal | None,
+) -> None:
+    """Exercise the target and control paths through real example tools."""
+    ticket = next(case.ticket for case in CASES if case.ticket.ticket_id == ticket_id)
+    store = MockCommerceStore()
+    model = _build_ci_model(ticket, strict_policy=True)
+
+    result = build_agent(store, model, strict_policy=True).run_sync(
+        build_prompt(ticket)
+    )
+
+    assert result.output.action is expected_action
+    assert result.output.amount == expected_amount
+    assert len(store.actions) == 1
+    assert store.actions[0].accepted is True
+    assert store.actions[0].action is expected_action
 
 
 def _load_documented_evaluator() -> dict[str, Any]:
@@ -276,6 +308,7 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         "kitaru evaluator register",
         "--evaluator returns-policy@1",
         "kitaru agent version register",
+        '--command "python -m examples.canonical_example.agent"',
         "RETURNS_POLICY_MODE=strict",
         "kitaru experiment create",
         "kitaru experiment run start",

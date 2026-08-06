@@ -40,7 +40,7 @@ uv run python ../../scripts/seed_default_plugins.py
 ```bash
 uv run kitaru agent register \
   returns-resolver \
-  --entrypoint examples.canonical_example.agent:main \
+  --command "python -m examples.canonical_example.agent" \
   --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
   --display-version baseline-v1 \
   --working-dir ../.. \
@@ -139,7 +139,7 @@ uv run kitaru evaluator register \
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
-  --entrypoint examples.canonical_example.agent:main \
+  --command "python -m examples.canonical_example.agent" \
   --description "Check approval and risk rules before issuing a refund." \
   --display-version strict-policy-v2 \
   --working-dir ../.. \

@@ -15,7 +15,7 @@ set -a; source .env; set +a
 
 The second command exports the values from `.env` into the current terminal. Run it once in every terminal used for this example. It also clears credentials left by an earlier Kitaru task or server before loading values explicitly defined in `.env`.
 
-The template already points the CLI at `http://localhost:8000`. Model and Langfuse credentials are only required when regenerating the traces.
+The template points the CLI at `http://localhost:8000` and includes a local-only worker credential for the server's unauthenticated development mode. Model and Langfuse credentials are only required when regenerating the traces.
 
 ## Optional Step 0: Generate real traces
 
@@ -77,7 +77,7 @@ Register the baseline:
 ```bash
 uv run kitaru agent register \
   returns-resolver \
-  --entrypoint examples.canonical_example.agent:main \
+  --command "python -m examples.canonical_example.agent" \
   --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
   --display-version baseline-v1 \
   --working-dir ../.. \
@@ -417,7 +417,7 @@ Register the same entrypoint with strict policy instructions enabled:
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
-  --entrypoint examples.canonical_example.agent:main \
+  --command "python -m examples.canonical_example.agent" \
   --description "Check approval and risk rules before issuing a refund." \
   --display-version strict-policy-v2 \
   --working-dir ../.. \
