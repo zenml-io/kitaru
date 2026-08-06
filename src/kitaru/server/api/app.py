@@ -32,12 +32,14 @@ from kitaru.analytics.source import (
 )
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.errors import is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -68,11 +70,13 @@ from kitaru.server.adapters.rest.routers import (
 )
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
+from kitaru.server.api.bootstrap import (
+    ensure_default_account,
+    register_default_plugins,
+)
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
-from kitaru.server.application.services.account_service import AccountService
-from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -237,15 +241,17 @@ def create_app(settings: APISettings) -> FastAPI:
         # is no local default account to fall back on.
         if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
             async for session in database.get_async_session():
-                account_service = AccountService(
-                    repository=SQLAccountRepository(session),
-                    password_hasher=BcryptPasswordHasher(),
-                    permission_service=PermissionService(AdminFlagPermissionProvider()),
-                )
-                await account_service.ensure_account(
-                    settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
+                await ensure_default_account(
+                    SQLAccountRepository(session),
+                    settings.DEFAULT_ACCOUNT_NAME,
+                    settings.DEFAULT_ACCOUNT_PASSWORD,
                 )
                 await session.commit()
+        async for session in database.get_async_session():
+            await register_default_plugins(
+                SQLPluginRepository(session), SQLBlobRepository(session)
+            )
+            await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield

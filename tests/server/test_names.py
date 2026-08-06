@@ -21,6 +21,7 @@ from kitaru.server.domain.names import (
     validate_account_name,
     validate_evaluation_name,
     validate_name,
+    validate_plugin_name,
     validate_version_name,
 )
 
@@ -121,3 +122,41 @@ def test_invalid_version_names_rejected(name: str) -> None:
     """Reject names that are empty, boundary separated, or outside the set."""
     with pytest.raises(InvalidName):
         validate_version_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["accuracy", "accuracy-v2", "kitaru/langfuse"],
+)
+def test_valid_plugin_names_pass(name: str) -> None:
+    """Accept ordinary names and names under the reserved default-plugin prefix."""
+    assert validate_plugin_name(name) == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "foo/bar",
+        "kitaru/foo/bar",
+        "kitaru/",
+        "Kitaru/foo",
+        "a b",
+        "a.b",
+        "a:b",
+        "a@b",
+        "ä",
+    ],
+)
+def test_invalid_plugin_names_rejected(name: str) -> None:
+    """Reject names outside the default set and misuses of the reserved prefix."""
+    with pytest.raises(InvalidName):
+        validate_plugin_name(name)
+
+
+def test_plugin_name_length_limit() -> None:
+    """Reject a reserved-prefix name whose remainder exceeds the maximum length."""
+    assert validate_plugin_name("kitaru/" + "a" * 248)
+    with pytest.raises(InvalidName):
+        validate_plugin_name("kitaru/" + "a" * 249)
+    with pytest.raises(InvalidName):
+        validate_plugin_name("abc", max_length=2)
