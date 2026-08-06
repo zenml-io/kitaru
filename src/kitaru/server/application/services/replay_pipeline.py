@@ -31,7 +31,6 @@ from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.job_service import add_tasks
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig, effective_inputs
@@ -129,21 +128,21 @@ async def append_result_evaluations(
     event: TaskTerminal,
     replay_repository: ReplayRepository,
     experiment_repository: ExperimentRepository,
-    job_repository: JobRepository,
     task_repository: TaskRepository,
 ) -> None:
     """Append the replay's result evaluator tasks when its agent task completes.
 
     A no-op when the terminal task is not an agent task, did not complete, or
-    does not belong to a replay's job. The evaluator tasks are built before
-    the job row is locked, so the lock only spans the settled check and the
-    inserts it guards.
+    does not belong to a replay's job. Inserts the evaluator tasks without
+    locking the job row. The completing task's own transition settles the
+    job afterward, in the same transaction, and its drained scan reads every
+    task including these, so the job can never be judged drained before they
+    exist.
 
     Args:
         event: TaskTerminal event.
         replay_repository: Replay repository.
         experiment_repository: Experiment repository, for the replay config.
-        job_repository: Job repository.
         task_repository: Task repository.
     """
     task = event.task
@@ -165,7 +164,7 @@ async def append_result_evaluations(
         for evaluator in config.evaluators
     ]
     if evaluator_tasks:
-        await add_tasks(evaluator_tasks, job_repository, task_repository)
+        await task_repository.create_many(evaluator_tasks)
     replay.start_evaluating()
     await replay_repository.update(replay)
 
