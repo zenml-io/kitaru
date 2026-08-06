@@ -54,7 +54,6 @@ SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session_node", ["session_id", "external_id"]
 )
 SESSION_NODE_SESSION_ID_FOREIGN_KEY = foreign_key_name("session_node", ["session_id"])
-SESSION_NODE_PARENT_ID_FOREIGN_KEY = foreign_key_name("session_node", ["parent_id"])
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
 
 NODE_TYPE_LENGTH = 32
@@ -83,12 +82,6 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_NODE_SESSION_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
-        ForeignKeyConstraint(
-            ["parent_id"],
-            ["session_node.id"],
-            name=SESSION_NODE_PARENT_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
-        ),
         Index(
             SESSION_NODE_CACHE_KEY_INDEX,
             "cache_key",
@@ -97,6 +90,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     session_id: Mapped[uuid.UUID]
+    # Validated at ingestion to reference a node of the same session, which
+    # a foreign key cannot express.
     parent_id: Mapped[uuid.UUID | None]
     secondary_parent_ids: Mapped[list[str]] = mapped_column(JSONB)
     index: Mapped[int]

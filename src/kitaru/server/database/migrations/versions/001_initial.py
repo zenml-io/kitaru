@@ -536,7 +536,10 @@ def upgrade() -> None:
     )
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.create_index(
-            "ix_session_agent_id_started_at", ["agent_id", "started_at"], unique=False
+            "ix_session_agent_id_id", ["agent_id", "id"], unique=False
+        )
+        batch_op.create_index(
+            "ix_session_agent_version_id_id", ["agent_version_id", "id"], unique=False
         )
         batch_op.create_index("ix_session_owner_id", ["owner_id"], unique=False)
         batch_op.create_index("ix_session_status", ["status"], unique=False)
@@ -567,6 +570,13 @@ def upgrade() -> None:
             name="uq_cohort_version_session_cohort_version_id_index",
         ),
     )
+    with op.batch_alter_table("cohort_version_session", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_cohort_version_session_session_id_cohort_version_id",
+            ["session_id", "cohort_version_id"],
+            unique=False,
+        )
+
     op.create_table(
         "replay",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
@@ -673,12 +683,6 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["parent_id"],
-            ["session_node.id"],
-            name="fk_session_node_parent_id",
-            ondelete="CASCADE",
-        ),
         sa.ForeignKeyConstraint(
             ["session_id"],
             ["session.id"],
@@ -793,6 +797,9 @@ def upgrade() -> None:
             unique=False,
             postgresql_using="gin",
             postgresql_where=sa.text("status = 'pending'"),
+        )
+        batch_op.create_index(
+            "ix_task_result_session_id", ["result_session_id"], unique=False
         )
 
     with op.batch_alter_table("session", schema=None) as batch_op:
@@ -1001,6 +1008,7 @@ def downgrade() -> None:
 
     op.drop_table("evaluation")
     with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.drop_index("ix_task_result_session_id")
         batch_op.drop_index(
             "ix_task_labels",
             postgresql_using="gin",
@@ -1029,12 +1037,16 @@ def downgrade() -> None:
         batch_op.drop_index("ix_replay_baseline_session_id")
 
     op.drop_table("replay")
+    with op.batch_alter_table("cohort_version_session", schema=None) as batch_op:
+        batch_op.drop_index("ix_cohort_version_session_session_id_cohort_version_id")
+
     op.drop_table("cohort_version_session")
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.drop_index("ix_session_task_id")
         batch_op.drop_index("ix_session_status")
         batch_op.drop_index("ix_session_owner_id")
-        batch_op.drop_index("ix_session_agent_id_started_at")
+        batch_op.drop_index("ix_session_agent_version_id_id")
+        batch_op.drop_index("ix_session_agent_id_id")
 
     op.drop_table("session")
     with op.batch_alter_table("experiment_run", schema=None) as batch_op:

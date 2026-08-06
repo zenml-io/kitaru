@@ -51,7 +51,8 @@ SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
 SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
-SESSION_AGENT_ID_STARTED_AT_INDEX = index_name("session", ["agent_id", "started_at"])
+SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
+SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
 SESSION_TASK_ID_INDEX = index_name("session", ["task_id"])
 SESSION_OWNER_ID_INDEX = index_name("session", ["owner_id"])
@@ -90,7 +91,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="SET NULL",
             use_alter=True,
         ),
-        Index(SESSION_AGENT_ID_STARTED_AT_INDEX, "agent_id", "started_at"),
+        Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
+        Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
         Index(SESSION_STATUS_INDEX, "status"),
         Index(SESSION_TASK_ID_INDEX, "task_id"),
         Index(SESSION_OWNER_ID_INDEX, "owner_id"),
