@@ -208,6 +208,24 @@ def test_extracts_prompt_fields_from_provider_message_shapes() -> None:
     assert node.input_text == "Where is my order?"
 
 
+def test_extracts_nested_system_instruction() -> None:
+    """Surface provider instructions nested inside request configuration."""
+    node = _node("model request").model_copy(
+        update={
+            "inputs": {
+                "config": {"system_instruction": "Answer from the handbook."},
+                "contents": [{"role": "user", "parts": [{"text": "Refunds?"}]}],
+            }
+        }
+    )
+
+    system_prompt = populate_node_display_fields([node])
+
+    assert system_prompt == "Answer from the handbook."
+    assert node.system_prompt == "Answer from the handbook."
+    assert node.input_text == "Refunds?"
+
+
 def test_extracts_output_and_visible_reasoning() -> None:
     """Surface assistant output and visible reasoning while ignoring ciphertext."""
     value = {

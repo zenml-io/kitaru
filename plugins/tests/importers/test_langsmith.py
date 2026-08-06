@@ -340,6 +340,25 @@ def test_parses_query_envelope_and_json_encoded_payloads() -> None:
     assert session.outputs == {"answer": "hi"}
 
 
+def test_uses_terminal_child_output_when_root_has_none() -> None:
+    """Surface a model result when the trace wrapper omits its output."""
+    [session] = sessions(
+        jsonl(
+            run("root", "trace", inputs={"message": "hello"}),
+            run(
+                "model",
+                "trace",
+                parent_run_id="root",
+                run_type="llm",
+                inputs={"messages": [{"role": "user", "content": "hello"}]},
+                outputs={"role": "assistant", "content": "hi"},
+            ),
+        )
+    )
+
+    assert session.outputs == {"role": "assistant", "content": "hi"}
+
+
 def test_node_order_is_stable_for_out_of_order_rows() -> None:
     """Produce the same node order regardless of export row order."""
     root = run("root", "trace", inputs="hello")

@@ -345,6 +345,50 @@ def test_maps_otel_conversation_model_provider_and_cost() -> None:
     assert node.tokens.input_tokens == 5
 
 
+def test_maps_openinference_chain_and_tool_spans() -> None:
+    """Keep LangGraph wrappers as spans and surface explicit tool payloads."""
+    wrapper = event(
+        event_id="event-wrapper",
+        span_id="wrapper",
+        root_span_id="wrapper",
+        name="tools",
+        span_type="llm",
+        parents=[],
+        input_={"message": "look up order 42"},
+        output=None,
+        start=1_785_000_000.0,
+        metadata={"openinference.span.kind": "CHAIN", "framework": "langgraph"},
+    )
+    tool = event(
+        event_id="event-tool",
+        span_id="tool",
+        root_span_id="wrapper",
+        name="tool wrapper",
+        span_type="task",
+        parents=["wrapper"],
+        input_=None,
+        output=None,
+        start=1_785_000_000.1,
+        metadata={
+            "openinference.span.kind": "TOOL",
+            "tool.name": "lookup_order",
+            "input.value": '{"order_id":"42"}',
+            "output.value": '{"status":"shipped"}',
+        },
+    )
+
+    session = sessions(json.dumps({"events": [wrapper, tool]}).encode())[0]
+    nodes = {node.external_id: node for node in flatten(session.nodes)}
+
+    assert session.framework == "langgraph"
+    assert session.outputs == {"status": "shipped"}
+    assert nodes["wrapper:wrapper"].node_type is NodeType.SPAN
+    assert nodes["wrapper:tool"].node_type is NodeType.TOOL_CALL
+    assert nodes["wrapper:tool"].tool_name == "lookup_order"
+    assert nodes["wrapper:tool"].inputs == {"order_id": "42"}
+    assert nodes["wrapper:tool"].outputs == {"status": "shipped"}
+
+
 def test_recovered_tool_failure_does_not_fail_session() -> None:
     """Use the root run outcome after a retry succeeds."""
     root = event(

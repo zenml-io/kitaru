@@ -261,11 +261,25 @@ def _extract_system_prompt(value: Any) -> str | None:
     messages = _message_texts(value, "system")
     if messages:
         return messages[-1]
-    if isinstance(value, dict):
+    found: list[str] = []
+
+    def _collect(item: Any, depth: int = 0) -> None:
+        if depth > 12:
+            return
+        if isinstance(item, list):
+            for child in item:
+                _collect(child, depth + 1)
+            return
+        if not isinstance(item, dict):
+            return
         for key in ("system_prompt", "system_instruction", "instructions"):
-            if key in value and (text := _content_text(value[key])):
-                return text
-    return None
+            if key in item and (text := _content_text(item[key], depth + 1)):
+                found.append(text)
+        for child in item.values():
+            _collect(child, depth + 1)
+
+    _collect(value)
+    return found[-1] if found else None
 
 
 def _extract_reasoning(value: Any) -> str | None:

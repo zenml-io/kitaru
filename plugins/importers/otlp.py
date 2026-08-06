@@ -44,10 +44,10 @@ MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 _TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
 _SPAN_ID = re.compile(r"^[0-9a-fA-F]{16}$")
 _CONVERSATION_KEYS = (
-    "gen_ai.conversation.id",
     "session.id",
     "conversation.id",
     "messaging.message.conversation_id",
+    "gen_ai.conversation.id",
 )
 _INPUT_KEYS = (
     "gen_ai.input.messages",
@@ -58,6 +58,8 @@ _INPUT_KEYS = (
     "input",
     "agent.input",
     "pydantic_ai.all_messages",
+    "raw_input",
+    "gcp.vertex.agent.llm_request",
 )
 _OUTPUT_KEYS = (
     "gen_ai.output.messages",
@@ -68,16 +70,20 @@ _OUTPUT_KEYS = (
     "output",
     "agent.output",
     "final_result",
+    "response",
+    "gcp.vertex.agent.llm_response",
 )
 _TOOL_INPUT_KEYS = (
     "gen_ai.tool.call.arguments",
     "tool.call.arguments",
     "tool.arguments",
+    "gcp.vertex.agent.tool_call_args",
 )
 _TOOL_OUTPUT_KEYS = (
     "gen_ai.tool.call.result",
     "tool.call.result",
     "tool.result",
+    "gcp.vertex.agent.tool_response",
 )
 _METADATA_KEYS = {
     "deployment.environment",
@@ -103,10 +109,8 @@ _METADATA_KEYS = {
 }
 _LLM_OPERATIONS = {
     "chat",
-    "create_agent",
     "embeddings",
     "generate_content",
-    "invoke_agent",
     "text_completion",
 }
 
@@ -198,7 +202,7 @@ def _decode_any_value(value: Any) -> Any:
         "bytesValue",
         "bytes_value",
     ):
-        if key in value:
+        if key in value and value[key] is not None:
             decoded = value[key]
             if key in {"intValue", "int_value"}:
                 try:
@@ -311,6 +315,21 @@ def _parse_requests(content: bytes) -> list[dict[str, Any]]:
             raise InvalidImport("OTLP JSON must contain an object or object array")
     if not requests:
         raise InvalidImport("OTLP import contains no JSON records")
+    envelope_types = {str(request.get("type") or "") for request in requests}
+    if envelope_types and envelope_types <= {"schema", "data", "end"}:
+        rows: list[dict[str, Any]] = []
+        for request in requests:
+            if request.get("type") != "data":
+                continue
+            data_rows = request.get("rows")
+            if not isinstance(data_rows, list) or not all(
+                isinstance(row, dict) for row in data_rows
+            ):
+                raise InvalidImport("Logfire data records must contain object rows")
+            rows.extend(data_rows)
+        if not rows:
+            raise InvalidImport("Logfire query export contains no span rows")
+        return rows
     return requests
 
 
@@ -620,6 +639,15 @@ def _content(record: _SpanRecord, keys: tuple[str, ...]) -> Any:
     return None
 
 
+def _node_inputs(record: _SpanRecord, keys: tuple[str, ...]) -> Any:
+    """Return node inputs with separately recorded system instructions."""
+    inputs = _content(record, keys)
+    system_prompt = _content(record, ("gen_ai.system_instructions",))
+    if system_prompt is None:
+        return inputs
+    return {"messages": inputs, "system_instruction": system_prompt}
+
+
 def _source_instance(record: _SpanRecord, params: dict[str, Any]) -> tuple[str, bool]:
     """Resolve a source instance and whether a fallback was needed."""
     selected_source = params.get("source_instance")
@@ -644,6 +672,11 @@ def _node_type(record: _SpanRecord) -> tuple[NodeType, str | None]:
     operation = str(_attribute(record, "gen_ai.operation.name") or "").lower()
     tool_name_value = _attribute(record, "gen_ai.tool.name", "tool.name")
     tool_name = str(tool_name_value) if tool_name_value else None
+    if record.name.startswith("Function:") and not tool_name:
+        value = _attribute(record, "name")
+        tool_name = (
+            str(value) if value else record.name.removeprefix("Function:").strip()
+        )
     if operation == "execute_tool" or tool_name:
         return NodeType.TOOL_CALL, tool_name
     if operation in _LLM_OPERATIONS or _attribute(
@@ -651,7 +684,6 @@ def _node_type(record: _SpanRecord) -> tuple[NodeType, str | None]:
         "gen_ai.request.model",
         "gen_ai.response.model",
         "gen_ai.provider.name",
-        "gen_ai.system",
     ):
         return NodeType.LLM_CALL, None
     return NodeType.SPAN, None
@@ -804,6 +836,7 @@ def _parse_session(
     traces: list[tuple[str, list[_SpanRecord]]],
     source_instance: str,
     fallback_source: bool,
+    file_framework: str | None,
 ) -> ParsedSession:
     """Parse one conversation or trace-derived session."""
     warnings: list[str] = []
@@ -873,7 +906,7 @@ def _parse_session(
                         error=_error(record) if status is NodeStatus.FAILED else None,
                         started_at=record.start_time,
                         ended_at=record.end_time,
-                        inputs=_content(record, input_keys),
+                        inputs=_node_inputs(record, input_keys),
                         outputs=_content(record, output_keys),
                         requested_model=(
                             str(value)
@@ -971,15 +1004,18 @@ def _parse_session(
         **metadata_values,
         "normalization_warnings": warnings,
     }
-    framework = detect_framework(
-        [
-            {
-                "attributes": record.attributes,
-                "resource_attributes": record.resource_attributes,
-                "scope_name": record.scope_name,
-            }
-            for record in all_records
-        ]
+    framework = (
+        detect_framework(
+            [
+                {
+                    "attributes": record.attributes,
+                    "resource_attributes": record.resource_attributes,
+                    "scope_name": record.scope_name,
+                }
+                for record in all_records
+            ]
+        )
+        or file_framework
     )
     return ParsedSession(
         external_id=f"{source_instance}:{source_id}",
@@ -987,7 +1023,14 @@ def _parse_session(
         status=session_status,
         system_prompt=system_prompt,
         inputs=inputs,
-        outputs=latest_turn.outputs,
+        outputs=(
+            latest_turn.outputs
+            if latest_turn.outputs is not None
+            else next(
+                (node.outputs for node in reversed(nodes) if node.outputs is not None),
+                None,
+            )
+        ),
         error=session_error,
         started_at=min(
             (turn.started_at for turn in turns if turn.started_at), default=None
@@ -1033,17 +1076,32 @@ class OTLPJSONImporter:
                 )
             )
 
+        file_framework = detect_framework(
+            [
+                {
+                    "attributes": record.attributes,
+                    "resource_attributes": record.resource_attributes,
+                    "scope_name": record.scope_name,
+                }
+                for records in traces.values()
+                for record in records
+            ]
+        )
+
         grouped: dict[tuple[str, str], list[tuple[str, list[_SpanRecord]]]] = (
             defaultdict(list)
         )
         fallback_sources: dict[tuple[str, str], bool] = {}
         for trace_id, records in traces.items():
-            conversation_ids = {
-                str(value)
-                for record in records
-                for key in _CONVERSATION_KEYS
-                if (value := _attribute(record, key)) not in (None, "")
-            }
+            conversation_ids: set[str] = set()
+            for conversation_key in _CONVERSATION_KEYS:
+                conversation_ids = {
+                    str(value)
+                    for record in records
+                    if (value := _attribute(record, conversation_key)) not in (None, "")
+                }
+                if conversation_ids:
+                    break
             if len(conversation_ids) > 1:
                 errors.append(
                     ImportFailure(
@@ -1077,6 +1135,7 @@ class OTLPJSONImporter:
                         grouped_traces,
                         source_instance,
                         fallback_sources[(source_instance, source_id)],
+                        file_framework,
                     )
                 )
             except InvalidImport as exc:

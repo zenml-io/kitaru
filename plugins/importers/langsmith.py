@@ -423,6 +423,17 @@ class LangSmithRunImporter:
     ) -> list[ParsedSession | ImportFailure]:
         """Parse one LangSmith JSON or JSONL payload."""
         records = _parse_records(content)
+        file_framework = detect_framework(
+            [
+                {
+                    "extra": record.get("extra"),
+                    "name": record.get("name"),
+                    "run_type": record.get("run_type"),
+                    "tags": record.get("tags"),
+                }
+                for record in records
+            ]
+        )
         trace_records: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         failures: list[ImportFailure] = []
         for line, record in enumerate(records, start=1):
@@ -480,6 +491,7 @@ class LangSmithRunImporter:
                         traces,
                         join_paths=join_paths[key],
                         trace_fallback=key in fallback_groups,
+                        file_framework=file_framework,
                     )
                 )
             except InvalidImport as exc:
@@ -522,6 +534,7 @@ class LangSmithRunImporter:
         *,
         join_paths: set[str],
         trace_fallback: bool,
+        file_framework: str | None,
     ) -> ParsedSession:
         """Normalize one grouped LangSmith session."""
         warnings: list[str] = []
@@ -684,17 +697,20 @@ class LangSmithRunImporter:
             "source_completeness": "full" if graph_complete else "partial",
             "normalization_warnings": warnings,
         }
-        framework = detect_framework(
-            [
-                {
-                    "extra": record.get("extra"),
-                    "name": record.get("name"),
-                    "run_type": record.get("run_type"),
-                    "tags": record.get("tags"),
-                }
-                for _, rows in traces
-                for record in rows
-            ]
+        framework = (
+            detect_framework(
+                [
+                    {
+                        "extra": record.get("extra"),
+                        "name": record.get("name"),
+                        "run_type": record.get("run_type"),
+                        "tags": record.get("tags"),
+                    }
+                    for _, rows in traces
+                    for record in rows
+                ]
+            )
+            or file_framework
         )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
@@ -702,7 +718,18 @@ class LangSmithRunImporter:
             status=session_status,
             system_prompt=system_prompt,
             inputs=inputs,
-            outputs=latest_turn.outputs,
+            outputs=(
+                latest_turn.outputs
+                if latest_turn.outputs is not None
+                else next(
+                    (
+                        node.outputs
+                        for node in reversed(nodes)
+                        if node.outputs is not None
+                    ),
+                    None,
+                )
+            ),
             error=session_error,
             started_at=min(
                 (turn.started_at for turn in turns if turn.started_at), default=None
