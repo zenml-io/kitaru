@@ -41,6 +41,9 @@ from kitaru.server.adapters.db.repositories.agent_repository import (
 from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
+from kitaru.server.adapters.db.repositories.annotation_repository import (
+    SQLAnnotationRepository,
+)
 from kitaru.server.adapters.db.repositories.api_key_repository import (
     SQLApiKeyRepository,
 )
@@ -62,6 +65,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 )
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
+)
+from kitaru.server.adapters.db.repositories.investigation_repository import (
+    SQLInvestigationRepository,
 )
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
@@ -103,6 +109,7 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
+from kitaru.server.application.services.annotation_service import AnnotationService
 from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.cohort_service import CohortService
@@ -115,6 +122,9 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
+from kitaru.server.application.services.investigation_service import (
+    InvestigationService,
+)
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.application.services.plugin_service import PluginService
@@ -647,6 +657,43 @@ def get_evaluation_service(
     return EvaluationService(
         repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_investigation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> InvestigationService:
+    """Return an investigation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Investigation service bound to the SQL repositories.
+    """
+    return InvestigationService(
+        repository=SQLInvestigationRepository(session),
+        agent_repository=SQLAgentRepository(session),
+        session_repository=SQLSessionRepository(session),
+    )
+
+
+def get_annotation_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AnnotationService:
+    """Return an annotation service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Annotation service bound to the SQL repositories.
+    """
+    return AnnotationService(
+        repository=SQLAnnotationRepository(session),
+        investigation_repository=SQLInvestigationRepository(session),
+        session_repository=SQLSessionRepository(session),
+        session_node_repository=SQLSessionNodeRepository(session),
     )
 
 
