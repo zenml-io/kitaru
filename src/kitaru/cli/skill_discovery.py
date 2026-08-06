@@ -310,7 +310,7 @@ def _get_claude_plugin_installations(
         return [], checked
     try:
         registry_data = json.loads(document)
-    except json.JSONDecodeError:
+    except (ValueError, RecursionError):
         return [], checked
     if not isinstance(registry_data, dict):
         return [], checked

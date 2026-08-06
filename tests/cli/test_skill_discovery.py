@@ -302,6 +302,25 @@ def test_discovery_finds_user_scoped_claude_marketplace_skills(
     ]
 
 
+def test_discovery_ignores_resource_pathological_claude_registry(
+    tmp_path: Path,
+) -> None:
+    """Bounded JSON parser failures cannot abort skill discovery."""
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    registry = home / ".claude" / "plugins" / "installed_plugins.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        '{"plugins":' + "1" * 5_000 + "}",
+        encoding="utf-8",
+    )
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
 def test_discovery_ignores_claude_plugin_scoped_to_another_project(
     tmp_path: Path,
 ) -> None:
