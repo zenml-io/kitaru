@@ -450,6 +450,45 @@ def test_machine_text_ignores_human_view_metadata() -> None:
     assert stdout == json.dumps(item, sort_keys=True) + "\n"
 
 
+def test_machine_text_renders_links_and_next_actions_after_the_item() -> None:
+    """Plain text retains the rich footer's stable link and action labels."""
+    stdout, _ = _render_text(
+        "session.get",
+        CommandResult(
+            item={"id": "019f0000-1111-7222-8333-444444444444"},
+            links={"skills": "https://kitaru.ai/skills"},
+            next_actions=["kitaru session list"],
+        ),
+        rich=False,
+    )
+
+    assert stdout.splitlines() == [
+        "id: 019f0000-1111-7222-8333-444444444444",
+        "skills: https://kitaru.ai/skills",
+        "Next: kitaru session list",
+    ]
+
+
+def test_root_rich_text_escapes_disk_derived_skill_names() -> None:
+    """Detected skill names cannot inject terminal control sequences."""
+    stdout, _ = _render_text(
+        "kitaru",
+        CommandResult(
+            item={
+                "skills": {
+                    "installed": True,
+                    "skills": ["kitaru-safe\x1b[999Dname"],
+                }
+            }
+        ),
+        rich=True,
+        strip_ansi=False,
+    )
+
+    assert "\x1b[999D" not in stdout
+    assert "kitaru-safe\\u001b[999Dname" in stdout
+
+
 def test_human_error_uses_a_clear_headline_and_recovery_hint() -> None:
     """Interactive errors separate the failure kind, cause, and next step."""
     stdout = io.StringIO()

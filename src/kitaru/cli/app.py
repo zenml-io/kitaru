@@ -79,6 +79,11 @@ from kitaru.cli.schema import (
     is_offline,
     register_spec,
 )
+from kitaru.cli.skill_discovery import (
+    INSTALL_COMMAND,
+    SKILLS_URL,
+    get_kitaru_skill_status,
+)
 from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
@@ -336,6 +341,15 @@ async def _launch(
             exception=error,
         )
     if command == app.help_print:
+        if not tokens:
+            return _emit_root_result(
+                command,
+                bound,
+                output=output,
+                machine=bool(machine),
+                debug=debug,
+                traceback=traceback,
+            )
         with suppress(BrokenPipeError):
             command(*bound.args, **bound.kwargs)
         return 0
@@ -411,6 +425,53 @@ async def _launch(
         )
     finally:
         _INVOCATION.reset(invocation_token)
+        reset_output_context(output_token)
+
+
+def _emit_root_result(
+    help_command: Callable[..., Any],
+    bound: Any,
+    *,
+    output: OutputMode,
+    machine: bool,
+    debug: bool,
+    traceback: bool,
+) -> int:
+    """Render bare root help with agent-skill onboarding."""
+    try:
+        mode = resolve_output_mode(output, is_tty=sys.stdout.isatty())
+    except CLIError as error:
+        return _emit_early_error(
+            error,
+            tokens=(),
+            output=output,
+            machine=machine,
+            non_interactive=False,
+            debug=debug,
+            traceback=traceback,
+        )
+    machine = machine or mode != "text" or not sys.stdout.isatty()
+    context = OutputContext(
+        command="kitaru",
+        mode=mode,
+        debug=debug,
+        traceback=traceback or debug,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        rich=mode == "text" and sys.stdout.isatty() and not machine,
+    )
+    output_token = set_output_context(context)
+    try:
+        if mode == "text":
+            help_command(*bound.args, **bound.kwargs)
+        return emit_result(
+            CommandResult(
+                item={"skills": get_kitaru_skill_status()},
+                links={"skills": SKILLS_URL},
+                next_actions=[INSTALL_COMMAND],
+            )
+        )
+    finally:
         reset_output_context(output_token)
 
 
