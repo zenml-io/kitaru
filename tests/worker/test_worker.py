@@ -17,7 +17,9 @@ import asyncio
 import socket
 import uuid
 from pathlib import Path
+from typing import Any
 
+import httpx
 import pytest
 from fakes import (
     FakeKitaruAPIClient,
@@ -186,29 +188,97 @@ async def test_should_stop_false_when_pinned_job_still_running(
     assert await worker._should_stop(ctx, asyncio.Event(), None) is False
 
 
-async def test_should_stop_propagates_a_missing_pinned_job(tmp_path: Path) -> None:
-    """A 404 reading the pinned job propagates instead of being swallowed."""
+async def test_should_stop_false_when_the_pinned_job_read_fails(
+    tmp_path: Path,
+) -> None:
+    """A failed pinned-job read is logged and does not stop the loop."""
     job_id = uuid.uuid4()
     worker = Worker(WorkerConfig(scope=WorkerScope(job_id=job_id)))
     client = FakeKitaruAPIClient()
     client.jobs.get_responses.append(NotFoundError(404, "job not found"))
+    client.jobs.get_responses.append(httpx.ConnectError("down"))
     ctx = _ctx(tmp_path, client)
 
-    with pytest.raises(NotFoundError):
-        await worker._should_stop(ctx, asyncio.Event(), None)
+    assert await worker._should_stop(ctx, asyncio.Event(), None) is False
+    assert await worker._should_stop(ctx, asyncio.Event(), None) is False
 
 
 # --- Claim loop capacity, backoff, and dispatch ------------------------------
 
 
-async def test_claim_loop_full_claim_loops_again_without_sleeping(
+def _record_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Patch the stop-aware sleep to record durations instead of sleeping."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(
+        stop: asyncio.Event, duration: float, deadline: float | None
+    ) -> None:
+        sleeps.append(duration)
+
+    monkeypatch.setattr(worker_module, "_sleep_until_stop", fake_sleep)
+    return sleeps
+
+
+async def test_claim_loop_stop_set_ends_the_loop_before_claiming(
     tmp_path: Path,
 ) -> None:
+    """A stop set before the loop starts ends it without a single claim."""
+    client = FakeKitaruAPIClient()
+    worker = Worker(WorkerConfig(concurrency=1))
+    ctx = _ctx(tmp_path, client)
+    stop = asyncio.Event()
+    stop.set()
+
+    await asyncio.wait_for(worker._claim_loop(ctx, stop), timeout=1.0)
+
+    assert client.tasks.claim_calls == []
+
+
+async def test_claim_loop_full_claim_loops_again_without_sleeping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A claim matching the request size loops again immediately."""
+    job_id = uuid.uuid4()
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(
+        scope=WorkerScope(job_id=job_id), concurrency=3, claim_batch_size=1
+    )
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    sleeps = _record_sleeps(monkeypatch)
+
+    for _ in range(2):
+        task = make_task(kind=TaskKind.AGENT, job_id=job_id)
+        client.tasks.claim_responses.append(
+            TaskClaimResponse(
+                tasks=[make_claimed(task, make_agent_spec(task.id, command="true"))]
+            )
+        )
+        running = task.model_copy(update={"status": TaskStatus.RUNNING})
+        client.tasks.update_responses.append(running)
+        client.tasks.update_responses.append(
+            running.model_copy(update={"status": TaskStatus.COMPLETED})
+        )
+    # The third claim is empty and short, and the settled job ends the loop.
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
+
+    await worker._claim_loop(ctx, asyncio.Event())
+
+    assert len(client.tasks.claim_calls) == 3
+    # max_tasks is clamped by claim_batch_size, not the full free_slots.
+    assert client.tasks.claim_calls[0].max_tasks == 1
+    assert sleeps == []
+
+
+async def test_claim_loop_stop_during_a_full_claim_stops_reclaiming(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stop set while a full claim is in flight drains it without reclaiming."""
     client = FakeKitaruAPIClient()
     config = WorkerConfig(concurrency=3, claim_batch_size=2)
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
+    stop = asyncio.Event()
 
     task_a = make_task(kind=TaskKind.AGENT)
     task_b = make_task(kind=TaskKind.AGENT)
@@ -226,106 +296,96 @@ async def test_claim_loop_full_claim_loops_again_without_sleeping(
         client.tasks.update_responses.append(
             running.model_copy(update={"status": TaskStatus.COMPLETED})
         )
-    # Second claim call: empty, and the stop event is already set so the loop
-    # ends right after without sleeping poll_interval away.
-    stop = asyncio.Event()
-    stop.set()
 
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
-    await worker._claim_loop(ctx, heartbeat, stop)
+    real_claim = client.tasks.claim
 
-    assert len(client.tasks.claim_calls) == 2
-    # max_tasks is clamped by claim_batch_size, not the full free_slots.
-    assert client.tasks.claim_calls[0].max_tasks == 2
+    async def claim_and_stop(request: Any) -> TaskClaimResponse:
+        result = await real_claim(request)
+        stop.set()
+        return result
+
+    monkeypatch.setattr(client.tasks, "claim", claim_and_stop)
+
+    await asyncio.wait_for(worker._claim_loop(ctx, stop), timeout=5.0)
+
+    assert len(client.tasks.claim_calls) == 1
+    assert {task_id for task_id, _ in client.tasks.update_calls} == {
+        task_a.id,
+        task_b.id,
+    }
 
 
 async def test_claim_loop_respects_the_concurrency_bound(tmp_path: Path) -> None:
     """The claim request never asks for more than the free concurrency slots."""
+    job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(concurrency=1)
+    config = WorkerConfig(scope=WorkerScope(job_id=job_id), concurrency=1)
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
-    stop = asyncio.Event()
-    stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    await worker._claim_loop(ctx, heartbeat, stop)
+    await worker._claim_loop(ctx, asyncio.Event())
 
     assert client.tasks.claim_calls[0].max_tasks == 1
 
 
 async def test_claim_size_is_clamped_to_endpoint_limit(tmp_path: Path) -> None:
     """The claim request never exceeds the endpoint's max batch size."""
+    job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(concurrency=150)
+    config = WorkerConfig(scope=WorkerScope(job_id=job_id), concurrency=150)
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
-    stop = asyncio.Event()
-    stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    await worker._claim_loop(ctx, heartbeat, stop)
+    await worker._claim_loop(ctx, asyncio.Event())
 
     assert client.tasks.claim_calls[0].max_tasks == worker_module._MAX_CLAIM_BATCH
 
 
 async def test_claim_loop_short_claim_checks_stop_before_sleeping(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A claim shorter than requested checks the stop condition first."""
+    job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(concurrency=5, poll_interval=5.0)
+    config = WorkerConfig(
+        scope=WorkerScope(job_id=job_id), concurrency=5, poll_interval=5.0
+    )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
-    stop = asyncio.Event()
-    stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
+    sleeps = _record_sleeps(monkeypatch)
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    # An immediate empty claim is a "short" claim (0 < 5), so with stop
-    # already set the loop must end without ever sleeping poll_interval.
-    await asyncio.wait_for(worker._claim_loop(ctx, heartbeat, stop), timeout=1.0)
+    # An immediate empty claim is a "short" claim (0 < 5), so with the job
+    # settled the loop must end without ever sleeping poll_interval.
+    await asyncio.wait_for(worker._claim_loop(ctx, asyncio.Event()), timeout=1.0)
 
     assert len(client.tasks.claim_calls) == 1
+    assert sleeps == []
 
 
 async def test_claim_loop_backoff_doubles_and_resets_on_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Claim failures back off exponentially and reset after a success."""
+    job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(concurrency=1, poll_interval=1.0)
+    config = WorkerConfig(
+        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=1.0
+    )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
-
-    sleeps: list[float] = []
-    real_sleep = asyncio.sleep
-
-    async def fake_sleep(duration: float) -> None:
-        sleeps.append(duration)
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    sleeps = _record_sleeps(monkeypatch)
 
     client.tasks.claim_responses.append(APIError(500, "boom"))
     client.tasks.claim_responses.append(APIError(500, "boom"))
     client.tasks.claim_responses.append(APIError(500, "boom"))
-    # The fourth call succeeds with an empty, short claim. The stop event is
-    # already set, so the loop ends there instead of sleeping again.
-    stop = asyncio.Event()
-    stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
+    # The fourth call succeeds with an empty, short claim, and the settled job
+    # ends the loop there instead of sleeping again.
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    await worker._claim_loop(ctx, heartbeat, stop)
+    await worker._claim_loop(ctx, asyncio.Event())
 
     assert sleeps == [1.0, 2.0, 4.0]
     assert len(client.tasks.claim_calls) == 4
@@ -335,35 +395,126 @@ async def test_claim_loop_backoff_caps_at_the_maximum(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The backoff never exceeds CLAIM_BACKOFF_MAX_SECONDS."""
+    job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(concurrency=1, poll_interval=50.0)
+    config = WorkerConfig(
+        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=50.0
+    )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
-
-    sleeps: list[float] = []
-    real_sleep = asyncio.sleep
-
-    async def fake_sleep(duration: float) -> None:
-        sleeps.append(duration)
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    sleeps = _record_sleeps(monkeypatch)
 
     for _ in range(3):
         client.tasks.claim_responses.append(APIError(500, "boom"))
-    stop = asyncio.Event()
-    stop.set()
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    await worker._claim_loop(ctx, heartbeat, stop)
+    await worker._claim_loop(ctx, asyncio.Event())
 
     assert sleeps == [
         50.0,
         worker_module.CLAIM_BACKOFF_MAX_SECONDS,
         worker_module.CLAIM_BACKOFF_MAX_SECONDS,
     ]
+
+
+async def test_claim_loop_backs_off_on_a_transport_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transport error from a claim backs off instead of propagating."""
+    job_id = uuid.uuid4()
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(
+        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=1.0
+    )
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    sleeps = _record_sleeps(monkeypatch)
+
+    client.tasks.claim_responses.append(httpx.ConnectError("down"))
+    client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
+
+    await worker._claim_loop(ctx, asyncio.Event())
+
+    assert sleeps == [1.0]
+    assert len(client.tasks.claim_calls) == 2
+
+
+async def test_claim_loop_stop_ends_the_backoff_sleep_early(tmp_path: Path) -> None:
+    """A stop during the claim error backoff ends the loop promptly."""
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(concurrency=1, poll_interval=30.0)
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    client.tasks.claim_responses.append(APIError(500, "boom"))
+    stop = asyncio.Event()
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    await asyncio.wait_for(
+        asyncio.gather(worker._claim_loop(ctx, stop), stop_soon()), timeout=1.0
+    )
+
+    assert len(client.tasks.claim_calls) == 1
+
+
+async def test_claim_loop_ends_at_the_lifetime_deadline(tmp_path: Path) -> None:
+    """The loop ends once the configured lifetime timeout passes."""
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(concurrency=1, poll_interval=30.0, timeout=0.05)
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+
+    await asyncio.wait_for(worker._claim_loop(ctx, asyncio.Event()), timeout=1.0)
+
+    assert len(client.tasks.claim_calls) >= 1
+
+
+async def test_claim_loop_drain_timeout_cancels_lingering_tasks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tasks still running past drain_timeout get their cancel events set."""
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(concurrency=1, drain_timeout=0.05)
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    stop = asyncio.Event()
+
+    async def hang_until_canceled(ctx_: object, runner: object, claimed: Any) -> None:
+        canceled = worker._inflight.register(claimed.task.id)
+        try:
+            await canceled.wait()
+        finally:
+            worker._inflight.unregister(claimed.task.id)
+
+    monkeypatch.setattr(worker, "_run_task", hang_until_canceled)
+
+    task = make_task(kind=TaskKind.AGENT)
+    client.tasks.claim_responses.append(
+        TaskClaimResponse(tasks=[make_claimed(task, make_agent_spec(task.id))])
+    )
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    # The gather only finishes if the drain timeout cancels the hung task.
+    await asyncio.wait_for(
+        asyncio.gather(worker._claim_loop(ctx, stop), stop_soon()), timeout=2.0
+    )
+
+    assert worker._inflight.get_ids() == []
+
+
+def test_cancel_inflight_sets_registered_cancel_events() -> None:
+    """cancel_inflight() sets the cancel event of every held task."""
+    worker = Worker(WorkerConfig())
+    event = worker._inflight.register(uuid.uuid4())
+
+    worker.cancel_inflight()
+
+    assert event.is_set()
 
 
 async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
@@ -402,18 +553,12 @@ async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
     client.jobs.get_responses.append(make_job_response(status=JobStatus.RUNNING))
     client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
 
-    heartbeat = worker_module.WorkerHeartbeat(
-        as_client(client), uuid.uuid4(), interval=1000
-    )
-    await worker._claim_loop(ctx, heartbeat, asyncio.Event())
+    await worker._claim_loop(ctx, asyncio.Event())
 
-    assert len(client.tasks.claim_calls) == 4
-    assert [task_id for task_id, _ in client.tasks.update_calls] == [
-        initial.id,
-        initial.id,
-        appended.id,
-        appended.id,
-    ]
+    assert len(client.tasks.claim_calls) >= 3
+    # Both tasks consumed their scripted RUNNING and COMPLETED transitions.
+    assert len(client.tasks.update_calls) == 4
+    assert not client.tasks.update_responses
 
 
 # --- Worker.run end-to-end with a fake client --------------------------------

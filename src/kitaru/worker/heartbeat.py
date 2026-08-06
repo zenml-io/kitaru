@@ -22,6 +22,7 @@ import httpx
 from kitaru.api_models.v1.worker import WorkerHeartbeatRequest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
+from kitaru.worker.inflight import InflightTasks
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class WorkerHeartbeat:
         self,
         client: KitaruAPIClient,
         worker_id: uuid.UUID,
+        inflight: InflightTasks,
         interval: float = DEFAULT_HEARTBEAT_INTERVAL_SECONDS,
     ) -> None:
         """Initialize the heartbeat.
@@ -42,39 +44,19 @@ class WorkerHeartbeat:
         Args:
             client: API client used to send heartbeats.
             worker_id: Id of the heartbeating worker.
+            inflight: Registry of tasks held by the worker.
             interval: Seconds between heartbeat requests.
         """
         self._client = client
         self._worker_id = worker_id
+        self._inflight = inflight
         self._interval = interval
-        self._registered: dict[uuid.UUID, asyncio.Event] = {}
-
-    def register(self, task_id: uuid.UUID) -> asyncio.Event:
-        """Report a task as held by this worker.
-
-        Args:
-            task_id: Id of the task now held.
-
-        Returns:
-            Event the heartbeat sets when the server requests cancellation.
-        """
-        event = asyncio.Event()
-        self._registered[task_id] = event
-        return event
-
-    def unregister(self, task_id: uuid.UUID) -> None:
-        """Stop reporting a task as held by this worker.
-
-        Args:
-            task_id: Id of the task no longer held.
-        """
-        self._registered.pop(task_id, None)
 
     async def run(self) -> None:
         """Send batched heartbeats on the interval until canceled."""
         while True:
             await asyncio.sleep(self._interval)
-            task_ids = list(self._registered)
+            task_ids = self._inflight.get_ids()
             if not task_ids:
                 continue
             try:
@@ -86,7 +68,5 @@ class WorkerHeartbeat:
                 continue
             logger.debug("Heartbeat sent for %d task(s).", len(task_ids))
             for task_id in response.cancel_task_ids:
-                event = self._registered.get(task_id)
-                if event is not None:
-                    logger.info("Server requested cancellation of task %s.", task_id)
-                    event.set()
+                logger.info("Server requested cancellation of task %s.", task_id)
+                self._inflight.cancel(task_id)
