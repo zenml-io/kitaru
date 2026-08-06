@@ -15,6 +15,7 @@
 
 import json
 import os
+import re
 import stat
 from collections.abc import Sequence
 from pathlib import Path
@@ -57,6 +58,7 @@ _KITARU_SKILL_PREFIX = "kitaru-"
 _MAX_SKILL_DOCUMENT_BYTES = 64 * 1024
 _MAX_CLAUDE_PLUGIN_REGISTRY_BYTES = 4 * 1024 * 1024
 _CLAUDE_PLUGIN_ID = "kitaru@kitaru"
+_SKILL_NAME_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 
 def _get_empty_skill_status() -> KitaruSkillStatus:
@@ -209,17 +211,21 @@ def _get_skill_name(path: Path) -> str | None:
         return None
     try:
         metadata = yaml.safe_load("\n".join(lines[1:closing_line]))
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
         return None
     if not isinstance(metadata, dict):
         return None
     name = metadata.get("name")
     description = metadata.get("description")
-    if not isinstance(name, str) or not name.strip():
+    if (
+        not isinstance(name, str)
+        or len(name) > 64
+        or _SKILL_NAME_PATTERN.fullmatch(name) is None
+    ):
         return None
     if not isinstance(description, str) or not description.strip():
         return None
-    return name.strip()
+    return name
 
 
 def _read_skill_frontmatter(path: Path) -> str | None:

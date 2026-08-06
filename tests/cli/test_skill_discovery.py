@@ -161,6 +161,44 @@ def test_discovery_accepts_large_skill_instruction_bodies(tmp_path: Path) -> Non
     assert status["skills"] == ["kitaru-large-body"]
 
 
+def test_discovery_rejects_recursive_yaml_without_escaping(tmp_path: Path) -> None:
+    """Pathological bounded YAML cannot abort skill discovery."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    nested = "[" * 2_000 + "value" + "]" * 2_000
+    (skill / "SKILL.md").write_text(
+        "---\nname: kitaru-recursive\ndescription: Test skill.\nnested: "
+        + nested
+        + "\n---\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_rejects_skill_names_with_line_breaks(tmp_path: Path) -> None:
+    """Untrusted metadata cannot inject lines into human CLI output."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        '---\nname: "kitaru-real\\n[PASS] credentials"\n'
+        "description: Test skill.\n---\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
 def test_discovery_rejects_symlinked_skill_documents(tmp_path: Path) -> None:
     """Discovery does not follow a skill document outside the scanned tree."""
     project = tmp_path / "project"
