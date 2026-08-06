@@ -3749,11 +3749,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
-        if tokens in (["--help"], ["-h"]):
+        if _is_root_help_invocation(tokens):
             return _emit_root_result(
                 lambda: app.help_print([]),
                 output="text",
-                machine=False,
+                machine="--machine" in tokens,
                 debug=False,
                 traceback=False,
             )
@@ -3924,6 +3924,38 @@ def _extract_output(tokens: Sequence[str]) -> OutputMode:
         if value in {"auto", "text", "json", "jsonl"}:
             return value  # type: ignore[return-value]
     return "auto"
+
+
+def _is_root_help_invocation(tokens: Sequence[str]) -> bool:
+    """Return whether tokens request root help with supported global options."""
+    options_with_values = {"--output", "-o", "--server", "--request-timeout"}
+    boolean_options = {
+        "--machine",
+        "--no-machine",
+        "--non-interactive",
+        "--no-browser",
+        "--debug",
+        "--traceback",
+    }
+    value_prefixes = ("--output=", "-o=", "--server=", "--request-timeout=")
+    help_requested = False
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--help", "-h"}:
+            help_requested = True
+            index += 1
+            continue
+        if token in options_with_values:
+            if index + 1 >= len(tokens):
+                return False
+            index += 2
+            continue
+        if token in boolean_options or token.startswith(value_prefixes):
+            index += 1
+            continue
+        return False
+    return help_requested
 
 
 def _guess_command(tokens: Sequence[str]) -> str:

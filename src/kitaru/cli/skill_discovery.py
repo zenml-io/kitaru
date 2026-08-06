@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Discover Kitaru agent skills in supported project and user locations."""
 
+import json
 import os
 import stat
 from collections.abc import Sequence
@@ -54,6 +55,8 @@ _SKILL_DIRECTORIES: tuple[tuple[SkillHost, Path], ...] = (
 )
 _KITARU_SKILL_PREFIX = "kitaru-"
 _MAX_SKILL_DOCUMENT_BYTES = 64 * 1024
+_MAX_CLAUDE_PLUGIN_REGISTRY_BYTES = 4 * 1024 * 1024
+_CLAUDE_PLUGIN_ID = "kitaru@kitaru"
 
 
 def _get_empty_skill_status() -> KitaruSkillStatus:
@@ -118,13 +121,19 @@ def get_kitaru_skill_status(
                 }
             )
 
+    plugin_installations, plugin_locations = _get_claude_plugin_installations(
+        current, user_home
+    )
+    installations.extend(plugin_installations)
+
     names = sorted({installation["name"] for installation in installations})
     return {
         "installed": bool(names),
         "skill_count": len(names),
         "skills": names,
         "installations": installations,
-        "locations_checked": [str(directory) for _, _, directory in locations],
+        "locations_checked": [str(directory) for _, _, directory in locations]
+        + plugin_locations,
     }
 
 
@@ -181,7 +190,7 @@ def _is_git_root(path: Path) -> bool:
 
 def _get_skill_name(path: Path) -> str | None:
     """Read a valid skill name from bounded YAML frontmatter."""
-    document = _read_skill_document(path)
+    document = _read_regular_text(path, max_bytes=_MAX_SKILL_DOCUMENT_BYTES)
     if document is None:
         return None
     lines = document.splitlines()
@@ -208,8 +217,8 @@ def _get_skill_name(path: Path) -> str | None:
     return name.strip()
 
 
-def _read_skill_document(path: Path) -> str | None:
-    """Read one regular, non-symlinked skill document within a byte limit."""
+def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
+    """Read one regular, non-symlinked UTF-8 file within a byte limit."""
     try:
         if path.is_symlink():
             return None
@@ -221,7 +230,7 @@ def _read_skill_document(path: Path) -> str | None:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 return None
             chunks: list[bytes] = []
-            remaining = _MAX_SKILL_DOCUMENT_BYTES + 1
+            remaining = max_bytes + 1
             while remaining:
                 chunk = os.read(descriptor, min(8192, remaining))
                 if not chunk:
@@ -233,9 +242,95 @@ def _read_skill_document(path: Path) -> str | None:
     except OSError:
         return None
     contents = b"".join(chunks)
-    if len(contents) > _MAX_SKILL_DOCUMENT_BYTES:
+    if len(contents) > max_bytes:
         return None
     try:
         return contents.decode("utf-8")
     except UnicodeError:
         return None
+
+
+def _get_claude_plugin_installations(
+    cwd: Path, home: Path
+) -> tuple[list[SkillInstallation], list[str]]:
+    """Discover Kitaru skills installed through the Claude marketplace."""
+    registry = home / ".claude" / "plugins" / "installed_plugins.json"
+    checked = [str(registry)]
+    document = _read_regular_text(registry, max_bytes=_MAX_CLAUDE_PLUGIN_REGISTRY_BYTES)
+    if document is None:
+        return [], checked
+    try:
+        registry_data = json.loads(document)
+    except json.JSONDecodeError:
+        return [], checked
+    if not isinstance(registry_data, dict):
+        return [], checked
+    plugins = registry_data.get("plugins")
+    if not isinstance(plugins, dict):
+        return [], checked
+    records = plugins.get(_CLAUDE_PLUGIN_ID)
+    if not isinstance(records, list):
+        return [], checked
+
+    project_roots = set(_get_project_search_roots(cwd, home))
+    installations: list[SkillInstallation] = []
+    seen_directories: set[tuple[SkillScope, Path]] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        scope = _get_claude_plugin_scope(record, project_roots, home)
+        install_path = record.get("installPath")
+        if scope is None or not isinstance(install_path, str) or not install_path:
+            continue
+        skills_directory = _get_configured_path(install_path, home) / "skills"
+        checked.append(str(skills_directory))
+        directory_key = (scope, skills_directory)
+        if directory_key in seen_directories:
+            continue
+        seen_directories.add(directory_key)
+        try:
+            skill_directories = sorted(
+                skills_directory.iterdir(), key=lambda path: path.name
+            )
+        except OSError:
+            continue
+        for skill_directory in skill_directories:
+            name = _get_skill_name(skill_directory / "SKILL.md")
+            if name is None or not name.startswith(_KITARU_SKILL_PREFIX):
+                continue
+            installations.append(
+                {
+                    "name": name,
+                    "scope": scope,
+                    "host": "claude",
+                    "path": str(skill_directory),
+                }
+            )
+    return installations, list(dict.fromkeys(checked))
+
+
+def _get_claude_plugin_scope(
+    record: dict[object, object], project_roots: set[Path], home: Path
+) -> SkillScope | None:
+    """Map one Claude plugin record to its active Kitaru search scope."""
+    scope = record.get("scope")
+    if scope == "user":
+        return "user"
+    if not isinstance(scope, str) or scope not in {"project", "local"}:
+        return None
+    project_path = record.get("projectPath")
+    if not isinstance(project_path, str) or not project_path:
+        return None
+    if _get_configured_path(project_path, home) not in project_roots:
+        return None
+    return "project"
+
+
+def _get_configured_path(value: str, home: Path) -> Path:
+    """Resolve an absolute or home-relative path from Claude plugin state."""
+    if value == "~":
+        return home
+    if value.startswith(("~/", "~\\")):
+        return (home / value[2:]).absolute()
+    path = Path(value)
+    return path.absolute() if path.is_absolute() else (home / path).absolute()

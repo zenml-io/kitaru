@@ -45,8 +45,17 @@ def test_bare_command_group_prints_help_without_bootstrap(monkeypatch, capsys) -
     assert captured.err == ""
 
 
-@pytest.mark.parametrize("help_flag", ["--help", "-h"])
-def test_root_help_adds_skill_onboarding(help_flag, monkeypatch, capsys) -> None:
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--help"],
+        ["-h"],
+        ["--machine", "--help"],
+        ["--help", "--output", "text"],
+        ["--output=text", "-h"],
+    ],
+)
+def test_root_help_adds_skill_onboarding(argv, monkeypatch, capsys) -> None:
     """Explicit root help includes the same skill guidance as bare Kitaru."""
     monkeypatch.setattr(
         app_module,
@@ -60,7 +69,7 @@ def test_root_help_adds_skill_onboarding(help_flag, monkeypatch, capsys) -> None
         },
     )
 
-    assert app_module.main([help_flag]) == 0
+    assert app_module.main(argv) == 0
 
     captured = capsys.readouterr()
     assert "Usage: kitaru COMMAND [OPTIONS]" in captured.out

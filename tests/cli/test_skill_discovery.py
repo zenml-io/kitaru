@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Cross-platform discovery of installed Kitaru agent skills."""
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -158,6 +159,85 @@ def test_discovery_rejects_symlinked_skill_documents(tmp_path: Path) -> None:
         pytest.skip("Symlinks are unavailable on this platform")
     home = tmp_path / "home"
     home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_finds_user_scoped_claude_marketplace_skills(
+    tmp_path: Path,
+) -> None:
+    """Claude marketplace installs count even without a .claude/skills copy."""
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    registry = home / ".claude" / "plugins" / "installed_plugins.json"
+    registry.parent.mkdir(parents=True)
+    plugin = home / ".claude" / "plugins" / "cache" / "kitaru" / "1.0.0"
+    skill = _write_skill(
+        plugin / "skills" / "kitaru-marketplace",
+        "kitaru-marketplace",
+    )
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "plugins": {
+                    "kitaru@kitaru": [
+                        {
+                            "scope": "user",
+                            "installPath": str(plugin),
+                            "version": "1.0.0",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["skills"] == ["kitaru-marketplace"]
+    assert status["installations"] == [
+        {
+            "name": "kitaru-marketplace",
+            "scope": "user",
+            "host": "claude",
+            "path": str(skill.parent),
+        }
+    ]
+
+
+def test_discovery_ignores_claude_plugin_scoped_to_another_project(
+    tmp_path: Path,
+) -> None:
+    """A project-scoped plugin is available only inside its configured project."""
+    project = tmp_path / "project"
+    project.mkdir()
+    home = tmp_path / "home"
+    registry = home / ".claude" / "plugins" / "installed_plugins.json"
+    registry.parent.mkdir(parents=True)
+    plugin = home / ".claude" / "plugins" / "cache" / "kitaru" / "1.0.0"
+    _write_skill(plugin / "skills" / "kitaru-marketplace", "kitaru-marketplace")
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "plugins": {
+                    "kitaru@kitaru": [
+                        {
+                            "scope": "project",
+                            "projectPath": str(tmp_path / "other-project"),
+                            "installPath": str(plugin),
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     status = get_kitaru_skill_status(cwd=project, home=home)
 
