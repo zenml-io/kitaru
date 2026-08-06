@@ -5731,6 +5731,18 @@
             "description": "Agent framework used.",
             "title": "Framework"
           },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
+          },
           "inputs": {
             "description": "Session inputs.",
             "title": "Inputs"
@@ -5760,18 +5772,6 @@
           "outputs": {
             "description": "Session outputs.",
             "title": "Outputs"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Source system naming the session.",
-            "title": "Provider"
           },
           "started_at": {
             "anyOf": [
@@ -6483,6 +6483,18 @@
             "title": "Id",
             "type": "string"
           },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
+          },
           "inputs": {
             "description": "Session inputs.",
             "title": "Inputs"
@@ -6528,18 +6540,6 @@
             "format": "uuid",
             "title": "Owner Id",
             "type": "string"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Source system naming the session.",
-            "title": "Provider"
           },
           "started_at": {
             "anyOf": [
@@ -14254,7 +14254,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe provider and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
         "operationId": "create_session_v1_sessions_post",
         "requestBody": {
           "content": {

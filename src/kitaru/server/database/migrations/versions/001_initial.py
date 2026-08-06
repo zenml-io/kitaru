@@ -512,7 +512,7 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("external_id", sa.Text(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("provider", sa.Text(), nullable=True),
+        sa.Column("imported_from", sa.Text(), nullable=True),
         sa.Column("framework", sa.Text(), nullable=True),
         sa.Column("adapter_version", sa.Text(), nullable=True),
         sa.Column("cost", sa.Numeric(), nullable=True),
@@ -533,7 +533,9 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "provider", "external_id", name="uq_session_provider_external_id"
+            "imported_from",
+            "external_id",
+            name="uq_session_imported_from_external_id",
         ),
         sa.UniqueConstraint("agent_id", "number", name="uq_session_agent_id_number"),
     )

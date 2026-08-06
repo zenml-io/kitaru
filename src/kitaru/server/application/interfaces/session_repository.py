@@ -48,7 +48,7 @@ class SessionRepository(Protocol):
             session: Session to store.
 
         Raises:
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -109,7 +109,7 @@ class SessionRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:

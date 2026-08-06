@@ -365,7 +365,7 @@ async def list_sessions(
     status: SessionStatus | None = None,
     agent: str | None = None,
     origin: SessionOrigin | None = None,
-    provider: str | None = None,
+    imported_from: str | None = None,
     tag: str | None = None,
     cohort: str | None = None,
     started_after: datetime | None = None,
@@ -390,9 +390,9 @@ async def list_sessions(
         conditions.append(
             FilterCondition(field="origin", op=FilterOp.EQ, value=origin.value)
         )
-    if provider is not None:
+    if imported_from is not None:
         conditions.append(
-            FilterCondition(field="provider", op=FilterOp.EQ, value=provider)
+            FilterCondition(field="imported_from", op=FilterOp.EQ, value=imported_from)
         )
     if tag is not None:
         normalized = tag.strip()

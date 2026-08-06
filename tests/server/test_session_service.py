@@ -670,12 +670,12 @@ async def test_delete_session_not_found(service: SessionService) -> None:
 async def test_create_session_duplicate_external_id_conflict(
     service: SessionService,
 ) -> None:
-    """Reject a duplicate provider and external id pair."""
+    """Reject a duplicate imported_from and external id pair."""
     await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-1",
         ),
         actor=ACTOR,
@@ -685,7 +685,7 @@ async def test_create_session_duplicate_external_id_conflict(
             SessionCreate(
                 agent_id=uuid.uuid4(),
                 origin=SessionOrigin.IMPORTED,
-                provider="langsmith",
+                imported_from="langsmith",
                 external_id="run-1",
             ),
             actor=ACTOR,

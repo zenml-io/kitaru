@@ -195,6 +195,7 @@ def test_session_request_maps_fields() -> None:
         ended_at=None,
         external_id="ext-1",
         metadata={"k": "v"},
+        framework="langgraph",
         nodes=[],
     )
 
@@ -209,7 +210,8 @@ def test_session_request_maps_fields() -> None:
     assert request.error == "boom"
     assert request.external_id == "ext-1"
     assert request.metadata == {"k": "v"}
-    assert request.provider == "acme"
+    assert request.imported_from == "acme"
+    assert request.framework == "langgraph"
 
 
 _PARSER_SCRIPT = """

@@ -201,17 +201,17 @@ async def test_create_session(client: httpx.AsyncClient) -> None:
 async def test_create_session_duplicate_external_id(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 409 for a duplicated provider and external id pair."""
+    """Observe HTTP 409 for a duplicated imported_from and external id pair."""
     await client.post(
         "/v1/sessions",
         json=_session_body(
-            origin="imported", provider="langsmith", external_id="run-1"
+            origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
     response = await client.post(
         "/v1/sessions",
         json=_session_body(
-            origin="imported", provider="langsmith", external_id="run-1"
+            origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
     assert response.status_code == 409
@@ -260,26 +260,26 @@ async def test_list_sessions_filters_by_origin_and_status(
     assert items[0]["status"] == "completed"
 
 
-async def test_list_sessions_filters_by_provider_and_external_id(
+async def test_list_sessions_filters_by_imported_from_and_external_id(
     client: httpx.AsyncClient,
 ) -> None:
-    """Filter sessions by provider and external id together."""
+    """Filter sessions by imported_from and external id together."""
     await client.post(
         "/v1/sessions",
         json=_session_body(
-            origin="imported", provider="langsmith", external_id="run-1"
+            origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
     await client.post(
         "/v1/sessions",
         json=_session_body(
-            origin="imported", provider="langsmith", external_id="run-2"
+            origin="imported", imported_from="langsmith", external_id="run-2"
         ),
     )
 
     filter_expression = {
         "and": [
-            {"field": "provider", "op": "eq", "value": "langsmith"},
+            {"field": "imported_from", "op": "eq", "value": "langsmith"},
             {"field": "external_id", "op": "eq", "value": "run-2"},
         ]
     }
