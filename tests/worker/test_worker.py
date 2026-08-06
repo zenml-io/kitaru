@@ -14,6 +14,7 @@
 """Tests for the Worker lifecycle, runtime detection, and claim loop."""
 
 import asyncio
+import os
 import socket
 import uuid
 from pathlib import Path
@@ -644,3 +645,31 @@ async def test_run_registers_and_drains_a_claimed_task(
         TaskStatus.COMPLETED,
     ]
     assert client.closed is True
+
+
+async def test_run_pins_the_api_url_to_the_registration_server(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run() exports the registration client's server URL for task processes."""
+    client = FakeKitaruAPIClient()
+    client.base_url = "https://stored.example.com"
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
+    monkeypatch.delenv("KITARU_API_URL", raising=False)
+
+    config = WorkerConfig(
+        name="worker-under-test",
+        scope=WorkerScope(kinds=[TaskKind.AGENT]),
+        poll_interval=0.01,
+        blob_cache_root=tmp_path / "blobs",
+        payload_cache_root=tmp_path / "payloads",
+    )
+    stop = asyncio.Event()
+    stop.set()
+
+    await Worker(config).run(stop=stop)
+
+    assert os.environ["KITARU_API_URL"] == "https://stored.example.com"

@@ -177,11 +177,10 @@ def test_selector_shorthand_and_json_cover_required_behavior() -> None:
         workers.build_worker_config(concurrency=0)
 
 
-def test_contract_environment_forwards_only_url_and_environment_api_key(
+def test_contract_environment_removes_credentials_path_and_restores(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Worker startup never creates or forwards a credential-store path."""
-    selected_server = "https://selected.example.com"
+    """Worker startup never forwards a credential-store path."""
     monkeypatch.setenv("KITARU_API_URL", "https://previous.example.com")
     monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/previous/credentials.json")
     monkeypatch.setenv("KITARU_API_KEY", "KITKEY_environment")
@@ -189,10 +188,10 @@ def test_contract_environment_forwards_only_url_and_environment_api_key(
     with (
         pytest.raises(RuntimeError, match="startup failed"),
         workers.worker_contract_environment(
-            ResolvedTarget(selected_server, "explicit")
+            ResolvedTarget("https://previous.example.com", "environment")
         ),
     ):
-        assert workers.os.environ["KITARU_API_URL"] == selected_server
+        assert workers.os.environ["KITARU_API_URL"] == "https://previous.example.com"
         assert workers.os.environ["KITARU_API_KEY"] == "KITKEY_environment"
         assert "KITARU_CREDENTIALS_PATH" not in workers.os.environ
         raise RuntimeError("startup failed")
@@ -202,24 +201,34 @@ def test_contract_environment_forwards_only_url_and_environment_api_key(
     assert workers.os.environ["KITARU_API_KEY"] == "KITKEY_environment"
 
 
-def test_contract_environment_rejects_stored_or_device_only_auth(
+def test_contract_environment_exports_an_explicit_server(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A credential-store path cannot substitute for the worker API-key contract."""
+    """An explicit --server overrides KITARU_API_URL for the worker."""
+    monkeypatch.setenv("KITARU_API_URL", "https://previous.example.com")
+
+    with workers.worker_contract_environment(
+        ResolvedTarget("https://selected.example.com", "explicit")
+    ):
+        assert workers.os.environ["KITARU_API_URL"] == "https://selected.example.com"
+
+    assert workers.os.environ["KITARU_API_URL"] == "https://previous.example.com"
+
+
+def test_contract_environment_allows_stored_or_device_only_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Worker startup without an environment API key defers to client credentials."""
     monkeypatch.delenv("KITARU_API_KEY", raising=False)
     monkeypatch.setenv("KITARU_CREDENTIALS_PATH", "/stored/credentials.json")
 
-    with (
-        pytest.raises(CLIError) as error,
-        workers.worker_contract_environment(
-            ResolvedTarget("https://selected.example.com", "explicit")
-        ),
+    with workers.worker_contract_environment(
+        ResolvedTarget("https://selected.example.com", "stored")
     ):
-        raise AssertionError("unreachable")
-    assert error.value.kind == "invalid_configuration"
-    assert error.value.message == (
-        "worker start requires KITARU_API_KEY in the environment."
-    )
+        assert "KITARU_API_KEY" not in workers.os.environ
+        assert "KITARU_CREDENTIALS_PATH" not in workers.os.environ
+
+    assert workers.os.environ["KITARU_CREDENTIALS_PATH"] == "/stored/credentials.json"
 
 
 async def test_natural_completion_reports_completed_and_restores_signals() -> None:

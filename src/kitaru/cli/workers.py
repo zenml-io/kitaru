@@ -180,19 +180,9 @@ def worker_contract_environment(
     original = {
         name: os.environ.get(name, _ENV_MISSING) for name in _WORKER_CONTRACT_ENV
     }
-    api_key = os.environ.get("KITARU_API_KEY")
-    if not api_key:
-        raise CLIError(
-            "invalid_configuration",
-            "worker start requires KITARU_API_KEY in the environment.",
-            hint=(
-                "Stored and device credentials are not supported by the worker; "
-                "export a server API key and retry."
-            ),
-        )
     try:
-        os.environ["KITARU_API_URL"] = target.server_url
-        os.environ["KITARU_API_KEY"] = api_key
+        if target.source == "explicit":
+            os.environ["KITARU_API_URL"] = target.server_url
         os.environ.pop("KITARU_CREDENTIALS_PATH", None)
         yield
     finally:

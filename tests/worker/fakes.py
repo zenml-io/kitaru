@@ -450,6 +450,7 @@ class FakeKitaruAPIClient:
 
     def __init__(self) -> None:
         """Initialize every resource fake."""
+        self.base_url = "https://api.example.com"
         self.workers = FakeWorkersResource()
         self.tasks = FakeTasksResource()
         self.jobs = FakeJobsResource()

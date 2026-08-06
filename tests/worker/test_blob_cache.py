@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the content-addressed blob cache."""
 
+import errno
 import hashlib
 import os
 import time
@@ -158,10 +159,16 @@ async def test_eviction_skips_an_entry_removed_by_another_process(
     path_b = await cache.put(digest_b, content_b)
 
     real_stat = Path.stat
+    path_a_stat_calls = 0
 
     def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        # The first stat passes the is_file check, then the entry vanishes
+        # before the size stat.
+        nonlocal path_a_stat_calls
         if self == path_a:
-            raise FileNotFoundError(str(self))
+            path_a_stat_calls += 1
+            if path_a_stat_calls > 1:
+                raise FileNotFoundError(errno.ENOENT, "No such file", str(self))
         return real_stat(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "stat", flaky_stat)
@@ -169,6 +176,7 @@ async def test_eviction_skips_an_entry_removed_by_another_process(
     content_c = b"c" * entry_size
     digest_c = _digest(content_c)
     await cache.put(digest_c, content_c)
+    monkeypatch.undo()
 
     # path_a's stat race excludes it from the eviction budget entirely, so
     # the remaining budget covers b and c without evicting either.

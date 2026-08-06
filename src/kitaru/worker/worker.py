@@ -36,7 +36,6 @@ from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth
 from kitaru.client.exceptions import APIError
-from kitaru.env import get_required_env
 from kitaru.worker.auth import WorkerTokenSource
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.config import WorkerConfig
@@ -160,18 +159,17 @@ class Worker:
             self._config.payload_cache_root or DEFAULT_PAYLOAD_CACHE_ROOT
         )
 
-        base_url = get_required_env("KITARU_API_URL")
-        api_key = get_required_env("KITARU_API_KEY")
-
         registration = WorkerCreateRequest(
             name=name,
             scope=self._config.scope,
             runtime=detect_runtime(),
             metadata=self._config.metadata,
         )
-        async with KitaruAPIClient(
-            base_url=base_url, api_key=api_key
-        ) as registration_client:
+        async with KitaruAPIClient() as registration_client:
+            # Task process environments inherit KITARU_API_URL from the
+            # worker's environment, so pin it to the server this worker
+            # registered with.
+            os.environ["KITARU_API_URL"] = registration_client.base_url
             response = await registration_client.workers.create(registration)
             worker = response.worker
             logger.info("Registered worker %s (%s).", name, worker.id)
