@@ -183,11 +183,13 @@ class TaskRepository(Protocol):
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
-    ) -> dict[uuid.UUID, datetime | None]:
+    ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:
         """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
 
         Writes only the heartbeat column, so a stamp cannot overwrite fields
-        concurrent writers committed since the caller last read the tasks.
+        concurrent writers committed since the caller last read the tasks. A
+        row locked by another open transaction is left unstamped rather than
+        waited on.
 
         Args:
             task_ids: Candidate task ids.
@@ -196,7 +198,8 @@ class TaskRepository(Protocol):
 
         Returns:
             Cancel request time of the task, falling back to its job's, by id
-            for every stamped task.
+            for every stamped task, and the owned in-flight candidates whose
+            lock was held elsewhere and so were left unstamped.
         """
         ...
 

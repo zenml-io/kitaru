@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
@@ -152,6 +153,26 @@ def _register_deadlock_exception_handler(app: FastAPI) -> None:
         return JSONResponse(status_code=503, content={"detail": "Deadlock detected"})
 
 
+def _register_pool_timeout_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for an exhausted connection pool.
+
+    Clients receive HTTP 503 with the usual ``detail`` message.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    async def pool_timeout(
+        request: Request, exc: SQLAlchemyTimeoutError
+    ) -> JSONResponse:
+        _ = request
+        _ = exc
+        return JSONResponse(
+            status_code=503, content={"detail": "Database connection pool exhausted"}
+        )
+
+
 def _register_token_grant_exception_handler(app: FastAPI) -> None:
     """Register the OAuth 2.0 error response for a failed token grant.
 
@@ -258,6 +279,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
     _register_deadlock_exception_handler(app)
+    _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_source)
     # FastAPIInstrumentor registers its middleware last, which makes the

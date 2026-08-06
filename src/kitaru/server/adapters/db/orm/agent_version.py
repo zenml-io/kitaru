@@ -40,7 +40,6 @@ AGENT_VERSION_AGENT_ID_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
 )
 AGENT_VERSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("agent_version", ["agent_id"])
 AGENT_VERSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("agent_version", ["owner_id"])
-AGENT_VERSION_AGENT_ID_INDEX = index_name("agent_version", ["agent_id"])
 AGENT_VERSION_OWNER_ID_INDEX = index_name("agent_version", ["owner_id"])
 
 
@@ -58,7 +57,6 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=AGENT_VERSION_OWNER_ID_FOREIGN_KEY
         ),
-        Index(AGENT_VERSION_AGENT_ID_INDEX, "agent_id"),
         Index(AGENT_VERSION_OWNER_ID_INDEX, "owner_id"),
     )
 

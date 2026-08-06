@@ -82,7 +82,10 @@ class TaskTransitions:
         The ordered sequence runs inside the caller's transaction: the
         transition is persisted, a terminal status publishes ``TaskTerminal``
         so subscribers can append work before the job is checked, and the job
-        advances afterward, publishing ``JobsSettled`` when it settles.
+        advances afterward, publishing ``JobsSettled`` when it settles. A
+        non-terminal transition (running, requeued) never drains the job and
+        never trips its abort-on-hard-failure check, so it skips the job row
+        lock entirely.
 
         Args:
             task: Task to transition.
@@ -96,9 +99,10 @@ class TaskTransitions:
             Stored task carrying its new status.
         """
         stored = await self._write_transition(task, transition)
+        if not stored.terminal:
+            return stored
         job = await self.advance_job(stored.job_id)
-        if stored.terminal:
-            self._track_task_terminal(stored, job)
+        self._track_task_terminal(stored, job)
         return stored
 
     async def _write_transition(
