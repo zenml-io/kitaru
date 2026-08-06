@@ -32,6 +32,12 @@ from kitaru.server.domain.session_node import SessionNode
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
 
+PAYLOAD_COLUMNS = (
+    SessionNodeORM.inputs,
+    SessionNodeORM.outputs,
+    SessionNodeORM.attributes,
+)
+
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     """Session node repository backed by the application database."""
@@ -39,13 +45,15 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     orm_class = SessionNodeORM
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
@@ -56,8 +64,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             SessionNodeORM.session_id == session_id,
             SessionNodeORM.index.in_(indexes),
         )
+        if not include_payloads:
+            statement = statement.options(
+                *(defer(column) for column in PAYLOAD_COLUMNS)
+            )
         rows = (await self._session.scalars(statement)).all()
-        return {row.index: row.to_domain(include_payloads=True) for row in rows}
+        return {
+            row.index: row.to_domain(include_payloads=include_payloads) for row in rows
+        }
 
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
@@ -78,7 +92,11 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         _ = session_id
         if not nodes:
             return []
-        existing_by_id = await self._load_by_ids([node.id for node in nodes])
+        # Defer the payload columns because apply_domain replaces them below
+        # without ever reading them, so the deferred load never fires.
+        existing_by_id = await self._load_by_ids(
+            [node.id for node in nodes], deferred_columns=PAYLOAD_COLUMNS
+        )
         stored_rows: list[SessionNodeORM] = []
         for node in nodes:
             row = existing_by_id.get(node.id)
@@ -107,9 +125,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         )
         if not session_node_filter.include_payloads:
             statement = statement.options(
-                defer(SessionNodeORM.inputs),
-                defer(SessionNodeORM.outputs),
-                defer(SessionNodeORM.attributes),
+                *(defer(column) for column in PAYLOAD_COLUMNS)
             )
         rows, next_cursor = await paginate_by_index(
             self._session,
@@ -142,9 +158,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         )
         if not include_payloads:
             statement = statement.options(
-                defer(SessionNodeORM.inputs),
-                defer(SessionNodeORM.outputs),
-                defer(SessionNodeORM.attributes),
+                *(defer(column) for column in PAYLOAD_COLUMNS)
             )
         rows = (await self._session.scalars(statement)).all()
         return [row.to_domain(include_payloads=include_payloads) for row in rows]

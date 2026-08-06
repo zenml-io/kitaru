@@ -25,13 +25,15 @@ class SessionNodeRepository(Protocol):
     """Session node persistence operations."""
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.

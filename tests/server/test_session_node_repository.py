@@ -199,7 +199,7 @@ def _node(index: int, **overrides: Any) -> SessionNode:
 async def test_get_by_indexes_empty_when_none_stored(setup: Setup) -> None:
     """Return no rows for indexes that are not stored."""
     repository, session_id, _ = setup
-    result = await repository.get_by_indexes(session_id, [0, 1])
+    result = await repository.get_by_indexes(session_id, [0, 1], include_payloads=True)
     assert result == {}
 
 
@@ -210,7 +210,9 @@ async def test_get_by_indexes_bulk_fetch(setup: Setup) -> None:
         session_id,
         [_node(0, session_id=session_id), _node(1, session_id=session_id)],
     )
-    result = await repository.get_by_indexes(session_id, [0, 1, 2])
+    result = await repository.get_by_indexes(
+        session_id, [0, 1, 2], include_payloads=True
+    )
     assert set(result.keys()) == {0, 1}
 
 
@@ -248,7 +250,7 @@ async def test_upsert_batch_replaces_existing_row_preserving_id(
     assert replaced[0].id == first[0].id
     assert replaced[0].name == "second"
 
-    loaded = await repository.get_by_indexes(session_id, [0])
+    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
     assert loaded[0].name == "second"
 
 
@@ -361,6 +363,93 @@ async def test_query_include_payloads_true_populates_heavy_columns(
     assert nodes[0].inputs == {"q": "hi"}
     assert nodes[0].outputs == {"a": "there"}
     assert nodes[0].attributes == {"k": 1}
+
+
+async def test_get_by_indexes_include_payloads_false_nulls_heavy_columns(
+    setup: Setup,
+) -> None:
+    """Null inputs, outputs, and attributes when include_payloads is unset."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                inputs={"q": "hi"},
+                outputs={"a": "there"},
+                attributes={"k": 1},
+            )
+        ],
+    )
+    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=False)
+    assert loaded[0].inputs is None
+    assert loaded[0].outputs is None
+    assert loaded[0].attributes is None
+    assert loaded[0].metadata == {}
+
+
+async def test_get_by_indexes_include_payloads_true_populates_heavy_columns(
+    setup: Setup,
+) -> None:
+    """Populate inputs, outputs, and attributes when requested."""
+    repository, session_id, _ = setup
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                inputs={"q": "hi"},
+                outputs={"a": "there"},
+                attributes={"k": 1},
+            )
+        ],
+    )
+    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
+    assert loaded[0].inputs == {"q": "hi"}
+    assert loaded[0].outputs == {"a": "there"}
+    assert loaded[0].attributes == {"k": 1}
+
+
+async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
+    setup: Setup,
+) -> None:
+    """Store the replacing payloads when the existing row loads them deferred."""
+    repository, session_id, _ = setup
+    first = await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                inputs={"q": "old"},
+                outputs={"a": "old"},
+                attributes={"k": 0},
+            )
+        ],
+    )
+    replaced = await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                id=first[0].id,
+                inputs={"q": "new"},
+                outputs={"a": "new"},
+                attributes={"k": 1},
+            )
+        ],
+    )
+    assert replaced[0].inputs == {"q": "new"}
+    assert replaced[0].outputs == {"a": "new"}
+    assert replaced[0].attributes == {"k": 1}
+
+    loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
+    assert loaded[0].inputs == {"q": "new"}
+    assert loaded[0].outputs == {"a": "new"}
+    assert loaded[0].attributes == {"k": 1}
 
 
 async def test_query_scoped_to_session(setup: Setup) -> None:

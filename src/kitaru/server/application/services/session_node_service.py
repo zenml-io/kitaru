@@ -118,7 +118,7 @@ class SessionNodeService:
             referenced_indexes.update(item.secondary_parent_indexes)
 
         existing_by_index = await self._repository.get_by_indexes(
-            session_id, sorted(referenced_indexes)
+            session_id, sorted(referenced_indexes), include_payloads=False
         )
         id_by_index = {index: node.id for index, node in existing_by_index.items()}
 

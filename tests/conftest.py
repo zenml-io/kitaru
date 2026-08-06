@@ -2361,22 +2361,32 @@ class FakeSessionNodeRepository:
         self._cohort_versions = cohort_versions
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
         """
         wanted = set(indexes)
-        return {
-            node.index: node.model_copy()
+        matches = [
+            node
             for node in self._nodes.values()
             if node.session_id == session_id and node.index in wanted
+        ]
+        if include_payloads:
+            return {node.index: node.model_copy() for node in matches}
+        return {
+            node.index: node.model_copy(
+                update={"inputs": None, "outputs": None, "attributes": None}
+            )
+            for node in matches
         }
 
     async def upsert_batch(
