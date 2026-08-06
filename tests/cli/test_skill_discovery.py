@@ -14,6 +14,7 @@
 """Cross-platform discovery of installed Kitaru agent skills."""
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -157,6 +158,42 @@ def test_discovery_rejects_symlinked_skill_documents(tmp_path: Path) -> None:
         (skill / "SKILL.md").symlink_to(target)
     except OSError:
         pytest.skip("Symlinks are unavailable on this platform")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_rejects_symlinked_skill_directories(tmp_path: Path) -> None:
+    """Discovery does not traverse a symlinked skill directory."""
+    project = tmp_path / "project"
+    skills = project / ".agents" / "skills"
+    skills.mkdir(parents=True)
+    target = tmp_path / "external-skill"
+    _write_skill(target, "kitaru-linked-directory")
+    try:
+        (skills / "linked-skill").symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("Symlinks are unavailable on this platform")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    status = get_kitaru_skill_status(cwd=project, home=home)
+
+    assert status["installed"] is False
+
+
+def test_discovery_rejects_fifo_skill_documents(tmp_path: Path) -> None:
+    """Discovery checks special files without blocking CLI startup."""
+    project = tmp_path / "project"
+    skill = project / ".agents" / "skills" / "skill"
+    skill.mkdir(parents=True)
+    try:
+        os.mkfifo(skill / "SKILL.md")
+    except (AttributeError, OSError):
+        pytest.skip("FIFOs are unavailable on this platform")
     home = tmp_path / "home"
     home.mkdir()
 

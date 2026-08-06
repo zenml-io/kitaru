@@ -190,6 +190,11 @@ def _is_git_root(path: Path) -> bool:
 
 def _get_skill_name(path: Path) -> str | None:
     """Read a valid skill name from bounded YAML frontmatter."""
+    try:
+        if path.parent.is_symlink():
+            return None
+    except OSError:
+        return None
     document = _read_regular_text(path, max_bytes=_MAX_SKILL_DOCUMENT_BYTES)
     if document is None:
         return None
@@ -220,10 +225,11 @@ def _get_skill_name(path: Path) -> str | None:
 def _read_regular_text(path: Path, *, max_bytes: int) -> str | None:
     """Read one regular, non-symlinked UTF-8 file within a byte limit."""
     try:
-        if path.is_symlink():
+        if not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode):
             return None
         flags = os.O_RDONLY
         flags |= getattr(os, "O_BINARY", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
         flags |= getattr(os, "O_NOFOLLOW", 0)
         descriptor = os.open(path, flags)
         try:
