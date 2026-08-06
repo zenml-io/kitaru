@@ -25,7 +25,7 @@ from kitaru.worker.process import (
     TailBuffer,
     TaskProcess,
     build_process_env,
-    get_python_run_command,
+    get_python_run_argv,
     parse_inline_dependencies,
     run_task_process,
 )
@@ -59,7 +59,10 @@ async def test_run_task_process_captures_stdout_and_exit_code() -> None:
 async def test_run_task_process_captures_stderr() -> None:
     """Stderr output is captured into its own labeled tail section."""
     process = TaskProcess(
-        command="echo oops 1>&2", working_dir=None, env={}, timeout_seconds=5
+        command="echo oops 1>&2",
+        working_dir=None,
+        env={},
+        timeout_seconds=5,
     )
     result = await run_task_process(process, asyncio.Event())
     assert result.returncode == 0
@@ -133,6 +136,66 @@ async def test_run_task_process_kills_the_whole_process_group() -> None:
     canceled.set()
     result = await asyncio.wait_for(run, timeout=5)
     assert result.returncode is None
+
+
+async def test_run_task_process_runs_an_argv_directly() -> None:
+    """An argv-based process bypasses the shell and captures its tail."""
+    process = TaskProcess(
+        command=[sys.executable, "-c", "print('hello')"],
+        working_dir=None,
+        env={},
+        timeout_seconds=5,
+    )
+    result = await run_task_process(process, asyncio.Event())
+    assert result.returncode == 0
+    assert "stdout tail:\nhello" in result.tail
+
+
+async def test_run_task_process_completes_when_a_descendant_holds_stdout() -> None:
+    """A descendant that inherits stdout and outlives the leader is killed too.
+
+    Regression test: the leader exiting normally used to leave the drain
+    tasks waiting forever on the descendant's still-open stdout copy.
+    """
+    process = TaskProcess(
+        command="sh -c 'sleep 300 & echo leader-done'",
+        working_dir=None,
+        env={},
+        timeout_seconds=30,
+    )
+    started = time.monotonic()
+    result = await asyncio.wait_for(
+        run_task_process(process, asyncio.Event()), timeout=10
+    )
+    elapsed = time.monotonic() - started
+    assert result.returncode == 0
+    assert elapsed < 8
+    assert "leader-done" in result.tail
+
+
+async def test_run_task_process_cancellation_of_the_caller_tears_down_promptly() -> (
+    None
+):
+    """Cancelling the coroutine running run_task_process returns promptly.
+
+    Regression test: the previous teardown awaited unbounded drains and
+    process waits inside the finally block, so cancelling the caller both
+    leaked the child process and hung the await.
+    """
+    process = TaskProcess(
+        command="sleep 300",
+        working_dir=None,
+        env={},
+        timeout_seconds=300,
+    )
+    run = asyncio.create_task(run_task_process(process, asyncio.Event()))
+    await asyncio.sleep(0.2)
+    run.cancel()
+    started = time.monotonic()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(run, timeout=8)
+    elapsed = time.monotonic() - started
+    assert elapsed < 8
 
 
 def test_build_process_env_layers_and_strips_contract_variables(
@@ -243,17 +306,24 @@ def test_parse_inline_dependencies_rejects_multiple_blocks(tmp_path: Path) -> No
         parse_inline_dependencies(script)
 
 
-def test_get_python_run_command_without_dependencies() -> None:
+def test_get_python_run_argv_without_dependencies() -> None:
     """A bare module invocation runs directly under sys.executable."""
-    command = get_python_run_command("kitaru.task", ["evaluate"], [])
-    assert command == f"{sys.executable} -m kitaru.task evaluate"
+    argv = get_python_run_argv("kitaru.task", ["evaluate"], [])
+    assert argv == [sys.executable, "-m", "kitaru.task", "evaluate"]
 
 
-def test_get_python_run_command_with_dependencies() -> None:
+def test_get_python_run_argv_with_dependencies() -> None:
     """Dependencies route the invocation through uv run --with."""
-    command = get_python_run_command(
-        "kitaru.task", ["import"], ["requests<3", "rich>=13"]
-    )
-    assert command == (
-        "uv run --with 'requests<3' --with 'rich>=13' python -m kitaru.task import"
-    )
+    argv = get_python_run_argv("kitaru.task", ["import"], ["requests<3", "rich>=13"])
+    assert argv == [
+        "uv",
+        "run",
+        "--with",
+        "requests<3",
+        "--with",
+        "rich>=13",
+        "python",
+        "-m",
+        "kitaru.task",
+        "import",
+    ]
