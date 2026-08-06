@@ -67,16 +67,20 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
-def _node(name: str, children: list[ParsedNode] | None = None) -> ParsedNode:
-    return ParsedNode(
-        node_type=NodeType.LLM_CALL,
-        name=name,
-        status=NodeStatus.COMPLETED,
-        inputs=None,
-        outputs=None,
-        attributes=None,
-        children=children or [],
-    )
+def _node(
+    name: str, children: list[ParsedNode] | None = None, **overrides: Any
+) -> ParsedNode:
+    values: dict[str, Any] = {
+        "node_type": NodeType.LLM_CALL,
+        "name": name,
+        "status": NodeStatus.COMPLETED,
+        "inputs": None,
+        "outputs": None,
+        "attributes": None,
+        "children": children or [],
+    }
+    values.update(overrides)
+    return ParsedNode(**values)
 
 
 def _parsed_session(
@@ -187,6 +191,7 @@ def test_session_request_maps_fields() -> None:
     parsed = ParsedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
+        system_prompt="Follow the policy.",
         inputs={"a": 1},
         outputs={"b": 2},
         expected=None,
@@ -205,6 +210,7 @@ def test_session_request_maps_fields() -> None:
     assert request.origin == SessionOrigin.IMPORTED
     assert request.status == SessionStatus.FAILED
     assert request.name == "imported-1"
+    assert request.system_prompt == "Follow the policy."
     assert request.inputs == {"a": 1}
     assert request.outputs == {"b": 2}
     assert request.error == "boom"
@@ -212,6 +218,22 @@ def test_session_request_maps_fields() -> None:
     assert request.metadata == {"k": "v"}
     assert request.imported_from == "acme"
     assert request.framework == "langgraph"
+
+
+def test_flatten_nodes_maps_model_content_fields() -> None:
+    """Carry normalized model content into node ingest requests."""
+    flattened = flatten_nodes(
+        [
+            _node(
+                "model-call",
+                system_prompt="Follow the policy.",
+                reasoning_text="The policy applies.",
+            )
+        ]
+    )
+
+    assert flattened[0].system_prompt == "Follow the policy."
+    assert flattened[0].reasoning_text == "The policy applies."
 
 
 _PARSER_SCRIPT = """

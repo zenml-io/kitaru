@@ -217,11 +217,21 @@ async def test_get_by_indexes_bulk_fetch(setup: Setup) -> None:
 async def test_upsert_batch_inserts_new_rows(setup: Setup) -> None:
     """Insert new rows preserving batch order and the given ids."""
     repository, session_id, _ = setup
-    nodes = [_node(0, session_id=session_id), _node(1, session_id=session_id)]
+    nodes = [
+        _node(
+            0,
+            session_id=session_id,
+            system_prompt="Be concise.",
+            reasoning_text="A short answer is enough.",
+        ),
+        _node(1, session_id=session_id),
+    ]
     stored = await repository.upsert_batch(session_id, nodes)
     assert [node.id for node in stored] == [nodes[0].id, nodes[1].id]
     assert stored[0].created is not None
     assert stored[0].updated is not None
+    assert stored[0].system_prompt == "Be concise."
+    assert stored[0].reasoning_text == "A short answer is enough."
 
 
 async def test_upsert_batch_replaces_existing_row_preserving_id(

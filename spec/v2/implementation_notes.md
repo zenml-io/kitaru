@@ -240,8 +240,7 @@ required solving beyond what the documents describe.
 
 ## Task package
 
-- `ParsedNode` mirrors `SessionNodeCreateRequest` minus index and parent
-  fields, plus `children`. Parsed trees are single-parent only.
+- `ParsedNode` mirrors `SessionNodeCreateRequest` minus index and parent fields, plus `children`. This includes the optional normalized `system_prompt` and `reasoning_text` fields. Parsed trees are single-parent only.
 - `session_request` takes the task id as an explicit parameter, the flow
   owns it.
 - API failures during import are sampled as `ImportFailure` rows with the

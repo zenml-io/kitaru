@@ -154,6 +154,8 @@ class SessionNodeService:
                 error=item.error,
                 started_at=item.started_at,
                 ended_at=item.ended_at,
+                system_prompt=item.system_prompt,
+                reasoning_text=item.reasoning_text,
                 inputs=item.inputs,
                 outputs=item.outputs,
                 requested_model=item.requested_model,

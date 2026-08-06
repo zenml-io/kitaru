@@ -63,6 +63,16 @@ _TRACE_CONTEXT_FIELDS = {
     "traceTags": "tags",
     "traceVersion": "version",
 }
+_FRAMEWORK_NAMES = {
+    "claude_agent": "claude-agent-sdk",
+    "gcp.vertex.agent": "google-adk",
+    "google_adk": "google-adk",
+    "langchain": "langgraph",
+    "langgraph": "langgraph",
+    "openai_agents": "openai-agents",
+    "pydantic-ai": "pydantic-ai",
+    "pydantic_ai": "pydantic-ai",
+}
 
 
 class InvalidImport(ValueError):
@@ -152,6 +162,200 @@ def _dict(value: Any) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _part_text(value: Any) -> str | None:
+    """Return visible text from one provider content part."""
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if not isinstance(value, dict):
+        return None
+    for key in ("text", "content"):
+        candidate = value.get(key)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _content_text(value: Any, *, exclude_tool_parts: bool = False) -> str | None:
+    """Join visible text from a message content value."""
+    if isinstance(value, str):
+        return value.strip() or None
+    if not isinstance(value, list):
+        return None
+    texts: list[str] = []
+    for part in value:
+        if exclude_tool_parts and isinstance(part, dict):
+            part_type = str(part.get("type") or "").lower()
+            if part_type in {
+                "function_call",
+                "function_call_output",
+                "function_response",
+                "tool_call",
+                "tool_call_response",
+                "tool_result",
+                "tool_use",
+            }:
+                continue
+            if "function_response" in part or "function_call" in part:
+                continue
+        text = _part_text(part)
+        if text:
+            texts.append(text)
+    return "\n\n".join(texts) or None
+
+
+def _message_text(message: Any, *, exclude_tool_parts: bool = False) -> str | None:
+    """Return visible text from one provider message."""
+    if not isinstance(message, dict):
+        return None
+    data = message.get("data")
+    if isinstance(data, dict):
+        text = _content_text(data.get("content"), exclude_tool_parts=exclude_tool_parts)
+        if text:
+            return text
+    for key in ("parts", "content"):
+        text = _content_text(message.get(key), exclude_tool_parts=exclude_tool_parts)
+        if text:
+            return text
+    return None
+
+
+def _messages(value: Any) -> list[Any]:
+    """Return the message-like list in one provider input."""
+    decoded = _decode_json(value)
+    if isinstance(decoded, list):
+        return decoded
+    if not isinstance(decoded, dict):
+        return []
+    for key in ("messages", "contents"):
+        candidate = decoded.get(key)
+        if isinstance(candidate, list):
+            return candidate
+    return []
+
+
+def _message_role(message: Any) -> str:
+    """Return a normalized role for one provider message."""
+    if not isinstance(message, dict):
+        return ""
+    role = str(message.get("role") or "").lower()
+    data = message.get("data")
+    if not role and isinstance(data, dict):
+        role = str(data.get("type") or data.get("role") or "").lower()
+    return role
+
+
+def _extract_prompt(value: Any) -> str | None:
+    """Extract the latest visible human prompt from provider inputs."""
+    decoded = _decode_json(value)
+    for message in reversed(_messages(decoded)):
+        if _message_role(message) not in {"human", "user"}:
+            continue
+        text = _message_text(message, exclude_tool_parts=True)
+        if text:
+            return text
+    if isinstance(decoded, dict):
+        for key in ("prompt", "query", "question", "message", "user_input"):
+            candidate = decoded.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+    return None
+
+
+def _surface_inputs(value: Any) -> Any:
+    """Promote a human prompt while preserving the complete provider input."""
+    decoded = _decode_json(value)
+    prompt = _extract_prompt(decoded)
+    if prompt is None or isinstance(decoded, str):
+        return decoded
+    if isinstance(decoded, dict):
+        if "prompt" in decoded:
+            return decoded
+        return {"prompt": prompt, **decoded}
+    if isinstance(decoded, list):
+        return {"prompt": prompt, "messages": decoded}
+    return decoded
+
+
+def _extract_system_prompt(value: Any, record: dict[str, Any]) -> str | None:
+    """Extract visible system instructions from one model call."""
+    decoded = _decode_json(value)
+    candidates: list[str] = []
+    if isinstance(decoded, dict):
+        for key in ("system_prompt", "system_instruction", "instructions"):
+            text = _content_text(decoded.get(key))
+            if text:
+                candidates.append(text)
+        config = _dict(decoded.get("config"))
+        text = _content_text(config.get("system_instruction"))
+        if text:
+            candidates.append(text)
+    for message in _messages(decoded):
+        if _message_role(message) not in {"developer", "system"}:
+            continue
+        text = _message_text(message)
+        if text:
+            candidates.append(text)
+
+    metadata = _dict(record.get("metadata"))
+    attributes = _dict(metadata.get("attributes"))
+    response = _dict(attributes.get("response"))
+    text = _content_text(response.get("instructions"))
+    if text:
+        candidates.append(text)
+
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return "\n\n".join(unique) or None
+
+
+def _is_visible_reasoning(text: str) -> bool:
+    """Return whether reasoning text contains useful visible content."""
+    normalized = " ".join(text.lower().split())
+    return normalized not in {"reasoning", "reasoning see json for details"}
+
+
+def _collect_reasoning(value: Any, texts: list[str]) -> None:
+    """Collect visible reasoning text without retaining opaque payloads."""
+    decoded = _decode_json(value)
+    if isinstance(decoded, list):
+        for item in decoded:
+            _collect_reasoning(item, texts)
+        return
+    if not isinstance(decoded, dict):
+        return
+
+    kind = str(decoded.get("type") or "").lower()
+    if kind in {"reasoning", "thinking"}:
+        for key in ("text", "content", "thinking", "summary"):
+            text = _content_text(decoded.get(key))
+            if text and _is_visible_reasoning(text) and text not in texts:
+                texts.append(text)
+        return
+
+    for key in ("reasoning_text", "reasoning_content"):
+        text = _content_text(decoded.get(key))
+        if text and _is_visible_reasoning(text) and text not in texts:
+            texts.append(text)
+    for key in ("data", "messages", "output", "parts"):
+        nested = decoded.get(key)
+        if isinstance(nested, dict | list):
+            _collect_reasoning(nested, texts)
+
+
+def _extract_reasoning_text(record: dict[str, Any]) -> str | None:
+    """Extract visible reasoning or reasoning summaries from a model call."""
+    texts: list[str] = []
+    _collect_reasoning(record.get("output"), texts)
+    metadata = _dict(record.get("metadata"))
+    attributes = _dict(metadata.get("attributes"))
+    response = _dict(attributes.get("response"))
+    _collect_reasoning(response.get("output"), texts)
+    return "\n\n".join(texts) or None
+
+
 def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
     """Return the first non-empty value from Langfuse metadata layers."""
     metadata = _dict(record.get("metadata"))
@@ -190,6 +394,26 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
         if source_field in record and record[source_field] not in (None, ""):
             selected[f"langfuse.{target_field}"] = record[source_field]
     return selected
+
+
+def _framework(record: dict[str, Any]) -> str | None:
+    """Map instrumentation evidence to a stable agent framework name."""
+    metadata = _dict(record.get("metadata"))
+    scope = _dict(metadata.get("scope"))
+    resource_attributes = _dict(metadata.get("resourceAttributes"))
+    candidates = (
+        metadata.get("framework"),
+        scope.get("name"),
+        resource_attributes.get("service.name"),
+    )
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        normalized = candidate.lower().replace("-", "_")
+        for marker, framework in _FRAMEWORK_NAMES.items():
+            if marker.replace("-", "_") in normalized:
+                return framework
+    return None
 
 
 def _detect_shape(record: dict[str, Any]) -> str:
@@ -642,6 +866,11 @@ class LangfuseJSONLImporter:
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
             status = _node_status(record)
+            system_prompt = (
+                _extract_system_prompt(record.get("input"), record)
+                if node_type is NodeType.LLM_CALL
+                else None
+            )
             nodes_with_parents.append(
                 (
                     ParsedNode(
@@ -658,7 +887,13 @@ class LangfuseJSONLImporter:
                         ),
                         started_at=_datetime(_first(record, "startTime", "start_time")),
                         ended_at=_datetime(_first(record, "endTime", "end_time")),
-                        inputs=_decode_json(record.get("input")),
+                        system_prompt=system_prompt,
+                        reasoning_text=(
+                            _extract_reasoning_text(record)
+                            if node_type is NodeType.LLM_CALL
+                            else None
+                        ),
+                        inputs=_surface_inputs(record.get("input")),
                         outputs=_decode_json(record.get("output")),
                         requested_model=(
                             _first_nonempty(
@@ -756,21 +991,49 @@ class LangfuseJSONLImporter:
             (turn.started_at for turn in turns if turn.started_at), default=None
         )
         ended_at = max((turn.ended_at for turn in turns if turn.ended_at), default=None)
-        inputs = {
-            "schema_version": 1,
-            "turns": [
-                {
-                    "source_trace_id": turn.trace_id,
-                    "inputs": turn.inputs,
-                    "outputs": turn.outputs,
-                }
-                for turn in turns
-            ],
+        latest_inputs = _surface_inputs(latest_turn.inputs)
+        inputs = latest_inputs
+        if len(turns) > 1:
+            inputs = {
+                "current": latest_inputs,
+                "history": [
+                    {
+                        "source_trace_id": turn.trace_id,
+                        "inputs": _surface_inputs(turn.inputs),
+                        "outputs": turn.outputs,
+                    }
+                    for turn in turns[:-1]
+                ],
+            }
+            latest_prompt = _extract_prompt(latest_turn.inputs)
+            if latest_prompt:
+                inputs = {"prompt": latest_prompt, **inputs}
+        system_prompt = next(
+            (
+                node.system_prompt
+                for node in reversed(nodes)
+                if node.node_type is NodeType.LLM_CALL
+                and node.system_prompt is not None
+            ),
+            None,
+        )
+        frameworks = {
+            framework
+            for _, observations in traces
+            for record in observations
+            if (framework := _framework(record)) is not None
         }
+        framework = next(iter(frameworks), None) if len(frameworks) == 1 else None
+        if len(frameworks) > 1:
+            warnings.append(
+                "Session contains conflicting framework evidence: "
+                + ", ".join(sorted(frameworks))
+            )
         digest_payload = {
             "source_id": source_id,
             "source_instance": source_instance,
             "status": session_status,
+            "framework": framework,
             "turns": [asdict(turn) for turn in turns],
             "nodes": [
                 {
@@ -829,6 +1092,7 @@ class LangfuseJSONLImporter:
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
             name=trace_names[-1] if trace_names else None,
+            system_prompt=system_prompt,
             status=session_status,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
@@ -837,6 +1101,7 @@ class LangfuseJSONLImporter:
             started_at=started_at,
             ended_at=ended_at,
             metadata=metadata,
+            framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
 

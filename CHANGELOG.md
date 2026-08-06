@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Sessions and session nodes now expose the latest model-call `system_prompt`, and session nodes expose visible `reasoning_text` when a provider records it. The default Langfuse importer populates these fields, normalizes known framework names, and leaves opaque or encrypted reasoning unavailable.
 - Sessions carry a per-agent sequential `number`, assigned at creation and returned in session responses. Numbers may skip when a create fails after its number was allocated.
 - CLI investigation and annotation commands, plus MCP commands for review workflows, evaluator registration, and starting bounded evaluations or experiment runs. The new operations use existing API and SDK resources, require exact IDs and evaluator versions, and return submitted workflows without polling.
 - Investigations and annotations, managed via `/v1/investigations` and `/v1/annotations`. An investigation asks a set of questions about a set of sessions, each optionally carrying a curated view, and answers are stored as annotations. Annotations also attach directly to a session, targeting the whole session or a part of it through a selector.
@@ -51,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - OpenTelemetry instrumentation for the API server, enabled by setting `KITARU_SERVER_OTEL_EXPORTER_OTLP_ENDPOINT` (or the standard `OTEL_*` environment variables) with the `otel` extra installed.
 
 ### Changed
+- The default Langfuse importer promotes the latest human prompt to the top of model-call inputs while retaining the complete provider payload. Single-turn session inputs use the trace input directly, while multi-turn sessions expose the latest input first and retain earlier turns as history.
 - The worker now stops promptly when asked. A stop request or the configured lifetime ends every wait in the claim loop, including error backoff and the wait for a free slot, and a stopping worker never claims again. A second SIGINT or SIGTERM during a drain cancels the held tasks instead of being ignored, and the new `--drain-timeout` option bounds the drain before canceling. The worker also survives transient network failures during claiming and job polling instead of exiting, and its heartbeat loop restarts after an unexpected error.
 - A task process is now killed together with every descendant on all outcomes, including success, so a background process spawned by a task can no longer outlive it or hang the worker by holding the task's output pipes open. Worker-built task commands run without a shell, and process spawning and killing are platform-specific, preparing task execution on Windows.
 - Starting an experiment run now writes its replays, jobs, and tasks in three batched inserts instead of row by row, so run creation stays fast for large cohorts.

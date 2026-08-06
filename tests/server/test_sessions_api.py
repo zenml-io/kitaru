@@ -190,11 +190,14 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_create_session(client: httpx.AsyncClient) -> None:
     """Create a session."""
-    response = await client.post("/v1/sessions", json=_session_body())
+    response = await client.post(
+        "/v1/sessions", json=_session_body(system_prompt="Follow the policy.")
+    )
     assert response.status_code == 201
     body = response.json()
     assert body["origin"] == "recorded"
     assert body["status"] == "in_progress"
+    assert body["system_prompt"] == "Follow the policy."
     assert body["owner_id"] == str(ACCOUNT.id)
 
 
@@ -592,6 +595,18 @@ async def test_update_session_omitted_outputs_unchanged(
     body = response.json()
     assert body["outputs"] == {"answer": 42}
     assert body["name"] == "renamed"
+
+
+async def test_update_session_system_prompt(client: httpx.AsyncClient) -> None:
+    """Update the system prompt after a recorded model call."""
+    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}",
+        json={"system_prompt": "Use the latest policy."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["system_prompt"] == "Use the latest policy."
 
 
 async def test_update_session_status_cannot_be_cleared(

@@ -168,11 +168,13 @@ async def test_create_sets_timestamps_and_defaults(setup: Setup) -> None:
             agent_id=agent_id,
             number=1,
             origin=SessionOrigin.RECORDED,
+            system_prompt="Follow the policy.",
         )
     )
     assert session.owner_id == owner_id
     assert session.agent_id == agent_id
     assert session.status == SessionStatus.IN_PROGRESS
+    assert session.system_prompt == "Follow the policy."
     assert session.cost is None
     assert session.tokens is None
     assert session.llm_call_count == 0

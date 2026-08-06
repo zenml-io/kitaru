@@ -55,6 +55,8 @@ class SessionNodeUpsert(FrozenModel):
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    system_prompt: str | None = None
+    reasoning_text: str | None = None
     inputs: Any = None
     outputs: Any = None
     requested_model: str | None = None

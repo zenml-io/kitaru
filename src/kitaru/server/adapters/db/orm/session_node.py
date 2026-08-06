@@ -103,6 +103,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    reasoning_text: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     requested_model: Mapped[str | None] = mapped_column(Text)
@@ -163,6 +165,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.error = node.error
         self.started_at = node.started_at
         self.ended_at = node.ended_at
+        self.system_prompt = node.system_prompt
+        self.reasoning_text = node.reasoning_text
         self.inputs = node.inputs
         self.outputs = node.outputs
         self.requested_model = node.requested_model
@@ -228,6 +232,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
+            system_prompt=self.system_prompt,
+            reasoning_text=self.reasoning_text,
             inputs=self.inputs if include_payloads else None,
             outputs=self.outputs if include_payloads else None,
             requested_model=self.requested_model,

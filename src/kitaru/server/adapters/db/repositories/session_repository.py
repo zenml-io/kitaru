@@ -290,6 +290,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.origin = session.origin.value
         row.status = session.status.value
         row.name = session.name
+        row.system_prompt = session.system_prompt
         row.inputs = session.inputs
         row.outputs = session.outputs
         row.expected = session.expected

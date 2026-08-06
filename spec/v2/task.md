@@ -144,6 +144,7 @@ class ParsedNode(BaseModel): ...      # node fields plus children: list[ParsedNo
 class ParsedSession(BaseModel):
     status: SessionStatus
     name: str | None
+    system_prompt: str | None
     inputs: Any
     outputs: Any
     expected: Any
@@ -165,7 +166,7 @@ def session_request(importer: ImportTaskDetails, parsed: ParsedSession) -> Sessi
 def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]: ...
 ```
 
-`call_parser` is a wrapping generator: it advances the parser one `next()` at a time inside a try/except, converting any exception into `SessionImportError`. Wrapping only the parser call would protect nothing, a generator function runs no code until iterated. `session_request` builds the create request with `origin=imported`, the task id, the importer's `provider` as `imported_from`, its `agent_id`, and the parsed fields, so every imported session links to its importer task. `flatten_nodes` walks the tree depth-first, assigns indexes and parent indexes, and emits flat ingest requests.
+`ParsedNode` also carries optional `system_prompt` and `reasoning_text` fields. `call_parser` is a wrapping generator: it advances the parser one `next()` at a time inside a try/except, converting any exception into `SessionImportError`. Wrapping only the parser call would protect nothing, a generator function runs no code until iterated. `session_request` builds the create request with `origin=imported`, the task id, the importer's `provider` as `imported_from`, its `agent_id`, and the parsed fields, so every imported session links to its importer task. `flatten_nodes` walks the tree depth-first, assigns indexes and parent indexes, and emits flat ingest requests.
 
 The flow, `async def run(client, task_id)`:
 

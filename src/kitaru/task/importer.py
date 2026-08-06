@@ -78,6 +78,8 @@ class ParsedNode(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    system_prompt: str | None = None
+    reasoning_text: str | None = None
     inputs: Any
     outputs: Any
     requested_model: str | None = None
@@ -101,6 +103,7 @@ class ParsedSession(BaseModel):
 
     status: SessionStatus
     name: str | None
+    system_prompt: str | None = None
     inputs: Any
     outputs: Any
     expected: Any
@@ -175,6 +178,7 @@ def session_request(
         origin=SessionOrigin.IMPORTED,
         status=parsed.status,
         name=parsed.name,
+        system_prompt=parsed.system_prompt,
         inputs=parsed.inputs,
         outputs=parsed.outputs,
         expected=parsed.expected,
@@ -213,6 +217,8 @@ def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]:
                 error=node.error,
                 started_at=node.started_at,
                 ended_at=node.ended_at,
+                system_prompt=node.system_prompt,
+                reasoning_text=node.reasoning_text,
                 inputs=node.inputs,
                 outputs=node.outputs,
                 requested_model=node.requested_model,

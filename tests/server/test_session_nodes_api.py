@@ -131,7 +131,12 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
         f"/v1/sessions/{session_id}/nodes",
         json={
             "nodes": [
-                _node(0, inputs={"q": "hi"}),
+                _node(
+                    0,
+                    inputs={"q": "hi"},
+                    system_prompt="Be concise.",
+                    reasoning_text="A short answer is enough.",
+                ),
                 _node(
                     1,
                     parent_index=0,
@@ -149,6 +154,8 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert items[1]["cache_key"] is not None
     # Ingest responses populate payloads even without include_payloads.
     assert items[0]["inputs"] == {"q": "hi"}
+    assert items[0]["system_prompt"] == "Be concise."
+    assert items[0]["reasoning_text"] == "A short answer is enough."
 
 
 async def test_ingest_nodes_unresolved_parent_index(
@@ -202,13 +209,25 @@ async def test_list_nodes_include_payloads_default_false(
     """Null inputs, outputs, and attributes by default."""
     await client.post(
         f"/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
+        json={
+            "nodes": [
+                _node(
+                    0,
+                    inputs={"q": "hi"},
+                    attributes={"k": 1},
+                    system_prompt="Be concise.",
+                    reasoning_text="A short answer is enough.",
+                )
+            ]
+        },
     )
     response = await client.get(f"/v1/sessions/{session_id}/nodes")
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["inputs"] is None
     assert item["attributes"] is None
+    assert item["system_prompt"] == "Be concise."
+    assert item["reasoning_text"] == "A short answer is enough."
 
 
 async def test_list_nodes_include_payloads_true(

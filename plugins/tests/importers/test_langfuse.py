@@ -209,17 +209,13 @@ def test_imports_multiturn_observations() -> None:
     assert session.external_id == "project-1:conversation-1"
     assert session.status is SessionStatus.COMPLETED
     assert session.inputs == {
-        "schema_version": 1,
-        "turns": [
+        "prompt": "again",
+        "current": {"prompt": "again", "message": "again"},
+        "history": [
             {
                 "source_trace_id": "trace-1",
-                "inputs": {"message": "hello"},
+                "inputs": {"prompt": "hello", "message": "hello"},
                 "outputs": {"answer": "hi"},
-            },
-            {
-                "source_trace_id": "trace-2",
-                "inputs": {"message": "again"},
-                "outputs": {"answer": "done"},
             },
         ],
     }
@@ -275,7 +271,7 @@ def test_imports_nested_trace_rows() -> None:
     session = sessions(jsonl(trace))[0]
 
     assert session.name == "support turn"
-    assert session.inputs["turns"][0]["inputs"] == {"message": "hello"}
+    assert session.inputs == {"prompt": "hello", "message": "hello"}
     assert session.outputs == {"answer": "hi"}
     assert session.metadata["langfuse.environments"] == ["production"]
     assert session.metadata["langfuse.releases"] == ["release-1"]
@@ -482,6 +478,145 @@ def test_maps_model_provider_cost_and_bounded_metadata() -> None:
     assert node.cost == Decimal("0.0125")
     assert "response" not in node.metadata
     assert node.metadata["langfuse.gen_ai.provider.name"] == "openai"
+
+
+def test_surfaces_model_prompt_system_prompt_and_reasoning() -> None:
+    """Promote model-call content while preserving the provider payload."""
+    messages = [
+        {
+            "role": "system",
+            "parts": [{"type": "text", "content": "Be concise."}],
+        },
+        {
+            "role": "user",
+            "parts": [{"type": "text", "content": "Find the invoice."}],
+        },
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "type": "tool_call_response",
+                    "name": "find_invoice",
+                    "result": {"total": 42},
+                }
+            ],
+        },
+    ]
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                input_={"messages": messages, "tools": [{"name": "find_invoice"}]},
+                output=[
+                    {
+                        "role": "assistant",
+                        "parts": [
+                            {"type": "thinking", "content": "The total is 42."},
+                            {"type": "text", "content": "The invoice total is 42."},
+                        ],
+                    }
+                ],
+                metadata={
+                    "scope": {"name": "pydantic-ai", "version": "2.15.0"},
+                    "resourceAttributes": {"service.name": "pydantic-ai-invoice-agent"},
+                },
+            )
+        )
+    )[0]
+
+    node = session.nodes[0]
+    assert node.inputs == {
+        "prompt": "Find the invoice.",
+        "messages": messages,
+        "tools": [{"name": "find_invoice"}],
+    }
+    assert node.system_prompt == "Be concise."
+    assert node.reasoning_text == "The total is 42."
+    assert session.system_prompt == "Be concise."
+    assert session.framework == "pydantic-ai"
+
+
+def test_extracts_google_adk_system_instruction() -> None:
+    """Read Google ADK's system instruction without flattening its config."""
+    input_ = {
+        "config": {"system_instruction": "Use the available tools."},
+        "contents": [{"role": "user", "parts": [{"text": "Check the weather."}]}],
+    }
+
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                input_=input_,
+                metadata={"scope": {"name": "gcp.vertex.agent", "version": "2.5.0"}},
+            )
+        )
+    )[0]
+
+    assert session.nodes[0].inputs == {"prompt": "Check the weather.", **input_}
+    assert session.nodes[0].system_prompt == "Use the available tools."
+    assert session.framework == "google-adk"
+
+
+def test_opaque_reasoning_remains_unavailable() -> None:
+    """Do not expose provider signatures or empty encrypted reasoning."""
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                input_=[
+                    {"role": "system", "content": "Be concise."},
+                    {"role": "user", "content": "Check the invoice."},
+                ],
+                output=[
+                    {
+                        "role": "assistant",
+                        "content": "reasoning\n\nSee JSON for details",
+                        "data": {
+                            "type": "reasoning",
+                            "summary": [],
+                            "content": [],
+                            "encrypted_content": "opaque-provider-value",
+                        },
+                    }
+                ],
+            )
+        )
+    )[0]
+
+    assert session.nodes[0].reasoning_text is None
+
+
+@pytest.mark.parametrize(
+    ("scope_name", "expected"),
+    [
+        ("openinference.instrumentation.claude_agent_sdk", "claude-agent-sdk"),
+        ("logfire.openai_agents", "openai-agents"),
+        ("opentelemetry.instrumentation.langchain", "langgraph"),
+    ],
+)
+def test_maps_framework_from_instrumentation_scope(
+    scope_name: str, expected: str
+) -> None:
+    """Normalize known instrumentation scopes into stable framework names."""
+    session = sessions(
+        jsonl(
+            observation(
+                "root",
+                "trace-1",
+                input_="hello",
+                metadata={"scope": {"name": scope_name}},
+            )
+        )
+    )[0]
+
+    assert session.framework == expected
 
 
 def test_uses_model_when_model_id_is_null() -> None:

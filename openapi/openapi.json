@@ -5796,6 +5796,18 @@
               }
             ],
             "description": "Initial session status."
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt for the session's latest model call.",
+            "title": "System Prompt"
           }
         },
         "required": [
@@ -5984,6 +5996,18 @@
             "description": "Model provider.",
             "title": "Provider"
           },
+          "reasoning_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning text produced by the model call.",
+            "title": "Reasoning Text"
+          },
           "requested_model": {
             "anyOf": [
               {
@@ -6032,6 +6056,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt used by the model call.",
+            "title": "System Prompt"
           },
           "tokens": {
             "anyOf": [
@@ -6246,6 +6282,18 @@
             "description": "Model provider.",
             "title": "Provider"
           },
+          "reasoning_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning text produced by the model call.",
+            "title": "Reasoning Text"
+          },
           "requested_model": {
             "anyOf": [
               {
@@ -6309,6 +6357,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt used by the model call.",
+            "title": "System Prompt"
           },
           "tokens": {
             "anyOf": [
@@ -6557,6 +6617,18 @@
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
           },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt for the session's latest model call.",
+            "title": "System Prompt"
+          },
           "task_id": {
             "anyOf": [
               {
@@ -6728,6 +6800,18 @@
               }
             ],
             "description": "New session status."
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New system prompt for the latest model call.",
+            "title": "System Prompt"
           }
         },
         "title": "SessionUpdateRequest",
