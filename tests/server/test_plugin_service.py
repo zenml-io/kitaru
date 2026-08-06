@@ -31,11 +31,9 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
-    DefaultPluginReadOnly,
     DuplicatePluginName,
     InvalidPluginProvider,
     PackagePluginSource,
-    Plugin,
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
@@ -289,50 +287,6 @@ async def test_update_plugin_not_found(evaluator_service: PluginService) -> None
         await evaluator_service.update_plugin(
             uuid.uuid4(), PluginUpdate(description="new"), actor=ACTOR
         )
-
-
-async def test_ownerless_reserved_plugin_rejects_public_mutations(
-    evaluator_service: PluginService,
-    repository: FakePluginRepository,
-    blob_repository: FakeBlobRepository,
-) -> None:
-    """Keep released built-ins immutable through public service methods."""
-    plugin = await repository.create(
-        Plugin(
-            owner_id=None,
-            kind=PluginKind.EVALUATOR,
-            name="kitaru/session-diagnostics",
-            description="Built-in diagnostics.",
-            provider=None,
-            metadata={"built_in": True},
-        )
-    )
-    blob = await create_blob(blob_repository, None)
-    version = await repository.create_version(
-        plugin.id, ScriptPluginSource(blob_id=blob.id, entrypoint="evaluate"), "1"
-    )
-
-    with pytest.raises(DefaultPluginReadOnly):
-        await evaluator_service.update_plugin(
-            plugin.id, PluginUpdate(description="changed"), actor=ACTOR
-        )
-    with pytest.raises(DefaultPluginReadOnly):
-        await evaluator_service.delete_plugin(plugin.id, actor=ACTOR)
-    with pytest.raises(DefaultPluginReadOnly):
-        await evaluator_service.create_version(
-            plugin.id,
-            ScriptPluginSource(blob_id=blob.id, entrypoint="evaluate"),
-            "2",
-            actor=ACTOR,
-        )
-    with pytest.raises(DefaultPluginReadOnly):
-        await evaluator_service.update_version(
-            plugin.id, version.version, "changed", ACTOR
-        )
-
-    stored = await repository.get(plugin.id)
-    assert stored.description == "Built-in diagnostics."
-    assert stored.latest_version == 1
 
 
 async def test_delete_plugin(evaluator_service: PluginService) -> None:

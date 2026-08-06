@@ -22,10 +22,7 @@ _SCRUBBED_ENVIRONMENT_VARIABLES = {
     "VIRTUAL_ENV_PROMPT",
 }
 _WORKER_IMPORTS = (
-    "import kitaru; import kitaru.cli; "
-    "from importlib.resources import files; "
-    "from kitaru.worker import Worker, WorkerConfig; "
-    "assert files('kitaru._default_plugins').joinpath('evaluators.py').read_bytes()"
+    "import kitaru; import kitaru.cli; from kitaru.worker import Worker, WorkerConfig"
 )
 _WORKER_ENVIRONMENT = {
     "KITARU_API_URL": "http://127.0.0.1:9",

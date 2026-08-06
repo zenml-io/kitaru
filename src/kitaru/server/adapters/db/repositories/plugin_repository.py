@@ -14,7 +14,7 @@
 """SQL plugin and plugin version repository."""
 
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 
 from sqlalchemy import Select, select, update
 
@@ -93,12 +93,11 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
         )
         return row.to_domain()
 
-    async def get(self, plugin_id: uuid.UUID, exclusive: bool = False) -> Plugin:
+    async def get(self, plugin_id: uuid.UUID) -> Plugin:
         """Load a plugin by id.
 
         Args:
             plugin_id: Id of the plugin.
-            exclusive: Whether to lock the row for update.
 
         Raises:
             PluginNotFound: No plugin has this id.
@@ -106,22 +105,8 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
         Returns:
             Stored plugin.
         """
-        row = await self._get_row(plugin_id, exclusive=exclusive)
+        row = await self._get_row(plugin_id)
         return row.to_domain()
-
-    async def get_many_locked(
-        self, plugin_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Plugin]:
-        """Bulk-lock and load plugins by id in ascending id order.
-
-        Args:
-            plugin_ids: Ids of the plugins to load.
-
-        Returns:
-            Locked plugins keyed by id, with missing ids omitted.
-        """
-        rows = await self._load_by_ids(plugin_ids, exclusive=True)
-        return {plugin_id: row.to_domain() for plugin_id, row in rows.items()}
 
     async def get_by_name(self, kind: PluginKind, name: str) -> Plugin:
         """Load a plugin by kind and name.

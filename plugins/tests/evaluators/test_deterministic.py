@@ -1,7 +1,7 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
-"""Tests for the packaged deterministic evaluator bundles."""
+"""Tests for the repository deterministic evaluator bundles."""
 
 import inspect
 import json
@@ -9,11 +9,12 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, localcontext
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from kitaru._default_plugins import evaluators
+from evaluators import deterministic as evaluators
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import (
     SessionOrigin,
@@ -27,6 +28,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
 )
 from kitaru.task.evaluator import SessionView
+from kitaru.task.plugins import load_plugin_entrypoint
 
 NOW = datetime(2026, 8, 6, 12, tzinfo=UTC)
 SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -156,8 +158,22 @@ def test_public_entrypoints_have_exact_signatures() -> None:
             function(_view(), unknown=True)
 
 
+def test_seeded_source_loads_through_script_plugin_contract() -> None:
+    """Load the repository file the same way an evaluator worker loads its blob."""
+    source = Path(__file__).resolve().parents[2] / "evaluators/deterministic.py"
+    entrypoint = load_plugin_entrypoint(source, "session_diagnostics", "Evaluator")
+
+    first = entrypoint(_view())
+    repeated = entrypoint(_view())
+
+    assert [result.model_dump(mode="json") for result in first] == [
+        result.model_dump(mode="json") for result in repeated
+    ]
+    assert {result.name for result in first} >= {"input_sha256", "terminality"}
+
+
 def test_ordered_result_name_contracts() -> None:
-    """Freeze the ordered leaf names emitted by every built-in bundle."""
+    """Freeze the ordered leaf names emitted by every deterministic bundle."""
     view = _view()
     calls = {
         "session_diagnostics": evaluators.session_diagnostics(view),
@@ -431,6 +447,20 @@ def test_output_contract_bounds_large_exact_result() -> None:
 
 
 @pytest.mark.parametrize(
+    ("observed", "expected"),
+    [(True, 1), (False, 0), (1, 1.0)],
+)
+def test_output_contract_uses_json_encoding_equality(
+    observed: Any, expected: Any
+) -> None:
+    """Keep distinct JSON encodings distinct during exact comparison."""
+    result = _by_name(evaluators.output_contract(_view(outputs=observed), expected))[
+        "exact_output"
+    ]
+    assert result.passed is False
+
+
+@pytest.mark.parametrize(
     ("call", "match"),
     [
         (lambda: evaluators.output_contract(_view()), "at least one"),
@@ -443,6 +473,28 @@ def test_output_contract_bounds_large_exact_result() -> None:
         (
             lambda: evaluators.output_contract(_view(), required_paths=["/a~2b"]),
             "escapes",
+        ),
+        (
+            lambda: evaluators.output_contract(_view(), required_paths=["/missing/~2"]),
+            "escapes",
+        ),
+        (
+            lambda: evaluators.output_contract(
+                _view(), type_requirements={"/missing/~2": "string"}
+            ),
+            "escapes",
+        ),
+        (
+            lambda: evaluators.timing_profile(_view(), evidence_limit=True),
+            "integer",
+        ),
+        (
+            lambda: evaluators.timing_profile(_view(), evidence_limit=0),
+            "between",
+        ),
+        (
+            lambda: evaluators.timing_profile(_view(), evidence_limit=101),
+            "between",
         ),
         (
             lambda: evaluators.resource_budget(_view(), max_nodes=True),
@@ -471,6 +523,16 @@ def test_output_contract_bounds_large_exact_result() -> None:
             "maximum of zero",
         ),
         (lambda: evaluators.model_policy(_view()), "at least one"),
+        (
+            lambda: evaluators.workflow_conformance(_view(), expected_tools=[]),
+            "non-empty",
+        ),
+        (
+            lambda: evaluators.workflow_conformance(
+                _view(), expected_tools=["search"], mode="unknown"
+            ),
+            "mode",
+        ),
     ],
 )
 def test_config_validation_rejects_ambiguous_policies(call: Any, match: str) -> None:
@@ -737,6 +799,20 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
 
 
 @pytest.mark.parametrize(
+    ("first", "second"),
+    [(True, 1), (False, 0), (1, 1.0)],
+)
+def test_llm_signals_use_json_encoding_equality(first: Any, second: Any) -> None:
+    """Do not classify distinct JSON encodings as identical LLM inputs."""
+    nodes = [
+        _node(0, node_type=NodeType.LLM_CALL, inputs=first, outputs="first"),
+        _node(1, node_type=NodeType.LLM_CALL, inputs=second, outputs="second"),
+    ]
+    signals = _by_name(evaluators.llm_call_signals(_view(nodes)))
+    assert _payload(signals["adjacent_identical_inputs"])["total"] == 0
+
+
+@pytest.mark.parametrize(
     ("mode", "passed"),
     [
         ("exact_order", False),
@@ -757,6 +833,35 @@ def test_workflow_conformance_modes(mode: str, passed: bool) -> None:
         )
     )
     assert results["workflow_match"].passed is passed
+
+
+@pytest.mark.parametrize(
+    ("names", "expected", "mode", "passed"),
+    [
+        (["read"], ["search"], "exact_order", False),
+        (["search", "read"], ["search"], "exact_order", False),
+        (["unexpected"], ["search"], "exact_set", False),
+        (["search"], ["search", "answer"], "exact_order", None),
+        (["search"], ["search", "answer"], "exact_set", None),
+        (["search"], ["search"], "exact_order", None),
+        (["search"], ["search"], "exact_set", None),
+    ],
+)
+def test_nonterminal_workflow_conformance_reports_decisive_failures(
+    names: list[str], expected: list[str], mode: str, passed: bool | None
+) -> None:
+    """Fail irreversible mismatches but hold incomplete matching traces."""
+    nodes = [
+        _node(index, tool_name=name, outputs={}) for index, name in enumerate(names)
+    ]
+    result = _by_name(
+        evaluators.workflow_conformance(
+            _view(nodes, status=SessionStatus.IN_PROGRESS),
+            expected_tools=expected,
+            mode=mode,
+        )
+    )["workflow_match"]
+    assert result.passed is passed
 
 
 def test_result_values_are_bounded_for_long_workflows() -> None:

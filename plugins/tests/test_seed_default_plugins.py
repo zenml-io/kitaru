@@ -26,7 +26,21 @@ _SCRIPT = runpy.run_path(
     str(Path(__file__).resolve().parents[2] / "scripts/seed_default_plugins.py")
 )
 PluginDefinition = _SCRIPT["PluginDefinition"]
+PLUGIN_DEFINITIONS = _SCRIPT["PLUGIN_DEFINITIONS"]
 seed_plugin = _SCRIPT["seed_plugin"]
+
+_DETERMINISTIC_ENTRYPOINTS = {
+    "session-diagnostics": "session_diagnostics",
+    "output-contract": "output_contract",
+    "trajectory-signals": "trajectory_signals",
+    "tool-health": "tool_health",
+    "timing-profile": "timing_profile",
+    "resource-budget": "resource_budget",
+    "tool-policy": "tool_policy",
+    "llm-call-signals": "llm_call_signals",
+    "model-policy": "model_policy",
+    "workflow-conformance": "workflow_conformance",
+}
 
 
 class FakeBlobs:
@@ -124,6 +138,30 @@ def _definition(path: Path) -> PluginDefinition:
         description="Import provider traces.",
         provider="provider",
     )
+
+
+def test_seed_catalog_preserves_basic_and_adds_deterministic_evaluators() -> None:
+    """Keep the existing demo evaluators beside the deterministic bundles."""
+    evaluators = {
+        definition.name: definition
+        for definition in PLUGIN_DEFINITIONS
+        if definition.kind == "evaluator"
+    }
+
+    assert {
+        name: definition.entrypoint
+        for name, definition in evaluators.items()
+        if definition.path.name == "basic.py"
+    } == {
+        "cost": "cost",
+        "latency": "latency",
+        "tool-call-patterns": "tool_call_patterns",
+    }
+    assert {
+        name: definition.entrypoint
+        for name, definition in evaluators.items()
+        if definition.path.name == "deterministic.py"
+    } == _DETERMINISTIC_ENTRYPOINTS
 
 
 async def test_seed_creates_only_changed_versions(tmp_path: Path) -> None:

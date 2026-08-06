@@ -13,16 +13,11 @@
 #  permissions and limitations under the License.
 """Tests for default plugin registration."""
 
-import hashlib
-import inspect
-
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository
-from kitaru._default_plugins import evaluators
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
-    DEFAULT_PLUGIN_DEFINITIONS,
     DefaultPluginDefinition,
     register_default_plugins,
 )
@@ -49,48 +44,6 @@ DEFINITIONS = (
         version=1,
     ),
 )
-
-EXPECTED_EVALUATORS = {
-    "kitaru/session-diagnostics": "session_diagnostics",
-    "kitaru/output-contract": "output_contract",
-    "kitaru/trajectory-signals": "trajectory_signals",
-    "kitaru/tool-health": "tool_health",
-    "kitaru/timing-profile": "timing_profile",
-    "kitaru/resource-budget": "resource_budget",
-    "kitaru/tool-policy": "tool_policy",
-    "kitaru/llm-call-signals": "llm_call_signals",
-    "kitaru/model-policy": "model_policy",
-    "kitaru/workflow-conformance": "workflow_conformance",
-}
-
-
-def test_released_evaluator_catalog_contract() -> None:
-    """Publish the complete additive built-in evaluator catalog."""
-    definitions = {
-        definition.name: definition for definition in DEFAULT_PLUGIN_DEFINITIONS
-    }
-    assert set(definitions) == set(EXPECTED_EVALUATORS)
-    assert {definition.version for definition in definitions.values()} == {1}
-    assert len({definition.content for definition in definitions.values()}) == 1
-    for name, entrypoint in EXPECTED_EVALUATORS.items():
-        definition = definitions[name]
-        assert definition.kind is PluginKind.EVALUATOR
-        assert definition.entrypoint == entrypoint
-        assert definition.provider is None
-        assert definition.metadata["built_in"] is True
-        assert definition.metadata["execution"] == "manual"
-        assert definition.metadata["offline"] is True
-        assert definition.metadata["contract_version"] == 1
-        assert (
-            definition.metadata["source_sha256"]
-            == hashlib.sha256(definition.content).hexdigest()
-        )
-        assert isinstance(definition.metadata["parameters"], dict)
-        assert isinstance(definition.metadata["result_families"], list)
-        signature = inspect.signature(getattr(evaluators, entrypoint))
-        assert set(definition.metadata["parameters"]) == set(signature.parameters) - {
-            "session"
-        }
 
 
 @pytest.fixture
@@ -120,7 +73,6 @@ async def test_register_creates_default_plugins(
         assert plugin.owner_id is None
         assert plugin.description == definition.description
         assert plugin.provider == definition.provider
-        assert plugin.metadata == definition.metadata
         assert plugin.latest_version == 1
         version = await repository.get_version(plugin.id, 1)
         assert isinstance(version.source, ScriptPluginSource)
@@ -157,13 +109,7 @@ async def test_register_creates_new_version_on_version_bump(
 
     bumped_name = DEFINITIONS[0].name
     bumped = tuple(
-        definition.model_copy(
-            update={
-                "version": 2,
-                "description": "Updated default plugin.",
-                "metadata": {"contract_version": 2},
-            }
-        )
+        definition.model_copy(update={"version": 2})
         if definition.name == bumped_name
         else definition
         for definition in DEFINITIONS
@@ -175,6 +121,3 @@ async def test_register_creates_new_version_on_version_bump(
         plugin = await repository.get_by_name(definition.kind, definition.name)
         expected_version = 2 if definition.name == bumped_name else 1
         assert plugin.latest_version == expected_version
-        if definition.name == bumped_name:
-            assert plugin.description == "Updated default plugin."
-            assert plugin.metadata == {"contract_version": 2}

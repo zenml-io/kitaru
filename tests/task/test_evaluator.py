@@ -18,7 +18,6 @@ import json
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from importlib.resources import as_file, files
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -57,7 +56,6 @@ from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task import evaluator as evaluator_module
 from kitaru.task.evaluator import EvaluationError, SessionView, call_evaluator, run
-from kitaru.task.plugins import load_plugin_entrypoint
 
 
 @pytest.fixture
@@ -172,30 +170,6 @@ def test_call_evaluator_passes_params() -> None:
 
     call_evaluator("with-params", evaluate, view, {"threshold": 0.5})
     assert received["threshold"] == 0.5
-
-
-def test_packaged_built_in_source_loads_through_script_contract() -> None:
-    """Run packaged diagnostic and policy entrypoints through the plugin loader."""
-    resource = files("kitaru._default_plugins").joinpath("evaluators.py")
-    with as_file(resource) as path:
-        view = _session_view()
-        diagnostics = load_plugin_entrypoint(path, "session_diagnostics", "Evaluator")
-        budget = load_plugin_entrypoint(path, "resource_budget", "Evaluator")
-
-        first = call_evaluator("kitaru/session-diagnostics", diagnostics, view, {})
-        repeated = call_evaluator("kitaru/session-diagnostics", diagnostics, view, {})
-        policy = call_evaluator(
-            "kitaru/resource-budget", budget, view, {"max_nodes": 0}
-        )
-
-    assert [result.model_dump(mode="json") for result in first] == [
-        result.model_dump(mode="json") for result in repeated
-    ]
-    assert {result.name for result in first} >= {"input_sha256", "terminality"}
-    assert {result.name for result in policy} >= {
-        "config_sha256",
-        "node_count_budget",
-    }
 
 
 async def test_run_fetches_session_and_nodes_concurrently(

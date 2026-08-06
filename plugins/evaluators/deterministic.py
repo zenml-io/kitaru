@@ -113,7 +113,7 @@ def _hash(value: Any) -> str:
 
 
 def _token_fields(tokens: Any) -> Any:
-    """Select the token fields used by the built-ins."""
+    """Select the token fields used by the evaluator bundles."""
     if tokens is None:
         return None
     return {
@@ -560,15 +560,19 @@ def _decode_pointer_part(raw_part: str) -> str:
     return "".join(decoded)
 
 
-def _resolve_pointer(document: Any, pointer: str) -> tuple[bool, Any]:
-    """Resolve an RFC 6901 JSON Pointer against normalized JSON evidence."""
+def _decode_pointer_parts(pointer: str) -> list[str]:
+    """Validate and decode every token in an RFC 6901 JSON Pointer."""
     if pointer == "":
-        return True, document
+        return []
     if not pointer.startswith("/"):
         raise ValueError("JSON Pointer paths must be empty or start with '/'")
+    return [_decode_pointer_part(part) for part in pointer[1:].split("/")]
+
+
+def _resolve_pointer(document: Any, pointer: str) -> tuple[bool, Any]:
+    """Resolve an RFC 6901 JSON Pointer against normalized JSON evidence."""
     current = document
-    for raw_part in pointer[1:].split("/"):
-        part = _decode_pointer_part(raw_part)
+    for part in _decode_pointer_parts(pointer):
         if isinstance(current, dict):
             if part not in current:
                 return False, None
@@ -672,7 +676,9 @@ def output_contract(
     if expected is not _UNSET:
         passed = None
         if output_available:
-            passed = normalized_output == normalized_expected
+            passed = _canonical_json(normalized_output) == _canonical_json(
+                normalized_expected
+            )
             if passed and not terminal:
                 passed = None
         results.append(
@@ -1371,7 +1377,7 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
             previous is not None
             and previous[2]
             and complete
-            and previous[1] == normalized
+            and _canonical_json(previous[1]) == _canonical_json(normalized)
         ):
             repeated.append({"indexes": [previous[0].index, call.index]})
         previous = call, normalized, complete and call.inputs is not None
@@ -1539,7 +1545,16 @@ def workflow_conformance(
         matched = set(expected_tools) <= set(observed)
     else:
         matched = set(expected_tools) == set(observed)
-    complete = _is_terminal(session) and len(observed) == len(calls)
+    name_coverage_complete = len(observed) == len(calls)
+    complete = _is_terminal(session) and name_coverage_complete
+    passed: bool | None = matched if complete else None
+    if not complete and name_coverage_complete:
+        if mode == "exact_order":
+            is_valid_prefix = observed == expected_tools[: len(observed)]
+            if len(observed) > len(expected_tools) or not is_valid_prefix:
+                passed = False
+        elif mode == "exact_set" and not set(observed) <= set(expected_tools):
+            passed = False
     results.extend(
         [
             name_coverage,
@@ -1547,7 +1562,7 @@ def workflow_conformance(
                 "workflow_match",
                 {"expected": expected_tools, "mode": mode, "observed": observed},
                 "Exact recorded tool sequence comparison under the selected mode.",
-                passed=matched if complete else None,
+                passed=passed,
             ),
         ]
     )

@@ -14,7 +14,6 @@
 """Plugin and plugin version repository interface."""
 
 import uuid
-from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
@@ -38,31 +37,17 @@ class PluginRepository(Protocol):
         """
         ...
 
-    async def get(self, plugin_id: uuid.UUID, exclusive: bool = False) -> Plugin:
+    async def get(self, plugin_id: uuid.UUID) -> Plugin:
         """Load a plugin by id.
 
         Args:
             plugin_id: Id of the plugin.
-            exclusive: Whether to lock the row for update.
 
         Raises:
             PluginNotFound: No plugin has this id.
 
         Returns:
             Stored plugin.
-        """
-        ...
-
-    async def get_many_locked(
-        self, plugin_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Plugin]:
-        """Bulk-lock and load plugins by id in ascending id order.
-
-        Args:
-            plugin_ids: Ids of the plugins to load.
-
-        Returns:
-            Locked plugins keyed by id, with missing ids omitted.
         """
         ...
 

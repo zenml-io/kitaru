@@ -39,6 +39,7 @@ from kitaru.client import KitaruAPIClient
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _SEED_MARKER = "scripts/seed_default_plugins.py"
+_DETERMINISTIC_EVALUATOR_PATH = _REPOSITORY_ROOT / "plugins/evaluators/deterministic.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,76 @@ PLUGIN_DEFINITIONS = (
         path=_REPOSITORY_ROOT / "plugins/evaluators/basic.py",
         entrypoint="tool_call_patterns",
         description="Count repeated calls to the same tool.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="session-diagnostics",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="session_diagnostics",
+        description="Check recorded session completeness and internal consistency.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="output-contract",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="output_contract",
+        description="Check recorded output against exact and structural rules.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="trajectory-signals",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="trajectory_signals",
+        description="Report exact repetition, failed retries, and short tool cycles.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="tool-health",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="tool_health",
+        description="Report recorded tool failures and result anomalies.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="timing-profile",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="timing_profile",
+        description="Report recorded wall-clock and node timing.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="resource-budget",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="resource_budget",
+        description="Apply configured ceilings to recorded resource use.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="tool-policy",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="tool_policy",
+        description="Apply exact tool requirements, prohibitions, and limits.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="llm-call-signals",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="llm_call_signals",
+        description="Report recorded LLM failures, repetition, and metadata coverage.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="model-policy",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="model_policy",
+        description="Apply exact model and provider rules to recorded LLM calls.",
+    ),
+    PluginDefinition(
+        kind="evaluator",
+        name="workflow-conformance",
+        path=_DETERMINISTIC_EVALUATOR_PATH,
+        entrypoint="workflow_conformance",
+        description="Compare recorded tool order with a configured workflow.",
     ),
 )
 

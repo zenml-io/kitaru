@@ -5,9 +5,17 @@ icon: gauge-high
 
 # Deterministic Evaluations
 
-Kitaru includes ten built-in evaluators for recorded and imported sessions. They read stored session evidence and return repeatable diagnostics or policy results. They do not run the agent, call a model provider, replay a session, invoke a live tool, or read an external service.
+The Kitaru repository includes ten deterministic evaluator plugins for recorded and imported sessions. They read stored session evidence and return repeatable diagnostics or policy results. They do not run the agent, call a model provider, replay a session, invoke a live tool, or read an external service.
 
-You start these evaluations explicitly. Importing or recording a session does not start them automatically.
+An administrator must seed the repository plugin definitions explicitly:
+
+```bash
+uv run python scripts/seed_default_plugins.py
+```
+
+The command uses the configured Kitaru workspace, preserves the three existing evaluators from `plugins/evaluators/basic.py`, and prints the created or current version of every seeded plugin. The ten bundles below share `plugins/evaluators/deterministic.py`; a fresh workspace creates version 1.
+
+You also start each evaluation explicitly. Importing, recording, or seeding a session does not start an evaluation Job automatically.
 
 ## Start with the descriptive bundles
 
@@ -15,11 +23,11 @@ Use these five bundles first when you are investigating unfamiliar traces:
 
 | Evaluator | What it reports |
 |---|---|
-| `kitaru/session-diagnostics@1` | Session terminality, node ordering, parent linkage, chronology, payload coverage, counts, duration, resource coverage, and malformed negative resource values. |
-| `kitaru/trajectory-signals@1` | Exact adjacent tool-call repetition, exact retry after a recorded failure, and bounded short tool-name cycles. |
-| `kitaru/tool-health@1` | Recorded tool failures, null or empty results, error/status inconsistencies, and adjacent failures of the same tool. |
-| `kitaru/timing-profile@1` | Wall-clock duration, node timing coverage, slowest recorded nodes, invalid intervals, and overlapping intervals. |
-| `kitaru/llm-call-signals@1` | Recorded LLM failures, null or empty results, exact adjacent repeated inputs, requested/served model mismatches, and metadata coverage. |
+| `session-diagnostics@1` | Session terminality, node ordering, parent linkage, chronology, payload coverage, counts, duration, resource coverage, and malformed negative resource values. |
+| `trajectory-signals@1` | Exact adjacent tool-call repetition, exact retry after a recorded failure, and bounded short tool-name cycles. |
+| `tool-health@1` | Recorded tool failures, null or empty results, error/status inconsistencies, and adjacent failures of the same tool. |
+| `timing-profile@1` | Wall-clock duration, node timing coverage, slowest recorded nodes, invalid intervals, and overlapping intervals. |
+| `llm-call-signals@1` | Recorded LLM failures, null or empty results, exact adjacent repeated inputs, requested/served model mismatches, and metadata coverage. |
 
 These results are descriptive. They leave `passed` unset because a repeated call, a slow span, or a failure marker is not by itself a judgment about agent quality or correctness.
 
@@ -27,11 +35,11 @@ Run the first pass from the CLI:
 
 ```bash
 kitaru session evaluate "$SESSION_ID" \
-  --evaluator kitaru/session-diagnostics@1 \
-  --evaluator kitaru/trajectory-signals@1 \
-  --evaluator kitaru/tool-health@1 \
-  --evaluator kitaru/timing-profile@1 \
-  --evaluator kitaru/llm-call-signals@1 \
+  --evaluator session-diagnostics@1 \
+  --evaluator trajectory-signals@1 \
+  --evaluator tool-health@1 \
+  --evaluator timing-profile@1 \
+  --evaluator llm-call-signals@1 \
   --wait
 ```
 
@@ -43,20 +51,20 @@ The other five bundles produce pass or fail verdicts only for rules you supply:
 
 | Evaluator | Parameters |
 |---|---|
-| `kitaru/output-contract@1` | `expected` for exact non-null JSON equality; `required_paths` for RFC 6901 JSON Pointer presence; `type_requirements` mapping pointers to `null`, `boolean`, `number`, `integer`, `string`, `array`, or `object`. Supply at least one rule. |
-| `kitaru/resource-budget@1` | One or more inclusive non-negative ceilings: `max_duration_seconds`, `max_cost`, `max_total_tokens`, `max_nodes`, `max_llm_calls`, or `max_tool_calls`. Count ceilings must be integers. |
-| `kitaru/tool-policy@1` | One or more of `required_tools`, `forbidden_tools`, or `max_calls_per_tool`. Tool names are exact and case-sensitive. |
-| `kitaru/model-policy@1` | One or more of `allowed_models`, `allowed_providers`, or `require_requested_model_match`. Recorded names are exact and case-sensitive. |
-| `kitaru/workflow-conformance@1` | Required `expected_tools` plus `mode`: `exact_order`, `in_order`, `contains_all`, or `exact_set`. |
+| `output-contract@1` | `expected` for exact non-null JSON equality; `required_paths` for RFC 6901 JSON Pointer presence; `type_requirements` mapping pointers to `null`, `boolean`, `number`, `integer`, `string`, `array`, or `object`. Supply at least one rule. |
+| `resource-budget@1` | One or more inclusive non-negative ceilings: `max_duration_seconds`, `max_cost`, `max_total_tokens`, `max_nodes`, `max_llm_calls`, or `max_tool_calls`. Node and call-count ceilings must be integers. |
+| `tool-policy@1` | One or more of `required_tools`, `forbidden_tools`, or `max_calls_per_tool`. Tool names are exact and case-sensitive. |
+| `model-policy@1` | One or more of `allowed_models`, `allowed_providers`, or `require_requested_model_match`. Recorded names are exact and case-sensitive. |
+| `workflow-conformance@1` | Required `expected_tools` plus `mode`: `exact_order`, `in_order`, `contains_all`, or `exact_set`. |
 
 For example, apply recorded resource ceilings and a tool policy:
 
 ```bash
 kitaru session evaluate "$SESSION_ID" \
-  --evaluator kitaru/resource-budget@1 \
-  --evaluator-params 'kitaru/resource-budget@1={"max_duration_seconds":120,"max_tool_calls":20,"max_total_tokens":50000}' \
-  --evaluator kitaru/tool-policy@1 \
-  --evaluator-params 'kitaru/tool-policy@1={"required_tools":["search"],"forbidden_tools":["delete_account"]}' \
+  --evaluator resource-budget@1 \
+  --evaluator-params 'resource-budget@1={"max_duration_seconds":120,"max_tool_calls":20,"max_total_tokens":50000}' \
+  --evaluator tool-policy@1 \
+  --evaluator-params 'tool-policy@1={"required_tools":["search"],"forbidden_tools":["delete_account"]}' \
   --wait
 ```
 
@@ -69,7 +77,7 @@ Configured rules use conservative evidence semantics:
 
 ## Understand result evidence
 
-Every bundle emits `input_sha256` and `config_sha256`. The input hash covers the materialized session and node fields used across the built-in catalog. The configuration hash covers normalized parameters for that evaluator. Use both values to tell whether two attempts analyzed the same fetched evidence with the same configuration.
+Every bundle emits `input_sha256` and `config_sha256`. The input hash covers the materialized session and node fields used across the deterministic catalog. The configuration hash covers normalized parameters for that evaluator. Use both values to tell whether two attempts analyzed the same fetched evidence with the same configuration.
 
 Finding results use compact JSON in `value`:
 
@@ -91,7 +99,7 @@ The short-cycle detector examines tool-name cycles with periods from two through
 
 ## Run through the Python SDK
 
-Use the existing evaluation request and pin built-in version 1:
+Use the existing evaluation request and pin the version reported by the seed command. This example uses a fresh workspace, where the version is 1:
 
 ```python
 import uuid
@@ -107,11 +115,11 @@ async def start_diagnostics(session_ids: list[uuid.UUID]) -> str:
             EvaluationBatchCreateRequest(
                 input_session_ids=session_ids,
                 evaluators=[
-                    EvaluatorConfig(evaluator="kitaru/session-diagnostics", version=1),
-                    EvaluatorConfig(evaluator="kitaru/trajectory-signals", version=1),
-                    EvaluatorConfig(evaluator="kitaru/tool-health", version=1),
-                    EvaluatorConfig(evaluator="kitaru/timing-profile", version=1),
-                    EvaluatorConfig(evaluator="kitaru/llm-call-signals", version=1),
+                    EvaluatorConfig(evaluator="session-diagnostics", version=1),
+                    EvaluatorConfig(evaluator="trajectory-signals", version=1),
+                    EvaluatorConfig(evaluator="tool-health", version=1),
+                    EvaluatorConfig(evaluator="timing-profile", version=1),
+                    EvaluatorConfig(evaluator="llm-call-signals", version=1),
                 ],
             )
         )
@@ -138,14 +146,14 @@ Start `kitaru-mcp` in `standard` mode. Discover each evaluator parent and exact 
 }
 ```
 
-The tool returns the submitted Job immediately. Poll it with `kitaru_activity_read`. See [MCP Server](../agent-native/mcp-server.md) for capability modes and request envelopes.
+The tool returns the submitted Job immediately. Read the Job with `kitaru_activity_read`, then use `list_children` with `kind: "job_tasks"` to inspect evaluator task results. See [MCP Server](../agent-native/mcp-server.md) for capability modes and request envelopes.
 
 ## Respect the batch limit
 
 One request may contain at most 100 distinct session/evaluator pairs. The server calculates this as `number of sessions × number of selected evaluators`.
 
 - The five-bundle descriptive first pass supports up to 20 sessions per request.
-- Selecting all ten built-ins supports up to 10 sessions per request.
+- Selecting all ten deterministic bundles supports up to 10 sessions per request.
 - A two-bundle policy pass supports up to 50 sessions per request.
 
 For larger sets, split the session IDs into chunks that satisfy the formula and submit one normal evaluation Job per chunk. With the CLI, write each chunk to a separate UTF-8 sessions file and use `--sessions-file`. With the SDK or MCP, submit the same evaluator selection once per chunk. This is caller-side batching; Kitaru does not create one aggregate verdict across the Jobs.
@@ -156,12 +164,12 @@ The worker fetches the session and its nodes when an attempt runs. These reads a
 
 The current session view cannot distinguish an absent normalized output from an explicit JSON null. An observed null session output is therefore unavailable to `output-contract`, including when the expected value is null. A null tool result has the same ambiguity and is reported as a diagnostic rather than an integrity verdict.
 
-Built-ins see Kitaru's canonical session and node models. They cannot inspect raw importer events that typed ingestion rejected, unknown raw event kinds, or provider fields that were not retained. They also do not classify rate limits, context exhaustion, timeouts, or malformed external responses unless the canonical record exposes enough direct evidence for the specific result.
+The evaluator bundles see Kitaru's canonical session and node models. They cannot inspect raw importer events that typed ingestion rejected, unknown raw event kinds, or provider fields that were not retained. They also do not classify rate limits, context exhaustion, timeouts, or malformed external responses unless the canonical record exposes enough direct evidence for the specific result.
 
 `timing-profile` and the call-count results report values for one session. They do not label cohort-relative duration or tool-call outliers. Establishing an outlier requires a frozen comparison cohort, a declared statistic, and calibrated thresholds; a high count alone is not an agent-quality failure.
 
 ## Versioning
 
-Version 1 is the current built-in catalog revision. All ten evaluators share one packaged source revision. A change to scoring rules, normalization, result names, or evidence encoding advances all ten versions together. Pin a version when you need a stable contract. Re-executing an older version is deterministic only when the fetched materialized view and worker runtime are also equivalent.
+All ten evaluators share one repository source file. The seed script creates a new immutable version when those source bytes change and leaves the current version unchanged when the bytes and entrypoint match. Use the version reported by the seed command and pin it when you need a stable contract. Re-executing an older version is deterministic only when the fetched materialized view and worker runtime are also equivalent.
 
-Built-in `kitaru/*` evaluator definitions and versions are read-only. Create a separately named evaluator when you need to modify source or metadata.
+Seeded evaluators are ordinary workspace plugins created through the public API. Kitaru does not register them at server startup or give them special read-only behavior.

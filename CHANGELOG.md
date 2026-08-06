@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Ten versioned offline deterministic evaluators under the reserved `kitaru/` namespace, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs and preserve the existing example evaluators.
+- Ten versioned offline deterministic evaluator plugins, seeded explicitly from `plugins/evaluators/deterministic.py`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs and supplement the existing basic evaluators.
 - The `kitaru/` plugin name prefix is reserved for built-in default plugins, which are registered at server startup without an owner. Creating a plugin whose name starts with `kitaru/` via the API is rejected.
 - Sessions carry a per-agent sequential `number`, assigned at creation and returned in session responses. Numbers may skip when a create fails after its number was allocated.
 - CLI investigation and annotation commands, plus MCP commands for review workflows, evaluator registration, and starting bounded evaluations or experiment runs. The new operations use existing API and SDK resources, require exact IDs and evaluator versions, and return submitted workflows without polling.
