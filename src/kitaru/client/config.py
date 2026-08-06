@@ -21,7 +21,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,15 @@ def get_config_directory() -> Path:
     return root / "kitaru"
 
 
+def get_config_path() -> Path:
+    """Return the configuration file path without reading it.
+
+    Returns:
+        Location of the configuration file.
+    """
+    return get_config_directory() / CONFIG_FILE_NAME
+
+
 def write_json_file(path: Path, payload: object) -> None:
     """Write a JSON file, replacing it in one step.
 
@@ -57,6 +66,9 @@ def write_json_file(path: Path, payload: object) -> None:
         payload: JSON-serializable content.
     """
     path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
+    # mkdir applies its mode only to a directory it creates, so a directory
+    # that already existed keeps whatever mode it was given.
+    os.chmod(path.parent, DIRECTORY_MODE)
     # A partial write must never replace a good file, and the content must
     # never be readable by others between creating the file and setting its
     # mode.
@@ -83,11 +95,20 @@ def normalize_server_url(url: str) -> str:
     return url.rstrip("/")
 
 
+class CLISettings(BaseModel):
+    """CLI settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    machine_mode: bool = False
+
+
 class ClientConfig(BaseModel):
     """Client configuration."""
 
     server_url: str | None = None
     client_id: uuid.UUID | None = None
+    cli: CLISettings = Field(default_factory=CLISettings)
 
 
 def load_config() -> ClientConfig:
@@ -97,7 +118,7 @@ def load_config() -> ClientConfig:
         Stored configuration, or an empty one when the file is missing or
         malformed.
     """
-    path = get_config_directory() / CONFIG_FILE_NAME
+    path = get_config_path()
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
@@ -116,7 +137,7 @@ def save_config(config: ClientConfig) -> None:
         config: Configuration to write.
     """
     write_json_file(
-        get_config_directory() / CONFIG_FILE_NAME,
+        get_config_path(),
         config.model_dump(mode="json", exclude_none=True),
     )
 

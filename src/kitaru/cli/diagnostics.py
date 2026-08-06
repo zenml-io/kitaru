@@ -31,10 +31,10 @@ from pydantic import ValidationError
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli.config import (
-    ConfigStore,
     ResolvedCredential,
     ResolvedTarget,
     build_api_client,
+    read_config,
     resolve_credential,
     resolve_target,
 )
@@ -42,6 +42,7 @@ from kitaru.cli.output import CLIError, CommandResult
 from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
+    get_config_path,
 )
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ServerCredentials
@@ -167,7 +168,6 @@ async def info(
 
 async def doctor(
     *,
-    config_store: ConfigStore,
     credential_store: CredentialStore,
     explicit_server: str | None,
     timeout: float,
@@ -175,7 +175,6 @@ async def doctor(
     """Run every local and remote diagnostic in a fixed logical order.
 
     Args:
-        config_store: Non-secret CLI configuration store.
         credential_store: Secret credential store.
         explicit_server: Explicit server override.
         timeout: Request timeout in seconds.
@@ -185,14 +184,12 @@ async def doctor(
     """
     checks: list[dict[str, Any]] = []
     failure_categories: set[str] = set()
+    config_path = get_config_path()
 
     try:
-        config_store.load()
-        _check_mode(
-            config_store.path,
-            require_private_parent=config_store.manages_parent_directory,
-        )
-        checks.append(_check("config", "pass", True, str(config_store.path)))
+        read_config()
+        _validate_private_path_mode(config_path)
+        checks.append(_check("config", "pass", True, str(config_path)))
     except (CLIError, OSError) as error:
         failure_categories.add("configuration")
         checks.append(_check("config", "fail", True, str(error)))
@@ -458,11 +455,6 @@ def _check(name: str, status: str, required: bool, detail: str) -> dict[str, Any
     return {"name": name, "status": status, "required": required, "detail": detail}
 
 
-def _check_mode(path: Path, *, require_private_parent: bool) -> None:
-    """Reject config files or managed directories accessible by other users."""
-    _validate_private_path_mode(path, require_private_parent=require_private_parent)
-
-
 def _validate_credentials_file(path: Path) -> None:
     """Validate credential readability, structure, and POSIX file mode."""
     if not path.exists():
@@ -475,13 +467,11 @@ def _validate_credentials_file(path: Path) -> None:
         ServerCredentials.model_validate(entry)
 
 
-def _validate_private_path_mode(
-    path: Path, *, require_private_parent: bool = True
-) -> None:
-    """Validate owner-only modes for a config file and optionally its directory."""
+def _validate_private_path_mode(path: Path) -> None:
+    """Validate owner-only modes for a config file and its directory."""
     if os.name != "posix":
         return
-    if require_private_parent and path.parent.exists():
+    if path.parent.exists():
         directory_mode = stat.S_IMODE(path.parent.stat().st_mode)
         if directory_mode != DIRECTORY_MODE:
             raise OSError(

@@ -76,7 +76,9 @@ def test_clearing_the_server_url(tmp_path: Path) -> None:
 
     path = tmp_path / "config" / "kitaru" / "config.json"
     assert get_server_url() is None
-    assert json.loads(path.read_text(encoding="utf-8")) == {}
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "cli": {"machine_mode": False}
+    }
 
 
 def test_explicit_url_beats_the_environment(
