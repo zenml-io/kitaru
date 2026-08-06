@@ -278,6 +278,7 @@ class Session(DomainModel):
     origin: SessionOrigin
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None
+    system_prompt: str | None = None
     inputs: Any = None
     outputs: Any = None
     error: str | None = None
@@ -302,6 +303,14 @@ class Session(DomainModel):
             name: New name.
         """
         self.name = name
+
+    def update_system_prompt(self, system_prompt: str | None) -> None:
+        """Set a new system prompt.
+
+        Args:
+            system_prompt: New system prompt.
+        """
+        self.system_prompt = system_prompt
 
     def update_metadata(self, metadata: dict[str, Any]) -> None:
         """Set new metadata.

@@ -71,6 +71,18 @@ class SessionNodeCreateRequest(RequestModel):
     ended_at: AwareDatetime | None = Field(
         default=None, description="Time the node ended."
     )
+    input_text: str | None = Field(
+        default=None, description="Primary human-readable input to the node."
+    )
+    output_text: str | None = Field(
+        default=None, description="Primary human-readable output from the node."
+    )
+    system_prompt: str | None = Field(
+        default=None, description="System prompt used by the model call."
+    )
+    reasoning: str | None = Field(
+        default=None, description="Visible reasoning produced by the model call."
+    )
     inputs: Any = Field(description="Node inputs.")
     outputs: Any = Field(description="Node outputs.")
     requested_model: str | None = Field(
@@ -154,6 +166,18 @@ class SessionNodeResponse(ResponseModel):
         default=None, description="Time the node started."
     )
     ended_at: datetime | None = Field(default=None, description="Time the node ended.")
+    input_text: str | None = Field(
+        default=None, description="Primary human-readable input to the node."
+    )
+    output_text: str | None = Field(
+        default=None, description="Primary human-readable output from the node."
+    )
+    system_prompt: str | None = Field(
+        default=None, description="System prompt used by the model call."
+    )
+    reasoning: str | None = Field(
+        default=None, description="Visible reasoning produced by the model call."
+    )
     inputs: Any = Field(
         default=None, description="Node inputs, null unless include_payloads."
     )

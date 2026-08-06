@@ -48,6 +48,7 @@ from pydantic_ai.messages import (
     SystemPromptPart,
     TextContent,
     TextPart,
+    ThinkingPart,
     ToolCallPart,
     UploadedFile,
     UserContent,
@@ -222,6 +223,59 @@ def _messages_json(messages: list[ModelMessage]) -> list[dict[str, Any]]:
     return ModelMessagesTypeAdapter.dump_python(messages, mode="json", fallback=str)
 
 
+def _display_text(value: Any) -> str | None:
+    """Convert a value to compact display text."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value or None
+    return json.dumps(
+        _jsonable(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    )
+
+
+def _user_prompt_text(content: str | Sequence[UserContent]) -> str | None:
+    """Extract text from a PydanticAI user prompt."""
+    if isinstance(content, str):
+        return content or None
+    text = [
+        item if isinstance(item, str) else item.content
+        for item in content
+        if isinstance(item, (str, TextContent))
+    ]
+    return "\n".join(part for part in text if part) or None
+
+
+def _request_display_fields(
+    messages: list[ModelMessage],
+) -> tuple[str | None, str | None]:
+    """Extract the user input and system prompt from a model request."""
+    input_text: str | None = None
+    system_parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            continue
+        if message.instructions:
+            system_parts.append(message.instructions)
+        for part in message.parts:
+            if isinstance(part, SystemPromptPart) and part.content:
+                system_parts.append(part.content)
+            elif isinstance(part, UserPromptPart):
+                input_text = _user_prompt_text(part.content) or input_text
+    return input_text, "\n\n".join(system_parts) or None
+
+
+def _response_display_fields(
+    response: ModelResponse,
+) -> tuple[str | None, str | None]:
+    """Extract assistant text and visible reasoning from a model response."""
+    output = [part.content for part in response.parts if isinstance(part, TextPart)]
+    reasoning = [
+        part.content for part in response.parts if isinstance(part, ThinkingPart)
+    ]
+    return "\n".join(output) or None, "\n".join(reasoning) or None
+
+
 def _error_text(error: BaseException) -> str:
     """Return a useful message for an exception, including empty exceptions."""
     return str(error) or type(error).__name__
@@ -334,6 +388,7 @@ class _RunState:
     started_at: datetime | None = None
     next_index: int = 1
     latest_llm_index: int | None = None
+    system_prompt: str | None = None
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     finished: bool = False
@@ -538,6 +593,8 @@ class _KitaruCapability(AbstractCapability[Any]):
 
         node_index = await self._allocate_node()
         started_at = datetime.now(UTC)
+        input_text, system_prompt = _request_display_fields(effective.messages)
+        state.system_prompt = system_prompt or state.system_prompt
         try:
             response = await handler(effective)
         except BaseException as error:
@@ -551,6 +608,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                     error=_error_text(error),
                     started_at=started_at,
                     ended_at=datetime.now(UTC),
+                    input_text=input_text,
+                    system_prompt=system_prompt,
                     inputs=_messages_json(effective.messages),
                     outputs=None,
                     requested_model=requested_model,
@@ -562,6 +621,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             raise
 
         unpaired_native_calls = _unpaired_native_calls(response)
+        output_text, reasoning = _response_display_fields(response)
         llm_node = SessionNodeCreateRequest(
             index=node_index,
             parent_index=0,
@@ -570,6 +630,10 @@ class _KitaruCapability(AbstractCapability[Any]):
             status=NodeStatus.COMPLETED,
             started_at=started_at,
             ended_at=datetime.now(UTC),
+            input_text=input_text,
+            output_text=output_text,
+            system_prompt=system_prompt,
+            reasoning=reasoning,
             inputs=_messages_json(effective.messages),
             outputs=_jsonable(response),
             requested_model=requested_model,
@@ -797,6 +861,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                 error=error,
                 started_at=started_at,
                 ended_at=datetime.now(UTC),
+                input_text=_display_text(arguments),
+                output_text=_display_text(result),
                 inputs=_jsonable(arguments),
                 outputs=_jsonable(result),
                 tool_name=tool_name,
@@ -854,6 +920,8 @@ class _KitaruCapability(AbstractCapability[Any]):
                     error=error,
                     started_at=state.started_at,
                     ended_at=ended_at,
+                    input_text=_display_text(state.effective_input),
+                    output_text=_display_text(outputs),
                     inputs=_jsonable(state.effective_input),
                     outputs=_jsonable(outputs),
                     attributes={},
@@ -867,6 +935,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                 outputs=_jsonable(outputs),
                 error=error,
                 ended_at=ended_at,
+                system_prompt=state.system_prompt,
             ),
         )
 

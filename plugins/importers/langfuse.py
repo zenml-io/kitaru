@@ -17,11 +17,10 @@
 # ///
 """Langfuse JSON and JSONL trace importer plugin."""
 
-import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -30,7 +29,12 @@ from typing import Any
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import (
+    ParsedNode,
+    ParsedSession,
+    detect_framework,
+    populate_node_display_fields,
+)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _TRACE_SHAPE = "trace"
@@ -150,6 +154,91 @@ def _dict(value: Any) -> dict[str, Any]:
     """Return a decoded dictionary or an empty one."""
     decoded = _decode_json(value)
     return decoded if isinstance(decoded, dict) else {}
+
+
+def _path_value(value: Any, path: str) -> Any:
+    """Resolve a dotted path or JSON Pointer against one observation."""
+    if not path.strip():
+        raise InvalidImport("join path must be non-empty")
+    if path.startswith("/"):
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
+        ]
+    else:
+        parts = path.split(".")
+    current = value
+    for part in parts:
+        current = _decode_json(current)
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (IndexError, ValueError):
+                return None
+            continue
+        return None
+    return _decode_json(current)
+
+
+def _join_value(
+    observations: list[dict[str, Any]], params: dict[str, Any], trace_id: str
+) -> tuple[str, str, bool]:
+    """Resolve one trace's session grouping value and selector."""
+    join_on = params.get("join_on")
+    join_key = params.get("join_key")
+    join_path = params.get("join_path")
+    if join_on is not None and (join_key is not None or join_path is not None):
+        raise InvalidImport("join_on cannot be combined with join_key or join_path")
+    if join_on is not None:
+        if not isinstance(join_on, str):
+            raise InvalidImport("join_on must be a dotted path or JSON pointer")
+        selector = join_on
+        values = {
+            str(value)
+            for record in observations
+            if (value := _path_value(record, join_on)) not in (None, "")
+        }
+    elif join_key is not None or join_path is not None:
+        if not isinstance(join_key, str) or not join_key.strip():
+            raise InvalidImport("join_key must be a non-empty string")
+        if not isinstance(join_path, str) or not join_path.strip():
+            raise InvalidImport("join_path must be a dotted path or JSON pointer")
+        selector = (
+            f"{join_path.rstrip('/')}/{join_key}"
+            if join_path.startswith("/")
+            else f"{join_path}.{join_key}"
+        )
+        values: set[str] = set()
+        for record in observations:
+            container = _path_value(record, join_path)
+            if isinstance(container, dict):
+                value = container.get(join_key)
+                if value not in (None, ""):
+                    values.add(str(value))
+    else:
+        session_ids = {
+            str(value)
+            for record in observations
+            if (value := _first(record, "sessionId", "session_id"))
+        }
+        if len(session_ids) > 1:
+            raise InvalidImport(
+                f"Trace '{trace_id}' contains conflicting Langfuse session ids"
+            )
+        if session_ids:
+            return next(iter(session_ids)), "sessionId", False
+        return trace_id, "traceId", True
+    if not values:
+        raise InvalidImport(
+            f"Trace '{trace_id}' has no value at join selector '{selector}'"
+        )
+    if len(values) > 1:
+        raise InvalidImport(
+            f"Trace '{trace_id}' has conflicting values at join selector '{selector}'"
+        )
+    return next(iter(values)), selector, False
 
 
 def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
@@ -407,14 +496,6 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     )
 
 
-def _canonical_digest(value: Any) -> str:
-    """Hash one normalized JSON-compatible value."""
-    encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), default=str
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _build_node_tree(
     nodes_with_parents: list[tuple[ParsedNode, str | None]],
 ) -> list[ParsedNode]:
@@ -488,24 +569,40 @@ class LangfuseJSONLImporter:
         session_traces: dict[str, list[tuple[str, list[dict[str, Any]]]]] = defaultdict(
             list
         )
+        join_paths: dict[str, set[str]] = defaultdict(set)
+        fallback_sessions: set[str] = set()
+        failures: list[ImportFailure] = []
         for trace_id, observations in trace_records.items():
-            session_ids = {
-                str(value)
-                for record in observations
-                if (value := _first(record, "sessionId", "session_id"))
-            }
-            if len(session_ids) > 1:
-                raise InvalidImport(
-                    f"Trace '{trace_id}' contains conflicting Langfuse session ids"
+            try:
+                session_id, join_path, fallback = _join_value(
+                    observations, params, trace_id
                 )
-            session_id = next(iter(session_ids), trace_id)
+            except InvalidImport as exc:
+                failures.append(
+                    ImportFailure(
+                        line=len(failures) + 1,
+                        external_id=trace_id,
+                        error=str(exc),
+                    )
+                )
+                continue
             session_traces[session_id].append((trace_id, observations))
+            join_paths[session_id].add(join_path)
+            if fallback:
+                fallback_sessions.add(session_id)
 
         sessions: list[ParsedSession] = []
-        failures: list[ImportFailure] = []
         for source_id, traces in sorted(session_traces.items()):
             try:
-                sessions.append(self._parse_session(source_id, traces, params))
+                sessions.append(
+                    self._parse_session(
+                        source_id,
+                        traces,
+                        params,
+                        join_paths=join_paths[source_id],
+                        trace_fallback=source_id in fallback_sessions,
+                    )
+                )
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
@@ -521,6 +618,9 @@ class LangfuseJSONLImporter:
         source_id: str,
         traces: list[tuple[str, list[dict[str, Any]]]],
         params: dict[str, Any],
+        *,
+        join_paths: set[str],
+        trace_fallback: bool,
     ) -> ParsedSession:
         """Parse one grouped Langfuse session."""
         project_ids = {
@@ -546,6 +646,8 @@ class LangfuseJSONLImporter:
             )
 
         warnings: list[str] = []
+        if trace_fallback:
+            warnings.append("No Langfuse session id found; grouped by trace id")
         raw_nodes: list[tuple[str, str | None, dict[str, Any]]] = []
         turns: list[_Turn] = []
         trace_names: list[str] = []
@@ -710,35 +812,7 @@ class LangfuseJSONLImporter:
             )
 
         nodes = [node for node, _ in nodes_with_parents]
-        graph_complete = not any("missing parent" in warning for warning in warnings)
-        tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-        replayable_tools = [
-            node
-            for node in tool_nodes
-            if node.tool_name and node.inputs is not None and node.outputs is not None
-        ]
-        root_inputs_available = bool(turns) and all(
-            turn.inputs is not None for turn in turns
-        )
-        reasons = list(warnings)
-        if not root_inputs_available:
-            reasons.append("One or more turns have no root input")
-        if len(replayable_tools) != len(tool_nodes):
-            reasons.append("One or more tool calls lack a name, input, or output")
-        if not root_inputs_available:
-            readiness_level = "unavailable"
-        elif graph_complete and len(replayable_tools) == len(tool_nodes):
-            readiness_level = "ready"
-        else:
-            readiness_level = "partial"
-        readiness = {
-            "level": readiness_level,
-            "root_inputs_available": root_inputs_available,
-            "graph_complete": graph_complete,
-            "tool_call_count": len(tool_nodes),
-            "replayable_tool_call_count": len(replayable_tools),
-            "reasons": reasons,
-        }
+        system_prompt = populate_node_display_fields(nodes)
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -768,23 +842,11 @@ class LangfuseJSONLImporter:
                 for turn in turns
             ],
         }
-        digest_payload = {
-            "source_id": source_id,
-            "source_instance": source_instance,
-            "status": session_status,
-            "turns": [asdict(turn) for turn in turns],
-            "nodes": [
-                {
-                    "parent_external_id": parent_external_id,
-                    **node.model_dump(mode="json", exclude={"children"}),
-                }
-                for node, parent_external_id in nodes_with_parents
-            ],
-        }
         metadata = {
             "langfuse.project_id": next(iter(project_ids), None),
             "langfuse.session_id": source_id,
             "langfuse.trace_ids": [turn.trace_id for turn in turns],
+            "langfuse.join_paths": sorted(join_paths),
             "langfuse.environments": sorted(
                 {
                     str(value)
@@ -824,19 +886,22 @@ class LangfuseJSONLImporter:
             "source_trace_count": len(turns),
             "source_completeness": "unknown",
             "normalization_warnings": warnings,
-            "replay_readiness": readiness,
-            "source_content_digest": _canonical_digest(digest_payload),
         }
+        framework = detect_framework(params.get("framework")) or detect_framework(
+            [record.get("metadata") for _, rows in traces for record in rows]
+        )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
             name=trace_names[-1] if trace_names else None,
             status=session_status,
+            system_prompt=system_prompt,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
             error=session_error,
             started_at=started_at,
             ended_at=ended_at,
             metadata=metadata,
+            framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
 

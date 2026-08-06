@@ -189,11 +189,14 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_create_session(client: httpx.AsyncClient) -> None:
     """Create a session."""
-    response = await client.post("/v1/sessions", json=_session_body())
+    response = await client.post(
+        "/v1/sessions", json=_session_body(system_prompt="Follow policy.")
+    )
     assert response.status_code == 201
     body = response.json()
     assert body["origin"] == "recorded"
     assert body["status"] == "in_progress"
+    assert body["system_prompt"] == "Follow policy."
     assert body["owner_id"] == str(ACCOUNT.id)
 
 

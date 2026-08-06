@@ -17,11 +17,10 @@
 # ///
 """LangSmith run-export importer plugin."""
 
-import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -29,7 +28,12 @@ from typing import Any
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import (
+    ParsedNode,
+    ParsedSession,
+    detect_framework,
+    populate_node_display_fields,
+)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _DEFAULT_JOIN_PATHS = (
@@ -126,14 +130,6 @@ def _decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         return None
-
-
-def _digest(value: Any) -> str:
-    """Return a deterministic digest for normalized content."""
-    encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), default=str
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
@@ -641,6 +637,7 @@ class LangSmithRunImporter:
             )
         )
         nodes = [node for node, _ in nodes_with_parents]
+        system_prompt = populate_node_display_fields(nodes)
         llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
         tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
         if (
@@ -651,25 +648,6 @@ class LangSmithRunImporter:
                 "Model output contains tool calls but no explicit tool runs"
             )
             graph_complete = False
-        replayable_tools = [
-            node
-            for node in tool_nodes
-            if node.tool_name and node.inputs is not None and node.outputs is not None
-        ]
-        root_inputs_available = bool(turns) and all(
-            turn.inputs is not None for turn in turns
-        )
-        reasons = list(warnings)
-        if not root_inputs_available:
-            reasons.append("One or more turns have no root input")
-        if len(replayable_tools) != len(tool_nodes):
-            reasons.append("One or more tool calls lack a name, input, or output")
-        if not root_inputs_available:
-            readiness_level = "unavailable"
-        elif graph_complete and len(replayable_tools) == len(tool_nodes):
-            readiness_level = "ready"
-        else:
-            readiness_level = "partial"
         latest_turn = turns[-1]
         latest_root = roots_by_trace[latest_turn.trace_id]
         root_status = _node_status(latest_root)
@@ -695,18 +673,6 @@ class LangSmithRunImporter:
                 for turn in turns
             ],
         }
-        digest_payload = {
-            "source_id": source_id,
-            "source_instance": source_instance,
-            "turns": [asdict(turn) for turn in turns],
-            "nodes": [
-                {
-                    "parent_external_id": parent,
-                    **node.model_dump(mode="json", exclude={"children"}),
-                }
-                for node, parent in nodes_with_parents
-            ],
-        }
         metadata = {
             "langsmith.project_id": source_instance,
             "langsmith.thread_id": source_id,
@@ -717,23 +683,26 @@ class LangSmithRunImporter:
             "source_trace_count": len(turns),
             "source_completeness": "full" if graph_complete else "partial",
             "normalization_warnings": warnings,
-            "replay_readiness": {
-                "level": readiness_level,
-                "root_inputs_available": root_inputs_available,
-                "graph_complete": graph_complete,
-                "tool_call_count": len(tool_nodes),
-                "replayable_tool_call_count": len(replayable_tools),
-                "reasons": reasons,
-            },
-            "source_content_digest": _digest(digest_payload),
         }
+        framework = detect_framework(
+            [
+                {
+                    "extra": record.get("extra"),
+                    "name": record.get("name"),
+                    "run_type": record.get("run_type"),
+                    "tags": record.get("tags"),
+                }
+                for _, rows in traces
+                for record in rows
+            ]
+        )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
             name=str(latest_root.get("name") or source_id),
             status=session_status,
+            system_prompt=system_prompt,
             inputs=inputs,
             outputs=latest_turn.outputs,
-            expected=None,
             error=session_error,
             started_at=min(
                 (turn.started_at for turn in turns if turn.started_at), default=None
@@ -742,6 +711,7 @@ class LangSmithRunImporter:
                 (turn.ended_at for turn in turns if turn.ended_at), default=None
             ),
             metadata=metadata,
+            framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
 

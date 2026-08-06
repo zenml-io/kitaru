@@ -171,7 +171,6 @@ def test_groups_thread_traces_into_ordered_turns_and_nodes() -> None:
     assert nodes["trace-2:tool-2"].node_type is NodeType.TOOL_CALL
     assert nodes["trace-2:tool-2"].tool_name == "lookup_policy"
     assert nodes["trace-2:tool-2"] in nodes["trace-2:llm-2"].children
-    assert session.metadata["replay_readiness"]["level"] == "ready"
 
 
 def test_uses_configurable_nested_join_path() -> None:
@@ -311,10 +310,7 @@ def test_marks_implicit_tool_activity_partial() -> None:
         )
     )
 
-    readiness = session.metadata["replay_readiness"]
-    assert readiness["level"] == "partial"
-    assert readiness["graph_complete"] is False
-    assert "no explicit tool runs" in readiness["reasons"][0]
+    assert "no explicit tool runs" in session.metadata["normalization_warnings"][0]
 
 
 def test_maps_failed_root_status_and_error() -> None:
@@ -344,8 +340,8 @@ def test_parses_query_envelope_and_json_encoded_payloads() -> None:
     assert session.outputs == {"answer": "hi"}
 
 
-def test_digest_is_stable_for_out_of_order_rows() -> None:
-    """Produce the same normalized digest regardless of export row order."""
+def test_node_order_is_stable_for_out_of_order_rows() -> None:
+    """Produce the same node order regardless of export row order."""
     root = run("root", "trace", inputs="hello")
     child = run(
         "child",
@@ -359,10 +355,9 @@ def test_digest_is_stable_for_out_of_order_rows() -> None:
     forward = sessions(jsonl(root, child))[0]
     reverse = sessions(jsonl(child, root))[0]
 
-    assert (
-        forward.metadata["source_content_digest"]
-        == reverse.metadata["source_content_digest"]
-    )
+    assert [node.external_id for node in forward.nodes] == [
+        node.external_id for node in reverse.nodes
+    ]
 
 
 def test_source_instance_override_supports_exports_without_project_id() -> None:

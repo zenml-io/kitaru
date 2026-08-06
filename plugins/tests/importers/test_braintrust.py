@@ -141,10 +141,6 @@ def test_imports_full_project_log_with_hierarchy() -> None:
     session = parsed[0]
     assert isinstance(session, ParsedSession)
     assert session.external_id == "project-1:conversation-1"
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "ready"
-    assert readiness["tool_call_count"] == 1
     nodes = {node.external_id: node for node in flatten(session.nodes)}
     assert nodes["root:llm"].node_type is NodeType.LLM_CALL
     assert nodes["root:llm"] in nodes["root:root"].children
@@ -288,10 +284,6 @@ def test_accepts_flat_ui_export_as_partial() -> None:
     session = sessions(json.dumps(rows).encode())[0]
 
     assert session.external_id == "litellm:conversation-1"
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "partial"
-    assert readiness["graph_complete"] is False
     warnings = session.metadata["normalization_warnings"]
     assert isinstance(warnings, list)
     assert "omits span identity" in warnings[0]
@@ -383,13 +375,10 @@ def test_recovered_tool_failure_does_not_fail_session() -> None:
 
     assert session.status is SessionStatus.COMPLETED
     assert session.error is None
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "partial"
 
 
-def test_embedded_tool_activity_without_tool_spans_is_partial() -> None:
-    """Do not claim readiness when the export omits implied tool spans."""
+def test_warns_about_embedded_tool_activity_without_tool_spans() -> None:
+    """Report when the export omits implied tool spans."""
     root = event(
         event_id="event-root",
         span_id="root",
@@ -415,17 +404,13 @@ def test_embedded_tool_activity_without_tool_spans_is_partial() -> None:
 
     session = sessions(json.dumps({"events": [root, llm]}).encode())[0]
 
-    readiness = session.metadata["replay_readiness"]
     warnings = session.metadata["normalization_warnings"]
-    assert isinstance(readiness, dict)
     assert isinstance(warnings, list)
-    assert readiness["level"] == "partial"
-    assert readiness["tool_call_count"] == 0
     assert "no explicit tool spans" in warnings[0]
 
 
-def test_incomplete_llm_span_is_partial() -> None:
-    """Do not claim readiness when an LLM output is absent."""
+def test_warns_about_incomplete_llm_span() -> None:
+    """Report when an LLM output is absent."""
     root = event(
         event_id="event-root",
         span_id="root",
@@ -451,9 +436,6 @@ def test_incomplete_llm_span_is_partial() -> None:
 
     session = sessions(json.dumps({"events": [root, llm]}).encode())[0]
 
-    readiness = session.metadata["replay_readiness"]
     warnings = session.metadata["normalization_warnings"]
-    assert isinstance(readiness, dict)
     assert isinstance(warnings, list)
-    assert readiness["level"] == "partial"
     assert "lack recorded input or output" in warnings[0]

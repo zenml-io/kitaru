@@ -54,7 +54,9 @@ from kitaru.task.importer import (
     ParsedSession,
     SessionImportError,
     call_parser,
+    detect_framework,
     flatten_nodes,
+    populate_node_display_fields,
     run,
     session_request,
 )
@@ -169,6 +171,93 @@ def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
     assert by_name["second-root"].parent_index is None
 
 
+def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
+    """Keep the flat Kitaru JSONL node representation unchanged."""
+    nodes = [
+        _node("child").model_copy(update={"index": 7, "parent_index": 4}),
+        _node("root").model_copy(update={"index": 4}),
+    ]
+
+    flattened = flatten_nodes(nodes)
+
+    assert [node.index for node in flattened] == [4, 7]
+    assert flattened[1].parent_index == 4
+
+
+def test_extracts_prompt_fields_from_provider_message_shapes() -> None:
+    """Surface role-tagged prompts while retaining nested provider payloads."""
+    value = {
+        "messages": [
+            {
+                "id": ["langchain", "schema", "messages", "SystemMessage"],
+                "kwargs": {"content": "Follow policy."},
+            },
+            {
+                "data": {"type": "human", "content": "Where is my order?"},
+                "type": "human",
+            },
+        ]
+    }
+
+    node = _node("model request").model_copy(update={"inputs": value})
+
+    system_prompt = populate_node_display_fields([node])
+
+    assert system_prompt == "Follow policy."
+    assert node.system_prompt == "Follow policy."
+    assert node.input_text == "Where is my order?"
+
+
+def test_extracts_output_and_visible_reasoning() -> None:
+    """Surface assistant output and visible reasoning while ignoring ciphertext."""
+    value = {
+        "messages": [{"role": "assistant", "content": "Order 42 shipped."}],
+        "reasoning": "The tracking event says shipped.",
+        "encrypted_content": "ciphertext",
+    }
+
+    node = _node("model request").model_copy(update={"outputs": value})
+    encrypted = _node("encrypted").model_copy(
+        update={
+            "outputs": {
+                "type": "reasoning",
+                "content": [],
+                "encrypted_content": "ciphertext",
+            }
+        }
+    )
+
+    populate_node_display_fields([node, encrypted])
+
+    assert node.output_text == "Order 42 shipped."
+    assert node.reasoning == "The tracking event says shipped."
+    assert encrypted.reasoning is None
+
+
+def test_populates_tool_input_and_output_text() -> None:
+    """Serialize structured tool arguments and results for display."""
+    node = ParsedNode(
+        node_type=NodeType.TOOL_CALL,
+        name="weather",
+        status=NodeStatus.COMPLETED,
+        inputs={"city": "Delft"},
+        outputs={"rain": True, "temperature": 18},
+        attributes={},
+    )
+
+    populate_node_display_fields([node])
+
+    assert node.input_text == '{"city":"Delft"}'
+    assert node.output_text == '{"rain":true,"temperature":18}'
+
+
+def test_detects_one_framework_from_metadata() -> None:
+    """Map instrumentation markers to a canonical framework name."""
+    assert detect_framework({"otel.scope.name": "pydantic_ai"}) == "pydantic-ai"
+    assert detect_framework({"framework": "langgraph"}) == "langgraph"
+    assert detect_framework(["langgraph", "pydantic-ai"]) is None
+
+
 def test_session_request_maps_fields() -> None:
     """Build a session create request from importer details and a parsed item."""
     agent_id = uuid.uuid4()
@@ -186,6 +275,7 @@ def test_session_request_maps_fields() -> None:
     parsed = ParsedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
+        system_prompt="Follow policy.",
         inputs={"a": 1},
         outputs={"b": 2},
         error="boom",
@@ -203,6 +293,7 @@ def test_session_request_maps_fields() -> None:
     assert request.origin == SessionOrigin.IMPORTED
     assert request.status == SessionStatus.FAILED
     assert request.name == "imported-1"
+    assert request.system_prompt == "Follow policy."
     assert request.inputs == {"a": 1}
     assert request.outputs == {"b": 2}
     assert request.error == "boom"

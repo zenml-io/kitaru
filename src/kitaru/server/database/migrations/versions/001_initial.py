@@ -491,6 +491,7 @@ def upgrade() -> None:
         sa.Column("origin", sa.String(length=32), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("name", sa.Text(), nullable=True),
+        sa.Column("system_prompt", sa.Text(), nullable=True),
         sa.Column(
             "inputs",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
@@ -650,6 +651,10 @@ def upgrade() -> None:
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("input_text", sa.Text(), nullable=True),
+        sa.Column("output_text", sa.Text(), nullable=True),
+        sa.Column("system_prompt", sa.Text(), nullable=True),
+        sa.Column("reasoning", sa.Text(), nullable=True),
         sa.Column(
             "inputs",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),

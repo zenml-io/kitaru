@@ -3099,6 +3099,19 @@
               "title": "Index",
               "type": "integer"
             },
+            "input_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Primary human-readable input to the node.",
+              "title": "Input Text"
+            },
             "inputs": {
               "default": null,
               "description": "Node inputs, null unless include_payloads.",
@@ -3146,6 +3159,19 @@
               "$ref": "#/$defs/NodeType",
               "description": "Kind of work the node records."
             },
+            "output_text": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Primary human-readable output from the node.",
+              "title": "Output Text"
+            },
             "outputs": {
               "default": null,
               "description": "Node outputs, null unless include_payloads.",
@@ -3189,6 +3215,19 @@
               "default": null,
               "description": "Model provider.",
               "title": "Provider"
+            },
+            "reasoning": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Visible reasoning produced by the model call.",
+              "title": "Reasoning"
             },
             "requested_model": {
               "anyOf": [
@@ -3256,6 +3295,19 @@
               "default": null,
               "description": "Subagent invoked.",
               "title": "Subagent Id"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "System prompt used by the model call.",
+              "title": "System Prompt"
             },
             "tokens": {
               "anyOf": [
@@ -3515,6 +3567,19 @@
             },
             "status": {
               "$ref": "#/$defs/SessionStatus"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Most recently recorded system prompt.",
+              "title": "System Prompt"
             },
             "task_id": {
               "anyOf": [

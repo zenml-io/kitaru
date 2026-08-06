@@ -59,6 +59,10 @@ class SessionNode(DomainModel):
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    input_text: str | None = None
+    output_text: str | None = None
+    system_prompt: str | None = None
+    reasoning: str | None = None
     inputs: Any = None
     outputs: Any = None
     requested_model: str | None = None

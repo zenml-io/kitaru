@@ -33,6 +33,7 @@
 
 ## Guides
 
+* [Import Sessions](guides/importing-sessions.md)
 * [Replay and Overrides](guides/replay-and-overrides.md)
 * [Execution Management](guides/execution-management.md)
 * [Configuration](guides/configuration.md)

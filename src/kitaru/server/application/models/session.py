@@ -76,6 +76,7 @@ class SessionCreate(FrozenModel):
     origin: SessionOrigin
     status: SessionStatus | None = None
     name: str | None = None
+    system_prompt: str | None = None
     inputs: Any = None
     outputs: Any = None
     error: str | None = None
@@ -96,4 +97,5 @@ class SessionUpdate(FrozenModel):
     error: str | None = None
     ended_at: datetime | None = None
     name: str | None = None
+    system_prompt: str | None = None
     metadata: dict[str, Any] | None = None

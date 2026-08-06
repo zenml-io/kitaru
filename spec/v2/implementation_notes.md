@@ -240,8 +240,7 @@ required solving beyond what the documents describe.
 
 ## Task package
 
-- `ParsedNode` mirrors `SessionNodeCreateRequest` minus index and parent
-  fields, plus `children`. Parsed trees are single-parent only.
+- `ParsedNode` mirrors `SessionNodeCreateRequest` and adds `children`. Provider importers use nested single-parent trees. The portable Kitaru JSONL importer uses flat indexed nodes, including secondary parent indexes.
 - `session_request` takes the task id as an explicit parameter, the flow
   owns it.
 - API failures during import are sampled as `ImportFailure` rows with the

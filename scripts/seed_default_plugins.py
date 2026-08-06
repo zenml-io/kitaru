@@ -56,6 +56,14 @@ class PluginDefinition:
 PLUGIN_DEFINITIONS = (
     PluginDefinition(
         kind="importer",
+        name="kitaru-jsonl",
+        path=_REPOSITORY_ROOT / "plugins/importers/kitaru.py",
+        entrypoint="parse",
+        description="Import sessions that match the portable Kitaru JSONL schema.",
+        provider="kitaru-jsonl",
+    ),
+    PluginDefinition(
+        kind="importer",
         name="braintrust",
         path=_REPOSITORY_ROOT / "plugins/importers/braintrust.py",
         entrypoint="parse",

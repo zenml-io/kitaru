@@ -5806,6 +5806,18 @@
               }
             ],
             "description": "Initial session status."
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recently recorded system prompt.",
+            "title": "System Prompt"
           }
         },
         "required": [
@@ -5921,6 +5933,18 @@
             "title": "Index",
             "type": "integer"
           },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary human-readable input to the node.",
+            "title": "Input Text"
+          },
           "inputs": {
             "description": "Node inputs.",
             "title": "Inputs"
@@ -5965,6 +5989,18 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
+          "output_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary human-readable output from the node.",
+            "title": "Output Text"
+          },
           "outputs": {
             "description": "Node outputs.",
             "title": "Outputs"
@@ -5992,6 +6028,18 @@
             ],
             "description": "Model provider.",
             "title": "Provider"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning produced by the model call.",
+            "title": "Reasoning"
           },
           "requested_model": {
             "anyOf": [
@@ -6041,6 +6089,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt used by the model call.",
+            "title": "System Prompt"
           },
           "tokens": {
             "anyOf": [
@@ -6170,6 +6230,18 @@
             "title": "Index",
             "type": "integer"
           },
+          "input_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary human-readable input to the node.",
+            "title": "Input Text"
+          },
           "inputs": {
             "description": "Node inputs, null unless include_payloads.",
             "title": "Inputs"
@@ -6214,6 +6286,18 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
+          "output_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primary human-readable output from the node.",
+            "title": "Output Text"
+          },
           "outputs": {
             "description": "Node outputs, null unless include_payloads.",
             "title": "Outputs"
@@ -6254,6 +6338,18 @@
             ],
             "description": "Model provider.",
             "title": "Provider"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning produced by the model call.",
+            "title": "Reasoning"
           },
           "requested_model": {
             "anyOf": [
@@ -6318,6 +6414,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System prompt used by the model call.",
+            "title": "System Prompt"
           },
           "tokens": {
             "anyOf": [
@@ -6562,6 +6670,18 @@
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
           },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Most recently recorded system prompt.",
+            "title": "System Prompt"
+          },
           "task_id": {
             "anyOf": [
               {
@@ -6728,6 +6848,18 @@
               }
             ],
             "description": "New session status."
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New system prompt.",
+            "title": "System Prompt"
           }
         },
         "title": "SessionUpdateRequest",

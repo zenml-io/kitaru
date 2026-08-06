@@ -203,15 +203,85 @@ def test_imports_span_graph_and_genai_fields() -> None:
     assert child.requested_model == "gpt-5-mini"
     assert child.model == "gpt-5-mini-2026-06-01"
     assert child.provider == "openai"
+    assert child.input_text == "Classify"
+    assert child.output_text == "invoice"
     assert child.tokens and child.tokens.input_tokens == 120
     assert child.model_params == {"temperature": 0.2}
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "ready"
+
+
+def test_imports_flattened_otlp_jsonl_and_surfaces_prompts() -> None:
+    """Normalize flattened Arize and Logfire records through the OTLP path."""
+    messages = [
+        {"role": "system", "parts": [{"type": "text", "content": "Be brief."}]},
+        {"role": "user", "parts": [{"type": "text", "content": "Classify it."}]},
+    ]
+    record = {
+        "trace_id": TRACE_1,
+        "span_id": ROOT,
+        "parent_span_id": None,
+        "span_name": "chat model",
+        "start_timestamp": "2026-07-22T10:00:00Z",
+        "end_timestamp": "2026-07-22T10:00:01Z",
+        "otel_status_code": "UNSET",
+        "attributes": {
+            "gen_ai.conversation.id": "conversation-1",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": "gpt-5-mini",
+            "pydantic_ai.all_messages": messages,
+            "final_result": {
+                "answer": "invoice",
+                "reasoning": "The document contains an invoice number.",
+            },
+        },
+        "service_name": "document-agent",
+        "otel_scope_name": "pydantic-ai",
+    }
+
+    session = sessions((json.dumps(record) + "\n").encode())[0]
+    node = session.nodes[0]
+
+    assert session.framework == "pydantic-ai"
+    assert session.system_prompt == "Be brief."
+    assert node.input_text == "Classify it."
+    assert node.output_text == "invoice"
+    assert node.system_prompt == "Be brief."
+    assert node.reasoning == "The document contains an invoice number."
+    assert node.inputs == messages
+    assert node.outputs == {
+        "answer": "invoice",
+        "reasoning": "The document contains an invoice number.",
+    }
+
+
+def test_imports_arize_flat_span_jsonl() -> None:
+    """Read Arize span ids from the nested context object."""
+    record = {
+        "context": {"trace_id": TRACE_1, "span_id": ROOT},
+        "name": "invoke_agent agent",
+        "span_kind": "AGENT",
+        "parent_id": None,
+        "start_time": "2026-07-22T14:09:41Z",
+        "end_time": "2026-07-22T14:09:42Z",
+        "status_code": "OK",
+        "status_message": "",
+        "attributes": {
+            "input.value": "Classify it.",
+            "output.value": "invoice",
+            "session.id": "session-1",
+        },
+        "events": [],
+    }
+
+    session = sessions(json.dumps(record).encode())[0]
+    node = session.nodes[0]
+
+    assert node.trace_id == TRACE_1
+    assert node.input_text == "Classify it."
+    assert node.output_text == "invoice"
 
 
 def test_imports_tool_call_content() -> None:
-    """Map a GenAI tool span into a replayable tool node."""
+    """Map a GenAI tool span into a tool node."""
     session = sessions(
         payload(
             span(
@@ -241,9 +311,6 @@ def test_imports_tool_call_content() -> None:
     assert tool.tool_name == "read_pdf"
     assert tool.inputs == {"path": "invoice.pdf"}
     assert tool.outputs == {"pages": 2}
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["replayable_tool_call_count"] == 1
 
 
 def test_groups_jsonl_requests_into_ordered_turns() -> None:
@@ -315,11 +382,8 @@ def test_reports_missing_parent_and_failed_exception() -> None:
     assert session.status.value == "failed"
     assert session.error == "PDF is encrypted"
     assert session.nodes[0].status is NodeStatus.FAILED
-    readiness = session.metadata["replay_readiness"]
     warnings = session.metadata["normalization_warnings"]
-    assert isinstance(readiness, dict)
     assert isinstance(warnings, list)
-    assert readiness["graph_complete"] is False
     assert any("missing parent" in warning for warning in warnings)
 
 
@@ -342,18 +406,17 @@ def test_isolates_invalid_and_conflicting_duplicate_spans() -> None:
     assert any("conflicting duplicate" in failure.error for failure in parsed_failures)
 
 
-def test_digest_is_stable_across_span_order() -> None:
-    """Build the same content digest for reordered OTLP spans."""
+def test_node_order_is_stable_across_span_order() -> None:
+    """Build the same node order for reordered OTLP spans."""
     root = span(TRACE_1, ROOT, attrs=attributes(input__value="hello"))
     child = span(TRACE_1, CHILD, parent_id=ROOT)
 
     first = sessions(payload(root, child))[0]
     second = sessions(payload(child, root))[0]
 
-    assert (
-        first.metadata["source_content_digest"]
-        == second.metadata["source_content_digest"]
-    )
+    assert [node.external_id for node in first.nodes] == [
+        node.external_id for node in second.nodes
+    ]
 
 
 def test_unified_entrypoint_and_pep723_metadata() -> None:

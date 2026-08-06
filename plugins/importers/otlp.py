@@ -22,7 +22,7 @@ import json
 import re
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -33,7 +33,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import (
+    ParsedNode,
+    ParsedSession,
+    detect_framework,
+    populate_node_display_fields,
+)
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 _TRACE_ID = re.compile(r"^[0-9a-fA-F]{32}$")
@@ -52,6 +57,7 @@ _INPUT_KEYS = (
     "input.value",
     "input",
     "agent.input",
+    "pydantic_ai.all_messages",
 )
 _OUTPUT_KEYS = (
     "gen_ai.output.messages",
@@ -61,6 +67,7 @@ _OUTPUT_KEYS = (
     "output.value",
     "output",
     "agent.output",
+    "final_result",
 )
 _TOOL_INPUT_KEYS = (
     "gen_ai.tool.call.arguments",
@@ -231,6 +238,20 @@ def _timestamp(value: Any) -> datetime | None:
         return None
 
 
+def _datetime(value: Any) -> datetime | None:
+    """Convert an OTLP timestamp or an ISO timestamp to UTC."""
+    parsed = _timestamp(value)
+    if parsed is not None:
+        return parsed
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 def _integer(value: Any) -> int | None:
     """Parse an integer field."""
     if value in (None, ""):
@@ -290,11 +311,6 @@ def _parse_requests(content: bytes) -> list[dict[str, Any]]:
             raise InvalidImport("OTLP JSON must contain an object or object array")
     if not requests:
         raise InvalidImport("OTLP import contains no JSON records")
-    if any(
-        _first(request, "resourceSpans", "resource_spans") is None
-        for request in requests
-    ):
-        raise InvalidImport("Each OTLP request must contain resourceSpans")
     return requests
 
 
@@ -305,10 +321,23 @@ def _event(record: Any) -> dict[str, Any] | None:
     name = record.get("name")
     if not isinstance(name, str):
         return None
+    attributes = record.get("attributes")
     return {
         "name": name,
-        "time": _timestamp(_first(record, "timeUnixNano", "time_unix_nano")),
-        "attributes": _decode_attributes(record.get("attributes")),
+        "time": _datetime(
+            _first(
+                record,
+                "timeUnixNano",
+                "time_unix_nano",
+                "timestamp",
+                "time",
+            )
+        ),
+        "attributes": (
+            attributes
+            if isinstance(attributes, dict)
+            else _decode_attributes(attributes)
+        ),
     }
 
 
@@ -372,6 +401,110 @@ def _span_record(
     )
 
 
+def _flat_span_record(record: dict[str, Any]) -> _SpanRecord:
+    """Decode one flattened OTLP, Arize, or Logfire span record."""
+    context_value = record.get("context")
+    context = context_value if isinstance(context_value, dict) else {}
+    attributes_value = record.get("attributes")
+    attributes = (
+        dict(attributes_value)
+        if isinstance(attributes_value, dict)
+        else _decode_attributes(attributes_value)
+    )
+    resource_value = _first(
+        record,
+        "resource_attributes",
+        "otel_resource_attributes",
+    )
+    resource_attributes = (
+        dict(resource_value) if isinstance(resource_value, dict) else {}
+    )
+    top_level_resource_keys = {
+        "deployment_environment": "deployment.environment.name",
+        "service_instance_id": "service.instance.id",
+        "service_name": "service.name",
+        "service_namespace": "service.namespace",
+        "service_version": "service.version",
+        "telemetry_sdk_language": "telemetry.sdk.language",
+        "telemetry_sdk_name": "telemetry.sdk.name",
+        "telemetry_sdk_version": "telemetry.sdk.version",
+    }
+    for source_key, target_key in top_level_resource_keys.items():
+        value = record.get(source_key)
+        if value not in (None, ""):
+            resource_attributes.setdefault(target_key, value)
+    events_value = _first(record, "events", "otel_events")
+    events = [
+        decoded for item in events_value or [] if (decoded := _event(item)) is not None
+    ]
+    exception_message = record.get("exception_message")
+    if exception_message:
+        events.append(
+            {
+                "name": "exception",
+                "time": None,
+                "attributes": {
+                    "exception.message": exception_message,
+                    "exception.type": record.get("exception_type"),
+                    "exception.stacktrace": record.get("exception_stacktrace"),
+                },
+            }
+        )
+    flattened = {
+        "traceId": record.get("trace_id") or context.get("trace_id"),
+        "spanId": record.get("span_id") or context.get("span_id"),
+        "parentSpanId": _first(record, "parent_span_id", "parent_id"),
+        "name": _first(record, "name", "span_name"),
+        "kind": _first(record, "kind", "span_kind"),
+        "startTimeUnixNano": record.get("start_time_unix_nano"),
+        "endTimeUnixNano": record.get("end_time_unix_nano"),
+        "attributes": [],
+    }
+    base = _span_record(flattened, resource_attributes, {}, None)
+    status_value = record.get("status")
+    status: dict[str, Any] = status_value if isinstance(status_value, dict) else {}
+    scope_attributes = record.get("otel_scope_attributes")
+    scope_schema_url = None
+    if isinstance(scope_attributes, dict):
+        value = _first(scope_attributes, "schema_url", "schemaUrl")
+        scope_schema_url = str(value) if value else None
+    return base.model_copy(
+        update={
+            "start_time": _datetime(
+                _first(
+                    record,
+                    "start_time_unix_nano",
+                    "start_timestamp",
+                    "start_time",
+                )
+            ),
+            "end_time": _datetime(
+                _first(
+                    record,
+                    "end_time_unix_nano",
+                    "end_timestamp",
+                    "end_time",
+                )
+            ),
+            "attributes": attributes,
+            "scope_name": _first(record, "scope_name", "otel_scope_name"),
+            "scope_version": _first(record, "scope_version", "otel_scope_version"),
+            "scope_schema_url": scope_schema_url,
+            "events": events,
+            "link_count": len(_first(record, "links", "otel_links") or []),
+            "dropped_attributes_count": _integer(record.get("dropped_attributes_count"))
+            or 0,
+            "dropped_events_count": _integer(record.get("dropped_events_count")) or 0,
+            "dropped_links_count": _integer(record.get("dropped_links_count")) or 0,
+            "status_code": _first(record, "otel_status_code", "status_code")
+            or status.get("code"),
+            "status_message": _first(record, "otel_status_message", "status_message")
+            or status.get("message"),
+            "raw_digest": _canonical_digest(record),
+        }
+    )
+
+
 def _decode_spans(
     requests: list[dict[str, Any]],
 ) -> tuple[list[_SpanRecord], list[ImportFailure]]:
@@ -391,6 +524,28 @@ def _decode_spans(
 
     for request in requests:
         resource_spans = _first(request, "resourceSpans", "resource_spans")
+        if resource_spans is None:
+            context = request.get("context")
+            has_context_ids = (
+                isinstance(context, dict)
+                and context.get("trace_id")
+                and context.get("span_id")
+            )
+            if not has_context_ids and (
+                not request.get("trace_id") or not request.get("span_id")
+            ):
+                raise InvalidImport(
+                    "Each OTLP request must contain resourceSpans or a flattened "
+                    "trace and span id"
+                )
+            try:
+                spans.append(_flat_span_record(request))
+            except InvalidImport as exc:
+                source_id_value = request.get("trace_id") or (
+                    context.get("trace_id") if isinstance(context, dict) else None
+                )
+                add_error(str(exc), str(source_id_value) if source_id_value else None)
+            continue
         if not isinstance(resource_spans, list):
             raise InvalidImport("resourceSpans must be a JSON array")
         for resource_group in resource_spans:
@@ -657,7 +812,6 @@ def _parse_session(
     turns: list[_Turn] = []
     nodes_with_parents: list[tuple[ParsedNode, str | None]] = []
     roots_by_trace: dict[str, _SpanRecord] = {}
-    graph_complete = True
     for trace_id, records in traces:
         ids = {record.span_id for record in records}
         if _find_cycle(records):
@@ -676,7 +830,6 @@ def _parse_session(
             warnings.append(f"Trace '{trace_id}' has {len(roots)} root spans")
         for record in roots:
             if record.parent_span_id:
-                graph_complete = False
                 warnings.append(f"Span '{record.span_id}' references a missing parent")
         root = roots[0]
         roots_by_trace[trace_id] = root
@@ -771,26 +924,7 @@ def _parse_session(
         )
     )
     nodes = [node for node, _ in nodes_with_parents]
-    tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-    replayable_tools = [
-        node
-        for node in tool_nodes
-        if node.tool_name and node.inputs is not None and node.outputs is not None
-    ]
-    root_inputs_available = bool(turns) and all(
-        turn.inputs is not None for turn in turns
-    )
-    reasons = list(warnings)
-    if not root_inputs_available:
-        reasons.append("One or more turns have no root input")
-    if len(replayable_tools) != len(tool_nodes):
-        reasons.append("One or more tool calls lack a name, input, or output")
-    if not root_inputs_available:
-        readiness_level = "unavailable"
-    elif graph_complete and len(replayable_tools) == len(tool_nodes):
-        readiness_level = "ready"
-    else:
-        readiness_level = "partial"
+    system_prompt = populate_node_display_fields(nodes)
     latest_turn = turns[-1]
     latest_root = roots_by_trace[latest_turn.trace_id]
     session_status = (
@@ -810,19 +944,6 @@ def _parse_session(
                 "outputs": turn.outputs,
             }
             for turn in turns
-        ],
-    }
-    digest_payload = {
-        "source_id": source_id,
-        "source_instance": source_instance,
-        "status": session_status,
-        "turns": [asdict(turn) for turn in turns],
-        "nodes": [
-            {
-                "parent_external_id": parent_external_id,
-                **node.model_dump(mode="json", exclude={"children"}),
-            }
-            for node, parent_external_id in nodes_with_parents
         ],
     }
     all_records = [record for _, records in traces for record in records]
@@ -849,29 +970,31 @@ def _parse_session(
         "source_completeness": "unknown",
         **metadata_values,
         "normalization_warnings": warnings,
-        "replay_readiness": {
-            "level": readiness_level,
-            "root_inputs_available": root_inputs_available,
-            "graph_complete": graph_complete,
-            "tool_call_count": len(tool_nodes),
-            "replayable_tool_call_count": len(replayable_tools),
-            "reasons": reasons,
-        },
-        "source_content_digest": _canonical_digest(digest_payload),
     }
+    framework = detect_framework(
+        [
+            {
+                "attributes": record.attributes,
+                "resource_attributes": record.resource_attributes,
+                "scope_name": record.scope_name,
+            }
+            for record in all_records
+        ]
+    )
     return ParsedSession(
         external_id=f"{source_instance}:{source_id}",
         name=latest_root.name,
         status=session_status,
+        system_prompt=system_prompt,
         inputs=inputs,
         outputs=latest_turn.outputs,
-        expected=None,
         error=session_error,
         started_at=min(
             (turn.started_at for turn in turns if turn.started_at), default=None
         ),
         ended_at=max((turn.ended_at for turn in turns if turn.ended_at), default=None),
         metadata=metadata,
+        framework=framework,
         nodes=_build_node_tree(nodes_with_parents),
     )
 

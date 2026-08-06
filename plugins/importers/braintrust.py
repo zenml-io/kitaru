@@ -21,7 +21,7 @@ import hashlib
 import json
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -30,7 +30,12 @@ from typing import Any
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import (
+    ParsedNode,
+    ParsedSession,
+    detect_framework,
+    populate_node_display_fields,
+)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _SESSION_FIELDS = (
@@ -518,9 +523,9 @@ class BraintrustProjectLogImporter:
             )
         )
         nodes = [node for node, _ in nodes_with_parents]
+        system_prompt = populate_node_display_fields(nodes)
         if missing_parent:
             warnings.append("One or more spans reference a missing parent")
-        graph_complete = full_export and not missing_parent
         llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
         incomplete_llm_nodes = [
             node for node in llm_nodes if node.inputs is None or node.outputs is None
@@ -534,30 +539,8 @@ class BraintrustProjectLogImporter:
             warnings.append(
                 "Model output contains tool activity but no explicit tool spans"
             )
-            graph_complete = False
         if incomplete_llm_nodes:
             warnings.append("One or more LLM spans lack recorded input or output")
-            graph_complete = False
-        tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-        replayable_tools = [
-            node
-            for node in tool_nodes
-            if node.tool_name and node.inputs is not None and node.outputs is not None
-        ]
-        root_inputs_available = bool(turns) and all(
-            turn.inputs is not None for turn in turns
-        )
-        reasons = list(warnings)
-        if not root_inputs_available:
-            reasons.append("One or more turns have no root input")
-        if len(replayable_tools) != len(tool_nodes):
-            reasons.append("One or more tool calls lack a name, input, or output")
-        if not root_inputs_available:
-            readiness_level = "unavailable"
-        elif graph_complete and len(replayable_tools) == len(tool_nodes):
-            readiness_level = "ready"
-        else:
-            readiness_level = "partial"
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         session_status = (
@@ -582,18 +565,6 @@ class BraintrustProjectLogImporter:
                 for turn in turns
             ],
         }
-        digest_payload = {
-            "source_id": source_id,
-            "source_instance": source_instance,
-            "turns": [asdict(turn) for turn in turns],
-            "nodes": [
-                {
-                    "parent_external_id": parent_external_id,
-                    **node.model_dump(mode="json", exclude={"children"}),
-                }
-                for node, parent_external_id in nodes_with_parents
-            ],
-        }
         project_ids = sorted(
             {
                 str(row["project_id"])
@@ -609,16 +580,17 @@ class BraintrustProjectLogImporter:
             "source_trace_count": len(turns),
             "source_completeness": "full" if full_export else "flat",
             "normalization_warnings": warnings,
-            "replay_readiness": {
-                "level": readiness_level,
-                "root_inputs_available": root_inputs_available,
-                "graph_complete": graph_complete,
-                "tool_call_count": len(tool_nodes),
-                "replayable_tool_call_count": len(replayable_tools),
-                "reasons": reasons,
-            },
-            "source_content_digest": _digest(digest_payload),
         }
+        framework = detect_framework(
+            [
+                {
+                    "metadata": row.get("metadata"),
+                    "span_attributes": row.get("span_attributes"),
+                    "name": row.get("name"),
+                }
+                for row in records
+            ]
+        )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
             name=str(
@@ -627,9 +599,9 @@ class BraintrustProjectLogImporter:
                 or source_id
             ),
             status=session_status,
+            system_prompt=system_prompt,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
-            expected=None,
             error=session_error,
             started_at=min(
                 (turn.started_at for turn in turns if turn.started_at),
@@ -640,6 +612,7 @@ class BraintrustProjectLogImporter:
                 default=None,
             ),
             metadata=metadata,
+            framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
 

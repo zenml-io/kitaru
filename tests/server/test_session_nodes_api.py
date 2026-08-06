@@ -130,7 +130,14 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
         f"/v1/sessions/{session_id}/nodes",
         json={
             "nodes": [
-                _node(0, inputs={"q": "hi"}),
+                _node(
+                    0,
+                    input_text="hi",
+                    output_text="hello",
+                    system_prompt="Follow policy.",
+                    reasoning="The greeting matches the request.",
+                    inputs={"q": "hi"},
+                ),
                 _node(
                     1,
                     parent_index=0,
@@ -146,6 +153,10 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert len(items) == 2
     assert items[1]["parent_id"] == items[0]["id"]
     assert items[1]["cache_key"] is not None
+    assert items[0]["input_text"] == "hi"
+    assert items[0]["output_text"] == "hello"
+    assert items[0]["system_prompt"] == "Follow policy."
+    assert items[0]["reasoning"] == "The greeting matches the request."
     # Ingest responses populate payloads even without include_payloads.
     assert items[0]["inputs"] == {"q": "hi"}
 
@@ -201,13 +212,29 @@ async def test_list_nodes_include_payloads_default_false(
     """Null inputs, outputs, and attributes by default."""
     await client.post(
         f"/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
+        json={
+            "nodes": [
+                _node(
+                    0,
+                    input_text="hi",
+                    output_text="hello",
+                    system_prompt="Follow policy.",
+                    reasoning="The greeting matches the request.",
+                    inputs={"q": "hi"},
+                    attributes={"k": 1},
+                )
+            ]
+        },
     )
     response = await client.get(f"/v1/sessions/{session_id}/nodes")
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["inputs"] is None
     assert item["attributes"] is None
+    assert item["input_text"] == "hi"
+    assert item["output_text"] == "hello"
+    assert item["system_prompt"] == "Follow policy."
+    assert item["reasoning"] == "The greeting matches the request."
 
 
 async def test_list_nodes_include_payloads_true(
