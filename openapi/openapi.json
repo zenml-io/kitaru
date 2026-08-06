@@ -5717,10 +5717,6 @@
             "description": "Error from a failed session.",
             "title": "Error"
           },
-          "expected": {
-            "description": "Expected outputs.",
-            "title": "Expected"
-          },
           "external_id": {
             "anyOf": [
               {
@@ -5815,8 +5811,7 @@
         "required": [
           "origin",
           "inputs",
-          "outputs",
-          "expected"
+          "outputs"
         ],
         "title": "SessionCreateRequest",
         "type": "object"
@@ -6463,10 +6458,6 @@
             "description": "Error from a failed session.",
             "title": "Error"
           },
-          "expected": {
-            "description": "Expected outputs.",
-            "title": "Expected"
-          },
           "external_id": {
             "anyOf": [
               {
@@ -6618,7 +6609,6 @@
           "status",
           "inputs",
           "outputs",
-          "expected",
           "metadata",
           "llm_call_count",
           "tool_call_count"
@@ -6698,10 +6688,6 @@
             ],
             "description": "New error.",
             "title": "Error"
-          },
-          "expected": {
-            "description": "New expected outputs.",
-            "title": "Expected"
           },
           "metadata": {
             "anyOf": [

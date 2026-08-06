@@ -78,7 +78,6 @@ class SessionCreate(FrozenModel):
     name: str | None = None
     inputs: Any = None
     outputs: Any = None
-    expected: Any = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -97,5 +96,4 @@ class SessionUpdate(FrozenModel):
     error: str | None = None
     ended_at: datetime | None = None
     name: str | None = None
-    expected: Any = None
     metadata: dict[str, Any] | None = None

@@ -95,7 +95,6 @@ async def test_session_run_lifecycle_completes_the_job(
                 "origin": "recorded",
                 "inputs": None,
                 "outputs": None,
-                "expected": None,
             },
             headers=task_headers,
         )

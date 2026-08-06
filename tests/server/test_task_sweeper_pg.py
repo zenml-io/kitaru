@@ -134,7 +134,6 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
                 "origin": "recorded",
                 "inputs": {"q": "hi"},
                 "outputs": None,
-                "expected": None,
             },
         )
     ).json()

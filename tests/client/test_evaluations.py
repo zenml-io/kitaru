@@ -130,7 +130,6 @@ async def _create_session(api_client: KitaruAPIClient) -> uuid.UUID:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )

@@ -342,39 +342,36 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
     assert {session.id for session in sessions} == {first.id, second.id}
 
 
-async def test_update_session_clears_outputs_and_expected_with_explicit_null(
+async def test_update_session_clears_outputs_with_explicit_null(
     service: SessionService,
 ) -> None:
-    """Clear outputs and expected with an explicit null passed alongside status."""
+    """Clear outputs with an explicit null passed alongside status."""
     created = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
             outputs={"answer": 42},
-            expected={"answer": 42},
         ),
         actor=ACTOR,
     )
     updated = await service.update_session(
         created.id,
-        SessionUpdate(status=SessionStatus.COMPLETED, outputs=None, expected=None),
+        SessionUpdate(status=SessionStatus.COMPLETED, outputs=None),
         actor=ACTOR,
     )
     assert updated.outputs is None
-    assert updated.expected is None
     assert updated.status == SessionStatus.COMPLETED
 
 
 async def test_update_session_omitted_fields_unchanged(
     service: SessionService,
 ) -> None:
-    """Leave outputs and expected unchanged when the command omits them."""
+    """Leave outputs unchanged when the command omits them."""
     created = await service.create_session(
         SessionCreate(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
             outputs={"answer": 42},
-            expected={"answer": 42},
         ),
         actor=ACTOR,
     )
@@ -382,7 +379,6 @@ async def test_update_session_omitted_fields_unchanged(
         created.id, SessionUpdate(name="renamed"), actor=ACTOR
     )
     assert updated.outputs == {"answer": 42}
-    assert updated.expected == {"answer": 42}
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.IN_PROGRESS
 

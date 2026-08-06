@@ -45,7 +45,6 @@ async def _create_session(client: httpx.AsyncClient, agent_id: str) -> str:
             "origin": "recorded",
             "inputs": {"prompt": "hi"},
             "outputs": None,
-            "expected": None,
             "metadata": {},
         },
     )

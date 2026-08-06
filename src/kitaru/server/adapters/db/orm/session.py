@@ -116,7 +116,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
-    expected: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -159,7 +158,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=session.name,
             inputs=session.inputs,
             outputs=session.outputs,
-            expected=session.expected,
             error=session.error,
             started_at=session.started_at,
             ended_at=session.ended_at,
@@ -219,7 +217,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             inputs=self.inputs,
             outputs=self.outputs,
-            expected=self.expected,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

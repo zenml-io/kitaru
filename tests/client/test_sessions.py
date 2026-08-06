@@ -104,7 +104,6 @@ async def test_create(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs={"prompt": "hi"},
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -121,7 +120,6 @@ async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None
         origin=SessionOrigin.IMPORTED,
         inputs=None,
         outputs=None,
-        expected=None,
         metadata={},
         imported_from="langsmith",
         external_id="run-1",
@@ -140,7 +138,6 @@ async def test_get(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -164,7 +161,6 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
                 origin=SessionOrigin.RECORDED,
                 inputs=None,
                 outputs=None,
-                expected=None,
                 metadata={},
             )
         )
@@ -195,7 +191,6 @@ async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:
             status=SessionStatus.COMPLETED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -205,7 +200,6 @@ async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -232,7 +226,6 @@ async def test_update(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -252,7 +245,6 @@ async def test_update_status_conflict(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -274,7 +266,6 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -291,7 +282,6 @@ async def test_ingest_nodes_and_list_nodes(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
@@ -343,7 +333,6 @@ async def test_iter_nodes(api_client: KitaruAPIClient) -> None:
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
             metadata={},
         )
     )
