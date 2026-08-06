@@ -112,7 +112,7 @@ The session import command uploads the file, resolves an exact importer and agen
 
 ```bash
 kitaru session import sessions.jsonl \
-  --importer kitaru-jsonl@latest \
+  --importer kitaru/kitaru-jsonl@latest \
   --agent customer-service@latest \
   --media-type application/x-ndjson \
   --wait
@@ -130,7 +130,7 @@ For Langfuse, select a JSON object and a key inside it:
 
 ```bash
 kitaru session import langfuse-observations.jsonl \
-  --importer langfuse@latest \
+  --importer kitaru/langfuse@latest \
   --agent customer-service@latest \
   --params '{"join_path":"/metadata/customer","join_key":"case_id"}' \
   --wait

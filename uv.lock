@@ -10,6 +10,12 @@ resolution-markers = [
 exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
 
+[manifest]
+members = [
+    "kitaru",
+    "kitaru-plugins",
+]
+
 [[package]]
 name = "alembic"
 version = "1.18.5"
@@ -1006,6 +1012,17 @@ dev = [
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
 ]
+
+[[package]]
+name = "kitaru-plugins"
+version = "0.1.0"
+source = { editable = "plugins" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
 name = "logfire-api"

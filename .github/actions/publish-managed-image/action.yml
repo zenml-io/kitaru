@@ -5,6 +5,9 @@ inputs:
   version:
     description: Kitaru release version.
     required: true
+  plugin-version:
+    description: Kitaru plugin package version.
+    required: true
   dry-run:
     description: Validate the Dockerfile without publishing an image.
     required: false
@@ -41,6 +44,7 @@ runs:
         push: true
         build-args: |
           KITARU_VERSION=${{ inputs.version }}
+          KITARU_PLUGINS_VERSION=${{ inputs.plugin-version }}
         tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
         labels: |-
           org.opencontainers.image.title=kitaru

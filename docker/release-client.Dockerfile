@@ -49,6 +49,8 @@ ARG KITARU_VERSION
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID \
+  plugins/pyproject.toml plugins/README.md ./plugins/
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -64,7 +66,7 @@ USER $USERNAME
 # snapshot of the resulting environment for inspection outside the container.
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
-  uv sync --locked --no-dev --no-install-project && \
+  uv sync --locked --no-dev --no-install-workspace && \
   uv pip install \
     --no-deps \
     --only-binary=:all: \

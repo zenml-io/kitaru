@@ -99,6 +99,9 @@ packages = ["src/kitaru"]
 [tool.uv]
 exclude-newer = "3 days"
 
+[tool.uv.workspace]
+members = ["plugins"]
+
 [dependency-groups]
 dev = [
     "pydantic-ai-slim[openai]>=2.14.1,<3",
@@ -139,7 +142,7 @@ extend-immutable-calls = ["fastapi.Depends"]
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["adapters", "evaluators", "importers", "kitaru", "plugins"]
+known-first-party = ["adapters", "kitaru", "kitaru_plugins", "plugins"]
 
 [tool.ty.src]
 # TODO: Re-enable once the examples are migrated to the v2 SDK.

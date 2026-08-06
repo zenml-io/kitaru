@@ -13,16 +13,19 @@
 #  permissions and limitations under the License.
 """Tests for default plugin registration."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from conftest import FakeBlobRepository, FakePluginRepository
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
     DefaultPluginDefinition,
+    _load_default_plugin_definitions,
     register_default_plugins,
 )
 from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
-from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
 
 DEFINITIONS = (
     DefaultPluginDefinition(
@@ -30,18 +33,18 @@ DEFINITIONS = (
         name=f"{RESERVED_PLUGIN_NAME_PREFIX}importer",
         description="Test importer.",
         provider="langfuse",
-        entrypoint="parse",
-        content=b"def parse(): ...",
-        version=1,
+        entrypoint="package.importer:parse",
+        requirement="kitaru-plugins==1.0.0",
+        display_version="1.0.0",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
         name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
         description="Test evaluator.",
         provider=None,
-        entrypoint="evaluate",
-        content=b"def evaluate(): ...",
-        version=1,
+        entrypoint="package.evaluator:evaluate",
+        requirement="kitaru-plugins==1.0.0",
+        display_version="1.0.0",
     ),
 )
 
@@ -60,13 +63,14 @@ def repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
 
 async def test_register_creates_default_plugins(
     repository: FakePluginRepository,
-    blob_repository: FakeBlobRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Create every default plugin ownerless with one version on first startup."""
-    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
+    monkeypatch.setattr(
+        bootstrap, "_load_default_plugin_definitions", lambda: DEFINITIONS
+    )
 
-    await register_default_plugins(repository, blob_repository)
+    await register_default_plugins(repository)
 
     for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
@@ -75,23 +79,23 @@ async def test_register_creates_default_plugins(
         assert plugin.provider == definition.provider
         assert plugin.latest_version == 1
         version = await repository.get_version(plugin.id, 1)
-        assert isinstance(version.source, ScriptPluginSource)
+        assert isinstance(version.source, PackagePluginSource)
         assert version.source.entrypoint == definition.entrypoint
-        blob = await blob_repository.get(version.source.blob_id)
-        assert blob.owner_id is None
-        assert blob.data == definition.content
+        assert version.source.requirement == "kitaru-plugins==1.0.0"
+        assert version.display_version == "1.0.0"
 
 
 async def test_register_is_idempotent(
     repository: FakePluginRepository,
-    blob_repository: FakeBlobRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Leave version numbers unchanged when the declared versions are unchanged."""
-    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
-    await register_default_plugins(repository, blob_repository)
+    """Leave versions unchanged while the package requirement is unchanged."""
+    monkeypatch.setattr(
+        bootstrap, "_load_default_plugin_definitions", lambda: DEFINITIONS
+    )
+    await register_default_plugins(repository)
 
-    await register_default_plugins(repository, blob_repository)
+    await register_default_plugins(repository)
 
     for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
@@ -100,24 +104,57 @@ async def test_register_is_idempotent(
 
 async def test_register_creates_new_version_on_version_bump(
     repository: FakePluginRepository,
-    blob_repository: FakeBlobRepository,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Create version 2 only for plugins whose declared version was bumped."""
-    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", DEFINITIONS)
-    await register_default_plugins(repository, blob_repository)
+    """Create a version when the plugin distribution version changes."""
+    monkeypatch.setattr(
+        bootstrap, "_load_default_plugin_definitions", lambda: DEFINITIONS
+    )
+    await register_default_plugins(repository)
 
     bumped_name = DEFINITIONS[0].name
     bumped = tuple(
-        definition.model_copy(update={"version": 2})
+        definition.model_copy(
+            update={
+                "requirement": "kitaru-plugins==1.1.0",
+                "display_version": "1.1.0",
+            }
+        )
         if definition.name == bumped_name
         else definition
         for definition in DEFINITIONS
     )
-    monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", bumped)
-    await register_default_plugins(repository, blob_repository)
+    monkeypatch.setattr(bootstrap, "_load_default_plugin_definitions", lambda: bumped)
+    await register_default_plugins(repository)
 
     for definition in DEFINITIONS:
         plugin = await repository.get_by_name(definition.kind, definition.name)
         expected_version = 2 if definition.name == bumped_name else 1
         assert plugin.latest_version == expected_version
+
+
+def test_loads_definitions_from_distribution_entrypoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Attach the catalog distribution name and version to every definition."""
+    value = {
+        "kind": "importer",
+        "name": f"{RESERVED_PLUGIN_NAME_PREFIX}provider",
+        "description": "Import provider traces.",
+        "provider": "provider",
+        "entrypoint": "kitaru_plugins.importers.provider:parse",
+    }
+    catalog = SimpleNamespace(
+        name="official",
+        dist=SimpleNamespace(
+            metadata={"Name": "kitaru-plugins"},
+            version="2.3.0",
+        ),
+        load=lambda: lambda: [value],
+    )
+    monkeypatch.setattr(bootstrap, "entry_points", lambda **_: [catalog])
+
+    [definition] = _load_default_plugin_definitions()
+
+    assert definition.requirement == "kitaru-plugins==2.3.0"
+    assert definition.display_version == "2.3.0"

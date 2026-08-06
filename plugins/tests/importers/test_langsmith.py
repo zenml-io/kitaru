@@ -19,12 +19,16 @@ from typing import Any
 
 import pytest
 
-import importers.langsmith as langsmith_module
-from importers.langsmith import InvalidImport, LangSmithRunImporter, parse
+import kitaru_plugins.importers.langsmith as langsmith_module
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru_plugins.importers.langsmith import (
+    InvalidImport,
+    LangSmithRunImporter,
+    parse,
+)
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:

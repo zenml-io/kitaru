@@ -13,29 +13,26 @@
 #  permissions and limitations under the License.
 """Default account and default plugin bootstrap at server startup."""
 
-import hashlib
 import logging
-from importlib.metadata import version
+from importlib.metadata import entry_points
 
 from kitaru.base import FrozenModel
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.application.interfaces.account_repository import AccountRepository
-from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
-from kitaru.server.domain.blob import Blob
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
+    PackagePluginSource,
     Plugin,
     PluginKind,
     PluginNotFound,
-    ScriptPluginSource,
 )
 
-_SOURCE_MEDIA_TYPE = "text/x-python"
+_DEFAULT_PLUGIN_ENTRY_POINT_GROUP = "kitaru.default_plugins"
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +63,49 @@ class DefaultPluginDefinition(FrozenModel):
     description: str
     provider: str | None
     entrypoint: str
-    content: bytes
-    version: int
+    requirement: str
+    display_version: str
 
 
-DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = ()
+def _load_default_plugin_definitions() -> tuple[DefaultPluginDefinition, ...]:
+    """Load plugin definitions from installed catalog packages."""
+    definitions: list[DefaultPluginDefinition] = []
+    names: set[tuple[PluginKind, str]] = set()
+    for catalog_entrypoint in entry_points(group=_DEFAULT_PLUGIN_ENTRY_POINT_GROUP):
+        distribution = catalog_entrypoint.dist
+        if distribution is None:
+            raise RuntimeError(
+                f"Plugin catalog '{catalog_entrypoint.name}' has no distribution"
+            )
+        distribution_name = distribution.metadata["Name"]
+        display_version = distribution.version
+        requirement = f"{distribution_name}=={display_version}"
+        catalog = catalog_entrypoint.load()
+        if not callable(catalog):
+            raise RuntimeError(
+                f"Plugin catalog '{catalog_entrypoint.name}' is not callable"
+            )
+        values = catalog()
+        if not isinstance(values, list | tuple):
+            raise RuntimeError(
+                f"Plugin catalog '{catalog_entrypoint.name}' must return a list"
+            )
+        for value in values:
+            definition = DefaultPluginDefinition.model_validate(
+                {
+                    **value,
+                    "requirement": requirement,
+                    "display_version": display_version,
+                }
+            )
+            identity = (definition.kind, definition.name)
+            if identity in names:
+                raise RuntimeError(
+                    f"Default plugin '{definition.name}' is defined more than once"
+                )
+            names.add(identity)
+            definitions.append(definition)
+    return tuple(definitions)
 
 
 async def _get_or_create_plugin(
@@ -106,35 +141,28 @@ async def _get_or_create_plugin(
         return await repository.get_by_name(definition.kind, definition.name)
 
 
-async def register_default_plugins(
-    repository: PluginRepository, blob_repository: BlobRepository
-) -> None:
-    """Create the built-in default plugins and their declared versions.
+async def register_default_plugins(repository: PluginRepository) -> None:
+    """Create default plugins declared by installed catalog packages.
 
     Args:
         repository: Plugin repository.
-        blob_repository: Blob repository.
     """
-    installed_version = version("kitaru")
-    for definition in DEFAULT_PLUGIN_DEFINITIONS:
+    for definition in _load_default_plugin_definitions():
         plugin = await _get_or_create_plugin(repository, definition)
-        if plugin.latest_version >= definition.version:
-            logger.debug("Default plugin %s is already current.", definition.name)
-            continue
-        blob, _ = await blob_repository.create(
-            Blob(
-                owner_id=None,
-                sha256=hashlib.sha256(definition.content).hexdigest(),
-                size=len(definition.content),
-                media_type=_SOURCE_MEDIA_TYPE,
-                data=definition.content,
-            )
+        source = PackagePluginSource(
+            requirement=definition.requirement,
+            entrypoint=definition.entrypoint,
         )
+        if plugin.latest_version:
+            latest = await repository.get_version(plugin.id, plugin.latest_version)
+            if latest.source == source:
+                logger.debug("Default plugin %s is already current.", definition.name)
+                continue
         try:
             await repository.create_version(
                 plugin.id,
-                ScriptPluginSource(blob_id=blob.id, entrypoint=definition.entrypoint),
-                installed_version,
+                source,
+                definition.display_version,
             )
             logger.info("Created a new version for default plugin %s.", definition.name)
         except DuplicatePluginVersion:

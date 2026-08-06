@@ -19,11 +19,11 @@ from typing import Any
 
 import pytest
 
-from importers import otlp as importer_module
-from importers.otlp import InvalidImport, OTLPJSONImporter, parse
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
 from kitaru.worker.process import parse_inline_dependencies
+from kitaru_plugins.importers import otlp as importer_module
+from kitaru_plugins.importers.otlp import InvalidImport, OTLPJSONImporter, parse
 
 TRACE_1 = "0af7651916cd43dd8448eb211c80319c"
 TRACE_2 = "1af7651916cd43dd8448eb211c80319c"

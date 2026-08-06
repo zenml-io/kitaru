@@ -1,0 +1,83 @@
+---
+name: Release plugins
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Plugin package version already committed in plugins/pyproject.toml.
+        required: true
+        type: string
+      dry-run:
+        description: Build and test without publishing or tagging.
+        required: false
+        type: boolean
+        default: false
+permissions: {}
+concurrency:
+  group: release-plugins
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.dry-run && 'dry-run' || 'pypi' }}
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: develop
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Validate committed version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(uv version --project plugins --short)
+          test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
+          grep -q "^## \[$PACKAGE_VERSION\] - " plugins/CHANGELOG.md
+          printf 'PLUGIN_VERSION=%s\n' "$PACKAGE_VERSION" >> "$GITHUB_ENV"
+      - name: Validate release is new
+        if: ${{ !inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "refs/tags/plugins-v$PLUGIN_VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag plugins-v$PLUGIN_VERSION already exists."
+            exit 1
+          fi
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/kitaru-plugins/$PLUGIN_VERSION/json")
+          if [ "$STATUS" = 200 ]; then
+            echo "::error::kitaru-plugins $PLUGIN_VERSION is already published."
+            exit 1
+          fi
+          if [ "$STATUS" != 404 ]; then
+            echo "::error::PyPI returned HTTP $STATUS."
+            exit 1
+          fi
+      - name: Test package and catalog integration
+        run: |
+          uv sync --frozen --all-packages --extra server
+          uv run pytest -q plugins/tests tests/server/test_default_plugins.py
+          uv run python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
+      - name: Build package
+        run: uv build --project plugins --out-dir plugins/dist
+      - name: Publish package
+        if: ${{ !inputs.dry-run }}
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          packages-dir: plugins/dist
+      - name: Tag release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          git tag "plugins-v$PLUGIN_VERSION"
+          git push origin "plugins-v$PLUGIN_VERSION"
+          gh release create "plugins-v$PLUGIN_VERSION" plugins/dist/* \
+            --title "Kitaru plugins $PLUGIN_VERSION" \
+            --generate-notes

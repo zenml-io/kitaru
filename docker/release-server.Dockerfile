@@ -9,6 +9,7 @@ ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG KITARU_VERSION=""
+ARG KITARU_PLUGINS_VERSION=""
 
 FROM docker.io/astral/uv:${UV_VERSION} AS uv
 
@@ -19,6 +20,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG KITARU_PLUGINS_VERSION
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS base
 
@@ -29,6 +31,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG KITARU_PLUGINS_VERSION
 
 RUN groupadd --gid $USER_GID $USERNAME && \
   useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
@@ -46,9 +49,12 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG KITARU_PLUGINS_VERSION
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID \
+  plugins/pyproject.toml plugins/README.md ./plugins/
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -63,17 +69,19 @@ USER $USERNAME
 # matching published Kitaru wheel without resolving its dependencies again.
 # Keep a snapshot of the resulting environment for external inspection.
 RUN test -n "$KITARU_VERSION" && \
+  test -n "$KITARU_PLUGINS_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
   uv sync \
     --locked \
     --no-dev \
-    --no-install-project \
+    --no-install-workspace \
     --extra server \
     --extra otel && \
   uv pip install \
     --no-deps \
     --only-binary=:all: \
-    "kitaru==$KITARU_VERSION" && \
+    "kitaru==$KITARU_VERSION" \
+    "kitaru-plugins==$KITARU_PLUGINS_VERSION" && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \
@@ -88,6 +96,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
+ARG KITARU_PLUGINS_VERSION
 
 # The Python base image includes package-management tools that are unnecessary
 # at runtime. uv is mounted only for this command and is not included in the

@@ -122,6 +122,16 @@ jobs:
         with:
           python-version: '3.12'
           enable-cache: false
+      - name: Resolve plugin package version
+        run: |
+          PLUGIN_VERSION=$(uv version --project plugins --short)
+          printf 'KITARU_PLUGINS_VERSION=%s\n' "$PLUGIN_VERSION" >> "$GITHUB_ENV"
+      - name: Validate plugin package is published
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          curl -fsS \
+            "https://pypi.org/pypi/kitaru-plugins/$KITARU_PLUGINS_VERSION/json" \
+            >/dev/null
 
       # --- Bump version (dispatch only, skip in recovery mode) ---
       # In recovery mode (tag already exists) we checked out the tag itself,
@@ -557,6 +567,7 @@ jobs:
           push: true
           build-args: |
             KITARU_VERSION=${{ env.VERSION }}
+            KITARU_PLUGINS_VERSION=${{ env.KITARU_PLUGINS_VERSION }}
           tags: |
             zenmldocker/kitaru-server:${{ env.VERSION }}
             zenmldocker/kitaru-server:latest
@@ -570,6 +581,7 @@ jobs:
         uses: ./.github/actions/publish-managed-image
         with:
           version: ${{ env.VERSION }}
+          plugin-version: ${{ env.KITARU_PLUGINS_VERSION }}
           dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
           aws-role-arn: ${{ vars.KITARU_ECR_ROLE_ARN }}
 

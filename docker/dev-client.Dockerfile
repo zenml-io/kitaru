@@ -53,6 +53,8 @@ ARG USER_GID
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock README.md ./
+COPY --chown=$USERNAME:$USER_GID \
+  plugins/pyproject.toml plugins/README.md ./plugins/
 COPY --chown=$USERNAME:$USER_GID src ./src
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -66,7 +68,7 @@ USER $USERNAME
 
 # Install the repository project and its client dependencies from the lockfile.
 # Keep a snapshot of the resulting environment for external inspection.
-RUN uv sync --locked --no-dev --no-editable && \
+RUN uv sync --locked --package kitaru --no-dev --no-editable && \
   uv pip check && \
   python -c "import kitaru" && \
   uv pip freeze > requirements.txt

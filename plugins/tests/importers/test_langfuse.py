@@ -19,11 +19,15 @@ from typing import Any
 
 import pytest
 
-import importers.langfuse as langfuse_module
-from importers.langfuse import InvalidImport, LangfuseJSONLImporter, parse
+import kitaru_plugins.importers.langfuse as langfuse_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru_plugins.importers.langfuse import (
+    InvalidImport,
+    LangfuseJSONLImporter,
+    parse,
+)
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:

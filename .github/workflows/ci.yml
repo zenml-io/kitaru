@@ -219,6 +219,21 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+  plugin-package:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --all-packages --extra server
+      - run: uv run pytest -q plugins/tests tests/server/test_default_plugins.py
+      - run: uv build --project plugins --out-dir plugins/dist
+      - run: uv run python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions;
+          assert _load_default_plugin_definitions()"
   mcp-wheel-contract:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

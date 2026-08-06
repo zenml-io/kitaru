@@ -19,11 +19,15 @@ from typing import Any
 
 import pytest
 
-import importers.braintrust as braintrust_module
-from importers.braintrust import BraintrustProjectLogImporter, InvalidImport, parse
+import kitaru_plugins.importers.braintrust as braintrust_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru_plugins.importers.braintrust import (
+    BraintrustProjectLogImporter,
+    InvalidImport,
+    parse,
+)
 
 
 def params(
