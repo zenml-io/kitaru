@@ -21,11 +21,7 @@ instead of duplicating them.
 
 from typing import Any, TypeVar
 
-from kitaru.api_models.v1.base import (
-    ListParams,
-    OwnedResponseModel,
-    TimestampedResponseModel,
-)
+from kitaru.api_models.v1.base import ListParams, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorUpdateRequest,
     EvaluatorVersionResponse,
@@ -51,7 +47,7 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource as DomainScriptPluginSource,
 )
 
-PluginResponseT = TypeVar("PluginResponseT", bound=OwnedResponseModel)
+PluginResponseT = TypeVar("PluginResponseT", bound=TimestampedResponseModel)
 PluginVersionResponseT = TypeVar(
     "PluginVersionResponseT", bound=TimestampedResponseModel
 )

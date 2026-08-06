@@ -66,7 +66,9 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
         return row.to_domain(), True
 
     @staticmethod
-    def _select_metadata() -> Select[tuple[uuid.UUID, uuid.UUID, str, int, str, Any]]:
+    def _select_metadata() -> Select[
+        tuple[uuid.UUID, uuid.UUID | None, str, int, str, Any]
+    ]:
         """Build the select over every blob column except the content.
 
         Returns:
@@ -82,7 +84,9 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
         )
 
     @staticmethod
-    def _to_metadata(row: Row[tuple[uuid.UUID, uuid.UUID, str, int, str, Any]]) -> Blob:
+    def _to_metadata(
+        row: Row[tuple[uuid.UUID, uuid.UUID | None, str, int, str, Any]],
+    ) -> Blob:
         """Build a domain blob from a metadata row.
 
         Args:

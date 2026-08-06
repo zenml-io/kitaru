@@ -3212,7 +3212,7 @@ class FakeBlobRepository:
 
 async def create_blob(
     repository: FakeBlobRepository,
-    owner_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
     content: bytes = b"blob-content",
     media_type: str = "application/octet-stream",
 ) -> Blob:

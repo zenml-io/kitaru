@@ -37,6 +37,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
+    ReservedPluginName,
     ScriptPluginSource,
 )
 
@@ -130,6 +131,25 @@ async def test_create_plugin_duplicate_name(evaluator_service: PluginService) ->
         await evaluator_service.create_plugin(
             name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
         )
+
+
+async def test_create_plugin_reserved_name(evaluator_service: PluginService) -> None:
+    """Reject a name that uses the reserved default-plugin prefix."""
+    with pytest.raises(
+        ReservedPluginName,
+        match="Plugin name 'kitaru/accuracy' uses the reserved prefix 'kitaru/'",
+    ):
+        await evaluator_service.create_plugin(
+            name="kitaru/accuracy",
+            description=None,
+            provider=None,
+            metadata={},
+            actor=ACTOR,
+        )
+    plugins, _ = await evaluator_service.list_plugins(
+        PluginFilter(kind=PluginKind.EVALUATOR), actor=ACTOR
+    )
+    assert plugins == []
 
 
 async def test_create_plugin_evaluator_rejects_provider(

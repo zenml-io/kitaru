@@ -56,7 +56,7 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
     created: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), sort_order=-2
     )
-    owner_id: Mapped[uuid.UUID]
+    owner_id: Mapped[uuid.UUID | None]
     sha256: Mapped[str] = mapped_column(String(64))
     size: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(255))

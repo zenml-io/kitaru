@@ -19,7 +19,6 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
@@ -52,9 +51,12 @@ class EvaluatorListParams(FilterableListParams):
     """Evaluator list params."""
 
 
-class EvaluatorResponse(OwnedResponseModel):
+class EvaluatorResponse(TimestampedResponseModel):
     """Evaluator response."""
 
+    owner_id: uuid.UUID | None = Field(
+        description="Id of the owning account, null for a default plugin."
+    )
     id: uuid.UUID = Field(description="Evaluator id.")
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(description="Evaluator description.")

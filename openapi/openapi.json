@@ -2262,10 +2262,17 @@
             "type": "string"
           },
           "owner_id": {
-            "description": "Id of the owning account.",
-            "format": "uuid",
-            "title": "Owner Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
           },
           "updated": {
             "description": "Last modification time.",
@@ -3184,10 +3191,17 @@
             "type": "string"
           },
           "owner_id": {
-            "description": "Id of the owning account.",
-            "format": "uuid",
-            "title": "Owner Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
           },
           "provider": {
             "anyOf": [

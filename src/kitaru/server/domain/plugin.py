@@ -29,7 +29,11 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import Name, VersionName
+from kitaru.server.domain.names import (
+    RESERVED_PLUGIN_NAME_PREFIX,
+    PluginName,
+    VersionName,
+)
 from kitaru.source_refs import parse_source_ref
 
 MAX_REQUIREMENT_LENGTH = 255
@@ -66,6 +70,21 @@ class DuplicatePluginName(ConflictError):
         """
         super().__init__(
             f"{kind.value.capitalize()} name '{name}' is already registered"
+        )
+
+
+class ReservedPluginName(ValidationError):
+    """Raised when a plugin name uses the reserved default-plugin prefix."""
+
+    def __init__(self, name: str) -> None:
+        """Initialize the error.
+
+        Args:
+            name: Name that uses the reserved prefix.
+        """
+        super().__init__(
+            f"Plugin name '{name}' uses the reserved prefix "
+            f"'{RESERVED_PLUGIN_NAME_PREFIX}'"
         )
 
 
@@ -253,9 +272,9 @@ class Plugin(DomainModel):
     """Plugin."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
-    owner_id: uuid.UUID
+    owner_id: uuid.UUID | None
     kind: PluginKind
-    name: Name
+    name: PluginName
     description: str | None = None
     provider: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
