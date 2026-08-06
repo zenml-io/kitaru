@@ -184,6 +184,13 @@ publish.
   (`9f052e78`) and an end-to-end test; agent guidance files were
   refreshed on `feat/refresh-v2-agent-guidance` (internal, no docs
   impact).
+- **Agent skills in flight** (`feat/cli-skill-discovery`, not merged):
+  the CLI detects installed Kitaru agent skills (Claude Code / Codex /
+  AGENTS hosts, project or user scope) and surfaces
+  `npx skills add zenml-io/kitaru-skills` guidance in root help — which
+  implies a public **`zenml-io/kitaru-skills`** repo. If it ships,
+  `agent-native/mcp-server.md` should gain a skills section alongside
+  MCP.
 
 ## Claims that need verification before publish
 
