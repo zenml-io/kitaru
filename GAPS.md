@@ -148,11 +148,42 @@ publish.
   `--extra pydantic-ai`, contradicting the same-day pyproject.)
 - **CLI preferences unified into the client config file (#671)** —
   `kitaru config list/get/set/path` all survive; no doc changes needed.
-- **Investigations + annotations in flight** — a ~13k-line feature
-  (`feature/investigations`, server API + services) with a follow-up
-  CLI/MCP branch (`feat/audit-investigation-evaluation-commands`). Not
-  merged into the mainline; not documented. If it ships for launch, it
-  needs its own concept/guide coverage — budget for it.
+- ~~Investigations + annotations in flight~~ — **merged same day**; see
+  the Aug 6 afternoon deltas.
+
+## Aug 6 afternoon deltas (docs updated Aug 6)
+
+- **Everything consolidated into `v2-spec-consolidated`** —
+  `v2-importer`, `feature/investigations`, and the audit/CLI branch were
+  all merged and deleted. One mainline now holds server + CLI + MCP +
+  plugins tree + adapter + investigations. (Packaging caveat above
+  still stands: plugins/adapter live outside the wheel.)
+- **Investigations + annotations merged (#668 + CLI/MCP)** — new domain:
+  investigations (per-agent, ordered questions as `key=text`, linked
+  sessions with curated views/selectors, complete/skip progress) and
+  annotations (JSON value + selector down to node/JSON-pointer/char
+  range; question answers or manual). CLI nouns `investigation`
+  (create/list/get/update/delete + session list/complete/skip) and
+  `annotation` (create/list/get/update/delete). **Documented**: new
+  `concepts/investigations.md` (+ toc), calibration section links it,
+  MCP page updated.
+- **MCP grew to 11 tools** — `kitaru_review_read` / `kitaru_review_manage`
+  (investigations), `kitaru_workflow_start` is back (bounded: session
+  evaluations + experiment runs), and `kitaru_evaluators_manage` landed.
+  Tool table updated in `agent-native/mcp-server.md`.
+- **Keyless local worker confirmed** — "Allow CLI worker start without
+  API key" (`5f5f7cc0`) resolves verification item 7 below; the
+  quickstart's bare `kitaru worker start` is now accurate under
+  `auth none`.
+- **TypeScript SDK in flight** (`feat/ts-support`, not merged): a
+  `packages/core` TS workspace with a typed client, run recorder,
+  replay + tool-policy enforcement, generated OpenAPI types, and CI.
+  Not documented; if it ships it's a headline adapter-story change (and
+  directly relevant to TS-stack prospects). Watch it.
+- **Canonical example gained an investigation-guided flow**
+  (`9f052e78`) and an end-to-end test; agent guidance files were
+  refreshed on `feat/refresh-v2-agent-guidance` (internal, no docs
+  impact).
 
 ## Claims that need verification before publish
 
@@ -186,11 +217,9 @@ publish.
 6. **`run_sync` on `KitaruAgent`** — inherited from PydanticAI's
    `WrapperAgent`; the team's examples use `await agent.run(...)`.
    Smoke-test `run_sync` before it stays in the quickstart/README.
-7. **Worker vs API key under `auth none`** — worker code reads
-   `KITARU_API_KEY` as required env in one path while the local compose
-   flow (auth `none`) runs without keys in the canonical example. Confirm
-   a keyless local worker works before the quickstart's "just
-   `kitaru worker start`" stands.
+7. ~~Worker vs API key under `auth none`~~ — **resolved Aug 6**:
+   `kitaru worker start` no longer requires an API key (`5f5f7cc0`);
+   the quickstart's bare invocation stands.
 
 ## Scoped down pending MVP confirmation (documented as roadmap, not shipped)
 
@@ -209,8 +238,10 @@ publish.
   brief's settled model (source CODE/LLM/HUMAN, `group_id`) is not in the
   code; provenance is derived from `evaluator_version_id`/`task_id`
   null-ness. Docs follow the code.
-- **Calibration / shadow mode / agentic triage / GitHub connect** — no
-  implementation; calibration stays documented as a workflow.
+- **Shadow mode / GitHub connect** — still no implementation.
+  Structured review/triage now exists as **investigations** (Aug 6) and
+  is documented; calibration is documented as a workflow on top of
+  investigations + evaluations.
 
 ## Flagged open questions (not resolved in the docs — need decisions)
 

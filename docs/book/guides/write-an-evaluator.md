@@ -105,8 +105,11 @@ provenance, and you can re-score any population with the new version.
 ## Calibrate against human judgment
 
 Before an evaluator gates anything, check that it agrees with the human
-it's standing in for. Have your expert label a slice of sessions —
-human labels are just evaluations written directly:
+it's standing in for. The structured way to collect the human side is an
+[investigation](../concepts/investigations.md): pose the criteria as
+questions over a slice of sessions and the answers land as annotations,
+one per session per question. Labels can also be written directly as
+evaluations:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationResult

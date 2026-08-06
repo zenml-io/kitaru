@@ -51,19 +51,21 @@ registered, so the assistant doesn't even see them:
 
 | Tool | Mode | What it does |
 |---|---|---|
-| `kitaru_registry_read` | read-only | Read agents, evaluators, importers, and their versions |
-| `kitaru_activity_read` | read-only | Read sessions, runs, jobs, and their children |
+| `kitaru_registry_read` | read-only | Read agents, cohorts, experiments, importers, evaluators, and their versions |
+| `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
+| `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
 | `kitaru_cohorts_manage` | standard | Create or update cohorts and cohort versions |
 | `kitaru_experiments_manage` | standard | Create or update experiments |
 | `kitaru_session_import` | standard | Import sessions from an already-uploaded blob |
+| `kitaru_review_manage` | standard | Run investigations: complete or skip sessions, answer questions, annotate |
+| `kitaru_workflow_start` | standard | Start a session evaluation or experiment run, return immediately |
+| `kitaru_evaluators_manage` | standard | Create or update evaluators from an existing blob or pinned package |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
-| `kitaru_delete` | destructive | Delete a cohort, experiment, version, or run |
+| `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, or run |
 
 Start assistants in `read-only`, move to `standard` when you want them
-building cohorts, and reserve `destructive` for sessions where you're
-watching. Starting replays, evaluations, and experiment runs stays with
-the CLI (which the assistant can also drive — see below), where `--wait`
-and exit codes make the outcome checkable.
+building cohorts and starting runs, and reserve `destructive` for
+sessions where you're watching.
 
 ## The other surfaces
 
