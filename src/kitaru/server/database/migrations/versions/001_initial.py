@@ -146,7 +146,7 @@ def upgrade() -> None:
         "blob",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=True),
         sa.Column("sha256", sa.String(length=64), nullable=False),
         sa.Column("size", sa.Integer(), nullable=False),
         sa.Column("media_type", sa.String(length=255), nullable=False),
@@ -188,7 +188,7 @@ def upgrade() -> None:
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("owner_id", sa.Uuid(), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=True),
         sa.Column("kind", sa.String(length=32), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
@@ -296,7 +296,6 @@ def upgrade() -> None:
         ),
     )
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
-        batch_op.create_index("ix_agent_version_agent_id", ["agent_id"], unique=False)
         batch_op.create_index("ix_agent_version_owner_id", ["owner_id"], unique=False)
 
     op.create_table(
@@ -502,17 +501,12 @@ def upgrade() -> None:
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
             nullable=True,
         ),
-        sa.Column(
-            "expected",
-            postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
-            nullable=True,
-        ),
         sa.Column("error", sa.Text(), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("external_id", sa.Text(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-        sa.Column("provider", sa.Text(), nullable=True),
+        sa.Column("imported_from", sa.Text(), nullable=True),
         sa.Column("framework", sa.Text(), nullable=True),
         sa.Column("adapter_version", sa.Text(), nullable=True),
         sa.Column("cost", sa.Numeric(), nullable=True),
@@ -533,7 +527,9 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "provider", "external_id", name="uq_session_provider_external_id"
+            "imported_from",
+            "external_id",
+            name="uq_session_imported_from_external_id",
         ),
         sa.UniqueConstraint("agent_id", "number", name="uq_session_agent_id_number"),
     )
@@ -973,11 +969,6 @@ def upgrade() -> None:
         ),
     )
     with op.batch_alter_table("annotation", schema=None) as batch_op:
-        batch_op.create_index(
-            "ix_annotation_investigation_session_id",
-            ["investigation_session_id"],
-            unique=False,
-        )
         batch_op.create_index("ix_annotation_owner_id", ["owner_id"], unique=False)
         batch_op.create_index("ix_annotation_session_id", ["session_id"], unique=False)
 
@@ -987,7 +978,6 @@ def downgrade() -> None:
     with op.batch_alter_table("annotation", schema=None) as batch_op:
         batch_op.drop_index("ix_annotation_session_id")
         batch_op.drop_index("ix_annotation_owner_id")
-        batch_op.drop_index("ix_annotation_investigation_session_id")
 
     op.drop_table("annotation")
     with op.batch_alter_table("investigation_session", schema=None) as batch_op:
@@ -1068,7 +1058,6 @@ def downgrade() -> None:
     op.drop_table("cohort")
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
         batch_op.drop_index("ix_agent_version_owner_id")
-        batch_op.drop_index("ix_agent_version_agent_id")
 
     op.drop_table("agent_version")
     with op.batch_alter_table("worker", schema=None) as batch_op:

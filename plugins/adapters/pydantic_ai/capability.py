@@ -417,7 +417,6 @@ class _KitaruCapability(AbstractCapability[Any]):
                     name=self.session_name,
                     inputs=_jsonable(state.effective_input),
                     outputs=None,
-                    expected=None,
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,

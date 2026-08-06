@@ -2262,10 +2262,17 @@
             "type": "string"
           },
           "owner_id": {
-            "description": "Id of the owning account.",
-            "format": "uuid",
-            "title": "Owner Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
           },
           "updated": {
             "description": "Last modification time.",
@@ -3184,10 +3191,17 @@
             "type": "string"
           },
           "owner_id": {
-            "description": "Id of the owning account.",
-            "format": "uuid",
-            "title": "Owner Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id of the owning account, null for a default plugin.",
+            "title": "Owner Id"
           },
           "provider": {
             "anyOf": [
@@ -5703,10 +5717,6 @@
             "description": "Error from a failed session.",
             "title": "Error"
           },
-          "expected": {
-            "description": "Expected outputs.",
-            "title": "Expected"
-          },
           "external_id": {
             "anyOf": [
               {
@@ -5730,6 +5740,18 @@
             ],
             "description": "Agent framework used.",
             "title": "Framework"
+          },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
           },
           "inputs": {
             "description": "Session inputs.",
@@ -5761,18 +5783,6 @@
             "description": "Session outputs.",
             "title": "Outputs"
           },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Source system naming the session.",
-            "title": "Provider"
-          },
           "started_at": {
             "anyOf": [
               {
@@ -5801,8 +5811,7 @@
         "required": [
           "origin",
           "inputs",
-          "outputs",
-          "expected"
+          "outputs"
         ],
         "title": "SessionCreateRequest",
         "type": "object"
@@ -6449,10 +6458,6 @@
             "description": "Error from a failed session.",
             "title": "Error"
           },
-          "expected": {
-            "description": "Expected outputs.",
-            "title": "Expected"
-          },
           "external_id": {
             "anyOf": [
               {
@@ -6482,6 +6487,18 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
           },
           "inputs": {
             "description": "Session inputs.",
@@ -6528,18 +6545,6 @@
             "format": "uuid",
             "title": "Owner Id",
             "type": "string"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Source system naming the session.",
-            "title": "Provider"
           },
           "started_at": {
             "anyOf": [
@@ -6604,7 +6609,6 @@
           "status",
           "inputs",
           "outputs",
-          "expected",
           "metadata",
           "llm_call_count",
           "tool_call_count"
@@ -6684,10 +6688,6 @@
             ],
             "description": "New error.",
             "title": "Error"
-          },
-          "expected": {
-            "description": "New expected outputs.",
-            "title": "Expected"
           },
           "metadata": {
             "anyOf": [
@@ -14254,7 +14254,7 @@
         ]
       },
       "post": {
-        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe provider and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
+        "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
         "operationId": "create_session_v1_sessions_post",
         "requestBody": {
           "content": {

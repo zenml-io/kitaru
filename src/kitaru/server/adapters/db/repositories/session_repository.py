@@ -34,7 +34,7 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
 )
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.session import (
-    SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+    SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
 from kitaru.server.adapters.db.orm.task import (
@@ -106,7 +106,7 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "task_id": SessionORM.task_id,
     "origin": SessionORM.origin,
     "status": SessionORM.status,
-    "provider": SessionORM.provider,
+    "imported_from": SessionORM.imported_from,
     "framework": SessionORM.framework,
     "external_id": SessionORM.external_id,
     "name": SessionORM.name,
@@ -150,15 +150,15 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         return SessionNotFound(entity_id)
 
     def _duplicate_external_id(self, session: Session) -> DuplicateSessionExternalId:
-        """Build the conflict error for a duplicated provider and external id.
+        """Build the conflict error for a duplicated imported_from and external id.
 
         Args:
-            session: Session whose provider and external id collided.
+            session: Session whose imported_from and external id collided.
 
         Returns:
             Conflict error.
         """
-        return DuplicateSessionExternalId(session.provider, session.external_id)
+        return DuplicateSessionExternalId(session.imported_from, session.external_id)
 
     async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
         """Bump the agent's session counter and return the new value.
@@ -195,7 +195,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             session: Session to store.
 
         Raises:
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -205,7 +205,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         await self._add(
             row,
             {
-                SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
                 )
             },
@@ -275,7 +275,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -292,13 +292,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.name = session.name
         row.inputs = session.inputs
         row.outputs = session.outputs
-        row.expected = session.expected
         row.error = session.error
         row.started_at = session.started_at
         row.ended_at = session.ended_at
         row.external_id = session.external_id
         row.metadata_ = session.metadata
-        row.provider = session.provider
+        row.imported_from = session.imported_from
         row.framework = session.framework
         row.adapter_version = session.adapter_version
         row.cost = session.cost
@@ -312,7 +311,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.tool_call_count = session.tool_call_count
         await self._flush(
             {
-                SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
                 )
             }

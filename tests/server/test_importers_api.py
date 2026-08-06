@@ -89,6 +89,14 @@ async def test_create_importer_duplicate_name(client: httpx.AsyncClient) -> None
     }
 
 
+async def test_create_importer_reserved_name(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a name using the reserved default-plugin prefix."""
+    response = await client.post(
+        "/v1/importers", json={"name": "kitaru/langfuse-import"}
+    )
+    assert response.status_code == 422
+
+
 async def test_list_importers_filter_by_provider(client: httpx.AsyncClient) -> None:
     """List importers filtered by provider."""
     await client.post(

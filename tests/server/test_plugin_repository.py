@@ -67,7 +67,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 
 
 def _plugin(
-    owner_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
     kind: PluginKind = PluginKind.EVALUATOR,
     name: str = "accuracy",
     provider: str | None = None,
@@ -84,6 +84,15 @@ async def test_create_sets_timestamps(setup: Setup) -> None:
     assert plugin.latest_version == 0
     assert plugin.created is not None
     assert plugin.updated is not None
+
+
+async def test_create_and_round_trip_without_owner(setup: Setup) -> None:
+    """Store and reload a default plugin with no owner."""
+    repository, _ = setup
+    created = await repository.create(_plugin(None, name="kitaru/accuracy"))
+    assert created.owner_id is None
+    loaded = await repository.get(created.id)
+    assert loaded.owner_id is None
 
 
 async def test_create_duplicate_name_same_kind(setup: Setup) -> None:

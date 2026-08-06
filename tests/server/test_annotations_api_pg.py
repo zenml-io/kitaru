@@ -48,7 +48,6 @@ async def _create_session_with_node(
                 "origin": "recorded",
                 "inputs": {"prompt": "hi"},
                 "outputs": None,
-                "expected": None,
                 "metadata": {},
             },
         )

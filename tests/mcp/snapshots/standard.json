@@ -824,10 +824,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "updated": {
               "description": "Last modification time.",
@@ -1087,10 +1094,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "provider": {
               "anyOf": [
@@ -3393,10 +3407,6 @@
               "description": "Error from a failed session.",
               "title": "Error"
             },
-            "expected": {
-              "description": "Expected outputs.",
-              "title": "Expected"
-            },
             "external_id": {
               "anyOf": [
                 {
@@ -3428,6 +3438,19 @@
               "format": "uuid",
               "title": "Id",
               "type": "string"
+            },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source system the session was imported from.",
+              "title": "Imported From"
             },
             "inputs": {
               "description": "Session inputs.",
@@ -3475,19 +3498,6 @@
               "format": "uuid",
               "title": "Owner Id",
               "type": "string"
-            },
-            "provider": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Source system naming the session.",
-              "title": "Provider"
             },
             "started_at": {
               "anyOf": [
@@ -3555,7 +3565,6 @@
             "status",
             "inputs",
             "outputs",
-            "expected",
             "metadata",
             "llm_call_count",
             "tool_call_count"
@@ -9245,10 +9254,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "updated": {
               "description": "Last modification time.",

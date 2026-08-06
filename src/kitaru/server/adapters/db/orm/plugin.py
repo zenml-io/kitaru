@@ -68,7 +68,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(PLUGIN_KIND_PROVIDER_INDEX, "kind", "provider"),
     )
 
-    owner_id: Mapped[uuid.UUID]
+    owner_id: Mapped[uuid.UUID | None]
     kind: Mapped[str] = mapped_column(String(32))
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)

@@ -44,9 +44,6 @@ ANNOTATION_INVESTIGATION_SESSION_ID_QUESTION_KEY_UNIQUE_CONSTRAINT = (
 )
 ANNOTATION_OWNER_ID_INDEX = index_name("annotation", ["owner_id"])
 ANNOTATION_SESSION_ID_INDEX = index_name("annotation", ["session_id"])
-ANNOTATION_INVESTIGATION_SESSION_ID_INDEX = index_name(
-    "annotation", ["investigation_session_id"]
-)
 
 
 class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -76,7 +73,6 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(ANNOTATION_OWNER_ID_INDEX, "owner_id"),
         Index(ANNOTATION_SESSION_ID_INDEX, "session_id"),
-        Index(ANNOTATION_INVESTIGATION_SESSION_ID_INDEX, "investigation_session_id"),
     )
 
     owner_id: Mapped[uuid.UUID]

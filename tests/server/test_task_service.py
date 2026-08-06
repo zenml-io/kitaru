@@ -980,6 +980,27 @@ async def test_advance_job_settlement_tracks_job_completed() -> None:
     assert tracked_properties["task_kinds"] == ["evaluator", "importer"]
 
 
+async def test_second_of_two_sibling_tasks_settles_the_job() -> None:
+    """The job stays unsettled after one sibling completes and settles after the other.
+
+    Exactly one of the two completions elects itself the settler, the one
+    whose scan finds every task of the job terminal.
+    """
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id)
+    first = await create_import_task(tasks, job.id)
+    second = await create_evaluation_task(tasks, job.id)
+
+    await _complete_task(transitions, first, result={"created": 1})
+    assert not (await jobs.get(job.id)).settled
+
+    await _complete_task(
+        transitions, second, result=[{"name": "quality", "score": 1.0}]
+    )
+    settled = await jobs.get(job.id)
+    assert settled.status is JobStatus.COMPLETED
+
+
 async def test_apply_status_non_terminal_writes_track_nothing() -> None:
     """Skip tracking when a transition leaves the task non-terminal."""
     analytics = _RecordingAnalytics()

@@ -329,14 +329,19 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
-    ) -> dict[uuid.UUID, datetime | None]:
+    ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:
         """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
 
         Writes only the heartbeat column, so a stamp cannot overwrite fields
         concurrent writers committed since the caller last read the tasks.
-        Task rows are locked in id order. The owning job row is joined for
-        its own cancel request, which reaches a task before the sweep stamps
-        it, and joining leaves that row unlocked.
+        Candidates are read unlocked first, then locked in id order with
+        ``SKIP LOCKED``, so a row a settlement transaction is mid-mutation on
+        is left unstamped for this tick rather than waited on. The candidate
+        filter is re-applied on the locked row, so a row that turns terminal
+        in the gap between the two reads lands in neither set rather than
+        being wrongly stamped. The owning job row is joined for its own
+        cancel request, which reaches a task before the sweep stamps it, and
+        joining leaves that row unlocked.
 
         Args:
             task_ids: Candidate task ids.
@@ -345,19 +350,31 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
 
         Returns:
             Cancel request time of the task, falling back to its job's, by id
-            for every stamped task.
+            for every stamped task, and the owned in-flight candidates whose
+            lock was held elsewhere and so were left unstamped.
         """
         if not task_ids:
-            return {}
+            return {}, set()
+        candidate_filter = (
+            TaskORM.worker_id == worker_id,
+            TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
+        )
+        candidate_ids = set(
+            (
+                await self._session.scalars(
+                    select(TaskORM.id).where(
+                        TaskORM.id.in_(list(task_ids)), *candidate_filter
+                    )
+                )
+            ).all()
+        )
+        if not candidate_ids:
+            return {}, set()
         locked = (
             select(TaskORM.id)
-            .where(
-                TaskORM.id.in_(list(task_ids)),
-                TaskORM.worker_id == worker_id,
-                TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
-            )
+            .where(TaskORM.id.in_(candidate_ids), *candidate_filter)
             .order_by(TaskORM.id.asc())
-            .with_for_update()
+            .with_for_update(skip_locked=True)
         )
         statement = (
             update(TaskORM)
@@ -371,7 +388,10 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         rows = (await self._session.execute(statement)).all()
         await self._session.flush()
-        return {task_id: cancel_requested_at for task_id, cancel_requested_at in rows}
+        stamped = {
+            task_id: cancel_requested_at for task_id, cancel_requested_at in rows
+        }
+        return stamped, candidate_ids - stamped.keys()
 
     async def lock_by_jobs(
         self, job_ids: Sequence[uuid.UUID], nowait: bool = False

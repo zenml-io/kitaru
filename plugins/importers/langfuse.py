@@ -832,7 +832,6 @@ class LangfuseJSONLImporter:
             status=session_status,
             inputs=inputs,
             outputs=turns[-1].outputs if turns else None,
-            expected=None,
             error=session_error,
             started_at=started_at,
             ended_at=ended_at,

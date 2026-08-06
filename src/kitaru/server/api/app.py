@@ -21,6 +21,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
@@ -31,12 +32,14 @@ from kitaru.analytics.source import (
 )
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.db.errors import is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
+from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.plugin_repository import (
+    SQLPluginRepository,
+)
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -67,11 +70,13 @@ from kitaru.server.adapters.rest.routers import (
 )
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
+from kitaru.server.api.bootstrap import (
+    ensure_default_account,
+    register_default_plugins,
+)
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
-from kitaru.server.application.services.account_service import AccountService
-from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -152,6 +157,26 @@ def _register_deadlock_exception_handler(app: FastAPI) -> None:
         return JSONResponse(status_code=503, content={"detail": "Deadlock detected"})
 
 
+def _register_pool_timeout_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for an exhausted connection pool.
+
+    Clients receive HTTP 503 with the usual ``detail`` message.
+
+    Args:
+        app: FastAPI application that will serve the v1 API.
+    """
+
+    @app.exception_handler(SQLAlchemyTimeoutError)
+    async def pool_timeout(
+        request: Request, exc: SQLAlchemyTimeoutError
+    ) -> JSONResponse:
+        _ = request
+        _ = exc
+        return JSONResponse(
+            status_code=503, content={"detail": "Database connection pool exhausted"}
+        )
+
+
 def _register_token_grant_exception_handler(app: FastAPI) -> None:
     """Register the OAuth 2.0 error response for a failed token grant.
 
@@ -216,15 +241,17 @@ def create_app(settings: APISettings) -> FastAPI:
         # is no local default account to fall back on.
         if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
             async for session in database.get_async_session():
-                account_service = AccountService(
-                    repository=SQLAccountRepository(session),
-                    password_hasher=BcryptPasswordHasher(),
-                    permission_service=PermissionService(AdminFlagPermissionProvider()),
-                )
-                await account_service.ensure_account(
-                    settings.DEFAULT_ACCOUNT_NAME, settings.DEFAULT_ACCOUNT_PASSWORD
+                await ensure_default_account(
+                    SQLAccountRepository(session),
+                    settings.DEFAULT_ACCOUNT_NAME,
+                    settings.DEFAULT_ACCOUNT_PASSWORD,
                 )
                 await session.commit()
+        async for session in database.get_async_session():
+            await register_default_plugins(
+                SQLPluginRepository(session), SQLBlobRepository(session)
+            )
+            await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:
             yield
@@ -258,6 +285,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.control_plane_client = None
     _register_domain_exception_handlers(app)
     _register_deadlock_exception_handler(app)
+    _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_source)
     # FastAPIInstrumentor registers its middleware last, which makes the

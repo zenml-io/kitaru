@@ -103,12 +103,12 @@ class ParsedSession(BaseModel):
     name: str | None
     inputs: Any
     outputs: Any
-    expected: Any
     error: str | None
     started_at: datetime | None
     ended_at: datetime | None
     external_id: str
     metadata: dict[str, Any]
+    framework: str | None = None
     nodes: list[ParsedNode]
 
 
@@ -176,13 +176,13 @@ def session_request(
         name=parsed.name,
         inputs=parsed.inputs,
         outputs=parsed.outputs,
-        expected=parsed.expected,
         error=parsed.error,
         started_at=parsed.started_at,
         ended_at=parsed.ended_at,
         external_id=parsed.external_id,
         metadata=parsed.metadata,
-        provider=importer.provider,
+        imported_from=importer.provider,
+        framework=parsed.framework,
     )
 
 
