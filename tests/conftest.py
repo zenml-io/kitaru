@@ -1999,15 +1999,17 @@ class FakeSessionRepository:
         self._cohort_membership_counts[session_id] -= 1
 
     def _check_duplicate_external_id(self, session: Session) -> None:
-        if session.provider is None or session.external_id is None:
+        if session.imported_from is None or session.external_id is None:
             return
         for other in self._sessions.values():
             if (
                 other.id != session.id
-                and other.provider == session.provider
+                and other.imported_from == session.imported_from
                 and other.external_id == session.external_id
             ):
-                raise DuplicateSessionExternalId(session.provider, session.external_id)
+                raise DuplicateSessionExternalId(
+                    session.imported_from, session.external_id
+                )
 
     async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
         """Bump the agent's session counter and return the new value.
@@ -2030,7 +2032,7 @@ class FakeSessionRepository:
             session: Session to store.
 
         Raises:
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -2201,7 +2203,7 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:

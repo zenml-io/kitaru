@@ -88,7 +88,7 @@ async def test_duplicate_external_id_conflict(
 ) -> None:
     """Translate the database constraint into HTTP 409."""
     body = _session_body(
-        agent_id, origin="imported", provider="langsmith", external_id="run-1"
+        agent_id, origin="imported", imported_from="langsmith", external_id="run-1"
     )
     response = await client.post("/v1/sessions", json=body)
     assert response.status_code == 201

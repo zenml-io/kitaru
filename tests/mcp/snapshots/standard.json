@@ -3429,6 +3429,19 @@
               "title": "Id",
               "type": "string"
             },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source system the session was imported from.",
+              "title": "Imported From"
+            },
             "inputs": {
               "description": "Session inputs.",
               "title": "Inputs"
@@ -3475,19 +3488,6 @@
               "format": "uuid",
               "title": "Owner Id",
               "type": "string"
-            },
-            "provider": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Source system naming the session.",
-              "title": "Provider"
             },
             "started_at": {
               "anyOf": [

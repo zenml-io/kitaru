@@ -91,8 +91,8 @@ class SessionCreateRequest(RequestModel):
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
-    provider: str | None = Field(
-        default=None, description="Source system naming the session."
+    imported_from: str | None = Field(
+        default=None, description="Source system the session was imported from."
     )
     framework: str | None = Field(default=None, description="Agent framework used.")
     adapter_version: str | None = Field(
@@ -157,8 +157,8 @@ class SessionResponse(OwnedResponseModel):
         default=None, description="Id from the source system."
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
-    provider: str | None = Field(
-        default=None, description="Source system naming the session."
+    imported_from: str | None = Field(
+        default=None, description="Source system the session was imported from."
     )
     framework: str | None = Field(default=None, description="Agent framework used.")
     adapter_version: str | None = Field(

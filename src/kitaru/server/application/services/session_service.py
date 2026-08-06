@@ -114,7 +114,7 @@ class SessionService:
             AgentVersionAgentMismatch: The resolved agent version belongs to
                 another agent.
             AgentNotFound: No agent has the resolved id.
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -150,7 +150,7 @@ class SessionService:
             ended_at=command.ended_at,
             external_id=command.external_id,
             metadata=command.metadata,
-            provider=command.provider,
+            imported_from=command.imported_from,
             framework=command.framework,
             adapter_version=command.adapter_version,
         )

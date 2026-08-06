@@ -494,12 +494,12 @@ The replay configuration value objects, mirroring `domain/replay_config.py`. Imp
 ### session.py
 
 - `TokenUsage` (RequestModel): input_tokens?, output_tokens?, cached_input_tokens?, reasoning_tokens?
-- `SessionCreateRequest`: agent_id?, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, task_id?. Both ids are optional on the wire because a task_id naming an agent or import task supplies them, see the session create rules below.
+- `SessionCreateRequest`: agent_id?, agent_version_id?, origin, status?, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, imported_from?, framework?, adapter_version?, task_id?. Both ids are optional on the wire because a task_id naming an agent or import task supplies them, see the session create rules below.
 - `SessionUpdateRequest`: status?, outputs, error?, ended_at?, name?, expected, metadata?
 - `SessionEvaluationsRequest`: evaluations: list[EvaluationResult] (min 1)
 - `SessionListParams`: filter?
-- `SessionResponse`: id, owner_id, agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, cost: Decimal?, tokens: TokenUsage?, llm_call_count, tool_call_count, created, updated. The session carries no evaluations inline, they are read via `GET /v1/evaluations?session_id=...`.
-- `provider` is a free-form string naming the source system
+- `SessionResponse`: id, owner_id, agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, imported_from?, framework?, adapter_version?, cost: Decimal?, tokens: TokenUsage?, llm_call_count, tool_call_count, created, updated. The session carries no evaluations inline, they are read via `GET /v1/evaluations?session_id=...`.
+- `imported_from` is a free-form string naming the source system the session was imported from
 
 ### session_node.py
 
@@ -631,7 +631,7 @@ Every versioned resource numbers its versions the same way: `version` is a serve
 | `ReplayConfig` | override?, tool_policy, evaluators | check_standalone (rejects cohort_version history scope) |
 | `Replay` | job_id, experiment_run_id?, replay_config_id, baseline_session_id, evaluate_baselines, status: ReplayStatus, error? | settled property, start_evaluating, complete, fail(error), cancel |
 | `Secret` | name, internal, type?, values: dict[str, SecretStr] | update_type, update_values |
-| `Session` | agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, provider?, framework?, adapter_version?, cost?, tokens?, llm_call_count, tool_call_count | update_name, update_expected, update_metadata, check_node_ingest, finish |
+| `Session` | agent_id, agent_version_id?, task_id?, origin, status, name?, inputs, outputs, expected, error?, started_at?, ended_at?, external_id?, metadata, imported_from?, framework?, adapter_version?, cost?, tokens?, llm_call_count, tool_call_count | update_name, update_expected, update_metadata, check_node_ingest, finish |
 | `SessionNode` | session_id, parent_id?, secondary_parent_ids, index, external_id?, trace_id?, node_type, name, status, error?, started_at?, ended_at?, inputs, outputs, requested_model?, model?, provider?, tokens?, cost?, model_params?, tool_name?, cache_key?, subagent_id?, attributes, metadata | - |
 | `Tag` | name | update_name |
 | `TagLink` | tag_id, resource_type, resource_id, no owner_id | - |
@@ -693,7 +693,7 @@ Repository `get_many` methods load id lists through `_load_by_ids` on the base S
 | replay | `ReplayORM` | `Replay` | owner_id, job_id FK CASCADE unique, experiment_run_id FK CASCADE?, replay_config_id FK, baseline_session_id FK, status, error?. Unique (experiment_run_id, baseline_session_id), one replay per baseline per run. Indexes on (experiment_run_id, status) and baseline_session_id. |
 | replay_config | `ReplayConfigORM` | `ReplayConfig` | owner_id, override JSONB?, tool_policy JSONB, evaluators JSONB |
 | secret | `SecretORM` | `Secret` | owner_id, name unique, internal, type?, values_encrypted (text, AES-GCM over JSON) |
-| session | `SessionORM` | `Session` | owner_id, agent_id FK, agent_version_id FK?, task_id FK SET NULL indexed, origin, status, name?, inputs/outputs/expected JSONB?, error?, started_at?, ended_at?, external_id?, metadata JSONB, provider?, framework?, adapter_version?, cost numeric?, input/output/cached_input/reasoning_tokens bigint?, llm_call_count, tool_call_count. Unique (provider, external_id). Indexes (agent_id, started_at) and (status). The has_evaluation filter is an EXISTS probe against the evaluation session_id index, the cohort_version_id filter an EXISTS probe against the cohort_version_session pk. One session per agent task is enforced in the service, import tasks link many. |
+| session | `SessionORM` | `Session` | owner_id, agent_id FK, agent_version_id FK?, task_id FK SET NULL indexed, origin, status, name?, inputs/outputs/expected JSONB?, error?, started_at?, ended_at?, external_id?, metadata JSONB, imported_from?, framework?, adapter_version?, cost numeric?, input/output/cached_input/reasoning_tokens bigint?, llm_call_count, tool_call_count. Unique (imported_from, external_id). Indexes (agent_id, started_at) and (status). The has_evaluation filter is an EXISTS probe against the evaluation session_id index, the cohort_version_id filter an EXISTS probe against the cohort_version_session pk. One session per agent task is enforced in the service, import tasks link many. |
 | session_node | `SessionNodeORM` | `SessionNode` | session_id FK CASCADE, parent_id self-FK CASCADE?, secondary_parent_ids JSONB, index, external_id?, trace_id?, node_type, name, status, error?, started_at?, ended_at?, inputs/outputs JSONB?, requested_model?, model?, provider?, token columns, cost?, model_params JSONB?, tool_name?, cache_key char(64)?, attributes JSONB, metadata JSONB, subagent_id?. Unique (session_id, index), (session_id, external_id). Partial index on cache_key where cache_key is not null (tool_lookup across cohort_version and agent history scopes). Row ids are server-minted uuid7, ingest resolves parent_index against stored and in-batch rows. |
 | tag | `TagORM` | `Tag` | owner_id, name unique |
 | tag_link | `TagLinkORM` | `TagLink` | tag_id FK CASCADE, resource_type, resource_id (no FK, polymorphic). Own uuid pk, unique (tag_id, resource_type, resource_id), index (resource_type, resource_id). |
@@ -881,7 +881,7 @@ Which invariants have a database constraint behind them and which are service-le
 | One replay per baseline per run | DB, unique (experiment_run_id, baseline_session_id) on replay |
 | One evaluator task per evaluator version per input session per job | DB, unique (job_id, input_session_id, plugin_version_id) |
 | One evaluation per (task, name) | DB, unique (task_id, name), with a partial unique (session_id, name) where task_id is null as the manual upsert key |
-| One session per (provider, external_id) | DB, unique, and the dedup import re-runs rely on |
+| One session per (imported_from, external_id) | DB, unique, and the dedup import re-runs rely on |
 | One replay row per job | DB, unique job_id on replay |
 | Attempt fencing on executor transitions | DB, the conditional UPDATE matches on attempt and the affected row count decides 409 |
 | Claim hands a task to exactly one worker | DB, `FOR UPDATE SKIP LOCKED` |

@@ -8,7 +8,7 @@ Resolving a worker or task token verifies the JWT and the account being active, 
 
 ## Idempotency keys on job-creating POSTs
 
-Replays inside a run dedup naturally on unique (experiment_run_id, baseline_session_id), and imports dedup per session on unique (provider, external_id). Standalone `POST /v1/replays`, `POST /v1/evaluations`, and `POST /v1/session-runs` have no natural key, so a client retry after a timeout creates duplicate jobs. The client already sends an `Idempotency-Key` header held stable across retry attempts, add the server-side dedup table keyed on it when duplicate jobs start showing up in practice.
+Replays inside a run dedup naturally on unique (experiment_run_id, baseline_session_id), and imports dedup per session on unique (imported_from, external_id). Standalone `POST /v1/replays`, `POST /v1/evaluations`, and `POST /v1/session-runs` have no natural key, so a client retry after a timeout creates duplicate jobs. The client already sends an `Idempotency-Key` header held stable across retry attempts, add the server-side dedup table keyed on it when duplicate jobs start showing up in practice.
 
 ## Task retry
 

@@ -53,7 +53,7 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         ended_at=body.ended_at,
         external_id=body.external_id,
         metadata=body.metadata,
-        provider=body.provider,
+        imported_from=body.imported_from,
         framework=body.framework,
         adapter_version=body.adapter_version,
     )
@@ -88,7 +88,7 @@ def session_to_response(session: Session) -> SessionResponse:
         ended_at=session.ended_at,
         external_id=session.external_id,
         metadata=session.metadata,
-        provider=session.provider,
+        imported_from=session.imported_from,
         framework=session.framework,
         adapter_version=session.adapter_version,
         cost=session.cost,

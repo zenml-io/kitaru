@@ -75,7 +75,7 @@ async def create_session(
 
     A task principal's session is always linked to its own task, regardless
     of the request's task_id. Clients observe HTTP 201 on success, 409 when
-    the provider and external id pair is already registered, and 422 on
+    the imported_from and external id pair is already registered, and 422 on
     invalid input.
 
     Args:

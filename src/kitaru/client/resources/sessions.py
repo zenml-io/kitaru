@@ -56,7 +56,7 @@ class SessionsResource:
 
         Raises:
             APIError: The request failed, including 409 for a duplicate
-                provider and external id pair.
+                imported_from and external id pair.
 
         Returns:
             Created session.

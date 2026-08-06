@@ -152,6 +152,7 @@ class ParsedSession(BaseModel):
     ended_at: datetime | None
     external_id: str
     metadata: dict[str, Any]
+    framework: str | None
     nodes: list[ParsedNode]
 
 ParsedItem = ParsedSession | ImportFailure   # ImportFailure from api_models
@@ -164,7 +165,7 @@ def session_request(importer: ImportTaskDetails, parsed: ParsedSession) -> Sessi
 def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]: ...
 ```
 
-`call_parser` is a wrapping generator: it advances the parser one `next()` at a time inside a try/except, converting any exception into `SessionImportError`. Wrapping only the parser call would protect nothing, a generator function runs no code until iterated. `session_request` builds the create request with `origin=imported`, the task id, the importer's `provider` and `agent_id`, and the parsed fields, so every imported session links to its importer task. `flatten_nodes` walks the tree depth-first, assigns indexes and parent indexes, and emits flat ingest requests.
+`call_parser` is a wrapping generator: it advances the parser one `next()` at a time inside a try/except, converting any exception into `SessionImportError`. Wrapping only the parser call would protect nothing, a generator function runs no code until iterated. `session_request` builds the create request with `origin=imported`, the task id, the importer's `provider` as `imported_from`, its `agent_id`, and the parsed fields, so every imported session links to its importer task. `flatten_nodes` walks the tree depth-first, assigns indexes and parent indexes, and emits flat ingest requests.
 
 The flow, `async def run(client, task_id)`:
 
@@ -179,7 +180,7 @@ The flow, `async def run(client, task_id)`:
    - Otherwise ingest the node tree in `NODE_BATCH_SIZE` batches and count as created.
 5. Write the `ImportStats(created, skipped, failed, failures)` via `write_task_result`.
 
-Items are consumed one at a time so arbitrarily large payloads never require the whole parse result in memory. A bad item the parser handles itself (yielding an `ImportFailure`) is a counted failure and never aborts the run. A parser crash mid-stream is the parser not handling it, and fails the task: the flow writes the stats gathered so far, then re-raises. Everything imported stays, a re-run dedups on (provider, external_id), and the partial stats are visible on the failed task. Pre-stream errors (spec, plugin load, payload read) and the result write fail the task the same way.
+Items are consumed one at a time so arbitrarily large payloads never require the whole parse result in memory. A bad item the parser handles itself (yielding an `ImportFailure`) is a counted failure and never aborts the run. A parser crash mid-stream is the parser not handling it, and fails the task: the flow writes the stats gathered so far, then re-raises. Everything imported stays, a re-run dedups on (imported_from, external_id), and the partial stats are visible on the failed task. Pre-stream errors (spec, plugin load, payload read) and the result write fail the task the same way.
 
 ## Plugin contract
 

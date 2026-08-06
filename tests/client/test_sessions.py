@@ -123,7 +123,7 @@ async def test_create_duplicate_external_id(api_client: KitaruAPIClient) -> None
         outputs=None,
         expected=None,
         metadata={},
-        provider="langsmith",
+        imported_from="langsmith",
         external_id="run-1",
     )
     await api_client.sessions.create(request)

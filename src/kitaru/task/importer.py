@@ -109,6 +109,7 @@ class ParsedSession(BaseModel):
     ended_at: datetime | None
     external_id: str
     metadata: dict[str, Any]
+    framework: str | None = None
     nodes: list[ParsedNode]
 
 
@@ -182,7 +183,8 @@ def session_request(
         ended_at=parsed.ended_at,
         external_id=parsed.external_id,
         metadata=parsed.metadata,
-        provider=importer.provider,
+        imported_from=importer.provider,
+        framework=parsed.framework,
     )
 
 

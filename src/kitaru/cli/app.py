@@ -3181,11 +3181,11 @@ async def session_import(
                 "Only sessions with this origin.",
             ),
             ParameterSpec(
-                "--provider",
+                "--imported-from",
                 "string",
                 "option",
                 False,
-                "Only sessions from this exact provider.",
+                "Only sessions imported from this exact source system.",
             ),
             ParameterSpec(
                 "--tag", "text", "option", False, "Only sessions with this tag."
@@ -3224,7 +3224,7 @@ async def session_list(
     status: SessionStatus | None = None,
     agent: str | None = None,
     origin: SessionOrigin | None = None,
-    provider: str | None = None,
+    imported_from: str | None = None,
     tag: str | None = None,
     cohort: str | None = None,
     started_after: datetime | None = None,
@@ -3244,7 +3244,7 @@ async def session_list(
             status=status,
             agent=agent,
             origin=origin,
-            provider=provider,
+            imported_from=imported_from,
             tag=tag,
             cohort=cohort,
             started_after=started_after,
