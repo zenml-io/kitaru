@@ -16,7 +16,7 @@ src/kitaru/           # Python package (src layout) — see src/kitaru/AGENTS.md
   server/             # FastAPI server (API, application, domain, adapters layers)
 tests/                # pytest tests — see tests/AGENTS.md
 examples/             # Runnable SDK examples
-docs/                 # Two docs surfaces — see "Documentation surfaces" below
+docs/                 # Three docs surfaces — see "Documentation surfaces" below
   book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
   content/docs/       # FumaDocs SDK reference content (generated)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -77,7 +77,7 @@ durable tracked document.
 
 ## Branching strategy
 
-- **`develop`** is the default branch and the target for all PRs.
+- **`develop`** is the default branch and the normal target for PRs. During the v2 migration, v2 feature work may target its explicitly named integration branch.
 - **`main`** contains only released versions. Updated by force-pushing during releases. Never push directly to `main`.
 - **`release/X.Y.Z`** branches are archival snapshots created during the release process.
 - **Tags** follow `vX.Y.Z` (e.g. `v0.1.0`).
@@ -129,7 +129,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 ## Commits and PRs
 
 - **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
-- **Fix pre-existing failures too.** If `just check` or `just test` surfaces failures that predate your changes, fix them rather than ignoring them. Other people may be working in the same repo, so not every failure is yours — but don't default to "not my problem." Ask the user if unsure whether a failure should be addressed in this commit.
+- **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.

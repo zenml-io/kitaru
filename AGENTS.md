@@ -95,7 +95,7 @@ Only document shipped features.
 
 ## Git, Commits, and PRs
 
-- Default branch is `develop`; all PRs target `develop`.
+- Default branch is `develop`; PRs normally target `develop`. During the v2 migration, v2 feature work may target its explicitly named integration branch.
 - `main` tracks the latest released version only; do not push directly.
 - Use short, imperative commit subjects such as `Add ...` or `Update ...`.
 - Keep commit titles concise, around 50 characters when practical.
