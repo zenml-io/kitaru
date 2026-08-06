@@ -17,6 +17,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -140,6 +141,113 @@ async def test_in_flight_part_files_are_never_evicted_as_complete(
     await cache.put(digest, content)
 
     assert stray.exists()
+
+
+async def test_eviction_skips_an_entry_removed_by_another_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stat race with a concurrent evictor is skipped instead of raising."""
+    entry_size = 100
+    cache = BlobCache(tmp_path / "blobs", max_bytes=entry_size * 2)
+
+    content_a = b"a" * entry_size
+    content_b = b"b" * entry_size
+    digest_a, digest_b = _digest(content_a), _digest(content_b)
+    path_a = await cache.put(digest_a, content_a)
+    time.sleep(0.01)
+    path_b = await cache.put(digest_b, content_b)
+
+    real_stat = Path.stat
+
+    def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> os.stat_result:
+        if self == path_a:
+            raise FileNotFoundError(str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+
+    content_c = b"c" * entry_size
+    digest_c = _digest(content_c)
+    await cache.put(digest_c, content_c)
+
+    # path_a's stat race excludes it from the eviction budget entirely, so
+    # the remaining budget covers b and c without evicting either.
+    assert path_a.exists()
+    assert path_b.exists()
+    assert (tmp_path / "blobs" / digest_c).exists()
+
+
+async def test_eviction_suppresses_a_failed_unlink_and_keeps_evicting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed unlink, such as an open file on Windows, does not stop eviction."""
+    entry_size = 100
+    cache = BlobCache(tmp_path / "blobs", max_bytes=entry_size * 2)
+
+    content_a = b"a" * entry_size
+    content_b = b"b" * entry_size
+    digest_a, digest_b = _digest(content_a), _digest(content_b)
+    path_a = await cache.put(digest_a, content_a)
+    time.sleep(0.01)
+    path_b = await cache.put(digest_b, content_b)
+
+    real_unlink = Path.unlink
+
+    def flaky_unlink(self: Path, *args: Any, **kwargs: Any) -> None:
+        if self == path_a:
+            raise PermissionError(str(self))
+        real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+
+    content_c = b"c" * entry_size
+    digest_c = _digest(content_c)
+    await cache.put(digest_c, content_c)
+
+    assert path_a.exists()
+    assert not path_b.exists()
+    assert (tmp_path / "blobs" / digest_c).exists()
+
+
+async def test_put_treats_a_racing_replace_failure_as_a_hit_when_destination_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A racing os.replace failure with a pre-existing destination is a cache hit."""
+    cache = BlobCache(tmp_path / "blobs")
+    content = b"already cached"
+    digest = _digest(content)
+    existing_path = await cache.put(digest, content)
+
+    def flaky_replace(src: str, dst: str) -> None:
+        raise OSError("destination is open in another process")
+
+    monkeypatch.setattr(os, "replace", flaky_replace)
+
+    path = await cache.put(digest, content)
+
+    assert path == existing_path
+    assert path.read_bytes() == content
+    leftovers = [entry for entry in (tmp_path / "blobs").iterdir() if entry != path]
+    assert leftovers == []
+
+
+async def test_put_reraises_a_replace_failure_when_the_destination_is_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replace failure with no pre-existing destination propagates and cleans up."""
+    cache = BlobCache(tmp_path / "blobs")
+    content = b"never cached"
+    digest = _digest(content)
+
+    def flaky_replace(src: str, dst: str) -> None:
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(os, "replace", flaky_replace)
+
+    with pytest.raises(OSError, match="simulated replace failure"):
+        await cache.put(digest, content)
+
+    assert list((tmp_path / "blobs").iterdir()) == []
 
 
 def test_path_is_pure(tmp_path: Path) -> None:
