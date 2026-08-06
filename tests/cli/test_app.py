@@ -83,6 +83,32 @@ def test_bare_root_emits_structured_skill_onboarding_for_machines(
     assert captured.err == ""
 
 
+def test_bare_root_omits_install_action_when_skills_are_detected(
+    monkeypatch, capsys
+) -> None:
+    """Detected skills remain visible without an inapplicable install action."""
+    monkeypatch.setattr(
+        app_module,
+        "get_kitaru_skill_status",
+        lambda: {
+            "installed": True,
+            "skill_count": 1,
+            "skills": ["kitaru-investigation"],
+            "installations": [],
+            "locations_checked": [],
+        },
+    )
+
+    assert app_module.main([]) == 0
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["item"]["skills"]["installed"] is True
+    assert payload["links"] == {"skills": SKILLS_URL}
+    assert payload["next_actions"] == []
+    assert captured.err == ""
+
+
 def test_bare_root_text_on_a_non_terminal_renders_plain_footer(
     monkeypatch, capsys
 ) -> None:
@@ -109,10 +135,10 @@ class _TTYStringIO(io.StringIO):
         return True
 
 
-def test_bare_root_keeps_help_and_adds_human_skill_onboarding(
+def test_bare_root_reports_detected_skills_without_install_action(
     monkeypatch, capsys
 ) -> None:
-    """An interactive root invocation keeps help and adds a concise next step."""
+    """Interactive output does not suggest reinstalling detected skills."""
     stdout = _TTYStringIO()
     monkeypatch.setattr(app_module.sys, "stdout", stdout)
     monkeypatch.setattr(
@@ -133,7 +159,7 @@ def test_bare_root_keeps_help_and_adds_human_skill_onboarding(
     assert "Usage: kitaru COMMAND [OPTIONS]" in rendered
     assert "Kitaru agent skills detected" in rendered
     assert "kitaru-investigation" in rendered
-    assert INSTALL_COMMAND in rendered
+    assert INSTALL_COMMAND not in rendered
     assert SKILLS_URL in rendered
     assert capsys.readouterr().err == ""
 

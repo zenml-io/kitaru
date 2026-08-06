@@ -464,11 +464,12 @@ def _emit_root_result(
     try:
         if mode == "text":
             help_command(*bound.args, **bound.kwargs)
+        skill_status = get_kitaru_skill_status()
         return emit_result(
             CommandResult(
-                item={"skills": get_kitaru_skill_status()},
+                item={"skills": skill_status},
                 links={"skills": SKILLS_URL},
-                next_actions=[INSTALL_COMMAND],
+                next_actions=[] if skill_status["installed"] else [INSTALL_COMMAND],
             )
         )
     finally:
