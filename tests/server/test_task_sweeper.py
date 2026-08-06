@@ -61,6 +61,7 @@ class _StubDatabase:
     def __init__(self) -> None:
         """Initialize the session log."""
         self.sessions: list[_RecordingSession] = []
+        self.engine: Any = None
 
     async def get_async_session(self) -> AsyncGenerator[Any, None]:
         """Yield a fresh recording session.

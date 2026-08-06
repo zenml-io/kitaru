@@ -96,6 +96,7 @@ def _get_session(session_id: uuid.UUID | None = None) -> SessionResponse:
         id=session_id or uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
+        number=1,
         origin="recorded",
         status="completed",
         inputs={},

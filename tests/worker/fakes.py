@@ -294,6 +294,7 @@ def make_session_response(
         "id": uuid.uuid4(),
         "owner_id": OWNER_ID,
         "agent_id": uuid.uuid4(),
+        "number": 1,
         "origin": SessionOrigin.RECORDED,
         "status": status,
         "inputs": None,

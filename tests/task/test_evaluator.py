@@ -72,6 +72,7 @@ def _session_view() -> SessionView:
         id=uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
+        number=1,
         origin=SessionOrigin.RECORDED,
         status=SessionStatus.COMPLETED,
         inputs=None,

@@ -18,7 +18,7 @@ from importlib.metadata import version
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.api_models.v1.info import AuthScheme
@@ -173,6 +173,19 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     async for session in database.get_async_session():
         attach_request_session(request, session)
         yield session
+
+
+def get_engine(request: Request) -> AsyncEngine:
+    """Provide the application database engine.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Engine attached to the application state.
+    """
+    database: DatabaseService = request.app.state.database
+    return database.engine
 
 
 def get_app_settings(request: Request) -> APISettings:
@@ -383,19 +396,21 @@ def get_importer_service(
 
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> SessionService:
     """Return a session service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
         Session service bound to the SQL repositories.
     """
     return SessionService(
-        repository=SQLSessionRepository(session),
+        repository=SQLSessionRepository(session, engine),
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_repository=SQLReplayRepository(session),
@@ -445,6 +460,7 @@ def _build_task_transitions(
 
 def get_job_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> JobService:
@@ -452,6 +468,7 @@ def get_job_service(
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         settings: API settings for this process.
         analytics: Analytics tracker for the current request.
 
@@ -461,7 +478,7 @@ def get_job_service(
     return JobService(
         repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         agent_repository=SQLAgentRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
@@ -473,6 +490,7 @@ def get_job_service(
 
 def get_task_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> TaskService:
@@ -480,6 +498,7 @@ def get_task_service(
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         settings: API settings for this process.
         analytics: Analytics tracker for the current request.
 
@@ -500,7 +519,7 @@ def get_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,
         transitions=_build_task_transitions(session, analytics),
@@ -510,30 +529,34 @@ def get_task_service(
 
 def get_session_node_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
 ) -> SessionNodeService:
     """Return a session node service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
 
     Returns:
         Session node service bound to the SQL repositories.
     """
     return SessionNodeService(
         repository=SQLSessionNodeRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         task_repository=SQLTaskRepository(session),
     )
 
 
 def get_experiment_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentService:
     """Return an experiment service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -544,7 +567,7 @@ def get_experiment_service(
         plugin_repository=SQLPluginRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
         cohort_version_repository=SQLCohortVersionRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
@@ -555,12 +578,14 @@ def get_experiment_service(
 
 def get_replay_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ReplayService:
     """Return a replay service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -572,7 +597,7 @@ def get_replay_service(
         experiment_run_repository=SQLExperimentRunRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         session_node_repository=SQLSessionNodeRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
@@ -624,12 +649,14 @@ def get_cohort_service(
 
 def get_cohort_version_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> CohortVersionService:
     """Return a cohort version service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -638,35 +665,39 @@ def get_cohort_version_service(
     return CohortVersionService(
         repository=SQLCohortVersionRepository(session),
         cohort_repository=SQLCohortRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         analytics=analytics,
     )
 
 
 def get_evaluation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
 ) -> EvaluationService:
     """Return an evaluation service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
 
     Returns:
         Evaluation service bound to the SQL repositories.
     """
     return EvaluationService(
         repository=SQLEvaluationRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
     )
 
 
 def get_investigation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
 ) -> InvestigationService:
     """Return an investigation service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
 
     Returns:
         Investigation service bound to the SQL repositories.
@@ -674,17 +705,19 @@ def get_investigation_service(
     return InvestigationService(
         repository=SQLInvestigationRepository(session),
         agent_repository=SQLAgentRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
     )
 
 
 def get_annotation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
 ) -> AnnotationService:
     """Return an annotation service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
 
     Returns:
         Annotation service bound to the SQL repositories.
@@ -692,7 +725,7 @@ def get_annotation_service(
     return AnnotationService(
         repository=SQLAnnotationRepository(session),
         investigation_repository=SQLInvestigationRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         session_node_repository=SQLSessionNodeRepository(session),
     )
 

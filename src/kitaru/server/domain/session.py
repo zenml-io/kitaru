@@ -272,6 +272,7 @@ class Session(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     agent_id: uuid.UUID
+    number: int
     agent_version_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     origin: SessionOrigin

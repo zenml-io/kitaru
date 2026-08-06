@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
@@ -26,6 +27,7 @@ from kitaru.server.adapters.db.filtering import (
     build_tag_condition_binding,
     compile_filter_expression,
 )
+from kitaru.server.adapters.db.orm.agent import AgentORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY,
     CohortVersionSessionORM,
@@ -42,6 +44,7 @@ from kitaru.server.adapters.db.orm.task import (
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
@@ -124,6 +127,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
 
     orm_class = SessionORM
 
+    def __init__(self, session: AsyncSession, engine: AsyncEngine) -> None:
+        """Initialize the repository.
+
+        Args:
+            session: Database session for all operations.
+            engine: Engine used for the session number allocations that
+                commit outside the request transaction.
+        """
+        super().__init__(session)
+        self._engine = engine
+
     def _not_found(self, entity_id: uuid.UUID) -> NotFoundError:
         """Build the not-found error for an id.
 
@@ -145,6 +159,34 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Conflict error.
         """
         return DuplicateSessionExternalId(session.provider, session.external_id)
+
+    async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
+        """Bump the agent's session counter and return the new value.
+
+        The bump commits in its own transaction, so the agent row lock is
+        held for the bump alone and a rolled back create leaves a gap.
+
+        Args:
+            agent_id: Id of the agent to bump.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            New session number.
+        """
+        statement = (
+            update(AgentORM)
+            .where(AgentORM.id == agent_id)
+            .values(latest_session_number=AgentORM.latest_session_number + 1)
+            .returning(AgentORM.latest_session_number)
+        )
+        async with self._engine.begin() as connection:
+            result = await connection.execute(statement)
+            row = result.first()
+        if row is None:
+            raise AgentNotFound(agent_id)
+        return row[0]
 
     async def create(self, session: Session) -> Session:
         """Persist a new session.

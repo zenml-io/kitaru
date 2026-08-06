@@ -1975,6 +1975,7 @@ class FakeSessionRepository:
         )
         self._cohort_membership_counts: dict[uuid.UUID, int] = {}
         self._cohort_versions: FakeCohortVersionRepository | None = None
+        self._session_numbers: dict[uuid.UUID, int] = {}
 
     def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
         """Record that one more cohort version references this session.
@@ -2007,6 +2008,20 @@ class FakeSessionRepository:
                 and other.external_id == session.external_id
             ):
                 raise DuplicateSessionExternalId(session.provider, session.external_id)
+
+    async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
+        """Bump the agent's session counter and return the new value.
+
+        Mirrors the SQL repository's ``UPDATE ... RETURNING`` bump.
+
+        Args:
+            agent_id: Id of the agent to bump.
+
+        Returns:
+            New session number.
+        """
+        self._session_numbers[agent_id] = self._session_numbers.get(agent_id, 0) + 1
+        return self._session_numbers[agent_id]
 
     async def create(self, session: Session) -> Session:
         """Persist a new session.
@@ -2278,6 +2293,8 @@ async def create_session(
         "origin": SessionOrigin.RECORDED,
     }
     values.update(overrides)
+    if "number" not in values:
+        values["number"] = await repository.allocate_session_number(values["agent_id"])
     return await repository.create(Session(**values))
 
 

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Contract tests for investigation repositories."""
 
+import itertools
 import uuid
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from typing import Any
@@ -23,7 +24,7 @@ from conftest import (
     FakeInvestigationRepository,
     FakeSessionRepository,
     create_session,
-    pg_session,
+    pg_session_with_engine,
     postgres_available,
 )
 from kitaru.api_models.v1.filter import FilterOp
@@ -92,17 +93,21 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
-        sessions_repository = SQLSessionRepository(session)
+        sessions_repository = SQLSessionRepository(session, engine)
+        session_numbers = itertools.count(1)
 
         async def make_session_id() -> uuid.UUID:
             created = await sessions_repository.create(
                 Session(
-                    owner_id=owner.id, agent_id=agent.id, origin=SessionOrigin.RECORDED
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=next(session_numbers),
+                    origin=SessionOrigin.RECORDED,
                 )
             )
             return created.id

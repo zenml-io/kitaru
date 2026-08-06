@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from conftest import pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -79,7 +79,7 @@ JOB_HIGH_ID = uuid.UUID("ffffffff-ffff-ffff-ffff-fffffffffffb")
 
 
 def _build_task_service(
-    session: AsyncSession, dispatcher: EventDispatcher
+    session: AsyncSession, engine: AsyncEngine, dispatcher: EventDispatcher
 ) -> TaskService:
     """Build a task service on the SQL repositories of one session."""
     policy = TaskPolicy()
@@ -101,7 +101,7 @@ def _build_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
-        session_repository=SQLSessionRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,
         transitions=transitions,
@@ -208,7 +208,7 @@ async def test_hard_failure_report_survives_concurrent_job_cancel() -> None:
                     await asyncio.wait_for(canceler_blocked.wait(), timeout=20)
 
                 dispatcher.register(TaskTerminal, hold_at_terminal)
-                service = _build_task_service(session, dispatcher)
+                service = _build_task_service(session, engine, dispatcher)
                 actor = TaskAuthContext(
                     account=owner,
                     principal=TaskPrincipal(
@@ -356,7 +356,7 @@ async def test_job_cancel_survives_concurrent_task_claim(
 
         async def claim_tasks() -> str:
             async with session_factory() as session:
-                service = _build_task_service(session, EventDispatcher())
+                service = _build_task_service(session, engine, EventDispatcher())
                 actor = WorkerAuthContext(
                     account=owner, principal=WorkerPrincipal(worker_id=worker.id)
                 )

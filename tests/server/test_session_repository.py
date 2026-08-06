@@ -27,7 +27,7 @@ from conftest import (
     FakeEvaluationRepository,
     FakeSessionRepository,
     FakeTagRepository,
-    pg_session,
+    pg_session_with_engine,
     postgres_available,
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType
@@ -69,7 +69,7 @@ from kitaru.server.application.interfaces.session_repository import (
 from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent import Agent, AgentNotFound
 from kitaru.server.domain.base import QueryTimeoutError, ValidationError
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
@@ -115,13 +115,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
         yield (
-            SQLSessionRepository(session),
+            SQLSessionRepository(session, engine),
             owner.id,
             agent.id,
             SQLTagRepository(session),
@@ -145,13 +145,13 @@ async def cohort_setup(
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
         yield (
-            SQLSessionRepository(session),
+            SQLSessionRepository(session, engine),
             SQLCohortRepository(session),
             SQLCohortVersionRepository(session),
             owner.id,
@@ -163,7 +163,12 @@ async def test_create_sets_timestamps_and_defaults(setup: Setup) -> None:
     """Store a new session with both timestamps and default rollups."""
     repository, owner_id, agent_id, _, _ = setup
     session = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     assert session.owner_id == owner_id
     assert session.agent_id == agent_id
@@ -183,6 +188,7 @@ async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
             external_id="run-1",
@@ -193,6 +199,7 @@ async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
             Session(
                 owner_id=owner_id,
                 agent_id=agent_id,
+                number=2,
                 origin=SessionOrigin.IMPORTED,
                 provider="langsmith",
                 external_id="run-1",
@@ -206,10 +213,20 @@ async def test_create_allows_null_provider_and_external_id_repeatedly(
     """Allow many sessions with no provider and external id."""
     repository, owner_id, agent_id, _, _ = setup
     first = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     second = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     assert first.id != second.id
 
@@ -218,7 +235,12 @@ async def test_get(setup: Setup) -> None:
     """Load a stored session by id."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     loaded = await repository.get(created.id)
     assert loaded == created
@@ -236,7 +258,12 @@ async def test_get_exclusive(setup: Setup) -> None:
     """Load a session with an exclusive lock without error."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     loaded = await repository.get(created.id, exclusive=True)
     assert loaded == created
@@ -246,12 +273,18 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     """Filter sessions by origin and status."""
     repository, owner_id, agent_id, _, _ = setup
     recorded = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.create(
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.IMPORTED,
             status=SessionStatus.COMPLETED,
         )
@@ -284,6 +317,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
             external_id="run-1",
@@ -293,6 +327,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
             external_id="run-2",
@@ -322,6 +357,7 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             started_at=datetime(2026, 1, 1, tzinfo=UTC),
             ended_at=datetime(2026, 1, 2, tzinfo=UTC),
@@ -331,6 +367,7 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.RECORDED,
             started_at=datetime(2026, 6, 1, tzinfo=UTC),
             ended_at=datetime(2026, 6, 2, tzinfo=UTC),
@@ -386,10 +423,20 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
     """Filter sessions by cost ordered comparisons."""
     repository, owner_id, agent_id, _, _ = setup
     cheap = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     pricey = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.apply_rollups(cheap.id, SessionRollups(cost=Decimal("1.00")))
     await repository.apply_rollups(pricey.id, SessionRollups(cost=Decimal("9.00")))
@@ -417,10 +464,20 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
     """Filter sessions by whether they have a stored evaluation."""
     repository, owner_id, agent_id, _, evaluations = setup
     scored = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     unscored = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await evaluations.merge_session_evaluations(
         scored.id,
@@ -459,9 +516,14 @@ async def test_query_walks_pages(setup: Setup) -> None:
     repository, owner_id, agent_id, _, _ = setup
     created = [
         await repository.create(
-            Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+            Session(
+                owner_id=owner_id,
+                agent_id=agent_id,
+                number=i + 1,
+                origin=SessionOrigin.RECORDED,
+            )
         )
-        for _ in range(5)
+        for i in range(5)
     ]
     expected_order = list(reversed(created))
 
@@ -484,7 +546,12 @@ async def test_update(setup: Setup) -> None:
     """Persist field changes and renew the updated timestamp."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     created.update_name("renamed")
     created.finish(
@@ -506,7 +573,10 @@ async def test_update_not_found(setup: Setup) -> None:
     """Raise for an unknown session id."""
     repository, owner_id, agent_id, _, _ = setup
     session = Session(
-        owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED
+        owner_id=owner_id,
+        agent_id=agent_id,
+        number=1,
+        origin=SessionOrigin.RECORDED,
     )
     with pytest.raises(SessionNotFound, match=f"Session {session.id} was not found"):
         await repository.update(session)
@@ -520,6 +590,7 @@ async def test_update_duplicate_external_id(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
             external_id="run-1",
@@ -529,6 +600,7 @@ async def test_update_duplicate_external_id(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
             external_id="run-2",
@@ -543,7 +615,12 @@ async def test_delete(setup: Setup) -> None:
     """Delete a stored session."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.delete(created.id)
     with pytest.raises(SessionNotFound):
@@ -562,7 +639,12 @@ async def test_delete_in_use_by_cohort_version(cohort_setup: CohortSetup) -> Non
     """Reject deleting a session that belongs to a cohort version."""
     sessions, cohorts, cohort_versions, owner_id, agent_id = cohort_setup
     member = await sessions.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     cohort = await cohorts.create(
         Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
@@ -580,7 +662,12 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
     """Add deltas atomically, coalescing null cost and tokens to zero."""
     repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.apply_rollups(
         created.id,
@@ -616,10 +703,20 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
     """Filter sessions linked to a tag through tag_link."""
     repository, owner_id, agent_id, tags, _ = setup
     tagged = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
@@ -643,13 +740,28 @@ async def test_query_filters_by_tag_in_unions_names(setup: Setup) -> None:
     """Union sessions matching either of two tag names with an in condition."""
     repository, owner_id, agent_id, tags, _ = setup
     smoke = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     regression = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=3,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     smoke_tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
@@ -683,10 +795,20 @@ async def test_query_filters_by_not_tag_returns_untagged(setup: Setup) -> None:
     """Return untagged sessions when negating a tag eq condition."""
     repository, owner_id, agent_id, tags, _ = setup
     tagged = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     untagged = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     tag = await tags.create(Tag(owner_id=owner_id, name="smoke-test"))
@@ -715,12 +837,18 @@ async def test_query_filters_by_is_null_on_name(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             name="run-1",
         )
     )
     unnamed = await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     sessions, _ = await repository.query(
@@ -733,10 +861,20 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
     """Filter sessions that are members of a cohort version."""
     sessions, cohorts, cohort_versions, owner_id, agent_id = cohort_setup
     member = await sessions.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await sessions.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     cohort = await cohorts.create(
         Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
@@ -763,17 +901,24 @@ async def test_query_filters_by_and_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.COMPLETED,
         )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     await repository.create(
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=3,
             origin=SessionOrigin.IMPORTED,
             status=SessionStatus.COMPLETED,
         )
@@ -799,6 +944,7 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.COMPLETED,
         )
@@ -807,12 +953,18 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.IMPORTED,
             provider="langsmith",
         )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=3,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     sessions, _ = await repository.query(
@@ -837,12 +989,18 @@ async def test_query_filters_by_not_is_null_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             name="run-1",
         )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     sessions, _ = await repository.query(
@@ -862,6 +1020,7 @@ async def test_query_filters_by_ne_excludes_null(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             name="run-1",
         )
@@ -870,12 +1029,18 @@ async def test_query_filters_by_ne_excludes_null(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.RECORDED,
             name="run-2",
         )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=3,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     sessions, _ = await repository.query(
@@ -893,6 +1058,7 @@ async def test_query_filters_by_in_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.COMPLETED,
         )
@@ -901,12 +1067,18 @@ async def test_query_filters_by_in_expression(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.FAILED,
         )
     )
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=3,
+            origin=SessionOrigin.RECORDED,
+        )
     )
 
     sessions, _ = await repository.query(
@@ -927,6 +1099,7 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             name="web-agent-run",
         )
@@ -935,6 +1108,7 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.RECORDED,
             name="batch-0%_day",
         )
@@ -946,6 +1120,7 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=3,
             origin=SessionOrigin.RECORDED,
             name="foo0Xday",
         )
@@ -954,6 +1129,7 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=4,
             origin=SessionOrigin.RECORDED,
             name="other",
         )
@@ -991,14 +1167,20 @@ async def test_query_where_filter_persists_across_cursor(setup: Setup) -> None:
             Session(
                 owner_id=owner_id,
                 agent_id=agent_id,
+                number=i + 1,
                 origin=SessionOrigin.RECORDED,
                 status=SessionStatus.COMPLETED,
             )
         )
-        for _ in range(3)
+        for i in range(3)
     ]
     await repository.create(
-        Session(owner_id=owner_id, agent_id=agent_id, origin=SessionOrigin.RECORDED)
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=4,
+            origin=SessionOrigin.RECORDED,
+        )
     )
     expected_order = list(reversed(matching))
 
@@ -1029,6 +1211,7 @@ async def test_query_cursor_expression_mismatch(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=1,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.COMPLETED,
         )
@@ -1037,6 +1220,7 @@ async def test_query_cursor_expression_mismatch(setup: Setup) -> None:
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
+            number=2,
             origin=SessionOrigin.RECORDED,
             status=SessionStatus.COMPLETED,
         )
@@ -1058,9 +1242,9 @@ async def test_query_applies_list_query_timeout() -> None:
     """Set the statement timeout for the transaction when the session carries one."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 3
-        repository = SQLSessionRepository(session)
+        repository = SQLSessionRepository(session, engine)
         await repository.query(SessionFilter())
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "3s"
@@ -1070,8 +1254,8 @@ async def test_query_without_list_query_timeout() -> None:
     """Leave the statement timeout untouched when the session carries none."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
-        repository = SQLSessionRepository(session)
+    async with pg_session_with_engine() as (session, engine):
+        repository = SQLSessionRepository(session, engine)
         await repository.query(SessionFilter())
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "0"
@@ -1081,17 +1265,18 @@ async def test_query_translates_statement_timeout() -> None:
     """Raise the timeout domain error when the statement is canceled."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 1
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
-        repository = SQLSessionRepository(session)
+        repository = SQLSessionRepository(session, engine)
         await repository.create(
             Session(
                 owner_id=owner.id,
                 agent_id=agent.id,
+                number=1,
                 origin=SessionOrigin.RECORDED,
                 status=SessionStatus.COMPLETED,
             )
@@ -1099,3 +1284,38 @@ async def test_query_translates_statement_timeout() -> None:
         statement = select(SessionORM).where(func.pg_sleep(1.5).is_(None))
         with pytest.raises(QueryTimeoutError):
             await paginate(session, statement, SessionFilter(), id_column=SessionORM.id)
+
+
+async def test_allocate_session_number_fake() -> None:
+    """Bump session numbers per agent, restarting at 1 for each new agent."""
+    repository = FakeSessionRepository()
+    agent_id = uuid.uuid4()
+    assert await repository.allocate_session_number(agent_id) == 1
+    assert await repository.allocate_session_number(agent_id) == 2
+    assert await repository.allocate_session_number(agent_id) == 3
+
+    other_agent_id = uuid.uuid4()
+    assert await repository.allocate_session_number(other_agent_id) == 1
+
+
+async def test_allocate_session_number_pg() -> None:
+    """Bump session numbers per agent, and raise for an unknown agent."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        other_agent = await agents.create(Agent(owner_id=owner.id, name="reviewer"))
+        await session.commit()
+
+        repository = SQLSessionRepository(session, engine)
+        assert await repository.allocate_session_number(agent.id) == 1
+        assert await repository.allocate_session_number(agent.id) == 2
+        assert await repository.allocate_session_number(agent.id) == 3
+        assert await repository.allocate_session_number(other_agent.id) == 1
+
+        missing_agent_id = uuid.uuid4()
+        with pytest.raises(AgentNotFound):
+            await repository.allocate_session_number(missing_agent_id)
