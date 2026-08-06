@@ -140,7 +140,9 @@ class TaskService:
 
         A reported task the caller no longer owns, that no longer exists, that
         already reached a terminal status, or whose cancellation was requested
-        on the task or on its job comes back for the worker to stop.
+        on the task or on its job comes back for the worker to stop. A task
+        the caller owns and is in flight but whose row a settlement
+        transaction holds locked keeps running, unstamped for this tick.
 
         Args:
             worker_id: Id of the reporting worker.
@@ -162,9 +164,13 @@ class TaskService:
             raise WorkerAccessDenied(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
-        stamped = await self._repository.stamp_heartbeats(task_ids, worker_id, now)
+        stamped, skipped = await self._repository.stamp_heartbeats(
+            task_ids, worker_id, now
+        )
         cancel_task_ids: list[uuid.UUID] = []
         for task_id in task_ids:
+            if task_id in skipped:
+                continue
             if task_id not in stamped or stamped[task_id] is not None:
                 cancel_task_ids.append(task_id)
         return cancel_task_ids
