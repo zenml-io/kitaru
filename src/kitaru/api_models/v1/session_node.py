@@ -73,15 +73,17 @@ class SessionNodeCreateRequest(RequestModel):
     )
     input_text_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting display text from node inputs.",
+        description="RFC 6901 JSON Pointer selecting display text from node inputs.",
     )
     output_text_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting display text from node outputs.",
+        description="RFC 6901 JSON Pointer selecting display text from node outputs.",
     )
     system_prompt_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting the system prompt from node inputs.",
+        description=(
+            "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
+        ),
     )
     reasoning: str | None = Field(
         default=None, description="Visible reasoning produced by the model call."
@@ -172,15 +174,17 @@ class SessionNodeResponse(ResponseModel):
     ended_at: datetime | None = Field(default=None, description="Time the node ended.")
     input_text_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting display text from node inputs.",
+        description="RFC 6901 JSON Pointer selecting display text from node inputs.",
     )
     output_text_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting display text from node outputs.",
+        description="RFC 6901 JSON Pointer selecting display text from node outputs.",
     )
     system_prompt_selector: str | None = Field(
         default=None,
-        description="RFC 9535 JSONPath selecting the system prompt from node inputs.",
+        description=(
+            "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
+        ),
     )
     reasoning: str | None = Field(
         default=None,

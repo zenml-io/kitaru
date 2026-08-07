@@ -553,7 +553,6 @@ _VIEWS: dict[str, HumanView] = {
             HumanSection(
                 "Payload",
                 (
-                    HumanField("system_prompt", "System prompt"),
                     HumanField("inputs", "Inputs"),
                     HumanField("outputs", "Outputs"),
                 ),

@@ -45,7 +45,6 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         origin=body.origin,
         status=body.status,
         name=body.name,
-        system_prompt=body.system_prompt,
         inputs=body.inputs,
         outputs=body.outputs,
         error=body.error,
@@ -80,7 +79,6 @@ def session_to_response(session: Session) -> SessionResponse:
         origin=session.origin,
         status=session.status,
         name=session.name,
-        system_prompt=session.system_prompt,
         inputs=session.inputs,
         outputs=session.outputs,
         error=session.error,
@@ -136,7 +134,6 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
         "error",
         "ended_at",
         "name",
-        "system_prompt",
     ):
         if field in fields:
             values[field] = getattr(body, field)

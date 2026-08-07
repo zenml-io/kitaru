@@ -207,8 +207,8 @@ def test_imports_span_graph_and_genai_fields() -> None:
     assert child.requested_model == "gpt-5-mini"
     assert child.model == "gpt-5-mini-2026-06-01"
     assert child.provider == "openai"
-    assert child.input_text_selector == '$[0]["content"]'
-    assert child.output_text_selector == '$[0]["content"]'
+    assert child.input_text_selector == "/0/content"
+    assert child.output_text_selector == "/0/content"
     assert child.tokens and child.tokens.input_tokens == 120
     assert child.model_params == {"temperature": 0.2}
 
@@ -245,10 +245,9 @@ def test_imports_flattened_otlp_jsonl_and_surfaces_prompts() -> None:
     node = session.nodes[0]
 
     assert session.framework == "pydantic-ai"
-    assert session.system_prompt == "Be brief."
-    assert node.input_text_selector == '$[1]["parts"][0]["content"]'
-    assert node.output_text_selector == '$["answer"]'
-    assert node.system_prompt_selector == '$[0]["parts"][0]["content"]'
+    assert node.input_text_selector == "/1/parts/0/content"
+    assert node.output_text_selector == "/answer"
+    assert node.system_prompt_selector == "/0/parts/0/content"
     assert node.reasoning == "The document contains an invoice number."
     assert node.inputs == messages
     assert node.outputs == {
@@ -350,7 +349,6 @@ def test_imports_logfire_query_rows_as_one_session() -> None:
     nodes = flatten(session.nodes)
 
     assert session.external_id.endswith(":support-session")
-    assert session.system_prompt == "Use order data only."
     assert session.outputs == {"status": "shipped"}
     assert sum(node.node_type is NodeType.LLM_CALL for node in nodes) == 1
     tool_node = next(node for node in nodes if node.node_type is NodeType.TOOL_CALL)
@@ -382,8 +380,8 @@ def test_imports_arize_flat_span_jsonl() -> None:
     node = session.nodes[0]
 
     assert node.trace_id == TRACE_1
-    assert node.input_text_selector == "$"
-    assert node.output_text_selector == "$"
+    assert node.input_text_selector == ""
+    assert node.output_text_selector == ""
 
 
 def test_imports_tool_call_content() -> None:

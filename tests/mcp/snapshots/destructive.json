@@ -3109,7 +3109,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 9535 JSONPath selecting display text from node inputs.",
+              "description": "RFC 6901 JSON Pointer selecting display text from node inputs.",
               "title": "Input Text Selector"
             },
             "inputs": {
@@ -3169,7 +3169,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 9535 JSONPath selecting display text from node outputs.",
+              "description": "RFC 6901 JSON Pointer selecting display text from node outputs.",
               "title": "Output Text Selector"
             },
             "outputs": {
@@ -3306,7 +3306,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 9535 JSONPath selecting the system prompt from node inputs.",
+              "description": "RFC 6901 JSON Pointer selecting the system prompt from node inputs.",
               "title": "System Prompt Selector"
             },
             "tokens": {
@@ -3567,19 +3567,6 @@
             },
             "status": {
               "$ref": "#/$defs/SessionStatus"
-            },
-            "system_prompt": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "System prompt from the first recorded model call.",
-              "title": "System Prompt"
             },
             "task_id": {
               "anyOf": [

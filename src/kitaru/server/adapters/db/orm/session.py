@@ -114,7 +114,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
-    system_prompt: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     error: Mapped[str | None] = mapped_column(Text)
@@ -157,7 +156,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=session.origin.value,
             status=session.status.value,
             name=session.name,
-            system_prompt=session.system_prompt,
             inputs=session.inputs,
             outputs=session.outputs,
             error=session.error,
@@ -217,7 +215,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
-            system_prompt=self.system_prompt,
             inputs=self.inputs,
             outputs=self.outputs,
             error=self.error,

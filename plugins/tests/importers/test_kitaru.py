@@ -28,7 +28,6 @@ def _session() -> dict[str, object]:
     return {
         "status": "completed",
         "name": "Weather request",
-        "system_prompt": "Answer briefly.",
         "inputs": {"question": "How is the weather?"},
         "outputs": {"answer": "Sunny."},
         "error": None,
@@ -47,9 +46,9 @@ def _session() -> dict[str, object]:
                 "node_type": "llm_call",
                 "name": "model request",
                 "status": "completed",
-                "input_text_selector": '$[1]["content"]',
-                "output_text_selector": '$[0]["content"]',
-                "system_prompt_selector": '$[0]["content"]',
+                "input_text_selector": "/1/content",
+                "output_text_selector": "/0/content",
+                "system_prompt_selector": "/0/content",
                 "reasoning": "The source reports clear skies.",
                 "inputs": [
                     {"role": "system", "content": "Answer briefly."},
@@ -74,10 +73,9 @@ def test_parses_one_complete_session_per_line() -> None:
     assert isinstance(session, ImportedSession)
     assert session.status is SessionStatus.COMPLETED
     assert session.framework == "pydantic-ai"
-    assert session.system_prompt == "Answer briefly."
-    assert session.nodes[0].input_text_selector == '$[1]["content"]'
-    assert session.nodes[0].output_text_selector == '$[0]["content"]'
-    assert session.nodes[0].system_prompt_selector == '$[0]["content"]'
+    assert session.nodes[0].input_text_selector == "/1/content"
+    assert session.nodes[0].output_text_selector == "/0/content"
+    assert session.nodes[0].system_prompt_selector == "/0/content"
     assert session.nodes[0].reasoning == "The source reports clear skies."
 
 

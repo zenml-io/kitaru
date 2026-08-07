@@ -199,7 +199,6 @@ def test_session_request_maps_fields() -> None:
     parsed = ImportedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
-        system_prompt="Follow policy.",
         inputs={"a": 1},
         outputs={"b": 2},
         error="boom",
@@ -217,7 +216,6 @@ def test_session_request_maps_fields() -> None:
     assert request.origin == SessionOrigin.IMPORTED
     assert request.status == SessionStatus.FAILED
     assert request.name == "imported-1"
-    assert request.system_prompt == "Follow policy."
     assert request.inputs == {"a": 1}
     assert request.outputs == {"b": 2}
     assert request.error == "boom"

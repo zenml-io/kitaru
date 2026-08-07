@@ -491,7 +491,6 @@ def upgrade() -> None:
         sa.Column("origin", sa.String(length=32), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("name", sa.Text(), nullable=True),
-        sa.Column("system_prompt", sa.Text(), nullable=True),
         sa.Column(
             "inputs",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),

@@ -75,9 +75,6 @@ class SessionCreateRequest(RequestModel):
         default=None, description="Initial session status."
     )
     name: str | None = Field(default=None, description="Session name.")
-    system_prompt: str | None = Field(
-        default=None, description="System prompt from the first recorded model call."
-    )
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
@@ -112,7 +109,6 @@ class SessionUpdateRequest(RequestModel):
     error: str | None = Field(default=None, description="New error.")
     ended_at: AwareDatetime | None = Field(default=None, description="New end time.")
     name: str | None = Field(default=None, description="New session name.")
-    system_prompt: str | None = Field(default=None, description="New system prompt.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -145,9 +141,6 @@ class SessionResponse(OwnedResponseModel):
     origin: SessionOrigin = Field(description="How the session came to exist.")
     status: SessionStatus = Field(description="Session status.")
     name: str | None = Field(default=None, description="Session name.")
-    system_prompt: str | None = Field(
-        default=None, description="System prompt from the first recorded model call."
-    )
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")

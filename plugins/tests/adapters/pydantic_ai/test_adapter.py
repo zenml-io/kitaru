@@ -333,10 +333,10 @@ def test_run_sync_preserves_result_and_records_lifecycle() -> None:
     assert nodes[0].index == nodes[-1].index
     llm = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
     assert llm.cost is None
-    assert llm.input_text_selector == '$[0]["parts"][0]["content"]'
-    assert llm.output_text_selector == '$["parts"][0]["content"]'
-    assert nodes[-1].input_text_selector == "$"
-    assert nodes[-1].output_text_selector == "$"
+    assert llm.input_text_selector == "/0/parts/0/content"
+    assert llm.output_text_selector == "/parts/0/content"
+    assert nodes[-1].input_text_selector == ""
+    assert nodes[-1].output_text_selector == ""
 
     original.run_sync("not recorded")
     assert len(_FakeClient.instances) == 1
@@ -431,11 +431,11 @@ async def test_replay_resolves_input_and_replaces_request_configuration(
     assert user_prompts == ["environment prompt"]
     client = _FakeClient.instances[0]
     assert client.sessions.created[0].inputs == "environment prompt"
-    assert client.sessions.updated[0][1].system_prompt == "replacement system"
+    assert "system_prompt" not in client.sessions.updated[0][1].model_fields_set
     llm = next(node for node in _nodes(client) if node.node_type is NodeType.LLM_CALL)
-    assert llm.input_text_selector == '$[0]["parts"][1]["content"]'
-    assert llm.output_text_selector == '$["parts"][0]["content"]'
-    assert llm.system_prompt_selector == '$[0]["parts"][0]["content"]'
+    assert llm.input_text_selector == "/0/parts/1/content"
+    assert llm.output_text_selector == "/parts/0/content"
+    assert llm.system_prompt_selector == "/0/parts/0/content"
 
 
 async def test_records_visible_model_reasoning() -> None:
@@ -454,7 +454,7 @@ async def test_records_visible_model_reasoning() -> None:
     client = _FakeClient.instances[0]
     llm = next(node for node in _nodes(client) if node.node_type is NodeType.LLM_CALL)
     assert llm.reasoning == "check the evidence"
-    assert llm.output_text_selector == '$["parts"][1]["content"]'
+    assert llm.output_text_selector == "/parts/1/content"
 
 
 async def test_replay_json_input_is_encoded_and_recorded_original(
@@ -934,8 +934,8 @@ async def test_provider_native_tools_are_observed_but_not_mocked(
     assert native.external_id == "native-1"
     assert native.inputs == {"query": "Kitaru"}
     assert native.outputs == {"answer": "recorded"}
-    assert native.input_text_selector == '$["query"]'
-    assert native.output_text_selector == '$["answer"]'
+    assert native.input_text_selector == "/query"
+    assert native.output_text_selector == "/answer"
     assert native.attributes == {"provider_native": True}
     assert "mocked" not in native.attributes
     assert client.replays.lookups == []

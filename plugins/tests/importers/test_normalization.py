@@ -15,6 +15,12 @@ IMPORTERS = (braintrust, langfuse, langsmith, otlp)
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
+def test_json_pointer_tokens_are_escaped(importer: ModuleType) -> None:
+    """Escape slash and tilde characters in generated pointer tokens."""
+    assert importer._child_selector("", "a/b~c") == "/a~1b~0c"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(
@@ -42,14 +48,13 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
         attributes={},
     )
 
-    system_prompt = importer._populate_node_fields([node, later_node])
+    importer._populate_node_fields([node, later_node])
 
-    assert system_prompt == "Follow policy."
-    assert node.input_text_selector == '$["messages"][1]["content"]'
-    assert node.output_text_selector == '$["messages"][0]["content"]'
-    assert node.system_prompt_selector == '$["messages"][0]["content"]'
+    assert node.input_text_selector == "/messages/1/content"
+    assert node.output_text_selector == "/messages/0/content"
+    assert node.system_prompt_selector == "/messages/0/content"
     assert node.reasoning == "The tracking event says shipped."
-    assert later_node.system_prompt_selector == '$["messages"][0]["content"]'
+    assert later_node.system_prompt_selector == "/messages/0/content"
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)

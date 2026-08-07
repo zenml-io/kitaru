@@ -224,13 +224,12 @@ def _messages_json(messages: list[ModelMessage]) -> list[dict[str, Any]]:
 
 
 def _child_selector(selector: str, key: str | int) -> str:
-    """Append a child segment to an RFC 9535 JSONPath."""
-    if isinstance(key, int):
-        return f"{selector}[{key}]"
-    return f"{selector}[{json.dumps(key, ensure_ascii=False)}]"
+    """Append a child token to an RFC 6901 JSON Pointer."""
+    token = str(key).replace("~", "~0").replace("/", "~1")
+    return f"{selector}/{token}"
 
 
-def _part_selector(value: Any, part_kind: str, selector: str = "$") -> str | None:
+def _part_selector(value: Any, part_kind: str, selector: str = "") -> str | None:
     """Select the last textual PydanticAI message part of one kind."""
     matches: list[str] = []
 
@@ -255,12 +254,12 @@ def _part_selector(value: Any, part_kind: str, selector: str = "$") -> str | Non
 def _payload_selector(value: Any, keys: tuple[str, ...]) -> str | None:
     """Select text from a PydanticAI payload or common tool field."""
     if isinstance(value, str):
-        return "$" if value.strip() else None
+        return "" if value.strip() else None
     if not isinstance(value, dict):
         return None
     for key in keys:
         if isinstance(value.get(key), str) and value[key].strip():
-            return _child_selector("$", key)
+            return _child_selector("", key)
     return None
 
 
@@ -281,20 +280,6 @@ def _output_text_selector(value: Any) -> str | None:
 def _system_prompt_selector(value: Any) -> str | None:
     """Select the latest system prompt from serialized model inputs."""
     return _part_selector(value, "system-prompt")
-
-
-def _get_request_system_prompt(messages: list[ModelMessage]) -> str | None:
-    """Extract the system prompt from a model request."""
-    system_parts: list[str] = []
-    for message in messages:
-        if not isinstance(message, ModelRequest):
-            continue
-        if message.instructions:
-            system_parts.append(message.instructions)
-        for part in message.parts:
-            if isinstance(part, SystemPromptPart) and part.content:
-                system_parts.append(part.content)
-    return "\n\n".join(system_parts) or None
 
 
 def _get_response_reasoning(response: ModelResponse) -> str | None:
@@ -417,7 +402,6 @@ class _RunState:
     started_at: datetime | None = None
     next_index: int = 1
     latest_llm_index: int | None = None
-    system_prompt: str | None = None
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     finished: bool = False
@@ -625,8 +609,6 @@ class _KitaruCapability(AbstractCapability[Any]):
         input_payload = _messages_json(effective.messages)
         input_text_selector = _input_text_selector(input_payload)
         system_prompt_selector = _system_prompt_selector(input_payload)
-        system_prompt = _get_request_system_prompt(effective.messages)
-        state.system_prompt = state.system_prompt or system_prompt
         try:
             response = await handler(effective)
         except BaseException as error:
@@ -971,7 +953,6 @@ class _KitaruCapability(AbstractCapability[Any]):
                 outputs=_jsonable(outputs),
                 error=error,
                 ended_at=ended_at,
-                system_prompt=state.system_prompt,
             ),
         )
 

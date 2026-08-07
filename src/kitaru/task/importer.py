@@ -111,7 +111,6 @@ class ImportedSession(BaseModel):
 
     status: SessionStatus
     name: str | None = None
-    system_prompt: str | None = None
     inputs: Any
     outputs: Any
     error: str | None = None
@@ -185,7 +184,6 @@ def session_request(
         origin=SessionOrigin.IMPORTED,
         status=parsed.status,
         name=parsed.name,
-        system_prompt=parsed.system_prompt,
         inputs=parsed.inputs,
         outputs=parsed.outputs,
         error=parsed.error,

@@ -144,7 +144,6 @@ class ImportedNode(BaseModel): ...      # node fields, optional wire indexes, an
 class ImportedSession(BaseModel):
     status: SessionStatus
     name: str | None
-    system_prompt: str | None
     inputs: Any
     outputs: Any
     error: str | None

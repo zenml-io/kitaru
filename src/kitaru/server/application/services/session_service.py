@@ -142,7 +142,6 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
-            system_prompt=command.system_prompt,
             inputs=command.inputs,
             outputs=command.outputs,
             error=command.error,
@@ -345,8 +344,6 @@ class SessionService:
                 )
         if "name" in fields:
             session.update_name(command.name)
-        if "system_prompt" in fields:
-            session.update_system_prompt(command.system_prompt)
         if "metadata" in fields:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}

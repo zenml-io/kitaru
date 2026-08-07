@@ -78,10 +78,9 @@ class _TextMatch:
 
 
 def _child_selector(selector: str, key: str | int) -> str:
-    """Append a child segment to an RFC 9535 JSONPath."""
-    if isinstance(key, int):
-        return f"{selector}[{key}]"
-    return f"{selector}[{json.dumps(key, ensure_ascii=False)}]"
+    """Append a child token to an RFC 6901 JSON Pointer."""
+    token = str(key).replace("~", "~0").replace("/", "~1")
+    return f"{selector}/{token}"
 
 
 def _role(value: dict[str, Any]) -> str | None:
@@ -118,9 +117,7 @@ def _role(value: dict[str, Any]) -> str | None:
     return None
 
 
-def _content_match(
-    value: Any, selector: str = "$", depth: int = 0
-) -> _TextMatch | None:
+def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch | None:
     """Return one scalar text value and its selector."""
     if depth > 8:
         return None
@@ -152,7 +149,7 @@ def _content_match(
 
 
 def _message_matches(
-    value: Any, target_role: str, selector: str = "$", depth: int = 0
+    value: Any, target_role: str, selector: str = "", depth: int = 0
 ) -> list[_TextMatch]:
     """Return text matches for one nested message role."""
     if depth > 12:
@@ -191,11 +188,11 @@ def _input_text_selector(value: Any) -> str | None:
     if messages:
         return messages[-1].selector
     if isinstance(value, str):
-        return "$" if value.strip() else None
+        return "" if value.strip() else None
     if isinstance(value, dict):
         for key in ("prompt", "query", "question", "user_input", "message"):
             if key in value and (
-                match := _content_match(value[key], _child_selector("$", key))
+                match := _content_match(value[key], _child_selector("", key))
             ):
                 return match.selector
     return None
@@ -207,11 +204,11 @@ def _output_text_selector(value: Any) -> str | None:
     if messages:
         return messages[-1].selector
     if isinstance(value, str):
-        return "$" if value.strip() else None
+        return "" if value.strip() else None
     if isinstance(value, dict):
         for key in ("answer", "result", "response", "output", "text", "content"):
             if key in value and (
-                match := _content_match(value[key], _child_selector("$", key))
+                match := _content_match(value[key], _child_selector("", key))
             ):
                 return match.selector
     return None
@@ -224,7 +221,7 @@ def _system_prompt_match(value: Any) -> _TextMatch | None:
         return messages[-1]
     found: list[_TextMatch] = []
 
-    def _collect(item: Any, selector: str = "$", depth: int = 0) -> None:
+    def _collect(item: Any, selector: str = "", depth: int = 0) -> None:
         if depth > 12:
             return
         if isinstance(item, list):
@@ -305,9 +302,8 @@ def _detect_framework(value: Any) -> str | None:
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def _populate_node_fields(nodes: list[ImportedNode]) -> str | None:
-    """Populate normalized node fields and return the first call's system prompt."""
-    session_system_prompt = None
+def _populate_node_fields(nodes: list[ImportedNode]) -> None:
+    """Populate normalized node fields."""
     for node in nodes:
         node.input_text_selector = _input_text_selector(node.inputs)
         node.output_text_selector = _output_text_selector(node.outputs)
@@ -317,9 +313,6 @@ def _populate_node_fields(nodes: list[ImportedNode]) -> str | None:
                 system_prompt.selector if system_prompt is not None else None
             )
             node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
-            if system_prompt is not None and session_system_prompt is None:
-                session_system_prompt = system_prompt.text
-    return session_system_prompt
 
 
 class InvalidImport(ValueError):
@@ -914,7 +907,7 @@ class LangSmithRunImporter:
             )
         )
         nodes = [node for node, _ in nodes_with_parents]
-        system_prompt = _populate_node_fields(nodes)
+        _populate_node_fields(nodes)
         llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
         tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
         if (
@@ -980,7 +973,6 @@ class LangSmithRunImporter:
             external_id=f"{source_instance}:{source_id}",
             name=str(latest_root.get("name") or source_id),
             status=session_status,
-            system_prompt=system_prompt,
             inputs=inputs,
             outputs=(
                 latest_turn.outputs
