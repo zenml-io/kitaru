@@ -34,6 +34,7 @@ class ImporterCreateRequest(RequestModel):
     provider: str | None = Field(
         default=None, description="Source system this importer reads."
     )
+    logo_url: str | None = Field(default=None, description="Importer logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
@@ -45,6 +46,7 @@ class ImporterUpdateRequest(RequestModel):
     description: str | None = Field(
         default=None, description="New importer description."
     )
+    logo_url: str | None = Field(default=None, description="New logo URL.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -64,6 +66,7 @@ class ImporterResponse(TimestampedResponseModel):
     name: str = Field(description="Importer name.")
     description: str | None = Field(description="Importer description.")
     provider: str | None = Field(description="Source system this importer reads.")
+    logo_url: str | None = Field(description="Importer logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     latest_version: int = Field(
         description="Highest version number created for this importer."

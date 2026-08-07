@@ -2152,6 +2152,13 @@ async def annotation_delete(
         parameters=(
             ParameterSpec("NAME", "string", "argument", True, "New experiment name."),
             ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Exact agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
                 "--description", "string", "option", False, "Experiment description."
             ),
             ParameterSpec(
@@ -2193,6 +2200,7 @@ async def experiment_create(
     name: str,
     /,
     *,
+    agent: str,
     evaluator: list[str],
     description: str | None = None,
     override: str | None = None,
@@ -2204,6 +2212,7 @@ async def experiment_create(
         return await experiments.create_experiment(
             client,
             name,
+            agent=agent,
             description=description,
             override=override,
             tool_policy=tool_policy,

@@ -29,6 +29,7 @@ async def handle_experiments_manage(
         dto = ExperimentCreateRequest(
             name=request.name,
             description=request.description,
+            agent_id=request.agent_id,
             override=request.override,
             tool_policy=request.tool_policy,
             evaluators=evaluators or [],

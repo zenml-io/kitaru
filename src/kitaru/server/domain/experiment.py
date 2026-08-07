@@ -81,6 +81,7 @@ class Experiment(DomainModel):
     owner_id: uuid.UUID
     name: Name
     description: str | None = None
+    agent_id: uuid.UUID
     replay_config_id: uuid.UUID
     created: datetime | None = None
     updated: datetime | None = None

@@ -23,6 +23,7 @@ from conftest import (
     FakePluginRepository,
     ReplayServices,
     build_replay_services,
+    create_agent,
     create_experiment_run,
     create_plugin,
     create_replay,
@@ -40,6 +41,7 @@ from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
@@ -109,6 +111,13 @@ def service(services: ReplayServices) -> ExperimentService:
     return services.experiment_service
 
 
+@pytest.fixture
+async def agent_id(services: ReplayServices) -> uuid.UUID:
+    """Provide an agent for experiments to belong to."""
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    return agent.id
+
+
 async def _register_evaluator(
     plugin_repository: FakePluginRepository, name: str = "accuracy"
 ) -> uuid.UUID:
@@ -122,12 +131,15 @@ async def _register_evaluator(
 
 
 async def test_create_experiment_resolves_evaluators(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Resolve evaluators and inline the replay config in the response."""
     version_id = await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
+        agent_id=agent_id,
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     experiment, config = await service.create_experiment(command, actor=ACTOR)
@@ -144,7 +156,9 @@ async def test_create_experiment_resolves_evaluators(
 
 
 async def test_create_experiment_with_override_and_tool_policy(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Store an explicit override and tool policy."""
     await _register_evaluator(plugin_repository)
@@ -152,6 +166,7 @@ async def test_create_experiment_with_override_and_tool_policy(
     tool_policy = ToolPolicy(default=PassthroughConfig())
     command = ExperimentCreate(
         name="exp1",
+        agent_id=agent_id,
         override=override,
         tool_policy=tool_policy,
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
@@ -162,34 +177,59 @@ async def test_create_experiment_with_override_and_tool_policy(
 
 
 async def test_create_experiment_duplicate_name(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject a second experiment with the same name."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     await service.create_experiment(command, actor=ACTOR)
     with pytest.raises(DuplicateExperimentName):
         await service.create_experiment(command, actor=ACTOR)
 
 
-async def test_create_experiment_unknown_evaluator(service: ExperimentService) -> None:
+async def test_create_experiment_unknown_evaluator(
+    service: ExperimentService, agent_id: uuid.UUID
+) -> None:
     """Raise when an evaluator config names an unknown evaluator."""
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="missing")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="missing")],
     )
     with pytest.raises(PluginNotFound):
         await service.create_experiment(command, actor=ACTOR)
 
 
-async def test_create_experiment_duplicate_evaluator_version(
+async def test_create_experiment_unknown_agent(
     service: ExperimentService, plugin_repository: FakePluginRepository
+) -> None:
+    """Raise when the command names an unknown agent."""
+    await _register_evaluator(plugin_repository)
+    command = ExperimentCreate(
+        name="exp1",
+        agent_id=uuid.uuid4(),
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+    )
+    with pytest.raises(AgentNotFound):
+        await service.create_experiment(command, actor=ACTOR)
+
+
+async def test_create_experiment_duplicate_evaluator_version(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject two evaluator configs resolving to the same version."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
+        agent_id=agent_id,
         evaluators=[
             EvaluatorConfigInput(evaluator="accuracy", version=1),
             EvaluatorConfigInput(evaluator="accuracy"),
@@ -200,12 +240,16 @@ async def test_create_experiment_duplicate_evaluator_version(
 
 
 async def test_get_experiment(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Load a stored experiment and its replay config by id."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, created_config = await service.create_experiment(command, actor=ACTOR)
     loaded, loaded_config = await service.get_experiment(created.id, actor=ACTOR)
@@ -220,13 +264,17 @@ async def test_get_experiment_not_found(service: ExperimentService) -> None:
 
 
 async def test_list_experiments(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """List experiments newest-first with a name filter."""
     await _register_evaluator(plugin_repository)
     for name in ["assistant", "reviewer"]:
         command = ExperimentCreate(
-            name=name, evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+            name=name,
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
         )
         await service.create_experiment(command, actor=ACTOR)
 
@@ -237,19 +285,60 @@ async def test_list_experiments(
         assert config.evaluators[0].evaluator == "accuracy"
 
 
+async def test_list_experiments_by_agent(
+    services: ReplayServices,
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Filter experiments by agent id."""
+    await _register_evaluator(plugin_repository)
+    other_agent = await create_agent(services.agents, ACTOR.account.id, name="other")
+    await service.create_experiment(
+        ExperimentCreate(
+            name="mine",
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    await service.create_experiment(
+        ExperimentCreate(
+            name="theirs",
+            agent_id=other_agent.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+
+    pairs, next_cursor = await service.list_experiments(
+        ExperimentFilter(
+            expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+        ),
+        actor=ACTOR,
+    )
+    assert next_cursor is None
+    assert [experiment.name for experiment, _ in pairs] == ["mine"]
+
+
 async def test_list_experiments_by_tag(
     services: ReplayServices,
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Filter experiments by a tag linked to the resource."""
     tag_repository = services.tags
     await _register_evaluator(plugin_repository)
     tagged_command = ExperimentCreate(
-        name="tagged", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="tagged",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     untagged_command = ExperimentCreate(
-        name="untagged", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="untagged",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     tagged, _ = await service.create_experiment(tagged_command, actor=ACTOR)
     await service.create_experiment(untagged_command, actor=ACTOR)
@@ -274,12 +363,16 @@ async def test_list_experiments_by_tag(
 
 
 async def test_update_experiment_name(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Update an experiment's name without touching its replay config."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, created_config = await service.create_experiment(command, actor=ACTOR)
     updated, updated_config = await service.update_experiment(
@@ -290,12 +383,16 @@ async def test_update_experiment_name(
 
 
 async def test_update_experiment_cannot_clear_name(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject clearing the experiment name with an explicit null."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     with pytest.raises(ValidationError, match="Experiment name cannot be cleared"):
@@ -308,12 +405,15 @@ async def test_update_experiment_new_evaluators_replaces_config(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     repository: FakeExperimentRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Build a new replay config and delete the old one when evaluators change."""
     await _register_evaluator(plugin_repository)
     await _register_evaluator(plugin_repository, name="relevance")
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, old_config = await service.create_experiment(command, actor=ACTOR)
 
@@ -334,12 +434,15 @@ async def test_update_experiment_old_config_survives_when_a_replay_references_it
     plugin_repository: FakePluginRepository,
     repository: FakeExperimentRepository,
     services: ReplayServices,
+    agent_id: uuid.UUID,
 ) -> None:
     """Keep the old replay config when a replay still points at it."""
     await _register_evaluator(plugin_repository)
     await _register_evaluator(plugin_repository, name="relevance")
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, old_config = await service.create_experiment(command, actor=ACTOR)
     await create_replay(
@@ -361,12 +464,16 @@ async def test_update_experiment_old_config_survives_when_a_replay_references_it
 
 
 async def test_update_experiment_cannot_clear_evaluators(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject clearing every evaluator with an explicit null or empty list."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     with pytest.raises(ValidationError, match="evaluators cannot be cleared"):
@@ -376,12 +483,16 @@ async def test_update_experiment_cannot_clear_evaluators(
 
 
 async def test_update_experiment_cannot_clear_tool_policy(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject clearing the tool policy with an explicit null."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     with pytest.raises(ValidationError, match="tool policy cannot be cleared"):
@@ -391,12 +502,15 @@ async def test_update_experiment_cannot_clear_tool_policy(
 
 
 async def test_update_experiment_explicit_null_override_clears(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Clear the override with an explicit null."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
+        agent_id=agent_id,
         override=ReplayOverride(prompt="hi"),
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
@@ -408,12 +522,15 @@ async def test_update_experiment_explicit_null_override_clears(
 
 
 async def test_update_experiment_omitted_fields_unchanged(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Leave the replay config untouched when the command sets none of it."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
+        agent_id=agent_id,
         override=ReplayOverride(prompt="hi"),
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
@@ -430,11 +547,14 @@ async def test_delete_experiment_removes_config(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     repository: FakeExperimentRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Delete an experiment and its replay config."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, config = await service.create_experiment(command, actor=ACTOR)
     await service.delete_experiment(created.id, actor=ACTOR)
@@ -454,12 +574,15 @@ async def test_update_experiment_config_frozen_once_it_has_runs(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     services: ReplayServices,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject a replay config update once the experiment has a run."""
     await _register_evaluator(plugin_repository)
     await _register_evaluator(plugin_repository, name="relevance")
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     await create_experiment_run(
@@ -481,11 +604,14 @@ async def test_update_experiment_name_unaffected_by_runs(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     services: ReplayServices,
+    agent_id: uuid.UUID,
 ) -> None:
     """A name-only update stays legal once the experiment has a run."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     await create_experiment_run(
@@ -505,11 +631,14 @@ async def test_delete_experiment_conflicts_once_it_has_runs(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     services: ReplayServices,
+    agent_id: uuid.UUID,
 ) -> None:
     """Reject deleting an experiment that has runs."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
     await create_experiment_run(
@@ -524,7 +653,9 @@ async def test_delete_experiment_conflicts_once_it_has_runs(
 
 
 async def test_create_experiment_tracks_experiment_created(
-    services: ReplayServices, plugin_repository: FakePluginRepository
+    services: ReplayServices,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Fire EXPERIMENT_CREATED with the evaluator and tool override counts."""
     await _register_evaluator(plugin_repository)
@@ -533,6 +664,7 @@ async def test_create_experiment_tracks_experiment_created(
         repository=services.experiments,
         plugin_repository=services.plugins,
         experiment_run_repository=services.experiment_runs,
+        agent_repository=services.agents,
         cohort_version_repository=services.cohort_versions,
         session_repository=services.sessions,
         agent_version_repository=services.agent_versions,
@@ -542,7 +674,9 @@ async def test_create_experiment_tracks_experiment_created(
         analytics=analytics,
     )
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
 
     await service.create_experiment(command, actor=ACTOR)
@@ -555,12 +689,16 @@ async def test_create_experiment_tracks_experiment_created(
 
 
 async def test_create_experiment_without_analytics_tracker(
-    service: ExperimentService, plugin_repository: FakePluginRepository
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
 ) -> None:
     """Create an experiment normally when no analytics tracker is configured."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
-        name="exp1", evaluators=[EvaluatorConfigInput(evaluator="accuracy")]
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     experiment, _ = await service.create_experiment(command, actor=ACTOR)
     assert experiment.owner_id == ACTOR.account.id

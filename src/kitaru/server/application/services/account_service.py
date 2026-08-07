@@ -18,6 +18,7 @@ from typing import Any
 
 from anyio import to_thread
 
+from kitaru.analytics.events import AccountOrigin
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
@@ -25,7 +26,9 @@ from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.permissions import Action, ResourceType
+from kitaru.server.application.services.analytics_events import build_account_traits
 from kitaru.server.application.services.permission_service import PermissionService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
@@ -43,6 +46,7 @@ class AccountService:
         repository: AccountRepository,
         password_hasher: PasswordHasher,
         permission_service: PermissionService,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -50,10 +54,23 @@ class AccountService:
             repository: Account repository.
             password_hasher: Password hasher for login credentials.
             permission_service: Permission service for authorization checks.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._password_hasher = password_hasher
         self._permission_service = permission_service
+        self._analytics = analytics
+
+    def _identify(self, account: Account, origin: AccountOrigin) -> None:
+        """Send the traits of an account.
+
+        Args:
+            account: Account to identify.
+            origin: Where the account was created.
+        """
+        if self._analytics is None:
+            return
+        self._analytics.identify(account.id, build_account_traits(account, origin))
 
     async def create_account(
         self,
@@ -80,6 +97,7 @@ class AccountService:
             Created account and its activation token when one was generated.
         """
         await self._permission_service.check(actor, ResourceType.ACCOUNT, Action.CREATE)
+        activation_token = None
         if password is not None:
             password_hash = await to_thread.run_sync(
                 self._password_hasher.hash, password
@@ -87,16 +105,18 @@ class AccountService:
             account = Account(
                 name=name, email=email, password_hash=password_hash, is_admin=is_admin
             )
-            return await self._repository.create(account), None
-        activation_token = generate_secret()
-        account = Account(
-            name=name,
-            email=email,
-            active=False,
-            activation_token_hash=hash_secret(activation_token),
-            is_admin=is_admin,
-        )
-        return await self._repository.create(account), activation_token
+        else:
+            activation_token = generate_secret()
+            account = Account(
+                name=name,
+                email=email,
+                active=False,
+                activation_token_hash=hash_secret(activation_token),
+                is_admin=is_admin,
+            )
+        account = await self._repository.create(account)
+        self._identify(account, AccountOrigin.API)
+        return account, activation_token
 
     async def ensure_account(self, name: str, password: str | None) -> Account:
         """Create an account at startup when it does not exist.
@@ -113,21 +133,23 @@ class AccountService:
         except AccountNotFound:
             account = None
         if account is not None:
-            if account.is_admin:
-                return account
-            account.update_is_admin(True)
-            return await self._repository.update(account)
-        password_hash = None
-        if password is not None:
-            password_hash = await to_thread.run_sync(
-                self._password_hasher.hash, password
-            )
-        try:
-            return await self._repository.create(
-                Account(name=name, password_hash=password_hash, is_admin=True)
-            )
-        except DuplicateAccountName:
-            return await self._repository.get_by_name(name)
+            if not account.is_admin:
+                account.update_is_admin(True)
+                account = await self._repository.update(account)
+        else:
+            password_hash = None
+            if password is not None:
+                password_hash = await to_thread.run_sync(
+                    self._password_hasher.hash, password
+                )
+            try:
+                account = await self._repository.create(
+                    Account(name=name, password_hash=password_hash, is_admin=True)
+                )
+            except DuplicateAccountName:
+                account = await self._repository.get_by_name(name)
+        self._identify(account, AccountOrigin.BOOTSTRAP)
+        return account
 
     async def get_account(self, account_id: uuid.UUID, actor: AuthContext) -> Account:
         """Get an account by id.

@@ -109,6 +109,7 @@ class ExperimentCreate(MCPModel):
     """Create an experiment with exact evaluator selections."""
 
     operation: Literal["create"]
+    agent_id: uuid.UUID
     name: str = Field(min_length=1)
     description: str | None = None
     override: ReplayOverride | None = None

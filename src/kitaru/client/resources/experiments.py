@@ -52,8 +52,9 @@ class ExperimentsResource:
             request: Experiment create request.
 
         Raises:
-            APIError: The request failed, including 404 for an unknown
-                evaluator name or version and 409 for a duplicate name.
+            APIError: The request failed, including 404 when the agent does
+                not exist or an evaluator name or version is unknown, and
+                409 for a duplicate name.
 
         Returns:
             Created experiment.
@@ -167,7 +168,8 @@ class ExperimentsResource:
         Raises:
             APIError: The request failed, including 404 for a missing
                 experiment, cohort version, or agent version, and 422 for an
-                empty cohort version or a missing agent version resolution.
+                empty or mismatched cohort version, a mismatched agent
+                version, or a missing agent version resolution.
 
         Returns:
             Created run.

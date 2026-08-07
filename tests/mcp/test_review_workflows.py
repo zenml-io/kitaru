@@ -545,6 +545,7 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
             owner_id=uuid.uuid4(),
             name="accuracy",
             description=None,
+            logo_url=None,
             metadata={},
             latest_version=1,
             created=now,
