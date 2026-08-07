@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
@@ -78,6 +79,7 @@ class ExperimentService:
         repository: ExperimentRepository,
         plugin_repository: PluginRepository,
         experiment_run_repository: ExperimentRunRepository,
+        agent_repository: AgentRepository,
         cohort_version_repository: CohortVersionRepository,
         session_repository: SessionRepository,
         agent_version_repository: AgentVersionRepository,
@@ -92,6 +94,8 @@ class ExperimentService:
             repository: Experiment and replay config repository.
             plugin_repository: Plugin repository, for evaluator resolution.
             experiment_run_repository: Experiment run repository.
+            agent_repository: Agent repository, to validate the owning
+                agent exists.
             cohort_version_repository: Cohort version repository, for run
                 fan-out.
             session_repository: Session repository, for run fan-out.
@@ -105,6 +109,7 @@ class ExperimentService:
         self._repository = repository
         self._plugin_repository = plugin_repository
         self._experiment_runs = experiment_run_repository
+        self._agents = agent_repository
         self._cohort_versions = cohort_version_repository
         self._sessions = session_repository
         self._agent_versions = agent_version_repository
@@ -160,6 +165,7 @@ class ExperimentService:
             actor: Caller context.
 
         Raises:
+            AgentNotFound: No agent has the command's agent id.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
@@ -171,6 +177,7 @@ class ExperimentService:
         Returns:
             Created experiment and its replay config.
         """
+        await self._agents.get(command.agent_id)
         evaluators = await validate_evaluators(
             command.evaluators, self._plugin_repository, actor
         )
@@ -184,6 +191,7 @@ class ExperimentService:
             owner_id=actor.account.id,
             name=command.name,
             description=command.description,
+            agent_id=command.agent_id,
             replay_config_id=config.id,
         )
         experiment = await self._repository.create(experiment)
@@ -378,9 +386,12 @@ class ExperimentService:
         Raises:
             ExperimentNotFound: No experiment has this id.
             CohortVersionIdNotFound: No cohort version has the given id.
-            ValidationError: The cohort version has no sessions, or the
-                resolved agent version has no run spec.
+            ValidationError: The cohort version has no sessions, belongs to
+                a cohort of another agent, or the resolved agent version has
+                no run spec.
             AgentVersionNotFound: No agent version has the given id.
+            AgentVersionAgentMismatch: The agent version belongs to another
+                agent.
 
         Returns:
             Created run and its replay counts by status.
@@ -393,8 +404,14 @@ class ExperimentService:
         )
         if cohort_version.session_count == 0:
             raise ValidationError(f"Cohort version {cohort_version.id} has no sessions")
+        cohort_agent_id = await self._cohort_versions.get_agent_id(cohort_version.id)
+        if cohort_agent_id != experiment.agent_id:
+            raise ValidationError(
+                f"Cohort version {cohort_version.id} does not belong to agent "
+                f"{experiment.agent_id}"
+            )
         agent_version = await resolve_runnable_agent_version(
-            command.agent_version_id, self._agent_versions
+            command.agent_version_id, self._agent_versions, experiment.agent_id
         )
         config = await self._repository.get_replay_config(experiment.replay_config_id)
         sessions = await self._resolve_cohort_version_sessions(cohort_version.id)

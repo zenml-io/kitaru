@@ -178,6 +178,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
                 Experiment(
                     owner_id=owner.id,
                     name=f"exp-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent.id,
                     replay_config_id=config.id,
                 )
             )

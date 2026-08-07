@@ -58,6 +58,7 @@ def experiment_to_response(
         owner_id=experiment.owner_id,
         name=experiment.name,
         description=experiment.description,
+        agent_id=experiment.agent_id,
         override=(
             replay_override_to_wire(config.override)
             if config.override is not None
@@ -103,6 +104,7 @@ def experiment_create_to_command(body: ExperimentCreateRequest) -> ExperimentCre
     return ExperimentCreate(
         name=body.name,
         description=body.description,
+        agent_id=body.agent_id,
         override=(
             replay_override_to_domain(body.override)
             if body.override is not None

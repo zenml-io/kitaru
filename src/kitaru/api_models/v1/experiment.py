@@ -31,6 +31,7 @@ class ExperimentCreateRequest(RequestModel):
 
     name: str = Field(description="Experiment name.")
     description: str | None = Field(default=None, description="Experiment description.")
+    agent_id: uuid.UUID = Field(description="Agent the experiment's runs belong to.")
     override: ReplayOverride | None = Field(
         default=None, description="Override applied to every run's replays."
     )
@@ -66,6 +67,7 @@ class ExperimentResponse(OwnedResponseModel):
     id: uuid.UUID = Field(description="Experiment id.")
     name: str = Field(description="Experiment name.")
     description: str | None = Field(description="Experiment description.")
+    agent_id: uuid.UUID = Field(description="Agent the experiment's runs belong to.")
     override: ReplayOverride | None = Field(
         description="Override applied to every run's replays."
     )

@@ -123,6 +123,29 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         row = await self._get_row(cohort_version_id, exclusive=exclusive)
         return row.to_domain()
 
+    async def get_agent_id(self, cohort_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version's cohort belongs to.
+
+        Args:
+            cohort_version_id: Id of the cohort version.
+
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        statement = (
+            select(CohortORM.agent_id)
+            .join(CohortVersionORM, CohortVersionORM.cohort_id == CohortORM.id)
+            .where(CohortVersionORM.id == cohort_version_id)
+        )
+        result = await self._session.execute(statement)
+        row = result.first()
+        if row is None:
+            raise CohortVersionIdNotFound(cohort_version_id)
+        return row[0]
+
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:
         """Load a cohort version by cohort id and version number.
 

@@ -25,7 +25,19 @@ class AnalyticsEvent(StrEnum):
     EVALUATION_COMPLETED = "evaluation_completed"
     EXPERIMENT_CREATED = "experiment_created"
     EXPERIMENT_RUN_COMPLETED = "experiment_run_completed"
+    AGENT_CREATED = "agent_created"
+    AGENT_VERSION_CREATED = "agent_version_created"
     COHORT_CREATED = "cohort_created"
     COHORT_VERSION_CREATED = "cohort_version_created"
+    INVESTIGATION_CREATED = "investigation_created"
+    ANNOTATION_CREATED = "annotation_created"
     JOB_COMPLETED = "job_completed"
     PLUGIN_REGISTERED = "plugin_registered"
+
+
+class AccountOrigin(StrEnum):
+    """Account origin."""
+
+    BOOTSTRAP = "bootstrap"
+    API = "api"
+    CONTROL_PLANE = "control_plane"

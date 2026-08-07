@@ -812,6 +812,18 @@
               "title": "Latest Version",
               "type": "integer"
             },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator logo URL.",
+              "title": "Logo Url"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
@@ -824,10 +836,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "updated": {
               "description": "Last modification time.",
@@ -843,6 +862,7 @@
             "id",
             "name",
             "description",
+            "logo_url",
             "metadata",
             "latest_version"
           ],
@@ -928,6 +948,12 @@
         "ExperimentResponse": {
           "description": "Experiment response.",
           "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1000,6 +1026,7 @@
             "id",
             "name",
             "description",
+            "agent_id",
             "override",
             "tool_policy",
             "evaluators"
@@ -1075,6 +1102,18 @@
               "title": "Latest Version",
               "type": "integer"
             },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Importer logo URL.",
+              "title": "Logo Url"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
@@ -1087,10 +1126,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "provider": {
               "anyOf": [
@@ -1119,6 +1165,7 @@
             "name",
             "description",
             "provider",
+            "logo_url",
             "metadata",
             "latest_version"
           ],
@@ -3393,10 +3440,6 @@
               "description": "Error from a failed session.",
               "title": "Error"
             },
-            "expected": {
-              "description": "Expected outputs.",
-              "title": "Expected"
-            },
             "external_id": {
               "anyOf": [
                 {
@@ -3428,6 +3471,19 @@
               "format": "uuid",
               "title": "Id",
               "type": "string"
+            },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source system the session was imported from.",
+              "title": "Imported From"
             },
             "inputs": {
               "description": "Session inputs.",
@@ -3475,19 +3531,6 @@
               "format": "uuid",
               "title": "Owner Id",
               "type": "string"
-            },
-            "provider": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Source system naming the session.",
-              "title": "Provider"
             },
             "started_at": {
               "anyOf": [
@@ -3555,7 +3598,6 @@
             "status",
             "inputs",
             "outputs",
-            "expected",
             "metadata",
             "llm_call_count",
             "tool_call_count"
@@ -4776,7 +4818,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"
@@ -5805,6 +5849,11 @@
           "additionalProperties": false,
           "description": "Create an experiment with exact evaluator selections.",
           "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "description": {
               "anyOf": [
                 {
@@ -5861,6 +5910,7 @@
           },
           "required": [
             "operation",
+            "agent_id",
             "name",
             "evaluators"
           ],
@@ -6335,6 +6385,12 @@
         "ExperimentResponse": {
           "description": "Experiment response.",
           "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -6407,6 +6463,7 @@
             "id",
             "name",
             "description",
+            "agent_id",
             "override",
             "tool_policy",
             "evaluators"
@@ -7235,7 +7292,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"
@@ -7824,7 +7883,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"
@@ -9233,6 +9294,18 @@
               "title": "Latest Version",
               "type": "integer"
             },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator logo URL.",
+              "title": "Logo Url"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
@@ -9245,10 +9318,17 @@
               "type": "string"
             },
             "owner_id": {
-              "description": "Id of the owning account.",
-              "format": "uuid",
-              "title": "Owner Id",
-              "type": "string"
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
             },
             "updated": {
               "description": "Last modification time.",
@@ -9264,6 +9344,7 @@
             "id",
             "name",
             "description",
+            "logo_url",
             "metadata",
             "latest_version"
           ],

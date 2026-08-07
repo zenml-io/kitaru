@@ -18,7 +18,14 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -230,6 +237,10 @@ from kitaru.transport import RetryTransport
 # runs, so register this module under the bare name and keep this file the
 # only conftest in the tree.
 sys.modules.setdefault("conftest", sys.modules[__name__])
+
+# Settings built without an explicit ANALYTICS_OPT_IN read this environment
+# variable, so no test server posts analytics to the real endpoint.
+os.environ["KITARU_SERVER_ANALYTICS_OPT_IN"] = "false"
 
 TEST_DB_PREFIX = "kitaru_test"
 
@@ -1999,15 +2010,17 @@ class FakeSessionRepository:
         self._cohort_membership_counts[session_id] -= 1
 
     def _check_duplicate_external_id(self, session: Session) -> None:
-        if session.provider is None or session.external_id is None:
+        if session.imported_from is None or session.external_id is None:
             return
         for other in self._sessions.values():
             if (
                 other.id != session.id
-                and other.provider == session.provider
+                and other.imported_from == session.imported_from
                 and other.external_id == session.external_id
             ):
-                raise DuplicateSessionExternalId(session.provider, session.external_id)
+                raise DuplicateSessionExternalId(
+                    session.imported_from, session.external_id
+                )
 
     async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
         """Bump the agent's session counter and return the new value.
@@ -2030,7 +2043,7 @@ class FakeSessionRepository:
             session: Session to store.
 
         Raises:
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -2201,7 +2214,7 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
-            DuplicateSessionExternalId: The provider and external id pair is
+            DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
 
         Returns:
@@ -2352,22 +2365,32 @@ class FakeSessionNodeRepository:
         self._cohort_versions = cohort_versions
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
         """
         wanted = set(indexes)
-        return {
-            node.index: node.model_copy()
+        matches = [
+            node
             for node in self._nodes.values()
             if node.session_id == session_id and node.index in wanted
+        ]
+        if include_payloads:
+            return {node.index: node.model_copy() for node in matches}
+        return {
+            node.index: node.model_copy(
+                update={"inputs": None, "outputs": None, "attributes": None}
+            )
+            for node in matches
         }
 
     async def upsert_batch(
@@ -2427,19 +2450,39 @@ class FakeSessionNodeRepository:
                 )
         return result, next_cursor
 
-    async def get_index_by_id(self, session_id: uuid.UUID) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of every node in a session, keyed by node id.
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
 
         Args:
             session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Every node of the session.
         """
+        nodes = [node for node in self._nodes.values() if node.session_id == session_id]
+        return sorted(nodes, key=lambda node: node.index)
+
+    async def get_indexes_by_ids(
+        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Bulk-load the index of the named nodes of a session, keyed by node id.
+
+        Args:
+            session_id: Id of the owning session.
+            node_ids: Ids to look up.
+
+        Returns:
+            Each requested node id mapped to its index, missing ids omitted.
+        """
+        requested = set(node_ids)
         return {
             node.id: node.index
             for node in self._nodes.values()
-            if node.session_id == session_id
+            if node.session_id == session_id and node.id in requested
         }
 
     def _newest_match(self, candidates: list[SessionNode]) -> SessionNode | None:
@@ -2801,6 +2844,24 @@ class FakeCohortVersionRepository:
         if version is None:
             raise CohortVersionIdNotFound(cohort_version_id)
         return version.model_copy()
+
+    async def get_agent_id(self, cohort_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version's cohort belongs to.
+
+        Args:
+            cohort_version_id: Id of the cohort version.
+
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        version = self._versions.get(cohort_version_id)
+        if version is None:
+            raise CohortVersionIdNotFound(cohort_version_id)
+        cohort = await self._cohorts.get(version.cohort_id)
+        return cohort.agent_id
 
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:
         """Load a cohort version by cohort id and version number.
@@ -3210,7 +3271,7 @@ class FakeBlobRepository:
 
 async def create_blob(
     repository: FakeBlobRepository,
-    owner_id: uuid.UUID,
+    owner_id: uuid.UUID | None,
     content: bytes = b"blob-content",
     media_type: str = "application/octet-stream",
 ) -> Blob:
@@ -3788,6 +3849,7 @@ class FakeExperimentRepository:
 async def create_experiment(
     repository: FakeExperimentRepository,
     owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
     replay_config_id: uuid.UUID,
     name: str = "smoke-test",
     description: str | None = None,
@@ -3797,6 +3859,7 @@ async def create_experiment(
     Args:
         repository: Fake experiment repository.
         owner_id: Id of the owning account.
+        agent_id: Id of the agent the experiment belongs to.
         replay_config_id: Id of the experiment's replay config.
         name: Experiment name.
         description: Experiment description.
@@ -3809,6 +3872,7 @@ async def create_experiment(
             owner_id=owner_id,
             name=name,
             description=description,
+            agent_id=agent_id,
             replay_config_id=replay_config_id,
         )
     )
@@ -4982,8 +5046,11 @@ class FakeTaskRepository:
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
-    ) -> dict[uuid.UUID, datetime | None]:
+    ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:
         """Stamp heartbeat_at on the worker's in-flight tasks among the ids.
+
+        Row locking has no in-memory counterpart, so no candidate is ever
+        reported skipped.
 
         Args:
             task_ids: Candidate task ids.
@@ -4992,7 +5059,8 @@ class FakeTaskRepository:
 
         Returns:
             Cancel request time of the task, falling back to its job's, by id
-            for every stamped task.
+            for every stamped task, and the owned in-flight candidates whose
+            lock was held elsewhere and so were left unstamped.
         """
         stamped: dict[uuid.UUID, datetime | None] = {}
         for task_id in task_ids:
@@ -5014,7 +5082,7 @@ class FakeTaskRepository:
                 owner = (await self.jobs.get_many([task.job_id])).get(task.job_id)
                 if owner is not None:
                     stamped[task_id] = owner.cancel_requested_at
-        return stamped
+        return stamped, set()
 
     async def lock_by_jobs(
         self, job_ids: Sequence[uuid.UUID], nowait: bool = False
@@ -5542,6 +5610,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         repository=experiments,
         plugin_repository=plugins,
         experiment_run_repository=experiment_runs,
+        agent_repository=agents,
         cohort_version_repository=cohort_versions,
         session_repository=sessions,
         agent_version_repository=agent_versions,

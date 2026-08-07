@@ -97,7 +97,6 @@ def register_subscribers(
             replay_pipeline.append_result_evaluations,
             replay_repository=replay_repository,
             experiment_repository=experiment_repository,
-            job_repository=job_repository,
             task_repository=task_repository,
         ),
     )

@@ -181,8 +181,8 @@ async def test_create_sets_timestamps_and_defaults(setup: Setup) -> None:
     assert session.updated is not None
 
 
-async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
-    """Reject a second session with the same provider and external id."""
+async def test_create_duplicate_imported_from_external_id(setup: Setup) -> None:
+    """Reject a second session with the same imported_from and external id."""
     repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
@@ -190,7 +190,7 @@ async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
             agent_id=agent_id,
             number=1,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-1",
         )
     )
@@ -201,16 +201,16 @@ async def test_create_duplicate_provider_external_id(setup: Setup) -> None:
                 agent_id=agent_id,
                 number=2,
                 origin=SessionOrigin.IMPORTED,
-                provider="langsmith",
+                imported_from="langsmith",
                 external_id="run-1",
             )
         )
 
 
-async def test_create_allows_null_provider_and_external_id_repeatedly(
+async def test_create_allows_null_imported_from_and_external_id_repeatedly(
     setup: Setup,
 ) -> None:
-    """Allow many sessions with no provider and external id."""
+    """Allow many sessions with no imported_from and external id."""
     repository, owner_id, agent_id, _, _ = setup
     first = await repository.create(
         Session(
@@ -310,8 +310,8 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     assert sessions[0].status == SessionStatus.COMPLETED
 
 
-async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
-    """Filter sessions by provider and external id together."""
+async def test_query_filters_by_imported_from_and_external_id(setup: Setup) -> None:
+    """Filter sessions by imported_from and external id together."""
     repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
@@ -319,7 +319,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
             agent_id=agent_id,
             number=1,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-1",
         )
     )
@@ -329,7 +329,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
             agent_id=agent_id,
             number=2,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-2",
         )
     )
@@ -339,7 +339,7 @@ async def test_query_filters_by_provider_and_external_id(setup: Setup) -> None:
             expression=AndExpression(
                 operands=(
                     FilterCondition(
-                        field="provider", op=FilterOp.EQ, value="langsmith"
+                        field="imported_from", op=FilterOp.EQ, value="langsmith"
                     ),
                     FilterCondition(field="external_id", op=FilterOp.EQ, value="run-2"),
                 )
@@ -583,7 +583,7 @@ async def test_update_not_found(setup: Setup) -> None:
 
 
 async def test_update_duplicate_external_id(setup: Setup) -> None:
-    """Reject an update that collides with another session's provider and
+    """Reject an update that collides with another session's imported_from and
     external id."""
     repository, owner_id, agent_id, _, _ = setup
     await repository.create(
@@ -592,7 +592,7 @@ async def test_update_duplicate_external_id(setup: Setup) -> None:
             agent_id=agent_id,
             number=1,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-1",
         )
     )
@@ -602,7 +602,7 @@ async def test_update_duplicate_external_id(setup: Setup) -> None:
             agent_id=agent_id,
             number=2,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
             external_id="run-2",
         )
     )
@@ -949,13 +949,13 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
             status=SessionStatus.COMPLETED,
         )
     )
-    by_provider = await repository.create(
+    by_imported_from = await repository.create(
         Session(
             owner_id=owner_id,
             agent_id=agent_id,
             number=2,
             origin=SessionOrigin.IMPORTED,
-            provider="langsmith",
+            imported_from="langsmith",
         )
     )
     await repository.create(
@@ -973,13 +973,13 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
                 operands=(
                     FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
                     FilterCondition(
-                        field="provider", op=FilterOp.EQ, value="langsmith"
+                        field="imported_from", op=FilterOp.EQ, value="langsmith"
                     ),
                 )
             )
         )
     )
-    assert {s.id for s in sessions} == {by_status.id, by_provider.id}
+    assert {s.id for s in sessions} == {by_status.id, by_imported_from.id}
 
 
 async def test_query_filters_by_not_is_null_expression(setup: Setup) -> None:

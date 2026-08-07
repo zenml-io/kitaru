@@ -19,7 +19,6 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
@@ -32,6 +31,7 @@ class EvaluatorCreateRequest(RequestModel):
 
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(default=None, description="Evaluator description.")
+    logo_url: str | None = Field(default=None, description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
@@ -43,6 +43,7 @@ class EvaluatorUpdateRequest(RequestModel):
     description: str | None = Field(
         default=None, description="New evaluator description."
     )
+    logo_url: str | None = Field(default=None, description="New logo URL.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -52,12 +53,16 @@ class EvaluatorListParams(FilterableListParams):
     """Evaluator list params."""
 
 
-class EvaluatorResponse(OwnedResponseModel):
+class EvaluatorResponse(TimestampedResponseModel):
     """Evaluator response."""
 
+    owner_id: uuid.UUID | None = Field(
+        description="Id of the owning account, null for a default plugin."
+    )
     id: uuid.UUID = Field(description="Evaluator id.")
     name: str = Field(description="Evaluator name.")
     description: str | None = Field(description="Evaluator description.")
+    logo_url: str | None = Field(description="Evaluator logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     latest_version: int = Field(
         description="Highest version number created for this evaluator."

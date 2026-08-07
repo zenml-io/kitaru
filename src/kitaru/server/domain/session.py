@@ -70,18 +70,18 @@ class SessionBaselineNotFound(NotFoundError):
 
 
 class DuplicateSessionExternalId(ConflictError):
-    """Raised when a provider and external id pair is already registered."""
+    """Raised when an imported_from and external id pair is already registered."""
 
-    def __init__(self, provider: str | None, external_id: str | None) -> None:
+    def __init__(self, imported_from: str | None, external_id: str | None) -> None:
         """Initialize the error.
 
         Args:
-            provider: Source system naming the session.
+            imported_from: Source system the session was imported from.
             external_id: Id from the source system.
         """
         super().__init__(
-            f"Session with provider '{provider}' and external_id '{external_id}' "
-            "is already registered"
+            f"Session with imported_from '{imported_from}' and external_id "
+            f"'{external_id}' is already registered"
         )
 
 
@@ -280,13 +280,12 @@ class Session(DomainModel):
     name: str | None = None
     inputs: Any = None
     outputs: Any = None
-    expected: Any = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     external_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider: str | None = None
+    imported_from: str | None = None
     framework: str | None = None
     adapter_version: str | None = None
     cost: Decimal | None = None
@@ -303,14 +302,6 @@ class Session(DomainModel):
             name: New name.
         """
         self.name = name
-
-    def update_expected(self, expected: Any) -> None:
-        """Set new expected outputs.
-
-        Args:
-            expected: New expected outputs.
-        """
-        self.expected = expected
 
     def update_metadata(self, metadata: dict[str, Any]) -> None:
         """Set new metadata.

@@ -16,7 +16,7 @@ src/kitaru/           # Python package (src layout) — see src/kitaru/AGENTS.md
   server/             # FastAPI server (API, application, domain, adapters layers)
 tests/                # pytest tests — see tests/AGENTS.md
 examples/             # Runnable SDK examples
-docs/                 # Two docs surfaces — see "Documentation surfaces" below
+docs/                 # Three docs surfaces — see "Documentation surfaces" below
   book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
   content/docs/       # FumaDocs SDK reference content (generated)
   scripts/            # Node-side doc generation (convert-sdk-docs.mjs)
@@ -77,7 +77,7 @@ durable tracked document.
 
 ## Branching strategy
 
-- **`develop`** is the default branch and the target for all PRs.
+- **`develop`** is the default branch and the normal target for PRs. During the v2 migration, v2 feature work may target its explicitly named integration branch.
 - **`main`** contains only released versions. Updated by force-pushing during releases. Never push directly to `main`.
 - **`release/X.Y.Z`** branches are archival snapshots created during the release process.
 - **Tags** follow `vX.Y.Z` (e.g. `v0.1.0`).
@@ -114,7 +114,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
 - **Comments explain *why*, not *what*.** No change-tracking comments ("Updated from X", "Refactored this"). No narrating obvious code (`x = x + 1  # increment x`). Add comments only for intent, trade-offs, constraints, edge cases, or non-obvious decisions. Prefer expressive names and small functions over inline commentary.
 - **Name functions for the action, not the return value.** `_get_bearer_credential()`, not `_bearer_credential()`. `_get_account_name()`, not `_account_name()`. A bare noun reads as an attribute access at the call site, which hides that work is happening.
-- **Docstrings describe the symbol, not its callers.** State what the thing does, never who calls it or why. `"""Set the account name and contact email."""`, not `"""Set the identity fields mirrored from an external account."""`. Same for `"""Response body for the statistics endpoint."""` and `"""Used by the job runner."""`. A caller named in a docstring is wrong as soon as a second caller appears, and the reader cannot tell whether the stated context is a real constraint or just where it happened to be used first. If a caller genuinely depends on something, that belongs in the code or in a `# Why:` comment at the line that needs it.
+- **Docstrings describe the symbol, not its callers.** State what the thing does, never who calls it or why. `"""Set the account name and contact email."""`, not `"""Set the identity fields mirrored from an external account."""`. Same for `"""Response body for the statistics endpoint."""` and `"""Used by the job runner."""`. A caller named in a docstring is wrong as soon as a second caller appears, and the reader cannot tell whether the stated context is a real constraint or just where it happened to be used first. If a caller genuinely depends on something, that belongs in the code or in a comment at the line that needs it. Such a comment is short, precise, and technical, and it states why the code below is written the way it is. Lead with the action it explains, as in `# Defer the payload columns because ...`. Never prefix it with `Why:` or any other label.
 - **Prefer typing over dynamic attribute checks.** Use Protocols/ABCs or `isinstance` narrowing instead of `getattr`/`hasattr`. If dynamic access is unavoidable, isolate it in a small typed helper.
 - **No postponed annotations.** Do not add `from __future__ import annotations`. Pydantic and FastAPI inspect annotations at runtime, and string annotations break that inspection.
 - **Util function placement:** Put a helper on the class if it's tied to the class's behavior or heavily used by subclasses (saves imports, subclasses just call `self.method()`). Put truly generic helpers in a standalone generic file, including helpers that are generic enough that other modules might use them in the future, even while they have a single caller.
@@ -129,7 +129,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 ## Commits and PRs
 
 - **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
-- **Fix pre-existing failures too.** If `just check` or `just test` surfaces failures that predate your changes, fix them rather than ignoring them. Other people may be working in the same repo, so not every failure is yours — but don't default to "not my problem." Ask the user if unsure whether a failure should be addressed in this commit.
+- **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
 - **Bug fixes:** Always add a regression test that would have caught the bug. Understand root cause before implementing the fix.
 - **PRs:** Human-readable titles (no "feat:"/"doc:" prefixes). Write comprehensive descriptions: what the changes do, why they're needed, key implementation decisions, and areas needing reviewer attention.

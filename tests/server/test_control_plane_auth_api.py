@@ -27,6 +27,7 @@ from conftest import (
     FakePasswordHasher,
     control_plane_settings,
     create_api_key,
+    lifespan_client,
 )
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -96,7 +97,7 @@ def build_app(
     control_plane = ControlPlaneAuthenticator(
         client=control_plane_client,
         account_repository=account_repository,
-        server_id=settings.SERVER_ID,
+        server_id=settings.SERVER_ID or uuid.uuid4(),
     )
     auth_service = AuthService(
         settings=settings,
@@ -349,12 +350,23 @@ async def test_list_accounts_allowed(
     assert response.status_code == 200
 
 
-async def test_control_plane_scheme_skips_default_account_bootstrap() -> None:
+async def test_control_plane_scheme_skips_default_account_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Skip the default-account bootstrap at startup under the control plane scheme."""
-    settings = control_plane_settings(SKIP_DB_MIGRATION=True, DB_PORT=1)
-    app = create_app(settings)
-    async with app.router.lifespan_context(app):
+    called = False
+
+    async def _record_call(
+        self: AccountService, name: str, password: str | None
+    ) -> None:
+        _ = self, name, password
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(AccountService, "ensure_account", _record_call)
+    async with lifespan_client(control_plane_settings(use_db=True)):
         pass
+    assert called is False
 
 
 async def test_update_own_account_metadata_allowed(

@@ -274,7 +274,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         status=SessionStatus.COMPLETED,
         agent="assistant",
         origin=SessionOrigin.IMPORTED,
-        provider="langfuse",
+        imported_from="langfuse",
         tag="baseline",
         started_after=started_after,
         started_before=None,
@@ -288,7 +288,7 @@ async def test_session_list_combines_typed_and_raw_filters() -> None:
         {"field": "status", "op": "eq", "value": "completed"},
         {"field": "agent_id", "op": "eq", "value": str(agents.agent.id)},
         {"field": "origin", "op": "eq", "value": "imported"},
-        {"field": "provider", "op": "eq", "value": "langfuse"},
+        {"field": "imported_from", "op": "eq", "value": "langfuse"},
         {"field": "tag", "op": "eq", "value": "baseline"},
         {
             "field": "started_at",

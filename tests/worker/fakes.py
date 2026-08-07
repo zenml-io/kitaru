@@ -299,7 +299,6 @@ def make_session_response(
         "status": status,
         "inputs": None,
         "outputs": None,
-        "expected": None,
         "metadata": {},
         "llm_call_count": 0,
         "tool_call_count": 0,
@@ -450,6 +449,7 @@ class FakeKitaruAPIClient:
 
     def __init__(self) -> None:
         """Initialize every resource fake."""
+        self.base_url = "https://api.example.com"
         self.workers = FakeWorkersResource()
         self.tasks = FakeTasksResource()
         self.jobs = FakeJobsResource()

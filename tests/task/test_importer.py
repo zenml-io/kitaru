@@ -87,7 +87,6 @@ def _parsed_session(
         name=external_id,
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,
@@ -189,12 +188,12 @@ def test_session_request_maps_fields() -> None:
         name="imported-1",
         inputs={"a": 1},
         outputs={"b": 2},
-        expected=None,
         error="boom",
         started_at=None,
         ended_at=None,
         external_id="ext-1",
         metadata={"k": "v"},
+        framework="langgraph",
         nodes=[],
     )
 
@@ -209,7 +208,8 @@ def test_session_request_maps_fields() -> None:
     assert request.error == "boom"
     assert request.external_id == "ext-1"
     assert request.metadata == {"k": "v"}
-    assert request.provider == "acme"
+    assert request.imported_from == "acme"
+    assert request.framework == "langgraph"
 
 
 _PARSER_SCRIPT = """
@@ -242,7 +242,6 @@ def parse(payload: bytes, params: dict):
         name="session-1",
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,
@@ -255,7 +254,6 @@ def parse(payload: bytes, params: dict):
         name="session-1-dup",
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,
@@ -276,7 +274,6 @@ def parse(payload: bytes, params: dict):
         name="session-1",
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,
@@ -298,7 +295,6 @@ def parse(payload: bytes, params: dict):
         name="session-1",
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,
@@ -320,7 +316,6 @@ def parse(payload: bytes, params: dict):
         name="session-1",
         inputs=None,
         outputs=None,
-        expected=None,
         error=None,
         started_at=None,
         ended_at=None,

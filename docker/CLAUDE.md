@@ -9,8 +9,10 @@ main project `CLAUDE.md` links here for Docker-specific guidance.
 |---|---|---|
 | `dev-client.Dockerfile` | Development client | Local repository source |
 | `dev-server.Dockerfile` | Development server | Local repository source |
+| `dev-worker.Dockerfile` | Development worker | Local repository source |
 | `release-client.Dockerfile` | Release client | Published PyPI wheel |
 | `release-server.Dockerfile` | Release server | Published PyPI wheel |
+| `release-worker.Dockerfile` | Release worker | Published PyPI wheel |
 
 All development and release builds resolve dependencies from the committed
 `uv.lock`. The release
@@ -26,7 +28,8 @@ that are incompatible with the lockfile.
 ## Stages
 
 `dev-client.Dockerfile` installs the locked local project non-editably and
-produces the `client` target.
+produces the `client` target. `dev-worker.Dockerfile` does the same with the
+`worker` extra and produces the `worker` target.
 
 `dev-server.Dockerfile` separates dependency installation from the two server
 runtime modes:
@@ -41,21 +44,22 @@ runtime modes:
 
 Set `INSTALL_DEBUG_TOOLS=true` when building the server to add curl, Git,
 network diagnostics, and the PostgreSQL client. Debug tools are omitted by
-default. Every development runtime sets
+default. Every development server runtime sets
 `KITARU_SERVER_ANALYTICS_DEBUG=true` so opted-in development events use the
 analytics debug service instead of polluting the production analytics namespace.
 
-Both release Dockerfiles use these stages:
+The release Dockerfiles use these stages:
 
 | Stage | Purpose |
 |---|---|
 | `uv` | Supplies the pinned uv binary to build stages |
 | `base` | Creates the slim Python base and non-root `kitaru` user |
 | `builder` | Creates the locked virtual environment and installs the published wheel |
-| `client` or `server` | Copies only the virtual environment and dependency snapshot into the runtime image |
+| `client`, `worker`, or `server` | Copies only the virtual environment and dependency snapshot into the runtime image |
 
-The release runtime images do not contain uv, pip, setuptools, or wheel. The
-resolved environment is recorded at `/app/requirements.txt` for inspection.
+The release runtime images do not contain pip, setuptools, or wheel. The worker
+images include uv. The resolved environment is recorded at
+`/app/requirements.txt` for inspection.
 
 ## Build and run
 
@@ -66,6 +70,10 @@ whose version and lockfile match the published package version.
 # Development client from local source
 docker build -f docker/dev-client.Dockerfile --target client \
   -t kitaru-client-dev .
+
+# Development worker from local source
+docker build -f docker/dev-worker.Dockerfile --target worker \
+  -t kitaru-worker-dev .
 
 # Self-contained development server from local source
 docker build -f docker/dev-server.Dockerfile --target runtime \
@@ -79,6 +87,10 @@ docker run --rm -p 8000:8000 -v "$PWD/src:/app/src" kitaru-server-local
 # Release client from the matching published package
 docker build -f docker/release-client.Dockerfile --target client \
   --build-arg KITARU_VERSION=<version> -t kitaru-client .
+
+# Release worker from the matching published package
+docker build -f docker/release-worker.Dockerfile --target worker \
+  --build-arg KITARU_VERSION=<version> -t kitaru-worker .
 
 # Release server from the matching published package
 docker build -f docker/release-server.Dockerfile --target server \

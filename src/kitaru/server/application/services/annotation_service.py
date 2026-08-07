@@ -17,6 +17,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.investigation import InvestigationStatus
 from kitaru.server.application.interfaces.annotation_repository import (
@@ -35,6 +36,10 @@ from kitaru.server.application.models.annotation import (
     ManualAnnotationCreate,
 )
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.analytics_events import (
+    build_annotation_created_properties,
+)
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.annotation import Annotation
 from kitaru.server.domain.base import ValidationError
 
@@ -48,6 +53,7 @@ class AnnotationService:
         investigation_repository: InvestigationRepository,
         session_repository: SessionRepository,
         session_node_repository: SessionNodeRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -60,11 +66,13 @@ class AnnotationService:
                 annotated session exists.
             session_node_repository: Session node repository, to validate a
                 selector's node id belongs to the annotated session.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._investigations = investigation_repository
         self._sessions = session_repository
         self._nodes = session_node_repository
+        self._analytics = analytics
 
     async def _check_selector(
         self, session_id: uuid.UUID, selector: AnnotationSelector | None
@@ -80,11 +88,27 @@ class AnnotationService:
         """
         if selector is None or selector.node_id is None:
             return
-        index_by_id = await self._nodes.get_index_by_id(session_id)
+        index_by_id = await self._nodes.get_indexes_by_ids(
+            session_id, [selector.node_id]
+        )
         if selector.node_id not in index_by_id:
             raise ValidationError(
                 f"Node {selector.node_id} does not belong to session {session_id}"
             )
+
+    def _track_created(self, annotation: Annotation) -> None:
+        """Track the creation of an annotation.
+
+        Args:
+            annotation: Stored annotation.
+        """
+        if self._analytics is None:
+            return
+        self._analytics.track(
+            annotation.owner_id,
+            AnalyticsEvent.ANNOTATION_CREATED,
+            build_annotation_created_properties(annotation),
+        )
 
     async def create_manual_annotation(
         self, command: ManualAnnotationCreate, actor: AuthContext
@@ -110,7 +134,9 @@ class AnnotationService:
             selector=command.selector,
             value=command.value,
         )
-        return await self._repository.create(annotation)
+        annotation = await self._repository.create(annotation)
+        self._track_created(annotation)
+        return annotation
 
     async def create_investigation_answer(
         self, command: InvestigationAnswerCreate, actor: AuthContext
@@ -155,7 +181,9 @@ class AnnotationService:
             selector=command.selector,
             value=command.value,
         )
-        return await self._repository.create(annotation)
+        annotation = await self._repository.create(annotation)
+        self._track_created(annotation)
+        return annotation
 
     async def get_annotation(
         self, annotation_id: uuid.UUID, actor: AuthContext

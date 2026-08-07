@@ -46,7 +46,7 @@ class SessionFilter(ListFilter):
         "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
         "origin": FilterField(value_type=SessionOrigin, ops=EQUALITY_OPS),
         "status": FilterField(value_type=SessionStatus, ops=EQUALITY_OPS),
-        "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
+        "imported_from": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
         "framework": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
         "external_id": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
@@ -78,13 +78,12 @@ class SessionCreate(FrozenModel):
     name: str | None = None
     inputs: Any = None
     outputs: Any = None
-    expected: Any = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
     external_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider: str | None = None
+    imported_from: str | None = None
     framework: str | None = None
     adapter_version: str | None = None
 
@@ -97,5 +96,4 @@ class SessionUpdate(FrozenModel):
     error: str | None = None
     ended_at: datetime | None = None
     name: str | None = None
-    expected: Any = None
     metadata: dict[str, Any] | None = None

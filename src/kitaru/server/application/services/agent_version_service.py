@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
@@ -23,6 +24,10 @@ from kitaru.server.application.models.agent_version import (
     AgentVersionUpdate,
 )
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.analytics_events import (
+    build_agent_version_created_properties,
+)
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
@@ -33,13 +38,19 @@ from kitaru.server.domain.agent_version import (
 class AgentVersionService:
     """Agent version use cases."""
 
-    def __init__(self, repository: AgentVersionRepository) -> None:
+    def __init__(
+        self,
+        repository: AgentVersionRepository,
+        analytics: ServerAnalytics | None = None,
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Agent version repository.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
+        self._analytics = analytics
 
     async def create_version(
         self,
@@ -76,7 +87,14 @@ class AgentVersionService:
             if capabilities is not None
             else AgentCapabilities(),
         )
-        return await self._repository.create(agent_version)
+        agent_version = await self._repository.create(agent_version)
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.AGENT_VERSION_CREATED,
+                build_agent_version_created_properties(agent_version),
+            )
+        return agent_version
 
     async def get_version(
         self, agent_version_id: uuid.UUID, actor: AuthContext

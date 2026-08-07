@@ -60,7 +60,7 @@ async def _run_unit(
     """
     async for session in database.get_async_session():
         try:
-            tracker = get_server_analytics(session, settings, analytics)
+            tracker = get_server_analytics(session, analytics)
             await unit(get_task_service(session, database.engine, settings, tracker))
             await session.commit()
         except Exception as exc:
@@ -90,7 +90,7 @@ async def _read_candidates(
     """
     async for session in database.get_async_session():
         try:
-            tracker = get_server_analytics(session, settings, analytics)
+            tracker = get_server_analytics(session, analytics)
             service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
@@ -101,7 +101,9 @@ async def _read_candidates(
 
 
 async def sweep_once(
-    database: DatabaseService, settings: APISettings, analytics: AnalyticsClient
+    database: DatabaseService,
+    settings: APISettings,
+    analytics: AnalyticsClient,
 ) -> None:
     """Propagate pending job cancels and rescue stale tasks, one item per transaction.
 
@@ -176,7 +178,9 @@ def _log_sweeper_exit(task: asyncio.Task[None]) -> None:
 
 
 def start_task_sweeper(
-    database: DatabaseService, settings: APISettings, analytics: AnalyticsClient
+    database: DatabaseService,
+    settings: APISettings,
+    analytics: AnalyticsClient,
 ) -> asyncio.Task[None] | None:
     """Start the background sweep loop unless it is disabled.
 

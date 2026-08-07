@@ -92,6 +92,7 @@ def test_route_manifest_is_registered() -> None:
         "/v1/sessions",
         "/v1/sessions/{session_id}",
         "/v1/sessions/{session_id}/evaluations",
+        "/v1/sessions/{session_id}/full",
         "/v1/sessions/{session_id}/nodes",
         "/v1/tags",
         "/v1/tags/{tag_id}",

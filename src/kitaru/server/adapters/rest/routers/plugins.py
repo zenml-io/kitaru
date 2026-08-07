@@ -22,12 +22,7 @@ instead of duplicating them.
 import uuid
 from typing import TypeVar
 
-from kitaru.api_models.v1.base import (
-    ListParams,
-    OwnedResponseModel,
-    Page,
-    TimestampedResponseModel,
-)
+from kitaru.api_models.v1.base import ListParams, Page, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
@@ -36,6 +31,7 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import ImporterCreateRequest, ImporterUpdateRequest
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.server.adapters.rest.mapping.plugins import (
+    plugin_create_to_command,
     plugin_list_params_to_filter,
     plugin_source_to_domain,
     plugin_to_response,
@@ -46,7 +42,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import PluginVersionFilter
 from kitaru.server.application.services.plugin_service import PluginService
 
-PluginResponseT = TypeVar("PluginResponseT", bound=OwnedResponseModel)
+PluginResponseT = TypeVar("PluginResponseT", bound=TimestampedResponseModel)
 PluginVersionResponseT = TypeVar(
     "PluginVersionResponseT", bound=TimestampedResponseModel
 )
@@ -69,14 +65,7 @@ async def create_plugin(
     Returns:
         Created plugin response.
     """
-    provider = body.provider if isinstance(body, ImporterCreateRequest) else None
-    plugin = await service.create_plugin(
-        name=body.name,
-        description=body.description,
-        provider=provider,
-        metadata=body.metadata,
-        actor=actor,
-    )
+    plugin = await service.create_plugin(plugin_create_to_command(body), actor=actor)
     return plugin_to_response(plugin, response_class)
 
 

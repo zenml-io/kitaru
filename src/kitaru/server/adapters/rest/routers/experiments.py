@@ -55,10 +55,10 @@ async def create_experiment(
 ) -> ExperimentResponse:
     """Create an experiment.
 
-    Clients observe HTTP 201 on success, 404 when an evaluator config names
-    an unknown evaluator or version, 409 when the name is already
-    registered, and 422 on invalid input, including a duplicate resolved
-    evaluator version.
+    Clients observe HTTP 201 on success, 404 when the agent does not exist
+    or an evaluator config names an unknown evaluator or version, 409 when
+    the name is already registered, and 422 on invalid input, including a
+    duplicate resolved evaluator version.
 
     Args:
         body: Experiment create request.
@@ -185,8 +185,9 @@ async def start_run(
 
     Clients observe HTTP 201 on success, 404 when the experiment, the
     cohort version, or the resolved agent version does not exist, and 422
-    when the cohort version has no sessions or the resolved agent version
-    has no run spec.
+    when the cohort version has no sessions, the cohort version or agent
+    version belongs to another agent, or the resolved agent version has no
+    run spec.
 
     Args:
         experiment_id: Id of the experiment.

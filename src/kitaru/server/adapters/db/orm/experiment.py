@@ -16,7 +16,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,6 +27,7 @@ from kitaru.server.adapters.db.orm.base import (
 )
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
+    index_name,
     unique_constraint_name,
 )
 from kitaru.server.domain.experiment import Experiment
@@ -106,6 +107,8 @@ class ReplayConfigORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 EXPERIMENT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("experiment", ["name"])
 EXPERIMENT_OWNER_ID_FOREIGN_KEY = foreign_key_name("experiment", ["owner_id"])
+EXPERIMENT_AGENT_ID_FOREIGN_KEY = foreign_key_name("experiment", ["agent_id"])
+EXPERIMENT_AGENT_ID_INDEX = index_name("experiment", ["agent_id"])
 EXPERIMENT_REPLAY_CONFIG_ID_FOREIGN_KEY = foreign_key_name(
     "experiment", ["replay_config_id"]
 )
@@ -121,15 +124,20 @@ class ExperimentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["owner_id"], ["account.id"], name=EXPERIMENT_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
+            ["agent_id"], ["agent.id"], name=EXPERIMENT_AGENT_ID_FOREIGN_KEY
+        ),
+        ForeignKeyConstraint(
             ["replay_config_id"],
             ["replay_config.id"],
             name=EXPERIMENT_REPLAY_CONFIG_ID_FOREIGN_KEY,
         ),
+        Index(EXPERIMENT_AGENT_ID_INDEX, "agent_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
+    agent_id: Mapped[uuid.UUID]
     replay_config_id: Mapped[uuid.UUID]
 
     @classmethod
@@ -147,6 +155,7 @@ class ExperimentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=experiment.owner_id,
             name=experiment.name,
             description=experiment.description,
+            agent_id=experiment.agent_id,
             replay_config_id=experiment.replay_config_id,
         )
 
@@ -161,6 +170,7 @@ class ExperimentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=self.owner_id,
             name=self.name,
             description=self.description,
+            agent_id=self.agent_id,
             replay_config_id=self.replay_config_id,
             created=self.created,
             updated=self.updated,

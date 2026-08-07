@@ -528,6 +528,7 @@ jobs:
         run: |
           docker build --check -f docker/release-client.Dockerfile .
           docker build --check -f docker/release-server.Dockerfile .
+          docker build --check -f docker/release-worker.Dockerfile .
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -544,6 +545,25 @@ jobs:
           labels: |
             org.opencontainers.image.title=kitaru
             org.opencontainers.image.description=Kitaru client
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: Build and publish public worker Docker image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-worker.Dockerfile
+          target: worker
+          push: true
+          build-args: |
+            KITARU_VERSION=${{ env.VERSION }}
+          tags: |
+            zenmldocker/kitaru-worker:${{ env.VERSION }}
+            zenmldocker/kitaru-worker:latest
+          labels: |
+            org.opencontainers.image.title=kitaru-worker
+            org.opencontainers.image.description=Kitaru worker
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/zenml-io/kitaru
             org.opencontainers.image.licenses=Apache-2.0
@@ -623,6 +643,7 @@ jobs:
             echo "### Docker image"
             echo "Statically validated: docker/release-client.Dockerfile"
             echo "Statically validated: docker/release-server.Dockerfile"
+            echo "Statically validated: docker/release-worker.Dockerfile"
             echo "Images require the published kitaru==$VERSION package and were not built."
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"

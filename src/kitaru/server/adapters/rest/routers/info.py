@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.server.adapters.rest.dependencies import get_app_settings
-from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
+from kitaru.server.api.config import APISettings
 
 router = APIRouter()
 
@@ -46,7 +46,7 @@ async def get_info(
     if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
         control_plane_api_url = settings.CONTROL_PLANE_API_URL.rstrip("/")
     return ServerInfoResponse(
-        id=None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID,
+        id=settings.SERVER_ID,
         version=KITARU_VERSION,
         auth_scheme=settings.AUTH_SCHEME,
         server_url=settings.SERVER_URL.rstrip("/") or None,
