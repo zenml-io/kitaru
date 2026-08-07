@@ -21,17 +21,18 @@ instead of duplicating them.
 
 from typing import Any, TypeVar
 
-from kitaru.api_models.v1.base import (
-    ListParams,
-    OwnedResponseModel,
-    TimestampedResponseModel,
-)
+from kitaru.api_models.v1.base import ListParams, TimestampedResponseModel
 from kitaru.api_models.v1.evaluator import (
+    EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
     EvaluatorVersionResponse,
 )
 from kitaru.api_models.v1.filter import Filter
-from kitaru.api_models.v1.importer import ImporterUpdateRequest, ImporterVersionResponse
+from kitaru.api_models.v1.importer import (
+    ImporterCreateRequest,
+    ImporterUpdateRequest,
+    ImporterVersionResponse,
+)
 from kitaru.api_models.v1.plugin import PackagePluginSource as WirePackagePluginSource
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.api_models.v1.plugin import ScriptPluginSource as WireScriptPluginSource
@@ -39,6 +40,7 @@ from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.plugin import (
     EvaluatorFilter,
     ImporterFilter,
+    PluginCreate,
     PluginFilter,
     PluginUpdate,
 )
@@ -51,7 +53,7 @@ from kitaru.server.domain.plugin import (
     ScriptPluginSource as DomainScriptPluginSource,
 )
 
-PluginResponseT = TypeVar("PluginResponseT", bound=OwnedResponseModel)
+PluginResponseT = TypeVar("PluginResponseT", bound=TimestampedResponseModel)
 PluginVersionResponseT = TypeVar(
     "PluginVersionResponseT", bound=TimestampedResponseModel
 )
@@ -119,6 +121,7 @@ def plugin_to_response(
         "owner_id": plugin.owner_id,
         "name": plugin.name,
         "description": plugin.description,
+        "logo_url": plugin.logo_url,
         "metadata": plugin.metadata,
         "latest_version": plugin.latest_version,
         "created": plugin.created,
@@ -179,6 +182,28 @@ def plugin_list_params_to_filter(
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,
+    )
+
+
+def plugin_create_to_command(
+    body: EvaluatorCreateRequest | ImporterCreateRequest,
+) -> PluginCreate:
+    """Convert an evaluator or importer create request to a plugin command.
+
+    Args:
+        body: Evaluator or importer create request.
+
+    Returns:
+        Create command.
+    """
+    # Read the provider off importer requests only, evaluators reject one.
+    provider = body.provider if isinstance(body, ImporterCreateRequest) else None
+    return PluginCreate(
+        name=body.name,
+        description=body.description,
+        provider=provider,
+        logo_url=body.logo_url,
+        metadata=body.metadata,
     )
 
 

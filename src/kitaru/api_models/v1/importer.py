@@ -19,7 +19,6 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import (
     JsonValue,
-    OwnedResponseModel,
     RequestModel,
     TimestampedResponseModel,
 )
@@ -35,6 +34,7 @@ class ImporterCreateRequest(RequestModel):
     provider: str | None = Field(
         default=None, description="Source system this importer reads."
     )
+    logo_url: str | None = Field(default=None, description="Importer logo URL.")
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
@@ -46,6 +46,7 @@ class ImporterUpdateRequest(RequestModel):
     description: str | None = Field(
         default=None, description="New importer description."
     )
+    logo_url: str | None = Field(default=None, description="New logo URL.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -55,13 +56,17 @@ class ImporterListParams(FilterableListParams):
     """Importer list params."""
 
 
-class ImporterResponse(OwnedResponseModel):
+class ImporterResponse(TimestampedResponseModel):
     """Importer response."""
 
+    owner_id: uuid.UUID | None = Field(
+        description="Id of the owning account, null for a default plugin."
+    )
     id: uuid.UUID = Field(description="Importer id.")
     name: str = Field(description="Importer name.")
     description: str | None = Field(description="Importer description.")
     provider: str | None = Field(description="Source system this importer reads.")
+    logo_url: str | None = Field(description="Importer logo URL.")
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     latest_version: int = Field(
         description="Highest version number created for this importer."

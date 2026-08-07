@@ -31,6 +31,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
     SessionNodeListParams,
     SessionNodeResponse,
+    SessionWithNodesResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
@@ -45,6 +46,7 @@ from kitaru.server.adapters.rest.mapping.evaluations import (
     session_evaluations_request_to_merges,
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
+    referenced_parent_ids,
     session_node_batch_to_upserts,
     session_node_list_params_to_filter,
     session_node_to_response,
@@ -75,7 +77,7 @@ async def create_session(
 
     A task principal's session is always linked to its own task, regardless
     of the request's task_id. Clients observe HTTP 201 on success, 409 when
-    the provider and external id pair is already registered, and 422 on
+    the imported_from and external id pair is already registered, and 422 on
     invalid input.
 
     Args:
@@ -214,7 +216,9 @@ async def ingest_session_nodes(
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
-    index_by_id = await service.get_index_by_id(session_id, actor=actor)
+    index_by_id = await service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
     return [
         session_node_to_response(node, index_by_id, include_payloads=True)
         for node in nodes
@@ -244,7 +248,9 @@ async def list_session_nodes(
     """
     session_node_filter = session_node_list_params_to_filter(session_id, params)
     nodes, next_cursor = await service.list_nodes(session_node_filter, actor=actor)
-    index_by_id = await service.get_index_by_id(session_id, actor=actor)
+    index_by_id = await service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
     return Page[SessionNodeResponse](
         items=[
             session_node_to_response(
@@ -253,6 +259,45 @@ async def list_session_nodes(
             for node in nodes
         ],
         next_cursor=next_cursor,
+    )
+
+
+@router.get("/{session_id}/full")
+async def get_session_with_nodes(
+    session_id: uuid.UUID,
+    service: Annotated[SessionService, Depends(get_session_service)],
+    node_service: Annotated[SessionNodeService, Depends(get_session_node_service)],
+    actor: Annotated[AuthContext, Depends(authorize_with_task)],
+) -> SessionWithNodesResponse:
+    """Get a session together with every one of its nodes.
+
+    The node list is not paginated, so one call carries a whole session.
+
+    Clients observe HTTP 200 on success, 403 when a task token neither owns
+    nor reads this session, and 404 when no session has this id.
+
+    Args:
+        session_id: Id of the session.
+        service: Session service.
+        node_service: Session node service.
+        actor: Caller context.
+
+    Returns:
+        Session with every node, ordered by index.
+    """
+    session = await service.get_session(session_id, actor=actor)
+    nodes = await node_service.list_all_nodes(
+        session_id, include_payloads=True, actor=actor
+    )
+    index_by_id = await node_service.get_indexes_by_ids(
+        session_id, referenced_parent_ids(nodes), actor=actor
+    )
+    return SessionWithNodesResponse(
+        session=session_to_response(session),
+        nodes=[
+            session_node_to_response(node, index_by_id, include_payloads=True)
+            for node in nodes
+        ],
     )
 
 

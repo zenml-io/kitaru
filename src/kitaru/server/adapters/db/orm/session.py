@@ -44,8 +44,8 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.session import Session
 
-SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session", ["provider", "external_id"]
+SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["imported_from", "external_id"]
 )
 SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["agent_id", "number"]
@@ -70,9 +70,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "session"
     __table_args__ = (
         UniqueConstraint(
-            "provider",
+            "imported_from",
             "external_id",
-            name=SESSION_PROVIDER_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
         ),
         UniqueConstraint(
             "agent_id",
@@ -116,13 +116,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
-    expected: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     external_id: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
-    provider: Mapped[str | None] = mapped_column(Text)
+    imported_from: Mapped[str | None] = mapped_column(Text)
     framework: Mapped[str | None] = mapped_column(Text)
     adapter_version: Mapped[str | None] = mapped_column(Text)
     cost: Mapped[Decimal | None] = mapped_column(Numeric)
@@ -159,13 +158,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=session.name,
             inputs=session.inputs,
             outputs=session.outputs,
-            expected=session.expected,
             error=session.error,
             started_at=session.started_at,
             ended_at=session.ended_at,
             external_id=session.external_id,
             metadata_=session.metadata,
-            provider=session.provider,
+            imported_from=session.imported_from,
             framework=session.framework,
             adapter_version=session.adapter_version,
             cost=session.cost,
@@ -219,13 +217,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             inputs=self.inputs,
             outputs=self.outputs,
-            expected=self.expected,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
             external_id=self.external_id,
             metadata=self.metadata_,
-            provider=self.provider,
+            imported_from=self.imported_from,
             framework=self.framework,
             adapter_version=self.adapter_version,
             cost=self.cost,

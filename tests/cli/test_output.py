@@ -311,12 +311,12 @@ def test_annotation_json_redacts_nested_secret_fields() -> None:
         (
             80,
             ("Status", "Name", "ID"),
-            ("Origin", "Provider", "LLM calls", "Tool calls", "Cost"),
+            ("Origin", "Imported from", "LLM calls", "Tool calls", "Cost"),
         ),
         (
             120,
             ("Status", "Name", "ID", "Origin"),
-            ("Provider", "LLM calls", "Tool calls", "Cost"),
+            ("Imported from", "LLM calls", "Tool calls", "Cost"),
         ),
         (
             200,
@@ -325,7 +325,7 @@ def test_annotation_json_redacts_nested_secret_fields() -> None:
                 "Name",
                 "ID",
                 "Origin",
-                "Provider",
+                "Imported from",
                 "LLM calls",
                 "Tool calls",
                 "Cost",
@@ -348,7 +348,7 @@ def test_human_session_list_selects_columns_for_terminal_width(
                     "status": "completed",
                     "name": "Example",
                     "origin": "imported",
-                    "provider": "langfuse",
+                    "imported_from": "langfuse",
                     "llm_call_count": 2,
                     "tool_call_count": 3,
                     "cost": "0.012",

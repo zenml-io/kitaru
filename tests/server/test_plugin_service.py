@@ -22,6 +22,7 @@ from conftest import FakeBlobRepository, FakePluginRepository, create_blob
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import (
+    PluginCreate,
     PluginFilter,
     PluginUpdate,
     PluginVersionFilter,
@@ -37,6 +38,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
     PluginVersionNotFound,
+    ReservedPluginName,
     ScriptPluginSource,
 )
 
@@ -103,10 +105,12 @@ def importer_service(
 async def test_create_plugin(evaluator_service: PluginService) -> None:
     """Create a plugin owned by the caller."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy",
-        description="Scores accuracy",
-        provider=None,
-        metadata={"team": "eval"},
+        PluginCreate(
+            name="accuracy",
+            description="Scores accuracy",
+            provider=None,
+            metadata={"team": "eval"},
+        ),
         actor=ACTOR,
     )
     assert plugin.kind is PluginKind.EVALUATOR
@@ -122,14 +126,34 @@ async def test_create_plugin(evaluator_service: PluginService) -> None:
 async def test_create_plugin_duplicate_name(evaluator_service: PluginService) -> None:
     """Reject a second evaluator with the same name."""
     await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     with pytest.raises(
         DuplicatePluginName, match="Evaluator name 'accuracy' is already registered"
     ):
         await evaluator_service.create_plugin(
-            name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+            PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+            actor=ACTOR,
         )
+
+
+async def test_create_plugin_reserved_name(evaluator_service: PluginService) -> None:
+    """Reject a name that uses the reserved default-plugin prefix."""
+    with pytest.raises(
+        ReservedPluginName,
+        match="Plugin name 'kitaru/accuracy' uses the reserved prefix 'kitaru/'",
+    ):
+        await evaluator_service.create_plugin(
+            PluginCreate(
+                name="kitaru/accuracy", description=None, provider=None, metadata={}
+            ),
+            actor=ACTOR,
+        )
+    plugins, _ = await evaluator_service.list_plugins(
+        PluginFilter(kind=PluginKind.EVALUATOR), actor=ACTOR
+    )
+    assert plugins == []
 
 
 async def test_create_plugin_evaluator_rejects_provider(
@@ -138,10 +162,9 @@ async def test_create_plugin_evaluator_rejects_provider(
     """Reject a provider on an evaluator plugin."""
     with pytest.raises(InvalidPluginProvider):
         await evaluator_service.create_plugin(
-            name="accuracy",
-            description=None,
-            provider="langfuse",
-            metadata={},
+            PluginCreate(
+                name="accuracy", description=None, provider="langfuse", metadata={}
+            ),
             actor=ACTOR,
         )
 
@@ -151,10 +174,9 @@ async def test_create_plugin_importer_allows_provider(
 ) -> None:
     """Store the provider on an importer plugin."""
     plugin = await importer_service.create_plugin(
-        name="langfuse-import",
-        description=None,
-        provider="langfuse",
-        metadata={},
+        PluginCreate(
+            name="langfuse-import", description=None, provider="langfuse", metadata={}
+        ),
         actor=ACTOR,
     )
     assert plugin.provider == "langfuse"
@@ -165,10 +187,12 @@ async def test_evaluator_and_importer_share_a_name(
 ) -> None:
     """Let an evaluator and an importer register the same name."""
     evaluator = await evaluator_service.create_plugin(
-        name="shared", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="shared", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     importer = await importer_service.create_plugin(
-        name="shared", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="shared", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     assert evaluator.id != importer.id
     assert evaluator.name == importer.name == "shared"
@@ -177,7 +201,8 @@ async def test_evaluator_and_importer_share_a_name(
 async def test_get_plugin(evaluator_service: PluginService) -> None:
     """Get a plugin by id."""
     created = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     loaded = await evaluator_service.get_plugin(created.id, actor=ACTOR)
     assert loaded == created
@@ -195,13 +220,13 @@ async def test_list_plugins_scoped_to_kind(
 ) -> None:
     """List only plugins matching the service's bound kind."""
     await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     await importer_service.create_plugin(
-        name="langfuse-import",
-        description=None,
-        provider=None,
-        metadata={},
+        PluginCreate(
+            name="langfuse-import", description=None, provider=None, metadata={}
+        ),
         actor=ACTOR,
     )
 
@@ -221,10 +246,9 @@ async def test_list_plugins_scoped_to_kind(
 async def test_update_plugin_description(evaluator_service: PluginService) -> None:
     """Update the description, leaving metadata unchanged."""
     created = await evaluator_service.create_plugin(
-        name="accuracy",
-        description="old",
-        provider=None,
-        metadata={"team": "eval"},
+        PluginCreate(
+            name="accuracy", description="old", provider=None, metadata={"team": "eval"}
+        ),
         actor=ACTOR,
     )
     updated = await evaluator_service.update_plugin(
@@ -239,7 +263,8 @@ async def test_update_plugin_explicit_null_clears_description(
 ) -> None:
     """Clear the description when it is explicitly set to null."""
     created = await evaluator_service.create_plugin(
-        name="accuracy", description="old", provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description="old", provider=None, metadata={}),
+        actor=ACTOR,
     )
     updated = await evaluator_service.update_plugin(
         created.id, PluginUpdate(description=None), actor=ACTOR
@@ -252,7 +277,8 @@ async def test_update_plugin_omitted_description_stays_unchanged(
 ) -> None:
     """Leave the description unchanged when the update omits it."""
     created = await evaluator_service.create_plugin(
-        name="accuracy", description="old", provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description="old", provider=None, metadata={}),
+        actor=ACTOR,
     )
     updated = await evaluator_service.update_plugin(
         created.id, PluginUpdate(metadata={"team": "eval"}), actor=ACTOR
@@ -272,7 +298,8 @@ async def test_update_plugin_not_found(evaluator_service: PluginService) -> None
 async def test_delete_plugin(evaluator_service: PluginService) -> None:
     """Delete a stored plugin."""
     created = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     await evaluator_service.delete_plugin(created.id, actor=ACTOR)
     with pytest.raises(PluginNotFound):
@@ -290,7 +317,8 @@ async def test_create_version_numbers_sequentially(
 ) -> None:
     """Assign sequential version numbers starting at 1."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     first = await evaluator_service.create_version(
         plugin.id,
@@ -330,7 +358,8 @@ async def test_create_version_script_source_checks_blob(
 ) -> None:
     """Reject a script version naming an unknown blob."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     missing_blob_id = uuid.uuid4()
     with pytest.raises(BlobNotFound, match=f"Blob {missing_blob_id} was not found"):
@@ -347,7 +376,8 @@ async def test_create_version_script_source_with_known_blob(
 ) -> None:
     """Accept a script version naming a stored blob."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     blob = await create_blob(blob_repository, ACTOR.account.id)
     version = await evaluator_service.create_version(
@@ -363,7 +393,8 @@ async def test_create_version_script_source_with_known_blob(
 async def test_get_version(evaluator_service: PluginService) -> None:
     """Get a plugin version by version number."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     created = await evaluator_service.create_version(
         plugin.id,
@@ -380,7 +411,8 @@ async def test_get_version(evaluator_service: PluginService) -> None:
 async def test_get_version_not_found(evaluator_service: PluginService) -> None:
     """Raise for an unknown version number."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     with pytest.raises(
         PluginVersionNotFound, match=f"Version 1 of plugin {plugin.id} was not found"
@@ -391,7 +423,8 @@ async def test_get_version_not_found(evaluator_service: PluginService) -> None:
 async def test_list_versions(evaluator_service: PluginService) -> None:
     """List a plugin's versions."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     await evaluator_service.create_version(
         plugin.id,
@@ -415,7 +448,8 @@ async def test_list_versions(evaluator_service: PluginService) -> None:
 async def test_update_version_display_version(evaluator_service: PluginService) -> None:
     """Update a version's display version."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     created = await evaluator_service.create_version(
         plugin.id,
@@ -432,7 +466,8 @@ async def test_update_version_display_version(evaluator_service: PluginService) 
 async def test_update_version_not_found(evaluator_service: PluginService) -> None:
     """Raise for an unknown version number."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     with pytest.raises(PluginVersionNotFound):
         await evaluator_service.update_version(
@@ -452,7 +487,8 @@ async def test_create_version_tracks_plugin_registered(
         analytics=analytics,
     )
     plugin = await service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
 
     await service.create_version(
@@ -466,7 +502,7 @@ async def test_create_version_tracks_plugin_registered(
     user_id, event, properties = analytics.tracked[0]
     assert user_id == ACTOR.account.id
     assert event == AnalyticsEvent.PLUGIN_REGISTERED
-    assert properties == {"kind": "evaluator", "source_type": "package"}
+    assert properties == {"kind": "evaluator", "plugin_source": "package"}
 
 
 async def test_create_version_without_analytics_tracker(
@@ -474,7 +510,8 @@ async def test_create_version_without_analytics_tracker(
 ) -> None:
     """Register a plugin version normally when no analytics tracker is configured."""
     plugin = await evaluator_service.create_plugin(
-        name="accuracy", description=None, provider=None, metadata={}, actor=ACTOR
+        PluginCreate(name="accuracy", description=None, provider=None, metadata={}),
+        actor=ACTOR,
     )
     version = await evaluator_service.create_version(
         plugin.id,
@@ -483,3 +520,55 @@ async def test_create_version_without_analytics_tracker(
         actor=ACTOR,
     )
     assert version.version == 1
+
+
+async def test_create_plugin_with_logo_url(evaluator_service: PluginService) -> None:
+    """Store the logo URL given at creation."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", logo_url="https://example.com/accuracy.svg"),
+        actor=ACTOR,
+    )
+    assert plugin.logo_url == "https://example.com/accuracy.svg"
+
+
+async def test_create_plugin_without_logo_url(
+    evaluator_service: PluginService,
+) -> None:
+    """Leave the logo URL unset when the command omits it."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy"), actor=ACTOR
+    )
+    assert plugin.logo_url is None
+
+
+async def test_update_plugin_logo_url(evaluator_service: PluginService) -> None:
+    """Update the logo URL, leaving the description unchanged."""
+    created = await evaluator_service.create_plugin(
+        PluginCreate(
+            name="accuracy",
+            description="scores",
+            logo_url="https://example.com/old.svg",
+        ),
+        actor=ACTOR,
+    )
+    updated = await evaluator_service.update_plugin(
+        created.id,
+        PluginUpdate(logo_url="https://example.com/new.svg"),
+        actor=ACTOR,
+    )
+    assert updated.logo_url == "https://example.com/new.svg"
+    assert updated.description == "scores"
+
+
+async def test_update_plugin_explicit_null_clears_logo_url(
+    evaluator_service: PluginService,
+) -> None:
+    """Clear the logo URL when it is explicitly set to null."""
+    created = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", logo_url="https://example.com/accuracy.svg"),
+        actor=ACTOR,
+    )
+    updated = await evaluator_service.update_plugin(
+        created.id, PluginUpdate(logo_url=None), actor=ACTOR
+    )
+    assert updated.logo_url is None

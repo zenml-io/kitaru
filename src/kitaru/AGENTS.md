@@ -1,16 +1,19 @@
 # Kitaru package rules
 
-The package has five independent top-level parts. `client` and `server` never
-import each other and both sit on `api_models`, `analytics`, and `transport`.
-import-linter enforces this, along with the server layering (adapters above
-application above domain).
+The import-linter contract covers five shared/runtime parts. `client` and `server` never import each other and both sit on `api_models`, `analytics`, and `transport`. Import-linter enforces this, along with the server layering (adapters above application above domain).
 
 - `analytics/`: Async analytics client and event source tracking.
 - `api_models/`: Versioned request and response DTOs shared by server and SDK.
 - `transport.py`: Retrying HTTP transport shared by every outbound client.
 - `client/`: Async SDK making REST calls.
-- `server/`: FastAPI server in layers (API, application, domain,
-  infrastructure adapters).
+- `server/`: FastAPI server in layers (API, application, domain, infrastructure adapters).
+
+The package also has four first-class delivery surfaces outside that five-part contract:
+
+- `cli/`: Optional Cyclopts CLI and structured output rendering.
+- `mcp/`: Optional native MCP server and capability-filtered tool registry.
+- `task/`: Importer and evaluator task subprocess entrypoints.
+- `worker/`: Worker lifecycle, task dispatch, and task handlers.
 
 Module naming: modules that define per-entity types are singular
 (`domain/order.py`, `orm/order.py`, `application/models/order.py`,

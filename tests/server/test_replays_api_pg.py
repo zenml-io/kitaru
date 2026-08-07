@@ -54,7 +54,6 @@ async def _setup_replayable_session(client: httpx.AsyncClient) -> tuple[str, str
                 "origin": "recorded",
                 "inputs": {"q": "hi"},
                 "outputs": None,
-                "expected": None,
             },
         )
     ).json()
@@ -128,7 +127,6 @@ async def test_replay_pipeline_completes_through_the_api(
                 "origin": "replay",
                 "inputs": None,
                 "outputs": None,
-                "expected": None,
             },
             headers=agent_task_headers,
         )

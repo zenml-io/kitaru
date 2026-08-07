@@ -113,7 +113,6 @@ async def _make_session(api_client: KitaruAPIClient, agent_id: uuid.UUID) -> uui
             origin=SessionOrigin.RECORDED,
             inputs=None,
             outputs=None,
-            expected=None,
         )
     )
     return session.id

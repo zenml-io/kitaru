@@ -77,7 +77,6 @@ class SessionCreateRequest(RequestModel):
     name: str | None = Field(default=None, description="Session name.")
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
-    expected: Any = Field(description="Expected outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: AwareDatetime | None = Field(
         default=None, description="Time the session started."
@@ -91,8 +90,8 @@ class SessionCreateRequest(RequestModel):
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
-    provider: str | None = Field(
-        default=None, description="Source system naming the session."
+    imported_from: str | None = Field(
+        default=None, description="Source system the session was imported from."
     )
     framework: str | None = Field(default=None, description="Agent framework used.")
     adapter_version: str | None = Field(
@@ -110,7 +109,6 @@ class SessionUpdateRequest(RequestModel):
     error: str | None = Field(default=None, description="New error.")
     ended_at: AwareDatetime | None = Field(default=None, description="New end time.")
     name: str | None = Field(default=None, description="New session name.")
-    expected: Any = Field(default=None, description="New expected outputs.")
     metadata: dict[str, JsonValue] | None = Field(
         default=None, description="New metadata."
     )
@@ -145,7 +143,6 @@ class SessionResponse(OwnedResponseModel):
     name: str | None = Field(default=None, description="Session name.")
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
-    expected: Any = Field(description="Expected outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: datetime | None = Field(
         default=None, description="Time the session started."
@@ -157,8 +154,8 @@ class SessionResponse(OwnedResponseModel):
         default=None, description="Id from the source system."
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
-    provider: str | None = Field(
-        default=None, description="Source system naming the session."
+    imported_from: str | None = Field(
+        default=None, description="Source system the session was imported from."
     )
     framework: str | None = Field(default=None, description="Agent framework used.")
     adapter_version: str | None = Field(

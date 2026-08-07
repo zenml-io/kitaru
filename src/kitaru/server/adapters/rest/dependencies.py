@@ -14,7 +14,6 @@
 """FastAPI dependency providers."""
 
 from collections.abc import AsyncGenerator
-from importlib.metadata import version
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
@@ -94,7 +93,7 @@ from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionPro
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
-from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -130,7 +129,10 @@ from kitaru.server.application.services.permission_service import PermissionServ
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
-from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.server_analytics import (
+    ServerAnalytics,
+    current_actor,
+)
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -145,7 +147,6 @@ from kitaru.server.domain.account import AccountNotFound
 from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
-KITARU_VERSION = version("kitaru")
 
 
 class RequestCredential(NamedTuple):
@@ -216,23 +217,18 @@ def get_analytics_client(request: Request) -> AnalyticsClient:
 
 def get_server_analytics(
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
     client: Annotated[AnalyticsClient, Depends(get_analytics_client)],
 ) -> ServerAnalytics:
     """Return a server analytics tracker for the current request.
 
     Args:
         session: Request-scoped database session.
-        settings: API settings for this process.
         client: Analytics client for this process.
 
     Returns:
         Tracker buffering track calls until the request session commits.
     """
-    server_id = None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID
-    return ServerAnalytics(
-        client=client, session=session, server_id=server_id, version=KITARU_VERSION
-    )
+    return ServerAnalytics(client=client, session=session)
 
 
 def get_permission_service(
@@ -254,12 +250,14 @@ def get_permission_service(
 def get_account_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     permission_service: Annotated[PermissionService, Depends(get_permission_service)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AccountService:
     """Return an account service for the current request.
 
     Args:
         session: Request-scoped database session.
         permission_service: Permission service for the current request.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Account service bound to the SQL repository.
@@ -268,35 +266,42 @@ def get_account_service(
         repository=SQLAccountRepository(session),
         password_hasher=BcryptPasswordHasher(),
         permission_service=permission_service,
+        analytics=analytics,
     )
 
 
 def get_agent_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AgentService:
     """Return an agent service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Agent service bound to the SQL repository.
     """
-    return AgentService(repository=SQLAgentRepository(session))
+    return AgentService(repository=SQLAgentRepository(session), analytics=analytics)
 
 
 def get_agent_version_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AgentVersionService:
     """Return an agent version service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Agent version service bound to the SQL repositories.
     """
-    return AgentVersionService(repository=SQLAgentVersionRepository(session))
+    return AgentVersionService(
+        repository=SQLAgentVersionRepository(session), analytics=analytics
+    )
 
 
 def get_api_key_service(
@@ -566,6 +571,7 @@ def get_experiment_service(
         repository=SQLExperimentRepository(session),
         plugin_repository=SQLPluginRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
+        agent_repository=SQLAgentRepository(session),
         cohort_version_repository=SQLCohortVersionRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         agent_version_repository=SQLAgentVersionRepository(session),
@@ -692,12 +698,14 @@ def get_evaluation_service(
 def get_investigation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> InvestigationService:
     """Return an investigation service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Investigation service bound to the SQL repositories.
@@ -706,18 +714,21 @@ def get_investigation_service(
         repository=SQLInvestigationRepository(session),
         agent_repository=SQLAgentRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+        analytics=analytics,
     )
 
 
 def get_annotation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AnnotationService:
     """Return an annotation service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Annotation service bound to the SQL repositories.
@@ -727,6 +738,7 @@ def get_annotation_service(
         investigation_repository=SQLInvestigationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         session_node_repository=SQLSessionNodeRepository(session),
+        analytics=analytics,
     )
 
 
@@ -790,6 +802,7 @@ def get_auth_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     device_service: Annotated[DeviceService, Depends(get_device_service)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
@@ -797,6 +810,7 @@ def get_auth_service(
         request: Incoming request.
         session: Request-scoped database session.
         device_service: Device service for the current request.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Authentication service bound to the SQL repositories.
@@ -806,10 +820,14 @@ def get_auth_service(
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
     if client is not None:
+        # Settings validation requires SERVER_ID under the control plane
+        # scheme, the only scheme that constructs the client.
+        assert settings.SERVER_ID is not None
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
             server_id=settings.SERVER_ID,
+            analytics=analytics,
         )
     return AuthService(
         settings=settings,
@@ -888,8 +906,38 @@ async def _resolve_auth_context(
         RequestCredential | None, Depends(get_optional_bearer_credential)
     ],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
-) -> AuthContext:
+) -> AsyncGenerator[AuthContext, None]:
     """Resolve a request into its auth context, gating on nothing but validity.
+
+    The resolved account is published as the analytics actor for the rest of
+    the request.
+
+    Args:
+        settings: Service settings governing auth behavior.
+        credential: Bearer token plus optional CSRF token.
+        auth_service: Authentication service for the current request.
+
+    Raises:
+        HTTPException: The credential is missing or invalid.
+        RuntimeError: The default account was not initialized at startup.
+
+    Yields:
+        Resolved account and principal for use-case calls.
+    """
+    context = await _authenticate(settings, credential, auth_service)
+    token = current_actor.set(context.account)
+    try:
+        yield context
+    finally:
+        current_actor.reset(token)
+
+
+async def _authenticate(
+    settings: APISettings,
+    credential: RequestCredential | None,
+    auth_service: AuthService,
+) -> AuthContext:
+    """Authenticate a request credential into its auth context.
 
     With the ``none`` auth scheme a request without a worker or task
     credential runs as the default account. Other schemes require a bearer

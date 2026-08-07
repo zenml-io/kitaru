@@ -506,7 +506,7 @@ _VIEWS: dict[str, HumanView] = {
             _NAME,
             _ID,
             HumanField("origin", "Origin", 105),
-            HumanField("provider", "Provider", 125),
+            HumanField("imported_from", "Imported from", 125),
             HumanField("llm_call_count", "LLM calls", 150),
             HumanField("tool_call_count", "Tool calls", 165),
             HumanField("cost", "Cost", 175),
@@ -541,7 +541,7 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("agent_id", "Agent ID"),
                     HumanField("agent_version_id", "Agent version ID"),
-                    HumanField("provider", "Provider"),
+                    HumanField("imported_from", "Imported from"),
                     HumanField("framework", "Framework"),
                     HumanField("adapter_version", "Adapter version"),
                 ),
@@ -560,7 +560,6 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("inputs", "Inputs"),
                     HumanField("outputs", "Outputs"),
-                    HumanField("expected", "Expected"),
                 ),
             ),
             HumanSection("Error", (HumanField("error", "Error"),)),

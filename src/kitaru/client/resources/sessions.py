@@ -30,6 +30,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
     SessionNodeListParams,
     SessionNodeResponse,
+    SessionWithNodesResponse,
 )
 from kitaru.client.resources.pagination import iterate_pages
 
@@ -56,7 +57,7 @@ class SessionsResource:
 
         Raises:
             APIError: The request failed, including 409 for a duplicate
-                provider and external id pair.
+                imported_from and external id pair.
 
         Returns:
             Created session.
@@ -83,6 +84,24 @@ class SessionsResource:
         """
         response = await self._client.request("GET", f"/v1/sessions/{session_id}")
         return SessionResponse.model_validate(response.json())
+
+    async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
+        """Get a session together with every one of its nodes.
+
+        The node list is not paginated, so one call carries a whole session.
+
+        Args:
+            session_id: Id of the session.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                session.
+
+        Returns:
+            Session with every node, ordered by index.
+        """
+        response = await self._client.request("GET", f"/v1/sessions/{session_id}/full")
+        return SessionWithNodesResponse.model_validate(response.json())
 
     async def ingest_nodes(
         self, session_id: uuid.UUID, batch: SessionNodeBatchRequest

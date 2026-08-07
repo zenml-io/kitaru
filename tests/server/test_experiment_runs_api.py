@@ -128,6 +128,7 @@ async def run_setup(services: ReplayServices) -> dict[str, str]:
     experiment, _ = await services.experiment_service.create_experiment(
         ExperimentCreate(
             name="exp1",
+            agent_id=agent.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
         ),
         actor=AuthContext(account=ACCOUNT),
