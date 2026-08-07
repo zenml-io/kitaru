@@ -45,12 +45,13 @@ uv sync \
   --extra mcp
 ```
 
-Connect and seed the bundled development plugins:
+Connect and confirm the server-provided plugins:
 
 ```bash
 uv run kitaru login --local
 uv run kitaru status
-uv run python ../../scripts/seed_default_plugins.py
+uv run kitaru importer get kitaru/langfuse
+uv run kitaru evaluator get kitaru/cost
 ```
 
 Start a worker in a second terminal and leave it running:
@@ -181,7 +182,7 @@ It starts one run for the target cohort and one for the control cohort through M
 
 ## Step 10: Decide from evidence
 
-The final comparison contains one row per reviewed replay with its cohort, baseline and candidate action, policy transition, comparable cost and latency evidence, tool-path change, replay status, and exact Kitaru identities.
+The final comparison contains one row per reviewed replay with its cohort, baseline and candidate action, policy transition, comparable guardrail evidence, tool-path change, replay status, and exact Kitaru identities. The default replay uses the same model as the checked-in baseline, so latency is comparable unless `BASELINE_MODEL` is overridden. Replay cost remains unavailable until the adapter records provider cost; do not interpret that missing value as zero.
 
 The intended result is:
 

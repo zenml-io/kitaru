@@ -45,13 +45,7 @@ uv run kitaru login --local
 uv run kitaru status
 ```
 
-Seed the development importers and evaluators into the fresh local database:
-
-```bash
-uv run python ../../scripts/seed_default_plugins.py
-```
-
-Confirm that the `langfuse` importer and the `cost`, `latency`, and `tool-call-patterns` evaluators are available:
+The server registers Kitaru's official importers and evaluators when it starts. Confirm that the `kitaru/langfuse` importer and the `kitaru/cost`, `kitaru/latency`, and `kitaru/tool-call-patterns` evaluators are available:
 
 ```bash
 uv run kitaru importer list
@@ -114,7 +108,7 @@ Import the Langfuse traces under the exact baseline agent version:
 ```bash
 uv run kitaru session import \
   traces/langfuse-traces.jsonl \
-  --importer langfuse@latest \
+  --importer kitaru/langfuse@latest \
   --agent returns-resolver@1 \
   --tag returns-baseline \
   --params '{"source_instance":"canonical-returns-example"}' \
@@ -140,9 +134,9 @@ Run Kitaru's deterministic evaluators across the imported baseline:
 ```bash
 uv run kitaru session evaluate \
   --tag returns-baseline \
-  --evaluator cost@latest \
-  --evaluator latency@latest \
-  --evaluator tool-call-patterns@latest \
+  --evaluator kitaru/cost@latest \
+  --evaluator kitaru/latency@latest \
+  --evaluator kitaru/tool-call-patterns@latest \
   --wait
 ```
 
@@ -191,7 +185,7 @@ INVESTIGATION_ID="$(
     --question 'outcome=Is this outcome acceptable, problematic, or uncertain, and why?' \
     --question 'expected=What should the agent have done in this case?' \
     --session "$TICKET_004_SESSION_ID" \
-    --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A $280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"description\":\"The terminal action that needs review.\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
+    --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A \$280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"description\":\"The terminal action that needs review.\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
   | jq -r '.item.id'
 )"
 
@@ -510,12 +504,13 @@ Create one reusable experiment that records the primary policy result plus the b
 ```bash
 uv run kitaru experiment create \
   improve-returns-policy \
+  --agent returns-resolver \
   --description "Replay policy-risk and valid-refund cohorts with strict refund approval rules." \
   --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
   --evaluator returns-policy@1 \
-  --evaluator cost@latest \
-  --evaluator latency@latest \
-  --evaluator tool-call-patterns@latest
+  --evaluator kitaru/cost@latest \
+  --evaluator kitaru/latency@latest \
+  --evaluator kitaru/tool-call-patterns@latest
 ```
 
 The mock commerce tools are safe to call again, so the experiment sets passthrough tool policy explicitly. Every replay receives a new isolated in-memory store.
@@ -592,9 +587,9 @@ uv run kitaru evaluation list \
   --size 100
 ```
 
-Open [http://localhost:8000](http://localhost:8000) to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, cost, latency, and tool-call patterns together.
+Open [http://localhost:8000](http://localhost:8000) to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, latency, and tool-call patterns together. The replay uses the same model as the checked-in baseline by default, so latency is comparable unless you override `BASELINE_MODEL`. Replay cost is marked unavailable because the PydanticAI adapter does not currently record provider cost.
 
-The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Cost and latency deltas remain visible for the shipping decision. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
+The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Use the comparable latency and tool-path evidence as guardrails; do not interpret unavailable replay cost as zero cost. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
 
 ## Step 15: Stop the local server
 

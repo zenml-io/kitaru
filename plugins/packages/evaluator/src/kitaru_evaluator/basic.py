@@ -10,11 +10,14 @@ from kitaru.task.evaluator import SessionView
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
     recorded_cost = session.session.cost
-    if recorded_cost is None:
+    if recorded_cost is None or any(
+        node.node_type is NodeType.LLM_CALL and node.cost is None
+        for node in session.nodes
+    ):
         return EvaluationResult(
             name="cost",
-            score=0.0,
-            explanation="The session has no recorded cost.",
+            value="unavailable",
+            explanation="The session has incomplete LLM cost information.",
         )
     return EvaluationResult(
         name="cost",

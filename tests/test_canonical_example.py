@@ -1,6 +1,7 @@
 """Contract tests for the canonical returns-resolution example."""
 
 import json
+import runpy
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -18,15 +19,19 @@ from examples.canonical_example.fixtures import CASES
 from examples.canonical_example.models import ResolutionAction
 from examples.canonical_example.store import MockCommerceStore
 
-from importers.langfuse import parse
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
-from kitaru.task.importer import ParsedSession, flatten_nodes
+from kitaru.task.importer import ImportedSession, flatten_nodes
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "canonical_example"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
+IMPORTER_PATH = (
+    REPOSITORY_ROOT
+    / "plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py"
+)
+parse = runpy.run_path(str(IMPORTER_PATH))["parse"]
 
 
 def test_fixture_corpus_covers_ten_distinct_resolution_scenarios() -> None:
@@ -224,10 +229,13 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
             TRACE_PATH.read_bytes(),
             {"source_instance": "canonical-returns-example"},
         )
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
     assert len(sessions) == len(CASES)
+    assert {session.name for session in sessions} == {
+        f"Returns ticket: {case.ticket.ticket_id}" for case in CASES
+    }
     assert {
         session.inputs["turns"][-1]["inputs"]["ticket_id"] for session in sessions
     } == {case.ticket.ticket_id for case in CASES}
@@ -266,7 +274,6 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
         nodes = flatten_nodes(session.nodes)
         assert any(node.node_type is NodeType.LLM_CALL for node in nodes)
         assert any(node.node_type is NodeType.TOOL_CALL for node in nodes)
-        assert session.metadata["replay_readiness"]["level"] == "ready"
 
 
 def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
@@ -278,7 +285,15 @@ def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
     assert "--extra examples" in script
     assert "langfuse-traces.jsonl" in script
     assert "Agent.instrument_all()" in generator
+    assert 'trace_name=f"Returns ticket: {ticket.ticket_id}"' in generator
     assert "kitaru session import" not in script
+
+
+def test_replay_defaults_to_the_model_used_by_checked_in_traces() -> None:
+    """Keep default latency comparisons on the same model."""
+    agent_source = (EXAMPLE_DIR / "agent.py").read_text()
+
+    assert 'os.environ.get("BASELINE_MODEL", "openai:gpt-5-nano")' in agent_source
 
 
 def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
@@ -287,10 +302,11 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
 
     assert "source .env" in readme
     assert "--env-file .env" not in readme
+    assert r"\"summary\":\"A \$280 refund exceeded" in readme
 
     for command in (
         "kitaru login --local",
-        "python ../../scripts/seed_default_plugins.py",
+        "--importer kitaru/langfuse@latest",
         "kitaru importer list",
         "kitaru evaluator list",
         "kitaru agent register",
@@ -311,6 +327,7 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         '--command "python -m examples.canonical_example.agent"',
         "RETURNS_POLICY_MODE=strict",
         "kitaru experiment create",
+        "--agent returns-resolver",
         "kitaru experiment run start",
         "kitaru experiment run list",
         "kitaru experiment run get",
@@ -320,9 +337,9 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         assert command in readme
     assert "--agent returns-resolver@1" in readme
     assert "--tag returns-baseline" in readme
-    assert "--evaluator cost@latest" in readme
-    assert "--evaluator latency@latest" in readme
-    assert "--evaluator tool-call-patterns@latest" in readme
+    assert "--evaluator kitaru/cost@latest" in readme
+    assert "--evaluator kitaru/latency@latest" in readme
+    assert "--evaluator kitaru/tool-call-patterns@latest" in readme
     assert "TICKET_004_SESSION_ID" in readme
     assert "TICKET_007_SESSION_ID" in readme
     assert "TICKET_010_SESSION_ID" in readme

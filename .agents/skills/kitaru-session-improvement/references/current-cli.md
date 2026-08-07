@@ -14,9 +14,9 @@ Coding-agent tool calls usually start fresh shells, so the exported state does n
 uv run kitaru status
 uv run kitaru worker list
 uv run kitaru importer list
-uv run kitaru evaluator get cost
-uv run kitaru evaluator get latency
-uv run kitaru evaluator get tool-call-patterns
+uv run kitaru evaluator get kitaru/cost
+uv run kitaru evaluator get kitaru/latency
+uv run kitaru evaluator get kitaru/tool-call-patterns
 uv run kitaru evaluator list
 ```
 
@@ -29,11 +29,7 @@ set -a; source .env; set +a
 uv run kitaru worker start --name WORKER_NAME
 ```
 
-Seed bundled development plugins only on a fresh local server:
-
-```bash
-uv run python ../../scripts/seed_default_plugins.py
-```
+Official `kitaru/...` plugins are registered by the server during startup. Do not create unqualified aliases for them.
 
 ## Register an agent version
 

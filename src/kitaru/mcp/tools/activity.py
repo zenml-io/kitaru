@@ -20,6 +20,7 @@ from kitaru.mcp.models.activity import (
     ActivityReadRequest,
     SessionNodesRequest,
 )
+from kitaru.mcp.models.common import ActivityItem, PageData
 from kitaru.mcp.tools.registry import build_page_data
 
 
@@ -54,7 +55,7 @@ async def handle_activity_read(
             )
         else:
             page = await client.jobs.list(JobListParams.model_validate(common))
-        return build_page_data(page, request.size)
+        return build_page_data(page, request.size, PageData[ActivityItem])
     return await _get_children(state, request)
 
 
@@ -84,4 +85,4 @@ async def _get_children(
                 cursor=request.cursor, size=request.size, sort=request.sort
             ),
         )
-    return build_page_data(page, request.size)
+    return build_page_data(page, request.size, PageData[ActivityItem])

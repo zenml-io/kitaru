@@ -13,7 +13,6 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).parents[2]
 EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "canonical_example"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
-SEED_SCRIPT = REPOSITORY_ROOT / "scripts" / "seed_default_plugins.py"
 CLI = Path(sys.executable).with_name("kitaru")
 
 pytestmark = pytest.mark.skipif(
@@ -23,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _subprocess_environment() -> dict[str, str]:
-    """Build the environment used by the CLI, worker, and seed script."""
+    """Build the environment used by the CLI and worker."""
     environment = os.environ.copy()
     environment["KITARU_API_URL"] = os.environ["KITARU_CANONICAL_SERVER_URL"]
     environment["KITARU_API_KEY"] = os.environ["KITARU_CANONICAL_API_KEY"]
@@ -112,8 +111,6 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
     """Exercise the documented import, evaluation, cohort, and replay loop."""
     assert CLI.exists()
     _cli("status")
-    _run([sys.executable, str(SEED_SCRIPT)], cwd=REPOSITORY_ROOT)
-
     _cli(
         "agent",
         "register",
@@ -158,6 +155,10 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "4",
                 "--poll-interval",
                 "0.1",
+                "--blob-cache-root",
+                str(tmp_path / "blobs"),
+                "--payload-cache-root",
+                str(tmp_path / "payloads"),
                 "--timeout",
                 "300",
             ],
@@ -174,7 +175,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "import",
                 str(TRACE_PATH),
                 "--importer",
-                "langfuse@latest",
+                "kitaru/langfuse@latest",
                 "--agent",
                 "returns-resolver@1",
                 "--tag",
@@ -207,11 +208,11 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "--tag",
                 "returns-baseline",
                 "--evaluator",
-                "cost@latest",
+                "kitaru/cost@latest",
                 "--evaluator",
-                "latency@latest",
+                "kitaru/latency@latest",
                 "--evaluator",
-                "tool-call-patterns@latest",
+                "kitaru/tool-call-patterns@latest",
                 "--wait",
                 "--timeout",
                 "180",
@@ -463,16 +464,18 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "experiment",
                 "create",
                 "improve-returns-policy",
+                "--agent",
+                "returns-resolver",
                 "--tool-policy",
                 '{"default":{"type":"passthrough"},"tools":{}}',
                 "--evaluator",
                 "returns-policy@1",
                 "--evaluator",
-                "cost@latest",
+                "kitaru/cost@latest",
                 "--evaluator",
-                "latency@latest",
+                "kitaru/latency@latest",
                 "--evaluator",
-                "tool-call-patterns@latest",
+                "kitaru/tool-call-patterns@latest",
             )
 
             target_version = _cli(

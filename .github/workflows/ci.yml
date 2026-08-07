@@ -109,6 +109,10 @@ jobs:
           --extra worker
           --extra pydantic-ai
           --extra examples
+      - name: Build local plugin candidates
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --candidate-dir plugins/candidate-wheels
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
@@ -141,6 +145,7 @@ jobs:
           KITARU_CANONICAL_E2E: '1'
           KITARU_CANONICAL_SERVER_URL: http://127.0.0.1:8000
           KITARU_CANONICAL_API_KEY: canonical-ci-worker
+          UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
       - name: Dump canonical example logs on failure
         if: failure()
         run: cat "$RUNNER_TEMP/kitaru-server.log"

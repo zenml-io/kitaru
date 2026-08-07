@@ -86,7 +86,7 @@ async def generate_traces(export_path: Path) -> Path:
         with (
             propagate_attributes(
                 session_id=session_id,
-                trace_name="returns-ticket-resolution",
+                trace_name=f"Returns ticket: {ticket.ticket_id}",
                 environment="canonical-example",
                 version="baseline-v1",
                 tags=["returns-resolution", "kitaru-example", case.scenario],

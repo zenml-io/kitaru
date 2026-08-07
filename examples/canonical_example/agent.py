@@ -13,7 +13,7 @@ from examples.canonical_example.store import MockCommerceStore
 from kitaru.task import get_task_inputs
 from plugins.adapters.pydantic_ai import KitaruAgent
 
-MODEL = cast(KnownModelName, os.environ.get("BASELINE_MODEL", "openai:gpt-5-mini"))
+MODEL = cast(KnownModelName, os.environ.get("BASELINE_MODEL", "openai:gpt-5-nano"))
 
 _TASK_INSTRUCTIONS = (
     "You autonomously resolve one customer return or delivery ticket.\n\n"

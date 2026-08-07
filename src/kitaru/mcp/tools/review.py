@@ -17,6 +17,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationUpdateRequest,
 )
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.common import PageData, ReviewItem
 from kitaru.mcp.models.review import (
     AnnotationUpdate,
     InvestigationAnswerCreate,
@@ -50,7 +51,7 @@ async def handle_review_read(
         page = await state.client.investigations.list_sessions(
             request.investigation_id, params
         )
-        return build_page_data(page, request.size)
+        return build_page_data(page, request.size, PageData[ReviewItem])
     common = request.model_dump(include={"cursor", "size", "sort", "filter"})
     if request.kind == "investigation":
         page = await state.client.investigations.list(
@@ -60,7 +61,7 @@ async def handle_review_read(
         page = await state.client.annotations.list(
             AnnotationListParams.model_validate(common)
         )
-    return build_page_data(page, request.size)
+    return build_page_data(page, request.size, PageData[ReviewItem])
 
 
 async def handle_review_manage(
