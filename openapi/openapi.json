@@ -6011,6 +6011,18 @@
             "title": "Index",
             "type": "integer"
           },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from node inputs.",
+            "title": "Input Text Selector"
+          },
           "inputs": {
             "description": "Node inputs.",
             "title": "Inputs"
@@ -6055,6 +6067,18 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from node outputs.",
+            "title": "Output Text Selector"
+          },
           "outputs": {
             "description": "Node outputs.",
             "title": "Outputs"
@@ -6082,6 +6106,18 @@
             ],
             "description": "Model provider.",
             "title": "Provider"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning produced by the model call.",
+            "title": "Reasoning"
           },
           "requested_model": {
             "anyOf": [
@@ -6131,6 +6167,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -6260,6 +6308,18 @@
             "title": "Index",
             "type": "integer"
           },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from node inputs.",
+            "title": "Input Text Selector"
+          },
           "inputs": {
             "description": "Node inputs, null unless include_payloads.",
             "title": "Inputs"
@@ -6304,6 +6364,18 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from node outputs.",
+            "title": "Output Text Selector"
+          },
           "outputs": {
             "description": "Node outputs, null unless include_payloads.",
             "title": "Outputs"
@@ -6344,6 +6416,18 @@
             ],
             "description": "Model provider.",
             "title": "Provider"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Visible reasoning, null unless payloads are included.",
+            "title": "Reasoning"
           },
           "requested_model": {
             "anyOf": [
@@ -6408,6 +6492,18 @@
             ],
             "description": "Subagent invoked.",
             "title": "Subagent Id"
+          },
+          "system_prompt_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -14688,13 +14784,13 @@
             }
           },
           {
-            "description": "Include inputs, outputs, and attributes.",
+            "description": "Include reasoning, inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Include inputs, outputs, and attributes.",
+              "description": "Include reasoning, inputs, outputs, and attributes.",
               "title": "Include Payloads",
               "type": "boolean"
             }

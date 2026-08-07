@@ -29,12 +29,12 @@ _IMPORTER_TEMPLATE = '''"""Kitaru importer scaffold."""
 from collections.abc import Iterator
 from typing import Any
 
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession, Parser
+from kitaru.task.importer import ImportFailure, ImportedNode, ImportedSession, Parser
 
 
 def parse(
     payload: bytes, params: dict[str, Any]
-) -> Iterator[ParsedSession | ImportFailure]:
+) -> Iterator[ImportedSession | ImportFailure]:
     """Parse a provider payload into Kitaru sessions or failures."""
     del payload, params
     return iter(())

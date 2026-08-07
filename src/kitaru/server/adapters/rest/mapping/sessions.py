@@ -128,7 +128,13 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     """
     fields = body.model_fields_set
     values: dict[str, Any] = {}
-    for field in ("status", "outputs", "error", "ended_at", "name"):
+    for field in (
+        "status",
+        "outputs",
+        "error",
+        "ended_at",
+        "name",
+    ):
         if field in fields:
             values[field] = getattr(body, field)
     if "metadata" in fields:

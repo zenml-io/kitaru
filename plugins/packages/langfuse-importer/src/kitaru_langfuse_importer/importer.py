@@ -17,11 +17,11 @@
 # ///
 """Langfuse JSON and JSONL trace importer plugin."""
 
-import hashlib
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -30,7 +30,10 @@ from typing import Any
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import (
+    ImportedNode,
+    ImportedSession,
+)
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 _TRACE_SHAPE = "trace"
@@ -63,6 +66,264 @@ _TRACE_CONTEXT_FIELDS = {
     "traceTags": "tags",
     "traceVersion": "version",
 }
+
+
+_FRAMEWORK_PATTERNS = (
+    (re.compile(r"pydantic[._ -]?ai", re.IGNORECASE), "pydantic-ai"),
+    (re.compile(r"langgraph", re.IGNORECASE), "langgraph"),
+    (re.compile(r"openai[._ -]?agents?", re.IGNORECASE), "openai-agents"),
+    (re.compile(r"google[._ -]?adk", re.IGNORECASE), "google-adk"),
+    (
+        re.compile(r"claude[._ -]?agent[._ -]?sdk|claudeagentsdk", re.IGNORECASE),
+        "claude-agent-sdk",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _TextMatch:
+    """Text selected from a provider payload."""
+
+    selector: str
+    text: str
+
+
+def _child_selector(selector: str, key: str | int) -> str:
+    """Append a child token to an RFC 6901 JSON Pointer."""
+    token = str(key).replace("~", "~0").replace("/", "~1")
+    return f"{selector}/{token}"
+
+
+def _role(value: dict[str, Any]) -> str | None:
+    """Return a normalized message role."""
+    candidates = [
+        value.get("role"),
+        value.get("type"),
+        value.get("part_kind"),
+        value.get("kind"),
+    ]
+    event_name = value.get("event.name")
+    if isinstance(event_name, str):
+        candidates.append(event_name.removeprefix("gen_ai.").removesuffix(".message"))
+    identifier = value.get("id")
+    if isinstance(identifier, list) and identifier:
+        candidates.append(identifier[-1])
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        normalized = candidate.lower().replace("_", "-")
+        if normalized in {"user", "human", "humanmessage", "user-prompt"}:
+            return "user"
+        if normalized in {"system", "systemmessage", "system-prompt"}:
+            return "system"
+        if normalized in {
+            "assistant",
+            "ai",
+            "aimessage",
+            "model",
+            "response",
+            "model-response",
+        }:
+            return "assistant"
+    return None
+
+
+def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch | None:
+    """Return one scalar text value and its selector."""
+    if depth > 8:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return _TextMatch(selector, text) if text else None
+    if isinstance(value, list):
+        matches = [
+            match
+            for index, item in enumerate(value)
+            if (
+                match := _content_match(
+                    item, _child_selector(selector, index), depth + 1
+                )
+            )
+            is not None
+        ]
+        return matches[-1] if matches else None
+    if not isinstance(value, dict):
+        return None
+    for key in ("text", "content", "parts", "kwargs", "data"):
+        if key in value and (
+            match := _content_match(
+                value[key], _child_selector(selector, key), depth + 1
+            )
+        ):
+            return match
+    return None
+
+
+def _message_matches(
+    value: Any, target_role: str, selector: str = "", depth: int = 0
+) -> list[_TextMatch]:
+    """Return text matches for one nested message role."""
+    if depth > 12:
+        return []
+    if isinstance(value, list):
+        return [
+            match
+            for index, item in enumerate(value)
+            for match in _message_matches(
+                item, target_role, _child_selector(selector, index), depth + 1
+            )
+        ]
+    if not isinstance(value, dict):
+        return []
+    if _role(value) == target_role:
+        for key in ("content", "text", "parts", "kwargs", "data"):
+            if key in value and (
+                match := _content_match(
+                    value[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                return [match]
+    matches: list[_TextMatch] = []
+    for key, child in value.items():
+        matches.extend(
+            _message_matches(
+                child, target_role, _child_selector(selector, key), depth + 1
+            )
+        )
+    return matches
+
+
+def _input_text_selector(value: Any) -> str | None:
+    """Return the primary user input selector."""
+    messages = _message_matches(value, "user")
+    if messages:
+        return messages[-1].selector
+    if isinstance(value, str):
+        return "" if value.strip() else None
+    if isinstance(value, dict):
+        for key in ("prompt", "query", "question", "user_input", "message"):
+            if key in value and (
+                match := _content_match(value[key], _child_selector("", key))
+            ):
+                return match.selector
+    return None
+
+
+def _output_text_selector(value: Any) -> str | None:
+    """Return the primary assistant output selector."""
+    messages = _message_matches(value, "assistant")
+    if messages:
+        return messages[-1].selector
+    if isinstance(value, str):
+        return "" if value.strip() else None
+    if isinstance(value, dict):
+        for key in ("answer", "result", "response", "output", "text", "content"):
+            if key in value and (
+                match := _content_match(value[key], _child_selector("", key))
+            ):
+                return match.selector
+    return None
+
+
+def _system_prompt_match(value: Any) -> _TextMatch | None:
+    """Return the latest system prompt and its selector."""
+    messages = _message_matches(value, "system")
+    if messages:
+        return messages[-1]
+    found: list[_TextMatch] = []
+
+    def _collect(item: Any, selector: str = "", depth: int = 0) -> None:
+        if depth > 12:
+            return
+        if isinstance(item, list):
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(selector, index), depth + 1)
+            return
+        if not isinstance(item, dict):
+            return
+        for key in ("system_prompt", "system_instruction", "instructions"):
+            if key in item and (
+                match := _content_match(
+                    item[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                found.append(match)
+        for key, child in item.items():
+            _collect(child, _child_selector(selector, key), depth + 1)
+
+    _collect(value)
+    return found[-1] if found else None
+
+
+def _reasoning(value: Any) -> str | None:
+    """Return visible reasoning from a provider payload."""
+    found: list[str] = []
+
+    def _collect(item: Any, depth: int = 0) -> None:
+        if depth > 12:
+            return
+        if isinstance(item, list):
+            for child in item:
+                _collect(child, depth + 1)
+            return
+        if not isinstance(item, dict):
+            return
+        kind_value = item.get("type") or item.get("part_kind")
+        kind = str(kind_value).lower().replace("_", "-") if kind_value else ""
+        if kind in {"reasoning", "reasoning-content", "thinking", "thought"}:
+            for key in ("text", "content", "summary"):
+                if key in item and (
+                    match := _content_match(item[key], depth=depth + 1)
+                ):
+                    found.append(match.text)
+        for key in ("reasoning", "reasoning_content", "thinking", "thought"):
+            if key in item and (match := _content_match(item[key], depth=depth + 1)):
+                found.append(match.text)
+        for child in item.values():
+            _collect(child, depth + 1)
+
+    _collect(value)
+    return found[-1] if found else None
+
+
+def _detect_framework(value: Any) -> str | None:
+    """Detect one supported framework from provider metadata."""
+    evidence: list[str] = []
+
+    def _collect(item: Any, depth: int = 0) -> None:
+        if depth > 8 or len(evidence) >= 500:
+            return
+        if isinstance(item, dict):
+            for key, child in item.items():
+                evidence.append(str(key))
+                _collect(child, depth + 1)
+        elif isinstance(item, list):
+            for child in item[:100]:
+                _collect(child, depth + 1)
+        elif isinstance(item, str):
+            evidence.append(item)
+
+    _collect(value)
+    joined = "\n".join(evidence)
+    matches = {
+        framework
+        for pattern, framework in _FRAMEWORK_PATTERNS
+        if pattern.search(joined)
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _populate_node_fields(nodes: list[ImportedNode]) -> None:
+    """Populate normalized node fields."""
+    for node in nodes:
+        node.input_text_selector = _input_text_selector(node.inputs)
+        node.output_text_selector = _output_text_selector(node.outputs)
+        if node.node_type is NodeType.LLM_CALL:
+            system_prompt = _system_prompt_match(node.inputs)
+            node.system_prompt_selector = (
+                system_prompt.selector if system_prompt is not None else None
+            )
+            node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
 
 
 class InvalidImport(ValueError):
@@ -152,6 +413,91 @@ def _dict(value: Any) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {}
 
 
+def _path_value(value: Any, path: str) -> Any:
+    """Resolve a dotted path or JSON Pointer against one observation."""
+    if not path.strip():
+        raise InvalidImport("join path must be non-empty")
+    if path.startswith("/"):
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
+        ]
+    else:
+        parts = path.split(".")
+    current = value
+    for part in parts:
+        current = _decode_json(current)
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (IndexError, ValueError):
+                return None
+            continue
+        return None
+    return _decode_json(current)
+
+
+def _join_value(
+    observations: list[dict[str, Any]], params: dict[str, Any], trace_id: str
+) -> tuple[str, str, bool]:
+    """Resolve one trace's session grouping value and selector."""
+    join_on = params.get("join_on")
+    join_key = params.get("join_key")
+    join_path = params.get("join_path")
+    if join_on is not None and (join_key is not None or join_path is not None):
+        raise InvalidImport("join_on cannot be combined with join_key or join_path")
+    if join_on is not None:
+        if not isinstance(join_on, str):
+            raise InvalidImport("join_on must be a dotted path or JSON pointer")
+        selector = join_on
+        values = {
+            str(value)
+            for record in observations
+            if (value := _path_value(record, join_on)) not in (None, "")
+        }
+    elif join_key is not None or join_path is not None:
+        if not isinstance(join_key, str) or not join_key.strip():
+            raise InvalidImport("join_key must be a non-empty string")
+        if not isinstance(join_path, str) or not join_path.strip():
+            raise InvalidImport("join_path must be a dotted path or JSON pointer")
+        selector = (
+            f"{join_path.rstrip('/')}/{join_key}"
+            if join_path.startswith("/")
+            else f"{join_path}.{join_key}"
+        )
+        values: set[str] = set()
+        for record in observations:
+            container = _path_value(record, join_path)
+            if isinstance(container, dict):
+                value = container.get(join_key)
+                if value not in (None, ""):
+                    values.add(str(value))
+    else:
+        session_ids = {
+            str(value)
+            for record in observations
+            if (value := _first(record, "sessionId", "session_id"))
+        }
+        if len(session_ids) > 1:
+            raise InvalidImport(
+                f"Trace '{trace_id}' contains conflicting Langfuse session ids"
+            )
+        if session_ids:
+            return next(iter(session_ids)), "sessionId", False
+        return trace_id, "traceId", True
+    if not values:
+        raise InvalidImport(
+            f"Trace '{trace_id}' has no value at join selector '{selector}'"
+        )
+    if len(values) > 1:
+        raise InvalidImport(
+            f"Trace '{trace_id}' has conflicting values at join selector '{selector}'"
+        )
+    return next(iter(values)), selector, False
+
+
 def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
     """Return the first non-empty value from Langfuse metadata layers."""
     metadata = _dict(record.get("metadata"))
@@ -160,6 +506,10 @@ def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         for source in (attributes, metadata, resource_attributes):
             value = source.get(key)
+            if value not in (None, ""):
+                return value
+        for flattened_key in (f"attributes.{key}", f"resourceAttributes.{key}"):
+            value = metadata.get(flattened_key)
             if value not in (None, ""):
                 return value
     return None
@@ -175,9 +525,15 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
         for key in _METADATA_KEYS:
             if key in source:
                 selected[f"langfuse.{key}"] = source[key]
+            flattened_key = f"attributes.{key}"
+            if flattened_key in metadata:
+                selected[f"langfuse.{key}"] = metadata[flattened_key]
     for key in _RESOURCE_METADATA_KEYS:
         if key in resource_attributes:
             selected[f"langfuse.{key}"] = resource_attributes[key]
+        flattened_key = f"resourceAttributes.{key}"
+        if flattened_key in metadata:
+            selected[f"langfuse.{key}"] = metadata[flattened_key]
     for source_field, target_field in _TRACE_CONTEXT_FIELDS.items():
         if source_field in record:
             selected[f"langfuse.trace.{target_field}"] = record[source_field]
@@ -340,8 +696,7 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
             "operationName",
             "operation_name",
         )
-        or attributes.get("gen_ai.operation.name")
-        or metadata.get("gen_ai.operation.name")
+        or _metadata_value(record, "gen_ai.operation.name")
         or ""
     ).lower()
     explicit_tool = observation_type == "TOOL" or operation in {
@@ -351,16 +706,17 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
     }
     tool_name = _first(record, "toolName", "tool_name")
     if tool_name is None:
-        tool_name = attributes.get("gen_ai.tool.name") or metadata.get(
-            "gen_ai.tool.name"
-        )
+        tool_name = _metadata_value(record, "gen_ai.tool.name")
+    function_name = attributes.get("name")
+    if function_name in (None, ""):
+        function_name = metadata.get("attributes.name")
     function_span = (
         observation_type == "SPAN"
         and str(record.get("name") or "").startswith("Function:")
-        and attributes.get("name") not in (None, "")
+        and function_name is not None
     )
     if function_span:
-        tool_name = attributes["name"]
+        tool_name = function_name
     if explicit_tool or function_span:
         return NodeType.TOOL_CALL, str(tool_name or record.get("name") or "tool")
     if observation_type == "GENERATION":
@@ -407,23 +763,15 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     )
 
 
-def _canonical_digest(value: Any) -> str:
-    """Hash one normalized JSON-compatible value."""
-    encoded = json.dumps(
-        value, sort_keys=True, separators=(",", ":"), default=str
-    ).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _build_node_tree(
-    nodes_with_parents: list[tuple[ParsedNode, str | None]],
-) -> list[ParsedNode]:
+    nodes_with_parents: list[tuple[ImportedNode, str | None]],
+) -> list[ImportedNode]:
     """Build and validate the parsed-node tree."""
     external_ids = [node.external_id for node, _ in nodes_with_parents]
     if any(external_id is None for external_id in external_ids):
-        raise InvalidImport("The parsed node graph contains a missing external id")
+        raise InvalidImport("The imported node graph contains a missing external id")
     if len(external_ids) != len(set(external_ids)):
-        raise InvalidImport("The parsed node graph contains duplicate external ids")
+        raise InvalidImport("The imported node graph contains duplicate external ids")
 
     converted = {
         node.external_id: node
@@ -440,18 +788,18 @@ def _build_node_tree(
         current = external_id
         while current in parents:
             if current in seen:
-                raise InvalidImport("The parsed node graph contains a parent cycle")
+                raise InvalidImport("The imported node graph contains a parent cycle")
             seen.add(current)
             current = parents[current]
 
-    roots: list[ParsedNode] = []
+    roots: list[ImportedNode] = []
     for node, parent_external_id in nodes_with_parents:
         if parent_external_id in converted:
             converted[parent_external_id].children.append(node)
         else:
             roots.append(node)
     if nodes_with_parents and not roots:
-        raise InvalidImport("The parsed node graph contains no root node")
+        raise InvalidImport("The imported node graph contains no root node")
     return roots
 
 
@@ -460,7 +808,7 @@ class LangfuseJSONLImporter:
 
     def parse(
         self, content: bytes, params: dict[str, Any]
-    ) -> list[ParsedSession | ImportFailure]:
+    ) -> list[ImportedSession | ImportFailure]:
         """Parse a Langfuse JSON or JSONL upload.
 
         Args:
@@ -468,7 +816,7 @@ class LangfuseJSONLImporter:
             params: User selections passed to the importer.
 
         Returns:
-            Parsed sessions and isolated import failures.
+            Imported sessions and isolated import failures.
         """
         records = _parse_records(content)
         shape = _detect_shape(records[0])
@@ -477,6 +825,9 @@ class LangfuseJSONLImporter:
             shape = _TRACE_SHAPE
         if shape == _TRACE_SHAPE:
             records = _trace_rows_to_observations(records)
+        file_framework = _detect_framework(
+            [record.get("metadata") for record in records]
+        )
 
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
@@ -488,39 +839,61 @@ class LangfuseJSONLImporter:
         session_traces: dict[str, list[tuple[str, list[dict[str, Any]]]]] = defaultdict(
             list
         )
+        join_paths: dict[str, set[str]] = defaultdict(set)
+        fallback_sessions: set[str] = set()
+        failures: list[ImportFailure] = []
         for trace_id, observations in trace_records.items():
-            session_ids = {
-                str(value)
-                for record in observations
-                if (value := _first(record, "sessionId", "session_id"))
-            }
-            if len(session_ids) > 1:
-                raise InvalidImport(
-                    f"Trace '{trace_id}' contains conflicting Langfuse session ids"
+            try:
+                session_id, join_path, fallback = _join_value(
+                    observations, params, trace_id
                 )
-            session_id = next(iter(session_ids), trace_id)
+            except InvalidImport as exc:
+                failures.append(
+                    ImportFailure(
+                        line=len(failures) + 1,
+                        external_id=trace_id,
+                        error=str(exc),
+                    )
+                )
+                continue
             session_traces[session_id].append((trace_id, observations))
+            join_paths[session_id].add(join_path)
+            if fallback:
+                fallback_sessions.add(session_id)
 
-        items: list[ParsedSession | ImportFailure] = []
+        sessions: list[ImportedSession] = []
         for source_id, traces in sorted(session_traces.items()):
             try:
-                items.append(self._parse_session(source_id, traces, params))
+                sessions.append(
+                    self._parse_session(
+                        source_id,
+                        traces,
+                        params,
+                        join_paths=join_paths[source_id],
+                        trace_fallback=source_id in fallback_sessions,
+                        file_framework=file_framework,
+                    )
+                )
             except InvalidImport as exc:
-                items.append(
+                failures.append(
                     ImportFailure(
-                        line=len(items) + 1,
+                        line=len(failures) + 1,
                         external_id=source_id,
                         error=str(exc),
                     )
                 )
-        return items
+        return [*sessions, *failures]
 
     def _parse_session(
         self,
         source_id: str,
         traces: list[tuple[str, list[dict[str, Any]]]],
         params: dict[str, Any],
-    ) -> ParsedSession:
+        *,
+        join_paths: set[str],
+        trace_fallback: bool,
+        file_framework: str | None,
+    ) -> ImportedSession:
         """Parse one grouped Langfuse session."""
         project_ids = {
             str(value)
@@ -545,6 +918,8 @@ class LangfuseJSONLImporter:
             )
 
         warnings: list[str] = []
+        if trace_fallback:
+            warnings.append("No Langfuse session id found; grouped by trace id")
         raw_nodes: list[tuple[str, str | None, dict[str, Any]]] = []
         turns: list[_Turn] = []
         trace_names: list[str] = []
@@ -638,13 +1013,13 @@ class LangfuseJSONLImporter:
                 item[0],
             )
         )
-        nodes_with_parents: list[tuple[ParsedNode, str | None]] = []
+        nodes_with_parents: list[tuple[ImportedNode, str | None]] = []
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
             status = _node_status(record)
             nodes_with_parents.append(
                 (
-                    ParsedNode(
+                    ImportedNode(
                         external_id=source_node_id,
                         trace_id=str(_first(record, "traceId", "trace_id")),
                         node_type=node_type,
@@ -661,21 +1036,18 @@ class LangfuseJSONLImporter:
                         inputs=_decode_json(record.get("input")),
                         outputs=_decode_json(record.get("output")),
                         requested_model=(
-                            _first_nonempty(
+                            _metadata_value(record, "gen_ai.request.model")
+                            or _first_nonempty(
                                 record,
                                 "providedModelName",
                                 "provided_model_name",
                                 "model",
                             )
-                            or _metadata_value(record, "gen_ai.request.model")
                         ),
                         model=(
-                            _first_nonempty(record, "modelId", "model_id", "model")
-                            or _metadata_value(
-                                record,
-                                "gen_ai.response.model",
-                                "gen_ai.request.model",
-                            )
+                            _metadata_value(record, "gen_ai.response.model")
+                            or _first_nonempty(record, "model", "modelId", "model_id")
+                            or _metadata_value(record, "gen_ai.request.model")
                         ),
                         provider=(
                             _first_nonempty(record, "modelProvider", "model_provider")
@@ -709,35 +1081,7 @@ class LangfuseJSONLImporter:
             )
 
         nodes = [node for node, _ in nodes_with_parents]
-        graph_complete = not any("missing parent" in warning for warning in warnings)
-        tool_nodes = [node for node in nodes if node.node_type is NodeType.TOOL_CALL]
-        replayable_tools = [
-            node
-            for node in tool_nodes
-            if node.tool_name and node.inputs is not None and node.outputs is not None
-        ]
-        root_inputs_available = bool(turns) and all(
-            turn.inputs is not None for turn in turns
-        )
-        reasons = list(warnings)
-        if not root_inputs_available:
-            reasons.append("One or more turns have no root input")
-        if len(replayable_tools) != len(tool_nodes):
-            reasons.append("One or more tool calls lack a name, input, or output")
-        if not root_inputs_available:
-            readiness_level = "unavailable"
-        elif graph_complete and len(replayable_tools) == len(tool_nodes):
-            readiness_level = "ready"
-        else:
-            readiness_level = "partial"
-        readiness = {
-            "level": readiness_level,
-            "root_inputs_available": root_inputs_available,
-            "graph_complete": graph_complete,
-            "tool_call_count": len(tool_nodes),
-            "replayable_tool_call_count": len(replayable_tools),
-            "reasons": reasons,
-        }
+        _populate_node_fields(nodes)
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -767,23 +1111,11 @@ class LangfuseJSONLImporter:
                 for turn in turns
             ],
         }
-        digest_payload = {
-            "source_id": source_id,
-            "source_instance": source_instance,
-            "status": session_status,
-            "turns": [asdict(turn) for turn in turns],
-            "nodes": [
-                {
-                    "parent_external_id": parent_external_id,
-                    **node.model_dump(mode="json", exclude={"children"}),
-                }
-                for node, parent_external_id in nodes_with_parents
-            ],
-        }
         metadata = {
             "langfuse.project_id": next(iter(project_ids), None),
             "langfuse.session_id": source_id,
             "langfuse.trace_ids": [turn.trace_id for turn in turns],
+            "langfuse.join_paths": sorted(join_paths),
             "langfuse.environments": sorted(
                 {
                     str(value)
@@ -823,19 +1155,36 @@ class LangfuseJSONLImporter:
             "source_trace_count": len(turns),
             "source_completeness": "unknown",
             "normalization_warnings": warnings,
-            "replay_readiness": readiness,
-            "source_content_digest": _canonical_digest(digest_payload),
         }
-        return ParsedSession(
+        framework = (
+            _detect_framework(params.get("framework"))
+            or _detect_framework(
+                [record.get("metadata") for _, rows in traces for record in rows]
+            )
+            or file_framework
+        )
+        return ImportedSession(
             external_id=f"{source_instance}:{source_id}",
             name=trace_names[-1] if trace_names else None,
             status=session_status,
             inputs=inputs,
-            outputs=turns[-1].outputs if turns else None,
+            outputs=(
+                turns[-1].outputs
+                if turns and turns[-1].outputs is not None
+                else next(
+                    (
+                        node.outputs
+                        for node in reversed(nodes)
+                        if node.outputs is not None
+                    ),
+                    None,
+                )
+            ),
             error=session_error,
             started_at=started_at,
             ended_at=ended_at,
             metadata=metadata,
+            framework=framework,
             nodes=_build_node_tree(nodes_with_parents),
         )
 
@@ -843,6 +1192,6 @@ class LangfuseJSONLImporter:
 def parse(
     content: bytes,
     params: dict[str, Any],
-) -> Iterator[ParsedSession | ImportFailure]:
+) -> Iterator[ImportedSession | ImportFailure]:
     """Parse Langfuse JSON or JSONL through the unified importer contract."""
     yield from LangfuseJSONLImporter().parse(content, params)
