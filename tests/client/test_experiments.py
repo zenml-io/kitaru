@@ -23,6 +23,7 @@ from conftest import (
     ReplayServices,
     asgi_api_client,
     build_replay_services,
+    create_agent,
     create_plugin,
 )
 from kitaru.api_models.v1.experiment import (
@@ -81,6 +82,13 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
 
 
 @pytest.fixture
+async def agent_id(services: ReplayServices) -> uuid.UUID:
+    """Provide an agent for experiments to belong to."""
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    return agent.id
+
+
+@pytest.fixture
 async def evaluator_config(plugin_repository: FakePluginRepository) -> EvaluatorConfig:
     """Register an evaluator plugin and return a config naming it."""
     plugin = await create_plugin(
@@ -91,12 +99,15 @@ async def evaluator_config(plugin_repository: FakePluginRepository) -> Evaluator
 
 
 async def test_create(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Create an experiment through the SDK."""
     experiment = await api_client.experiments.create(
         ExperimentCreateRequest(
-            name="exp1", description="First run", evaluators=[evaluator_config]
+            name="exp1",
+            agent_id=agent_id,
+            description="First run",
+            evaluators=[evaluator_config],
         )
     )
     assert isinstance(experiment, ExperimentResponse)
@@ -108,10 +119,12 @@ async def test_create(
 
 
 async def test_create_duplicate_name(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Surface HTTP 409 as a typed error."""
-    request = ExperimentCreateRequest(name="exp1", evaluators=[evaluator_config])
+    request = ExperimentCreateRequest(
+        name="exp1", agent_id=agent_id, evaluators=[evaluator_config]
+    )
     await api_client.experiments.create(request)
     with pytest.raises(APIError) as exc_info:
         await api_client.experiments.create(request)
@@ -120,11 +133,13 @@ async def test_create_duplicate_name(
 
 
 async def test_get(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Get an experiment by id through the SDK."""
     created = await api_client.experiments.create(
-        ExperimentCreateRequest(name="exp1", evaluators=[evaluator_config])
+        ExperimentCreateRequest(
+            name="exp1", agent_id=agent_id, evaluators=[evaluator_config]
+        )
     )
     loaded = await api_client.experiments.get(created.id)
     assert loaded == created
@@ -137,12 +152,14 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 
 
 async def test_list(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """List experiments newest-first with filters through the SDK."""
     for name in ["assistant-eval", "reviewer-eval"]:
         await api_client.experiments.create(
-            ExperimentCreateRequest(name=name, evaluators=[evaluator_config])
+            ExperimentCreateRequest(
+                name=name, agent_id=agent_id, evaluators=[evaluator_config]
+            )
         )
 
     page = await api_client.experiments.list()
@@ -159,12 +176,14 @@ async def test_list(
 
 
 async def test_iter(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Iterate every experiment across pages through the SDK."""
     for name in ["assistant-eval", "reviewer-eval", "triager-eval"]:
         await api_client.experiments.create(
-            ExperimentCreateRequest(name=name, evaluators=[evaluator_config])
+            ExperimentCreateRequest(
+                name=name, agent_id=agent_id, evaluators=[evaluator_config]
+            )
         )
 
     collected = [
@@ -176,11 +195,13 @@ async def test_iter(
 
 
 async def test_update(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Update an experiment through the SDK."""
     created = await api_client.experiments.create(
-        ExperimentCreateRequest(name="exp1", evaluators=[evaluator_config])
+        ExperimentCreateRequest(
+            name="exp1", agent_id=agent_id, evaluators=[evaluator_config]
+        )
     )
     updated = await api_client.experiments.update(
         created.id, ExperimentUpdateRequest(description="Reviews")
@@ -189,12 +210,13 @@ async def test_update(
 
 
 async def test_update_clears_override(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Clear an experiment's override with an explicit null."""
     created = await api_client.experiments.create(
         ExperimentCreateRequest(
             name="exp1",
+            agent_id=agent_id,
             override=ReplayOverride(prompt="hi"),
             evaluators=[evaluator_config],
         )
@@ -207,11 +229,13 @@ async def test_update_clears_override(
 
 
 async def test_delete(
-    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig
+    api_client: KitaruAPIClient, evaluator_config: EvaluatorConfig, agent_id: uuid.UUID
 ) -> None:
     """Delete an experiment through the SDK."""
     created = await api_client.experiments.create(
-        ExperimentCreateRequest(name="exp1", evaluators=[evaluator_config])
+        ExperimentCreateRequest(
+            name="exp1", agent_id=agent_id, evaluators=[evaluator_config]
+        )
     )
     await api_client.experiments.delete(created.id)
     with pytest.raises(NotFoundError):

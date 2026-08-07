@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The server persists a generated server id on first startup, seeded from `KITARU_SERVER_SERVER_ID` when set. Analytics events carry that id together with the auth scheme, runtime environment, operating system, Python version, and, when available, the enrolled workspace id, the acting account's service account flag, and its control plane user id. The default account is identified at startup, and identify traits carry an `account_origin` (`bootstrap`, `api`, or `control_plane`).
+- Evaluators and importers carry an optional `logo_url`, set at creation, changed through the update endpoints, and returned in responses. Default plugin definitions can supply one.
+- Server-side analytics now cover agent, agent version, investigation, and annotation creation. A created account is identified with its email, service account flag, and source, and an account mirrored from a control plane user is aliased to that user.
 - The `kitaru/` plugin name prefix is reserved for built-in default plugins, which are registered at server startup without an owner. Creating a plugin whose name starts with `kitaru/` via the API is rejected.
 - Sessions carry a per-agent sequential `number`, assigned at creation and returned in session responses. Numbers may skip when a create fails after its number was allocated.
 - CLI investigation and annotation commands, plus MCP commands for review workflows, evaluator registration, and starting bounded evaluations or experiment runs. The new operations use existing API and SDK resources, require exact IDs and evaluator versions, and return submitted workflows without polling.
@@ -52,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - OpenTelemetry instrumentation for the API server, enabled by setting `KITARU_SERVER_OTEL_EXPORTER_OTLP_ENDPOINT` (or the standard `OTEL_*` environment variables) with the `otel` extra installed.
 
 ### Changed
+- Experiments are now scoped to an agent. Creating an experiment requires an `agent_id`, experiments filter on `agent_id`, and starting a run rejects a cohort version or agent version that belongs to a different agent.
 - The worker now stops promptly when asked. A stop request or the configured lifetime ends every wait in the claim loop, including error backoff and the wait for a free slot, and a stopping worker never claims again. A second SIGINT or SIGTERM during a drain cancels the held tasks instead of being ignored, and the new `--drain-timeout` option bounds the drain before canceling. The worker also survives transient network failures during claiming and job polling instead of exiting, and its heartbeat loop restarts after an unexpected error.
 - A task process is now killed together with every descendant on all outcomes, including success, so a background process spawned by a task can no longer outlive it or hang the worker by holding the task's output pipes open. Worker-built task commands run without a shell, and process spawning and killing are platform-specific, preparing task execution on Windows.
 - Starting an experiment run now writes its replays, jobs, and tasks in three batched inserts instead of row by row, so run creation stays fast for large cohorts.

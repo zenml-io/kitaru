@@ -97,7 +97,7 @@ def build_app(
     control_plane = ControlPlaneAuthenticator(
         client=control_plane_client,
         account_repository=account_repository,
-        server_id=settings.SERVER_ID,
+        server_id=settings.SERVER_ID or uuid.uuid4(),
     )
     auth_service = AuthService(
         settings=settings,

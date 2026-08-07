@@ -14,6 +14,7 @@
 """Tests for investigation use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,7 @@ from conftest import (
     create_agent,
     create_session,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionStatus,
@@ -41,6 +43,7 @@ from kitaru.server.application.models.investigation import (
 from kitaru.server.application.services.investigation_service import (
     InvestigationService,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
@@ -53,6 +56,29 @@ from kitaru.server.domain.investigation import (
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -617,3 +643,52 @@ async def test_update_investigation_session_status_session_not_found(
             InvestigationSessionStatus.COMPLETED,
             actor=ACTOR,
         )
+
+
+async def test_create_investigation_tracks_investigation_created(
+    investigation_repository: FakeInvestigationRepository,
+    agent_repository: FakeAgentRepository,
+    session_repository: FakeSessionRepository,
+    agent_id: uuid.UUID,
+    session_ids: list[uuid.UUID],
+) -> None:
+    """Fire INVESTIGATION_CREATED with the question and session counts."""
+    analytics = _RecordingAnalytics()
+    service = InvestigationService(
+        repository=investigation_repository,
+        agent_repository=agent_repository,
+        session_repository=session_repository,
+        analytics=analytics,
+    )
+
+    await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[QuestionItem(key="root_cause", question="What caused it?")],
+            sessions=[
+                InvestigationSessionInput(session_id=session_id)
+                for session_id in session_ids
+            ],
+        ),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.INVESTIGATION_CREATED
+    assert properties == {"question_count": 1, "session_count": 2}
+
+
+async def test_create_investigation_without_analytics_tracker(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Create an investigation normally when no analytics tracker is configured."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    assert investigation.owner_id == ACTOR.account.id
