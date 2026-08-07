@@ -29,6 +29,8 @@ class AnnotationSelectorPart(StrEnum):
     OUTPUT = "output"
     ERROR = "error"
     METADATA = "metadata"
+    ATTRIBUTES = "attributes"
+    MODEL_PARAMS = "model_params"
 
 
 class AnnotationSpan(RequestModel):

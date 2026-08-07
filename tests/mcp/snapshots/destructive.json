@@ -4818,7 +4818,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"
@@ -7290,7 +7292,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"
@@ -7879,7 +7883,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"

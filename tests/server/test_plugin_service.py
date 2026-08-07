@@ -502,7 +502,7 @@ async def test_create_version_tracks_plugin_registered(
     user_id, event, properties = analytics.tracked[0]
     assert user_id == ACTOR.account.id
     assert event == AnalyticsEvent.PLUGIN_REGISTERED
-    assert properties == {"kind": "evaluator", "source_type": "package"}
+    assert properties == {"kind": "evaluator", "plugin_source": "package"}
 
 
 async def test_create_version_without_analytics_tracker(

@@ -4818,7 +4818,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"

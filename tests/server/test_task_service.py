@@ -908,7 +908,7 @@ async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
     assert tracked_user_id == ACTOR.account.id
     assert tracked_event == AnalyticsEvent.IMPORT_COMPLETED
     assert tracked_properties["status"] == "completed"
-    assert tracked_properties["plugin_version_id"] == task.plugin_version_id
+    assert "plugin_version_id" not in tracked_properties
     assert tracked_properties["session_count"] == 3
     assert tracked_properties["duration_seconds"] >= 0.0
 

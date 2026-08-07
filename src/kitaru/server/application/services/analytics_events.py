@@ -275,4 +275,4 @@ def build_plugin_registered_properties(
     Returns:
         Event properties.
     """
-    return {"kind": kind.value, "source_type": source.type}
+    return {"kind": kind.value, "plugin_source": source.type}
