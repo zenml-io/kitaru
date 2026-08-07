@@ -48,7 +48,6 @@ MAX_RESULT_BYTES = 1024 * 1024
 
 _LABELS: dict[TaskKind, str] = {
     TaskKind.AGENT: "Agent",
-    TaskKind.TRIGGER: "Trigger",
     TaskKind.EVALUATOR: "Evaluator",
     TaskKind.IMPORTER: "Importer",
 }

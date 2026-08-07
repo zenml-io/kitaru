@@ -16,8 +16,9 @@
 import uuid
 
 from kitaru.api_models.v1.task import (
-    AgentTaskDetails,
+    CommandAgentTaskDetails,
     EvaluationTaskDetails,
+    FunctionAgentTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
     PayloadSpec,
@@ -31,7 +32,6 @@ from kitaru.api_models.v1.task import (
     TaskSpecResponse,
     TaskUpdateRequest,
     TaskWithSpec,
-    TriggerTaskDetails,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
@@ -43,10 +43,13 @@ from kitaru.server.domain.task import (
     TaskSpec,
 )
 from kitaru.server.domain.task import (
-    AgentTaskDetails as DomainAgentTaskDetails,
+    CommandAgentTaskDetails as DomainCommandAgentTaskDetails,
 )
 from kitaru.server.domain.task import (
     EvaluationTaskDetails as DomainEvaluationTaskDetails,
+)
+from kitaru.server.domain.task import (
+    FunctionAgentTaskDetails as DomainFunctionAgentTaskDetails,
 )
 from kitaru.server.domain.task import (
     ImportTaskDetails as DomainImportTaskDetails,
@@ -62,9 +65,6 @@ from kitaru.server.domain.task import (
 )
 from kitaru.server.domain.task import (
     TaskRunSpec as DomainTaskRunSpec,
-)
-from kitaru.server.domain.task import (
-    TriggerTaskDetails as DomainTriggerTaskDetails,
 )
 
 
@@ -171,10 +171,12 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
         Task details DTO.
     """
     details = spec.details
-    if isinstance(details, DomainAgentTaskDetails):
-        return AgentTaskDetails(inputs=details.inputs, replay_id=details.replay_id)
-    if isinstance(details, DomainTriggerTaskDetails):
-        return TriggerTaskDetails(
+    if isinstance(details, DomainCommandAgentTaskDetails):
+        return CommandAgentTaskDetails(
+            inputs=details.inputs, replay_id=details.replay_id
+        )
+    if isinstance(details, DomainFunctionAgentTaskDetails):
+        return FunctionAgentTaskDetails(
             entrypoint=details.entrypoint,
             inputs=details.inputs,
             replay_id=details.replay_id,

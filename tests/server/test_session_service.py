@@ -958,7 +958,7 @@ async def test_create_session_adopts_a_matching_pending_import_placeholder(
     task_repository: FakeTaskRepository,
 ) -> None:
     """An import create matching a placeholder's external id adopts it."""
-    trigger_task = await task_repository.create(
+    function_task = await task_repository.create(
         AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
     )
     placeholder = await create_session(
@@ -968,7 +968,7 @@ async def test_create_session_adopts_a_matching_pending_import_placeholder(
         origin=SessionOrigin.REPLAY,
         status=SessionStatus.PENDING_IMPORT,
         external_id="run-1",
-        task_id=trigger_task.id,
+        task_id=function_task.id,
     )
     import_task = await _start(
         task_repository, await create_import_task(task_repository, uuid.uuid4())
@@ -1018,7 +1018,7 @@ async def test_create_session_adopts_a_matching_pending_import_placeholder(
     assert adopted.imported_from == "acme"
     assert adopted.framework == "langgraph"
     assert adopted.adapter_version == "1.2.3"
-    assert adopted.task_id == trigger_task.id
+    assert adopted.task_id == function_task.id
     assert adopted.agent_id == placeholder.agent_id
     assert adopted.agent_version_id == placeholder.agent_version_id
 

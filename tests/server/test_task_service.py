@@ -537,7 +537,7 @@ async def test_sweep_stale_task_abandons_and_settles() -> None:
     assert job.status.value == "failed"
 
 
-async def _trigger_job_with_completed_agent_task(
+async def _function_job_with_completed_agent_task(
     services: JobAndTaskServices, import_deadline_seconds: int
 ) -> tuple[uuid.UUID, ImportWaitTask]:
     """Drive a job's agent task to completed with a pending-import result session."""
@@ -583,7 +583,7 @@ async def test_sweep_expired_import_wait_fails_the_task_and_the_job(
     services: JobAndTaskServices,
 ) -> None:
     """An expired wait task fails past its deadline and its abort settles the job."""
-    job_id, wait = await _trigger_job_with_completed_agent_task(
+    job_id, wait = await _function_job_with_completed_agent_task(
         services, import_deadline_seconds=60
     )
 
@@ -606,7 +606,7 @@ async def test_sweep_expired_import_wait_leaves_a_task_within_its_deadline_alone
     services: JobAndTaskServices,
 ) -> None:
     """A wait task inside its import deadline is neither listed nor swept."""
-    _, wait = await _trigger_job_with_completed_agent_task(
+    _, wait = await _function_job_with_completed_agent_task(
         services, import_deadline_seconds=60
     )
 

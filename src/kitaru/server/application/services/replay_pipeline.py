@@ -36,7 +36,7 @@ from kitaru.server.application.interfaces.session_repository import SessionRepos
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.task_transitions import TaskTransitions
-from kitaru.server.domain.agent_version import AgentVersion, TriggerRunSpec
+from kitaru.server.domain.agent_version import AgentVersion, FunctionRunSpec
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
@@ -60,7 +60,7 @@ async def create_replay_pipelines(
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
     Each agent task carries its baseline session's inputs and the agent
-    version as a label. A trigger-mode agent version adds one import wait
+    version as a label. A function-mode agent version adds one import wait
     task per job, completed by the server when the placeholder session's
     import finalizes. With ``evaluate_baselines``, one baseline evaluator
     task is appended per evaluator that has not already scored the baseline
@@ -112,7 +112,7 @@ async def create_replay_pipelines(
                 on_failure=TaskOnFailure.ABORT,
             )
         )
-        if isinstance(run_spec, TriggerRunSpec):
+        if isinstance(run_spec, FunctionRunSpec):
             tasks.append(
                 ImportWaitTask(
                     job_id=job.id,

@@ -11,9 +11,9 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Trigger-mode replays.
+"""Function run specs.
 
-Revision ID: 002_trigger_mode_replays
+Revision ID: 002_function_run_specs
 Revises: 001_initial
 Create Date: 2026-08-07
 
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "002_trigger_mode_replays"
+revision = "002_function_run_specs"
 down_revision = "001_initial"
 branch_labels = None
 depends_on = None

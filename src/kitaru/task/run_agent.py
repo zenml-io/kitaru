@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Trigger plugin contract and the trigger flow."""
+"""Run function contract and the run-agent flow."""
 
 import uuid
 from collections.abc import Callable
@@ -22,77 +22,79 @@ from kitaru.api_models.v1.session import (
     SessionOrigin,
     SessionStatus,
 )
-from kitaru.api_models.v1.task import TriggerTaskDetails
+from kitaru.api_models.v1.task import FunctionAgentTaskDetails
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.plugins import PluginLoadError, load_source_ref
 from kitaru.task.task_io import write_task_result
 
 __all__ = [
-    "Trigger",
-    "TriggerError",
-    "call_trigger",
+    "AgentRunError",
+    "RunFunction",
+    "call_run_function",
     "run",
 ]
 
-_LABEL = "Trigger"
+_LABEL = "Run function"
 
 
-class TriggerError(Exception):
-    """Raised when loading or invoking a trigger function fails."""
+class AgentRunError(Exception):
+    """Raised when loading or invoking the run function fails."""
 
 
-Trigger = Callable[[Any, str | None], str]
+RunFunction = Callable[[Any, str | None], str]
 
 
-def call_trigger(
-    name: str, trigger: Trigger, inputs: Any, replay_id: str | None
+def call_run_function(
+    name: str, run_function: RunFunction, inputs: Any, replay_id: str | None
 ) -> str:
-    """Invoke a trigger function and validate its result.
+    """Invoke the run function and validate its result.
 
     Args:
-        name: Trigger entrypoint, named in error messages.
-        trigger: Trigger callable.
-        inputs: Inputs passed to the trigger function.
-        replay_id: Replay id passed to the trigger function.
+        name: Run function entrypoint, named in error messages.
+        run_function: Run function callable.
+        inputs: Inputs passed to the run function.
+        replay_id: Replay id passed to the run function.
 
     Raises:
-        TriggerError: The trigger raised, or did not return a non-empty
-            string.
+        AgentRunError: The run function raised, or did not return a
+            non-empty string.
 
     Returns:
         External id of the resulting session.
     """
     try:
-        result = trigger(inputs, replay_id)
+        result = run_function(inputs, replay_id)
     except Exception as exc:
-        raise TriggerError(f"Trigger '{name}' raised an error: {exc}") from exc
+        raise AgentRunError(f"Run function '{name}' raised an error: {exc}") from exc
     if not isinstance(result, str) or not result:
-        raise TriggerError(f"Trigger '{name}' did not return a non-empty string")
+        raise AgentRunError(f"Run function '{name}' did not return a non-empty string")
     return result
 
 
 async def run(client: KitaruAPIClient, task_id: str) -> None:
-    """Run the trigger flow: run the trigger function and create the placeholder.
+    """Run the run-agent flow: call the run function and create the placeholder.
 
     Args:
         client: API client.
-        task_id: Id of the trigger task.
+        task_id: Id of the agent task.
 
     Raises:
-        TriggerError: The task is not a trigger task, the entrypoint fails
-            to load, or the trigger invocation fails validation.
+        AgentRunError: The task is not a function agent task, the entrypoint
+            fails to load, or the run function invocation fails validation.
     """
     spec = await client.tasks.get_spec(uuid.UUID(task_id))
     details = spec.details
-    if not isinstance(details, TriggerTaskDetails):
-        raise TriggerError(f"Task {task_id} is not a trigger task")
+    if not isinstance(details, FunctionAgentTaskDetails):
+        raise AgentRunError(f"Task {task_id} is not a function agent task")
     try:
-        trigger = load_source_ref(details.entrypoint, _LABEL)
+        run_function = load_source_ref(details.entrypoint, _LABEL)
     except PluginLoadError as exc:
-        raise TriggerError(str(exc)) from exc
+        raise AgentRunError(str(exc)) from exc
 
     replay_id = str(details.replay_id) if details.replay_id is not None else None
-    external_id = call_trigger(details.entrypoint, trigger, details.inputs, replay_id)
+    external_id = call_run_function(
+        details.entrypoint, run_function, details.inputs, replay_id
+    )
 
     await client.sessions.create(
         SessionCreateRequest(

@@ -19,7 +19,11 @@ import uuid
 import httpx
 import pytest
 
-from kitaru.api_models.v1.task import AgentTaskDetails, TaskKind, TaskSpecResponse
+from kitaru.api_models.v1.task import (
+    CommandAgentTaskDetails,
+    TaskKind,
+    TaskSpecResponse,
+)
 from kitaru.task import get_task_id, get_task_inputs
 
 
@@ -30,7 +34,7 @@ def _agent_spec(task_id: str, inputs: object) -> TaskSpecResponse:
         timeout_seconds=60,
         env={},
         secret_env={},
-        details=AgentTaskDetails(inputs=inputs),
+        details=CommandAgentTaskDetails(inputs=inputs),
     )
 
 

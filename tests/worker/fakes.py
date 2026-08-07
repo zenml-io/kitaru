@@ -21,7 +21,7 @@ from typing import Any, cast
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
-    AgentTaskDetails,
+    CommandAgentTaskDetails,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
@@ -125,7 +125,7 @@ def make_agent_spec(
         run=TaskRunSpec(command=command, working_dir=working_dir, env=run_env or {}),
         env=extra_env or {},
         secret_env=secret_env or {},
-        details=AgentTaskDetails(inputs=inputs, replay_id=replay_id),
+        details=CommandAgentTaskDetails(inputs=inputs, replay_id=replay_id),
     )
 
 

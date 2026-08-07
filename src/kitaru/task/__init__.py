@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from kitaru.api_models.v1.task import AgentTaskDetails, TaskSpecResponse
+from kitaru.api_models.v1.task import CommandAgentTaskDetails, TaskSpecResponse
 from kitaru.task.task_io import get_required_env
 
 
@@ -61,6 +61,6 @@ def get_task_inputs() -> Any:
     response = httpx.get(f"{base_url}/api/v1/tasks/{task_id}/spec", headers=headers)
     response.raise_for_status()
     spec = TaskSpecResponse.model_validate(response.json())
-    if not isinstance(spec.details, AgentTaskDetails):
+    if not isinstance(spec.details, CommandAgentTaskDetails):
         raise RuntimeError(f"Task {task_id} is not an agent task")
     return spec.details.inputs

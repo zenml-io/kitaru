@@ -49,8 +49,9 @@ SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["imported_from", "external_id"]
 )
 # A partial unique index, not a plain unique constraint, since Postgres only
-# supports a WHERE predicate on an index. It keeps a second trigger run from
-# reserving an external id an unadopted placeholder already holds.
+# supports a WHERE predicate on an index. It keeps a second run function
+# invocation from reserving an external id an unadopted placeholder already
+# holds.
 SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX = unique_constraint_name(
     "session", ["owner_id", "external_id"]
 )

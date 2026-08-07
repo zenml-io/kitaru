@@ -16,15 +16,19 @@
 import json
 import uuid
 
-from kitaru.api_models.v1.task import AgentTaskDetails, TaskSpecResponse
+from kitaru.api_models.v1.task import (
+    CommandAgentTaskDetails,
+    FunctionAgentTaskDetails,
+    TaskSpecResponse,
+)
 from kitaru.worker.context import ExecutionContext
-from kitaru.worker.process import TaskProcess, build_process_env
+from kitaru.worker.process import TaskProcess, build_process_env, get_python_run_argv
 
 MAX_INPUTS_ENV_BYTES = 32768
 
 
 class AgentHandler:
-    """Builds the agent's own command as the task process."""
+    """Builds the agent's own command or its run function process."""
 
     async def prepare(
         self,
@@ -33,7 +37,7 @@ class AgentHandler:
         spec: TaskSpecResponse,
         token: str,
     ) -> TaskProcess:
-        """Build the process running the agent's command from its run spec.
+        """Build the process running the agent's command or its run function.
 
         Args:
             ctx: Execution context.
@@ -42,10 +46,19 @@ class AgentHandler:
             token: Bearer token scoped to this task and attempt.
 
         Returns:
-            Process running the agent's command.
+            Process running the agent.
         """
+        if isinstance(spec.details, FunctionAgentTaskDetails):
+            env = build_process_env(task_id, {}, spec.env, spec.secret_env, token)
+            argv = get_python_run_argv("kitaru.task", ["run-agent"], [])
+            return TaskProcess(
+                command=argv,
+                working_dir=None,
+                env=env,
+                timeout_seconds=spec.timeout_seconds,
+            )
         assert spec.run is not None, "agent task spec is missing a run spec"
-        assert isinstance(spec.details, AgentTaskDetails)
+        assert isinstance(spec.details, CommandAgentTaskDetails)
         env = build_process_env(task_id, spec.run.env, spec.env, spec.secret_env, token)
         inputs_json = json.dumps(spec.details.inputs)
         if len(inputs_json.encode("utf-8")) <= MAX_INPUTS_ENV_BYTES:

@@ -19,6 +19,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import Field
+from typing_extensions import TypeAliasType
 
 from kitaru.api_models.v1.base import (
     JsonValue,
@@ -34,7 +35,6 @@ class TaskKind(StrEnum):
     """Kind of work a task runs."""
 
     AGENT = "agent"
-    TRIGGER = "trigger"
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
     IMPORT_WAIT = "import_wait"
@@ -172,27 +172,35 @@ class PayloadSpec(ResponseModel):
     sha256: str = Field(description="Blob content hash.")
 
 
-class AgentTaskDetails(ResponseModel):
-    """Agent task details."""
+class CommandAgentTaskDetails(ResponseModel):
+    """Command agent task details."""
 
     kind: Literal["agent"] = Field(default="agent")
+    type: Literal["command"] = Field(default="command")
     inputs: JsonValue = Field(description="Inputs passed to the agent's command.")
     replay_id: uuid.UUID | None = Field(
         default=None, description="Replay the task runs for."
     )
 
 
-class TriggerTaskDetails(ResponseModel):
-    """Trigger task details."""
+class FunctionAgentTaskDetails(ResponseModel):
+    """Function agent task details."""
 
-    kind: Literal["trigger"] = Field(default="trigger")
-    entrypoint: str = Field(
-        description="Trigger function to load, as module:attribute."
-    )
-    inputs: JsonValue = Field(description="Inputs passed to the trigger function.")
+    kind: Literal["agent"] = Field(default="agent")
+    type: Literal["function"] = Field(default="function")
+    entrypoint: str = Field(description="Run function to load, as module:attribute.")
+    inputs: JsonValue = Field(description="Inputs passed to the run function.")
     replay_id: uuid.UUID | None = Field(
         default=None, description="Replay the task runs for."
     )
+
+
+AgentTaskDetails = TypeAliasType(
+    "AgentTaskDetails",
+    Annotated[
+        CommandAgentTaskDetails | FunctionAgentTaskDetails, Field(discriminator="type")
+    ],
+)
 
 
 class EvaluationTaskDetails(ResponseModel):
@@ -225,7 +233,7 @@ class ImportTaskDetails(ResponseModel):
 
 
 TaskDetails = Annotated[
-    AgentTaskDetails | TriggerTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
     Field(discriminator="kind"),
 ]
 

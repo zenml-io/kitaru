@@ -42,6 +42,7 @@ keywords = [
 dependencies = [
     "pydantic>=2,<3",
     "httpx>=0.27,<1",
+    "typing-extensions>=4.6",
 ]
 
 [project.optional-dependencies]

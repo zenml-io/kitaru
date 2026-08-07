@@ -19,7 +19,7 @@ from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.application.models.auth import GrantKind
 from kitaru.server.application.services.resource_access import build_task_grants
 from kitaru.server.domain.task import (
-    AgentTaskDetails,
+    CommandAgentTaskDetails,
     EvaluationTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
@@ -41,7 +41,7 @@ def test_agent_spec_grants_nothing() -> None:
         kind=TaskKind.AGENT,
         timeout_seconds=60,
         run_spec=TaskRunSpec(command="run.sh"),
-        details=AgentTaskDetails(),
+        details=CommandAgentTaskDetails(),
     )
     assert build_task_grants(spec) == {}
 

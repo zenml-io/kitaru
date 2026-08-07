@@ -103,10 +103,10 @@ class CommandRunSpec(FrozenModel):
     timeout_seconds: TimeoutSeconds = 3600
 
 
-class TriggerRunSpec(FrozenModel):
-    """Trigger run spec."""
+class FunctionRunSpec(FrozenModel):
+    """Function run spec."""
 
-    type: Literal["trigger"] = "trigger"
+    type: Literal["function"] = "function"
     entrypoint: str
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
@@ -114,7 +114,7 @@ class TriggerRunSpec(FrozenModel):
     import_deadline_seconds: TimeoutSeconds = 86400
 
 
-RunSpec = Annotated[CommandRunSpec | TriggerRunSpec, Field(discriminator="type")]
+RunSpec = Annotated[CommandRunSpec | FunctionRunSpec, Field(discriminator="type")]
 
 
 class AgentCapabilities(FrozenModel):

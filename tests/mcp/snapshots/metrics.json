@@ -6,15 +6,15 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 143866,
+      "discovery_response_bytes": 143860,
       "tool_count": 11,
       "tools": {
         "kitaru_activity_read": {
           "$defs_count": 43,
-          "combined_bytes": 33584,
+          "combined_bytes": 33574,
           "input_bytes": 5090,
           "maximum_nesting_depth": 8,
-          "output_bytes": 28494
+          "output_bytes": 28484
         },
         "kitaru_cohorts_manage": {
           "$defs_count": 7,
@@ -46,10 +46,10 @@
         },
         "kitaru_registry_read": {
           "$defs_count": 38,
-          "combined_bytes": 26858,
+          "combined_bytes": 26862,
           "input_bytes": 4989,
           "maximum_nesting_depth": 9,
-          "output_bytes": 21869
+          "output_bytes": 21873
         },
         "kitaru_review_manage": {
           "$defs_count": 25,
@@ -89,22 +89,22 @@
       }
     },
     "read-only": {
-      "discovery_response_bytes": 74374,
+      "discovery_response_bytes": 74368,
       "tool_count": 3,
       "tools": {
         "kitaru_activity_read": {
           "$defs_count": 43,
-          "combined_bytes": 33584,
+          "combined_bytes": 33574,
           "input_bytes": 5090,
           "maximum_nesting_depth": 8,
-          "output_bytes": 28494
+          "output_bytes": 28484
         },
         "kitaru_registry_read": {
           "$defs_count": 38,
-          "combined_bytes": 26858,
+          "combined_bytes": 26862,
           "input_bytes": 4989,
           "maximum_nesting_depth": 9,
-          "output_bytes": 21869
+          "output_bytes": 21873
         },
         "kitaru_review_read": {
           "$defs_count": 22,
@@ -116,15 +116,15 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 134404,
+      "discovery_response_bytes": 134398,
       "tool_count": 9,
       "tools": {
         "kitaru_activity_read": {
           "$defs_count": 43,
-          "combined_bytes": 33584,
+          "combined_bytes": 33574,
           "input_bytes": 5090,
           "maximum_nesting_depth": 8,
-          "output_bytes": 28494
+          "output_bytes": 28484
         },
         "kitaru_cohorts_manage": {
           "$defs_count": 7,
@@ -149,10 +149,10 @@
         },
         "kitaru_registry_read": {
           "$defs_count": 38,
-          "combined_bytes": 26858,
+          "combined_bytes": 26862,
           "input_bytes": 4989,
           "maximum_nesting_depth": 9,
-          "output_bytes": 21869
+          "output_bytes": 21873
         },
         "kitaru_review_manage": {
           "$defs_count": 25,

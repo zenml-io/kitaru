@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal, Self
 
 import pydantic
 from pydantic import Field, field_validator
+from typing_extensions import TypeAliasType
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.task import (
@@ -40,9 +41,11 @@ from kitaru.server.domain.ids import uuid7
 __all__ = [
     "AgentTask",
     "AgentTaskDetails",
+    "CommandAgentTaskDetails",
     "DuplicateEvaluationTask",
     "EvaluationTask",
     "EvaluationTaskDetails",
+    "FunctionAgentTaskDetails",
     "ImportTask",
     "ImportTaskDetails",
     "ImportWaitTask",
@@ -61,7 +64,6 @@ __all__ = [
     "TaskResultSessionMissing",
     "TaskRunSpec",
     "TaskSpec",
-    "TriggerTaskDetails",
 ]
 
 TERMINAL_TASK_STATUSES = frozenset(
@@ -762,21 +764,31 @@ class PayloadSpec(FrozenModel):
     sha256: str
 
 
-class AgentTaskDetails(FrozenModel):
-    """Agent task details."""
+class CommandAgentTaskDetails(FrozenModel):
+    """Command agent task details."""
 
     kind: Literal[TaskKind.AGENT] = TaskKind.AGENT
+    type: Literal["command"] = "command"
     inputs: Any = None
     replay_id: uuid.UUID | None = None
 
 
-class TriggerTaskDetails(FrozenModel):
-    """Trigger task details."""
+class FunctionAgentTaskDetails(FrozenModel):
+    """Function agent task details."""
 
-    kind: Literal[TaskKind.TRIGGER] = TaskKind.TRIGGER
+    kind: Literal[TaskKind.AGENT] = TaskKind.AGENT
+    type: Literal["function"] = "function"
     entrypoint: str
     inputs: Any = None
     replay_id: uuid.UUID | None = None
+
+
+AgentTaskDetails = TypeAliasType(
+    "AgentTaskDetails",
+    Annotated[
+        CommandAgentTaskDetails | FunctionAgentTaskDetails, Field(discriminator="type")
+    ],
+)
 
 
 class EvaluationTaskDetails(FrozenModel):
@@ -801,7 +813,7 @@ class ImportTaskDetails(FrozenModel):
 
 
 TaskDetails = Annotated[
-    AgentTaskDetails | TriggerTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
     Field(discriminator="kind"),
 ]
 

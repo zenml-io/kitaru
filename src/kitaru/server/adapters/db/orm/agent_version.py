@@ -33,8 +33,8 @@ from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
     CommandRunSpec,
+    FunctionRunSpec,
     RunSpec,
-    TriggerRunSpec,
 )
 
 AGENT_VERSION_AGENT_ID_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -92,7 +92,7 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             self.run_working_dir = run_spec.working_dir
             self.run_env = run_spec.env
             self.run_timeout_seconds = run_spec.timeout_seconds
-        elif isinstance(run_spec, TriggerRunSpec):
+        elif isinstance(run_spec, FunctionRunSpec):
             self.run_entrypoint = run_spec.entrypoint
             self.run_env = run_spec.env
             self.run_timeout_seconds = run_spec.timeout_seconds
@@ -146,7 +146,7 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         elif self.run_entrypoint is not None:
             assert self.run_timeout_seconds is not None
             assert self.run_import_deadline_seconds is not None
-            run_spec = TriggerRunSpec(
+            run_spec = FunctionRunSpec(
                 entrypoint=self.run_entrypoint,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,

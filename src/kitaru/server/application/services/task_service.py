@@ -455,7 +455,7 @@ class TaskService:
         """Require an agent task's linked result session to exist and be completed.
 
         A pending-import result session also passes, the placeholder a
-        trigger-mode task hands off to the import.
+        function-mode task hands off to the import.
 
         Args:
             task: Task about to complete.

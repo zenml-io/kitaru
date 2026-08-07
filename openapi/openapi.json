@@ -403,37 +403,21 @@
         "type": "object"
       },
       "AgentTaskDetails": {
-        "description": "Agent task details.",
-        "properties": {
-          "inputs": {
-            "description": "Inputs passed to the agent's command.",
-            "title": "Inputs"
+        "discriminator": {
+          "mapping": {
+            "command": "#/components/schemas/CommandAgentTaskDetails",
+            "function": "#/components/schemas/FunctionAgentTaskDetails"
           },
-          "kind": {
-            "const": "agent",
-            "default": "agent",
-            "title": "Kind",
-            "type": "string"
-          },
-          "replay_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Replay the task runs for.",
-            "title": "Replay Id"
-          }
+          "propertyName": "type"
         },
-        "required": [
-          "inputs"
-        ],
-        "title": "AgentTaskDetails",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CommandAgentTaskDetails"
+          },
+          {
+            "$ref": "#/components/schemas/FunctionAgentTaskDetails"
+          }
+        ]
       },
       "AgentUpdateRequest": {
         "additionalProperties": false,
@@ -512,7 +496,7 @@
                 "discriminator": {
                   "mapping": {
                     "command": "#/components/schemas/CommandRunSpec",
-                    "trigger": "#/components/schemas/TriggerRunSpec"
+                    "function": "#/components/schemas/FunctionRunSpec"
                   },
                   "propertyName": "type"
                 },
@@ -521,7 +505,7 @@
                     "$ref": "#/components/schemas/CommandRunSpec"
                   },
                   {
-                    "$ref": "#/components/schemas/TriggerRunSpec"
+                    "$ref": "#/components/schemas/FunctionRunSpec"
                   }
                 ]
               },
@@ -596,7 +580,7 @@
                 "discriminator": {
                   "mapping": {
                     "command": "#/components/schemas/CommandRunSpec",
-                    "trigger": "#/components/schemas/TriggerRunSpec"
+                    "function": "#/components/schemas/FunctionRunSpec"
                   },
                   "propertyName": "type"
                 },
@@ -605,7 +589,7 @@
                     "$ref": "#/components/schemas/CommandRunSpec"
                   },
                   {
-                    "$ref": "#/components/schemas/TriggerRunSpec"
+                    "$ref": "#/components/schemas/FunctionRunSpec"
                   }
                 ]
               },
@@ -688,7 +672,7 @@
                 "discriminator": {
                   "mapping": {
                     "command": "#/components/schemas/CommandRunSpec",
-                    "trigger": "#/components/schemas/TriggerRunSpec"
+                    "function": "#/components/schemas/FunctionRunSpec"
                   },
                   "propertyName": "type"
                 },
@@ -697,7 +681,7 @@
                     "$ref": "#/components/schemas/CommandRunSpec"
                   },
                   {
-                    "$ref": "#/components/schemas/TriggerRunSpec"
+                    "$ref": "#/components/schemas/FunctionRunSpec"
                   }
                 ]
               },
@@ -1619,6 +1603,45 @@
           }
         },
         "title": "CohortVersionUpdateRequest",
+        "type": "object"
+      },
+      "CommandAgentTaskDetails": {
+        "description": "Command agent task details.",
+        "properties": {
+          "inputs": {
+            "description": "Inputs passed to the agent's command.",
+            "title": "Inputs"
+          },
+          "kind": {
+            "const": "agent",
+            "default": "agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "replay_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replay the task runs for.",
+            "title": "Replay Id"
+          },
+          "type": {
+            "const": "command",
+            "default": "command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "inputs"
+        ],
+        "title": "CommandAgentTaskDetails",
         "type": "object"
       },
       "CommandRunSpec": {
@@ -3080,6 +3103,104 @@
         ],
         "title": "FilterOp",
         "type": "string"
+      },
+      "FunctionAgentTaskDetails": {
+        "description": "Function agent task details.",
+        "properties": {
+          "entrypoint": {
+            "description": "Run function to load, as module:attribute.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "inputs": {
+            "description": "Inputs passed to the run function.",
+            "title": "Inputs"
+          },
+          "kind": {
+            "const": "agent",
+            "default": "agent",
+            "title": "Kind",
+            "type": "string"
+          },
+          "replay_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Replay the task runs for.",
+            "title": "Replay Id"
+          },
+          "type": {
+            "const": "function",
+            "default": "function",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entrypoint",
+          "inputs"
+        ],
+        "title": "FunctionAgentTaskDetails",
+        "type": "object"
+      },
+      "FunctionRunSpec": {
+        "additionalProperties": false,
+        "description": "Function run spec.",
+        "properties": {
+          "entrypoint": {
+            "description": "Run function to load, as module:attribute.",
+            "title": "Entrypoint",
+            "type": "string"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Process environment.",
+            "title": "Env",
+            "type": "object"
+          },
+          "import_deadline_seconds": {
+            "default": 86400,
+            "description": "Seconds the resulting session may stay pending import.",
+            "exclusiveMinimum": 0.0,
+            "title": "Import Deadline Seconds",
+            "type": "integer"
+          },
+          "secret_ids": {
+            "description": "Secrets merged into the process environment.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Secret Ids",
+            "type": "array"
+          },
+          "timeout_seconds": {
+            "default": 3600,
+            "description": "Process timeout.",
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "type": {
+            "const": "function",
+            "default": "function",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entrypoint"
+        ],
+        "title": "FunctionRunSpec",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -7262,7 +7383,6 @@
         "description": "Kind of work a task runs.",
         "enum": [
           "agent",
-          "trigger",
           "evaluator",
           "importer",
           "import_wait"
@@ -7564,17 +7684,13 @@
               "mapping": {
                 "agent": "#/components/schemas/AgentTaskDetails",
                 "evaluator": "#/components/schemas/EvaluationTaskDetails",
-                "importer": "#/components/schemas/ImportTaskDetails",
-                "trigger": "#/components/schemas/TriggerTaskDetails"
+                "importer": "#/components/schemas/ImportTaskDetails"
               },
               "propertyName": "kind"
             },
             "oneOf": [
               {
                 "$ref": "#/components/schemas/AgentTaskDetails"
-              },
-              {
-                "$ref": "#/components/schemas/TriggerTaskDetails"
               },
               {
                 "$ref": "#/components/schemas/EvaluationTaskDetails"
@@ -7972,98 +8088,6 @@
         ],
         "title": "ToolPolicyOnMiss",
         "type": "string"
-      },
-      "TriggerRunSpec": {
-        "additionalProperties": false,
-        "description": "Trigger run spec.",
-        "properties": {
-          "entrypoint": {
-            "description": "Trigger function to load, as module:attribute.",
-            "title": "Entrypoint",
-            "type": "string"
-          },
-          "env": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Process environment.",
-            "title": "Env",
-            "type": "object"
-          },
-          "import_deadline_seconds": {
-            "default": 86400,
-            "description": "Seconds the resulting session may stay pending import.",
-            "exclusiveMinimum": 0.0,
-            "title": "Import Deadline Seconds",
-            "type": "integer"
-          },
-          "secret_ids": {
-            "description": "Secrets merged into the process environment.",
-            "items": {
-              "format": "uuid",
-              "type": "string"
-            },
-            "title": "Secret Ids",
-            "type": "array"
-          },
-          "timeout_seconds": {
-            "default": 3600,
-            "description": "Process timeout.",
-            "exclusiveMinimum": 0.0,
-            "title": "Timeout Seconds",
-            "type": "integer"
-          },
-          "type": {
-            "const": "trigger",
-            "default": "trigger",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "entrypoint"
-        ],
-        "title": "TriggerRunSpec",
-        "type": "object"
-      },
-      "TriggerTaskDetails": {
-        "description": "Trigger task details.",
-        "properties": {
-          "entrypoint": {
-            "description": "Trigger function to load, as module:attribute.",
-            "title": "Entrypoint",
-            "type": "string"
-          },
-          "inputs": {
-            "description": "Inputs passed to the trigger function.",
-            "title": "Inputs"
-          },
-          "kind": {
-            "const": "trigger",
-            "default": "trigger",
-            "title": "Kind",
-            "type": "string"
-          },
-          "replay_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Replay the task runs for.",
-            "title": "Replay Id"
-          }
-        },
-        "required": [
-          "entrypoint",
-          "inputs"
-        ],
-        "title": "TriggerTaskDetails",
-        "type": "object"
       },
       "ValidationError": {
         "properties": {

@@ -27,10 +27,10 @@ from kitaru.api_models.v1.agent_version import (
 from kitaru.api_models.v1.agent_version import (
     CommandRunSpec as WireCommandRunSpec,
 )
-from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
 from kitaru.api_models.v1.agent_version import (
-    TriggerRunSpec as WireTriggerRunSpec,
+    FunctionRunSpec as WireFunctionRunSpec,
 )
+from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
@@ -40,8 +40,8 @@ from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
     CommandRunSpec,
+    FunctionRunSpec,
     RunSpec,
-    TriggerRunSpec,
 )
 
 
@@ -62,7 +62,7 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
             secret_ids=run_spec.secret_ids,
             timeout_seconds=run_spec.timeout_seconds,
         )
-    return TriggerRunSpec(
+    return FunctionRunSpec(
         entrypoint=run_spec.entrypoint,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
@@ -88,7 +88,7 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
             secret_ids=run_spec.secret_ids,
             timeout_seconds=run_spec.timeout_seconds,
         )
-    return WireTriggerRunSpec(
+    return WireFunctionRunSpec(
         entrypoint=run_spec.entrypoint,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,

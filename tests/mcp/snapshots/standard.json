@@ -568,7 +568,7 @@
                   "discriminator": {
                     "mapping": {
                       "command": "#/$defs/CommandRunSpec",
-                      "trigger": "#/$defs/TriggerRunSpec"
+                      "function": "#/$defs/FunctionRunSpec"
                     },
                     "propertyName": "type"
                   },
@@ -577,7 +577,7 @@
                       "$ref": "#/$defs/CommandRunSpec"
                     },
                     {
-                      "$ref": "#/$defs/TriggerRunSpec"
+                      "$ref": "#/$defs/FunctionRunSpec"
                     }
                   ]
                 },
@@ -1106,6 +1106,59 @@
             "evaluators"
           ],
           "title": "ExperimentResponse",
+          "type": "object"
+        },
+        "FunctionRunSpec": {
+          "additionalProperties": false,
+          "description": "Function run spec.",
+          "properties": {
+            "entrypoint": {
+              "description": "Run function to load, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Process environment.",
+              "title": "Env",
+              "type": "object"
+            },
+            "import_deadline_seconds": {
+              "default": 86400,
+              "description": "Seconds the resulting session may stay pending import.",
+              "exclusiveMinimum": 0,
+              "title": "Import Deadline Seconds",
+              "type": "integer"
+            },
+            "secret_ids": {
+              "description": "Secrets merged into the process environment.",
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Secret Ids",
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "default": 3600,
+              "description": "Process timeout.",
+              "exclusiveMinimum": 0,
+              "title": "Timeout Seconds",
+              "type": "integer"
+            },
+            "type": {
+              "const": "function",
+              "default": "function",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entrypoint"
+          ],
+          "title": "FunctionRunSpec",
           "type": "object"
         },
         "HistoryConfig": {
@@ -1773,59 +1826,6 @@
           ],
           "title": "ToolPolicyOnMiss",
           "type": "string"
-        },
-        "TriggerRunSpec": {
-          "additionalProperties": false,
-          "description": "Trigger run spec.",
-          "properties": {
-            "entrypoint": {
-              "description": "Trigger function to load, as module:attribute.",
-              "title": "Entrypoint",
-              "type": "string"
-            },
-            "env": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Process environment.",
-              "title": "Env",
-              "type": "object"
-            },
-            "import_deadline_seconds": {
-              "default": 86400,
-              "description": "Seconds the resulting session may stay pending import.",
-              "exclusiveMinimum": 0,
-              "title": "Import Deadline Seconds",
-              "type": "integer"
-            },
-            "secret_ids": {
-              "description": "Secrets merged into the process environment.",
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "title": "Secret Ids",
-              "type": "array"
-            },
-            "timeout_seconds": {
-              "default": 3600,
-              "description": "Process timeout.",
-              "exclusiveMinimum": 0,
-              "title": "Timeout Seconds",
-              "type": "integer"
-            },
-            "type": {
-              "const": "trigger",
-              "default": "trigger",
-              "title": "Type",
-              "type": "string"
-            }
-          },
-          "required": [
-            "entrypoint"
-          ],
-          "title": "TriggerRunSpec",
-          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -3816,7 +3816,6 @@
           "description": "Kind of work a task runs.",
           "enum": [
             "agent",
-            "trigger",
             "evaluator",
             "importer",
             "import_wait"

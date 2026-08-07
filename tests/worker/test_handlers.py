@@ -57,7 +57,6 @@ def test_handlers_registry_covers_every_kind() -> None:
     """HANDLERS carries one entry per task kind."""
     assert set(HANDLERS) == {
         TaskKind.AGENT,
-        TaskKind.TRIGGER,
         TaskKind.EVALUATOR,
         TaskKind.IMPORTER,
     }

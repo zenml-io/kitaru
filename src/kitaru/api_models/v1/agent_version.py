@@ -41,13 +41,11 @@ class CommandRunSpec(DiscriminatedRequestModel):
     timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
 
 
-class TriggerRunSpec(DiscriminatedRequestModel):
-    """Trigger run spec."""
+class FunctionRunSpec(DiscriminatedRequestModel):
+    """Function run spec."""
 
-    type: Literal["trigger"] = Field(default="trigger")
-    entrypoint: str = Field(
-        description="Trigger function to load, as module:attribute."
-    )
+    type: Literal["function"] = Field(default="function")
+    entrypoint: str = Field(description="Run function to load, as module:attribute.")
     env: dict[str, str] = Field(
         default_factory=dict, description="Process environment."
     )
@@ -61,7 +59,7 @@ class TriggerRunSpec(DiscriminatedRequestModel):
     )
 
 
-RunSpec = Annotated[CommandRunSpec | TriggerRunSpec, Field(discriminator="type")]
+RunSpec = Annotated[CommandRunSpec | FunctionRunSpec, Field(discriminator="type")]
 
 
 class AgentCapabilities(RequestModel):
