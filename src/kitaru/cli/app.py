@@ -191,6 +191,11 @@ worker_app = App(
     help=GROUP_DESCRIPTIONS["worker"],
     default_parameter=Parameter(negative=False),
 )
+worker_pool_app = App(
+    name="pool",
+    help="Create, inspect, and manage worker pools.",
+    default_parameter=Parameter(negative=False),
+)
 job_app = App(
     name="job",
     help=GROUP_DESCRIPTIONS["job"],
@@ -207,6 +212,7 @@ investigation_app.command(investigation_session_app, name="session")
 experiment_app.command(experiment_run_app, name="run")
 importer_app.command(importer_version_app, name="version")
 evaluator_app.command(evaluator_version_app, name="version")
+worker_app.command(worker_pool_app, name="pool")
 app.command(config_app, name="config")
 app.command(agent_app, name="agent")
 app.command(annotation_app, name="annotation")
@@ -3778,6 +3784,167 @@ async def worker_get(worker: str, /) -> CommandResult:
     """Get one exact worker record."""
     async with _open_asset_client() as client:
         return await workers.get_worker(client, worker)
+
+
+@_register(
+    worker_pool_app,
+    _spec(
+        ("worker", "pool", "create"),
+        "Create a worker pool.",
+        parameters=(
+            ParameterSpec("--name", "string", "option", True, "Worker pool name."),
+            ParameterSpec(
+                "--kinds",
+                "agent|evaluator|importer[]",
+                "option",
+                False,
+                "Task kinds this pool's workers claim.",
+            ),
+            ParameterSpec(
+                "--selector",
+                "KEY=VALUE[,VALUE][]|JSON[]",
+                "option",
+                False,
+                "Task label selectors, combined by conjunction.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_remote_create",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def worker_pool_create(
+    *,
+    name: str,
+    kinds: list[TaskKind] | None = None,
+    selectors: Annotated[
+        list[str] | None,
+        Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
+    ] = None,
+) -> CommandResult:
+    """Create a worker pool."""
+    async with _open_asset_client() as client:
+        return await workers.create_worker_pool(
+            client, name=name, kinds=kinds, selectors=selectors
+        )
+
+
+@_register(
+    worker_pool_app,
+    _spec(
+        ("worker", "pool", "list"),
+        "List worker pools.",
+        parameters=_LIST_PARAMETERS,
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def worker_pool_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of worker pools."""
+    async with _open_asset_client() as client:
+        return await workers.list_worker_pools(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    worker_pool_app,
+    _spec(
+        ("worker", "pool", "get"),
+        "Get a worker pool by exact UUID or case-sensitive name.",
+        parameters=(
+            ParameterSpec(
+                "POOL", "reference", "argument", True, "Worker pool UUID or name."
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def worker_pool_get(pool: str, /) -> CommandResult:
+    """Get one exact worker pool."""
+    async with _open_asset_client() as client:
+        return await workers.get_worker_pool(client, pool)
+
+
+@_register(
+    worker_pool_app,
+    _spec(
+        ("worker", "pool", "update"),
+        "Update selected fields on an exact worker pool.",
+        parameters=(
+            ParameterSpec(
+                "POOL", "reference", "argument", True, "Worker pool UUID or name."
+            ),
+            ParameterSpec("--name", "string", "option", False, "New worker pool name."),
+            ParameterSpec(
+                "--kinds",
+                "agent|evaluator|importer[]",
+                "option",
+                False,
+                "New task kinds this pool's workers claim. Replaces the scope.",
+            ),
+            ParameterSpec(
+                "--selector",
+                "KEY=VALUE[,VALUE][]|JSON[]",
+                "option",
+                False,
+                "New task label selectors, combined by conjunction. Replaces the "
+                "scope.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state",),
+        idempotency="idempotent replacement",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def worker_pool_update(
+    pool: str,
+    /,
+    *,
+    name: str | None = None,
+    kinds: list[TaskKind] | None = None,
+    selectors: Annotated[
+        list[str] | None,
+        Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
+    ] = None,
+) -> CommandResult:
+    """Update selected fields on one exact worker pool."""
+    async with _open_asset_client() as client:
+        return await workers.update_worker_pool(
+            client, pool, name=name, kinds=kinds, selectors=selectors
+        )
+
+
+@_register(
+    worker_pool_app,
+    _spec(
+        ("worker", "pool", "delete"),
+        "Delete a worker pool.",
+        parameters=(
+            ParameterSpec(
+                "POOL", "reference", "argument", True, "Worker pool UUID or name."
+            ),
+            ParameterSpec(
+                "--force", "boolean", "option", False, "Confirm remote deletion."
+            ),
+        ),
+        read_only=False,
+        side_effects=("mutates_remote_state", "deletes_remote_state"),
+        idempotency="not_found after first removal",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def worker_pool_delete(pool: str, /, *, force: bool = False) -> CommandResult:
+    """Delete one exact worker pool."""
+    async with _open_asset_client() as client:
+        return await workers.delete_worker_pool(client, pool, force=force)
 
 
 _JOB_ERRORS = (

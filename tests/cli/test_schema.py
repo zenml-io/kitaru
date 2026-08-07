@@ -40,7 +40,11 @@ def test_handler_parameters_match_command_schema() -> None:
             schema_names = [
                 "all_sessions" if name == "all" else name for name in schema_names
             ]
-        if spec.path == ("worker", "start"):
+        if spec.path in {
+            ("worker", "start"),
+            ("worker", "pool", "create"),
+            ("worker", "pool", "update"),
+        }:
             # The singular public --selector option intentionally maps to the
             # plural handler parameter that receives its repeatable values.
             schema_names = [

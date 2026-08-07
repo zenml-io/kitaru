@@ -101,6 +101,7 @@ from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.models.worker_pool import WorkerPoolFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -223,6 +224,11 @@ from kitaru.server.domain.task import (
     TaskNotFound,
 )
 from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker_pool import (
+    DuplicateWorkerPoolName,
+    WorkerPool,
+    WorkerPoolNotFound,
+)
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -3180,6 +3186,157 @@ async def create_worker(
             last_seen_at=last_seen_at
             if last_seen_at is not None
             else datetime.now(UTC),
+        )
+    )
+
+
+class FakeWorkerPoolRepository:
+    """In-memory worker pool repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._worker_pools: dict[uuid.UUID, WorkerPool] = {}
+
+    def _check_duplicate_name(self, worker_pool: WorkerPool) -> None:
+        for other in self._worker_pools.values():
+            if other.id != worker_pool.id and other.name == worker_pool.name:
+                raise DuplicateWorkerPoolName(worker_pool.name)
+
+    async def create(self, worker_pool: WorkerPool) -> WorkerPool:
+        """Persist a new worker pool.
+
+        Args:
+            worker_pool: Worker pool to store.
+
+        Raises:
+            DuplicateWorkerPoolName: The worker pool name is already registered.
+
+        Returns:
+            Stored worker pool with timestamps set.
+        """
+        self._check_duplicate_name(worker_pool)
+        now = datetime.now(UTC)
+        stored = worker_pool.model_copy(update={"created": now, "updated": now})
+        self._worker_pools[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, worker_pool_id: uuid.UUID) -> WorkerPool:
+        """Load a worker pool by id.
+
+        Args:
+            worker_pool_id: Id of the worker pool.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+
+        Returns:
+            Stored worker pool.
+        """
+        worker_pool = self._worker_pools.get(worker_pool_id)
+        if worker_pool is None:
+            raise WorkerPoolNotFound(worker_pool_id)
+        return worker_pool.model_copy()
+
+    async def get_by_name(self, name: str) -> WorkerPool:
+        """Load a worker pool by name.
+
+        Args:
+            name: Worker pool name.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this name.
+
+        Returns:
+            Stored worker pool.
+        """
+        for worker_pool in self._worker_pools.values():
+            if worker_pool.name == name:
+                return worker_pool.model_copy()
+        raise WorkerPoolNotFound(name)
+
+    async def query(
+        self, worker_pool_filter: WorkerPoolFilter
+    ) -> tuple[list[WorkerPool], str | None]:
+        """Query worker pools matching a filter.
+
+        Args:
+            worker_pool_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching worker pools and the next cursor.
+        """
+        worker_pools = list(self._worker_pools.values())
+        if worker_pool_filter.expression is not None:
+            worker_pools = [
+                worker_pool
+                for worker_pool in worker_pools
+                if _evaluate_filter_expression(
+                    worker_pool, worker_pool_filter.expression
+                )
+            ]
+        page, next_cursor = _paginate_fake(worker_pools, worker_pool_filter)
+        return [worker_pool.model_copy() for worker_pool in page], next_cursor
+
+    async def update(self, worker_pool: WorkerPool) -> WorkerPool:
+        """Persist changes to an existing worker pool.
+
+        Args:
+            worker_pool: Worker pool with modified fields.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+            DuplicateWorkerPoolName: The worker pool name is already registered.
+
+        Returns:
+            Stored worker pool with the updated timestamp renewed.
+        """
+        stored = self._worker_pools.get(worker_pool.id)
+        if stored is None:
+            raise WorkerPoolNotFound(worker_pool.id)
+        self._check_duplicate_name(worker_pool)
+        now = _renewed_timestamp(stored.updated)
+        updated = worker_pool.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._worker_pools[worker_pool.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, worker_pool_id: uuid.UUID) -> None:
+        """Delete a worker pool by id.
+
+        Args:
+            worker_pool_id: Id of the worker pool.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+        """
+        if worker_pool_id not in self._worker_pools:
+            raise WorkerPoolNotFound(worker_pool_id)
+        del self._worker_pools[worker_pool_id]
+
+
+async def create_worker_pool(
+    repository: FakeWorkerPoolRepository,
+    owner_id: uuid.UUID,
+    name: str = "pool-1",
+    scope: WorkerScope | None = None,
+) -> WorkerPool:
+    """Store a worker pool in the fake repository.
+
+    Args:
+        repository: Fake worker pool repository.
+        owner_id: Id of the owning account.
+        name: Worker pool name.
+        scope: Tasks the pool's workers claim.
+
+    Returns:
+        Stored worker pool.
+    """
+    return await repository.create(
+        WorkerPool(
+            owner_id=owner_id,
+            name=name,
+            scope=scope if scope is not None else WorkerScope(),
         )
     )
 

@@ -5008,6 +5008,36 @@
         "title": "Page[TaskResponse]",
         "type": "object"
       },
+      "Page_WorkerPoolResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/WorkerPoolResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[WorkerPoolResponse]",
+        "type": "object"
+      },
       "Page_WorkerResponse_": {
         "properties": {
           "items": {
@@ -8026,6 +8056,105 @@
           "cancel_task_ids"
         ],
         "title": "WorkerHeartbeatResponse",
+        "type": "object"
+      },
+      "WorkerPoolCreateRequest": {
+        "additionalProperties": false,
+        "description": "Worker pool create request.",
+        "properties": {
+          "name": {
+            "description": "Worker pool name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkerScope",
+            "description": "Tasks this pool's workers claim."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WorkerPoolCreateRequest",
+        "type": "object"
+      },
+      "WorkerPoolResponse": {
+        "description": "Worker pool response.",
+        "properties": {
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "id": {
+            "description": "Worker pool id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Worker pool name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkerScope",
+            "description": "Tasks this pool's workers claim."
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "name",
+          "scope"
+        ],
+        "title": "WorkerPoolResponse",
+        "type": "object"
+      },
+      "WorkerPoolUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Worker pool update request.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New worker pool name.",
+            "title": "Name"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkerScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New claim scope."
+          }
+        },
+        "title": "WorkerPoolUpdateRequest",
         "type": "object"
       },
       "WorkerRegistrationResponse": {
@@ -15509,6 +15638,283 @@
         "summary": "Get Task Spec",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/v1/worker-pools": {
+      "get": {
+        "description": "List worker pools.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Worker pool service.\n    actor: Caller context.\n    params: Worker pool list params.\n\nReturns:\n    Page of worker pools.",
+        "operationId": "list_worker_pools_v1_worker_pools_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_WorkerPoolResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Worker Pools",
+        "tags": [
+          "worker-pools"
+        ]
+      },
+      "post": {
+        "description": "Create a worker pool.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 when the scope names a job or on other invalid\ninput.\n\nArgs:\n    body: Worker pool create request.\n    service: Worker pool service.\n    actor: Caller context.\n\nReturns:\n    Created worker pool.",
+        "operationId": "create_worker_pool_v1_worker_pools_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerPoolCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerPoolResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Worker Pool",
+        "tags": [
+          "worker-pools"
+        ]
+      }
+    },
+    "/v1/worker-pools/{pool_id}": {
+      "delete": {
+        "description": "Delete a worker pool.\n\nClients observe HTTP 204 on success and 404 when no worker pool has\nthis id.\n\nArgs:\n    pool_id: Id of the worker pool.\n    service: Worker pool service.\n    actor: Caller context.",
+        "operationId": "delete_worker_pool_v1_worker_pools__pool_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pool Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Worker Pool",
+        "tags": [
+          "worker-pools"
+        ]
+      },
+      "get": {
+        "description": "Get a worker pool by id.\n\nClients observe HTTP 200 on success and 404 when no worker pool has\nthis id.\n\nArgs:\n    pool_id: Id of the worker pool.\n    service: Worker pool service.\n    actor: Caller context.\n\nReturns:\n    Stored worker pool.",
+        "operationId": "get_worker_pool_v1_worker_pools__pool_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pool Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerPoolResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Worker Pool",
+        "tags": [
+          "worker-pools"
+        ]
+      },
+      "patch": {
+        "description": "Update a worker pool.\n\nClients observe HTTP 200 on success, 404 when no worker pool has this\nid, 409 when the new name is already registered, and 422 when the\nupdate clears the name or scope, or the new scope names a job.\n\nArgs:\n    pool_id: Id of the worker pool.\n    body: Worker pool update request.\n    service: Worker pool service.\n    actor: Caller context.\n\nReturns:\n    Updated worker pool.",
+        "operationId": "update_worker_pool_v1_worker_pools__pool_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pool Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerPoolUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerPoolResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Worker Pool",
+        "tags": [
+          "worker-pools"
         ]
       }
     },

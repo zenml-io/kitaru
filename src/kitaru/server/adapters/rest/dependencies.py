@@ -86,6 +86,9 @@ from kitaru.server.adapters.db.repositories.session_repository import (
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
+from kitaru.server.adapters.db.repositories.worker_pool_repository import (
+    SQLWorkerPoolRepository,
+)
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
@@ -141,6 +144,7 @@ from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.application.services.worker_pool_service import WorkerPoolService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
@@ -782,6 +786,20 @@ def get_tag_service(
         Tag service bound to the SQL repository.
     """
     return TagService(repository=SQLTagRepository(session))
+
+
+def get_worker_pool_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> WorkerPoolService:
+    """Return a worker pool service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Worker pool service bound to the SQL repository.
+    """
+    return WorkerPoolService(repository=SQLWorkerPoolRepository(session))
 
 
 def get_worker_service(
