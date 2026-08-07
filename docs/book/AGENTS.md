@@ -6,7 +6,7 @@ Edit these `.md` files directly — they are the source of truth for hand-writte
 docs.
 
 Do **not** put hand-written docs in `docs/content/docs/` — that is the
-reference-only FumaDocs app (generated CLI + SDK reference, served at
+reference-only FumaDocs app (generated SDK reference, served at
 `sdkdocs.kitaru.ai`).
 
 ## Adding & editing pages
@@ -33,7 +33,7 @@ reference-only FumaDocs app (generated CLI + SDK reference, served at
 
 - **Within this space:** relative `.md` paths — `../concepts/checkpoints.md`,
   `flows.md#runtime-options`. Section index → `../concepts/README.md`.
-- **SDK / CLI reference:** `https://sdkdocs.kitaru.ai` — the separate reference
+- **SDK reference:** `https://sdkdocs.kitaru.ai` — the separate reference
   site, not part of this GitBook space.
 - **Other ZenML docs:** absolute `https://docs.zenml.io/...`.
 - **Changelog:** `https://docs.zenml.io/changelog` (owned by the changelog repo).
@@ -64,6 +64,5 @@ regenerate.
 
 ## Style
 
-- Keep **Kitaru product terminology** (flow, checkpoint, stack, deployment) — do
-  not rewrite into ZenML internals (pipeline, step, orchestrator).
+- Keep **current Kitaru v2 terminology** (session, node, agent version, cohort, experiment, evaluation, job, task, worker, replay). Do not copy v1 flow, checkpoint, stack, deployment, or ZenML runtime terminology into new pages.
 - US English. Only document shipped features.
