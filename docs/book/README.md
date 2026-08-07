@@ -20,8 +20,7 @@ beside your observability stack. Traces tell you what happened; Kitaru
 re-runs it.
 
 Kitaru comes from the team behind [ZenML](https://zenml.io): ZenML is
-for ML pipelines, Kitaru is for agents. The full split is in
-[Where ZenML fits](#where-zenml-fits).
+for ML pipelines, Kitaru is for agents.
 
 ## The loop
 
@@ -76,15 +75,6 @@ a measured model-swap experiment in one sitting.
 * **Three ways to drive it:** the `kitaru` CLI and Python SDK, and your
   [coding agent](agent-native/mcp-server.md) — Kitaru observes your
   production agents; your coding assistant is how you talk to Kitaru.
-
-## Where ZenML fits
-
-Kitaru is built by the team behind [ZenML](https://docs.zenml.io), as a
-ZenML sub-brand, and the split is clean: **ZenML runs agents durably;
-Kitaru replays and improves them.** If you need durable execution,
-checkpointed pipelines, or agent orchestration in production, that's
-ZenML. Kitaru assumes your agent already runs somewhere — its job is what
-happens to the recordings.
 
 ## Next steps
 
