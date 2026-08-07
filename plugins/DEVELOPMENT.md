@@ -20,6 +20,7 @@ Registration stores package metadata. It does not upload wheel bytes. A worker r
 
 ```bash
 cd /path/to/kitaru
+export KITARU_REPO="$PWD"
 git branch --show-current
 uv sync --frozen --extra cli --extra worker --extra server --extra otel
 uv sync --project plugins --frozen --all-packages
@@ -62,6 +63,8 @@ ls -lh plugins/candidate-wheels/*.whl
 ```
 
 The directory must contain the Kitaru wheel and all six plugin wheels.
+
+Git ignores generated files under `plugins/candidate-wheels/`. Commit changes to `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`, but do not commit wheel files.
 
 ## Build the candidate server image
 
@@ -149,6 +152,31 @@ uv run --no-sync kitaru importer version list \
 
 An unchanged package requirement and entrypoint must remain at one database version after restart.
 
+## Register an in-progress script
+
+Register one source file while you develop a plugin. This path does not require a wheel or a PyPI release:
+
+```bash
+uv run --no-sync kitaru importer register dev-langfuse \
+  --server "$KITARU_API_URL" \
+  --provider langfuse \
+  --script plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py \
+  --entrypoint parse \
+  --display-version dev
+```
+
+Register a new version after you change the file:
+
+```bash
+uv run --no-sync kitaru importer version register dev-langfuse \
+  --server "$KITARU_API_URL" \
+  --script plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py \
+  --entrypoint parse \
+  --display-version dev
+```
+
+The CLI uploads only the selected file. Keep the script self-contained because sibling package files are not uploaded. A worker downloads the stored script when it executes a task. Use package registration when you need to test wheel installation or package imports.
+
 ## Register a package source manually
 
 Built-in names use the reserved `kitaru/` prefix. Use an unreserved alias for manual registration:
@@ -176,7 +204,6 @@ The API validates the exact pin and entrypoint format. The artifact test validat
 Use a separate environment so the worker does not inherit editable workspace packages:
 
 ```bash
-export KITARU_REPO="$PWD"
 export KITARU_CANDIDATES="$KITARU_REPO/plugins/candidate-wheels"
 KITARU_WHEEL="$(find "$KITARU_CANDIDATES" -maxdepth 1 -type f -name 'kitaru-[0-9]*.whl' -print -quit)"
 test -n "$KITARU_WHEEL"
@@ -201,18 +228,20 @@ kitaru worker start \
 
 Keep the worker active while you create an import or evaluation job. Task subprocesses inherit `UV_FIND_LINKS` and resolve the candidate wheels.
 
+Stop the worker with Ctrl-C before you remove the candidate server.
+
 ## Stop the candidate server
 
 Retain the PostgreSQL data:
 
 ```bash
-docker compose -f plugins/docker-compose.candidate.yml down
+docker compose -f "$KITARU_REPO/plugins/docker-compose.candidate.yml" down
 ```
 
 Remove the database volume before a clean registration test:
 
 ```bash
-docker compose -f plugins/docker-compose.candidate.yml down -v
+docker compose -f "$KITARU_REPO/plugins/docker-compose.candidate.yml" down -v
 ```
 
 The second command deletes only the volume owned by the `kitaru-plugin-e2e` Compose project.

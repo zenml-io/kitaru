@@ -21,6 +21,8 @@ Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plug
 
 Manual workflow dispatches build and test without publishing. A package tag publishes only when the tagged commit is contained in `main`.
 
+`candidate.Dockerfile` and `docker-compose.candidate.yml` are tracked development infrastructure. Files generated under `candidate-wheels/` are local artifacts and must not be committed. Production release Dockerfiles install Kitaru from PyPI and do not install plugin distributions.
+
 Run the main package gate from the repository root:
 
 ```bash

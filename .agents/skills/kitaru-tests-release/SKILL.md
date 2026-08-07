@@ -50,6 +50,9 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - CI runs plugin distributions as a package matrix. Keep the matrix aligned with `plugins/packages/` and the choices in `.github/workflows/release-plugins.yml`.
 - Plugin workflow dispatches are dry-runs. A package tag triggers publishing only when its commit is contained in `main`.
 - Kitaru release dry-runs build plugin-owned candidate images from `plugins/candidate-wheels`; production release Dockerfiles continue to install exact versions from PyPI.
+- Commit `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`. Do not commit generated files under `plugins/candidate-wheels/`.
+- Keep production release Dockerfiles unchanged when a plugin change only needs local candidate-wheel testing.
+- Register a self-contained in-progress plugin with the CLI `--script` source. Use an exact package source when the test must cover wheel installation or package imports.
 
 ## MCP Tests
 

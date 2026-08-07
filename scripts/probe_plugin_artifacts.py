@@ -137,7 +137,7 @@ def main() -> int:
         "--requirement",
         action="append",
         required=True,
-        help="Exact installed plugin requirement expected from catalog discovery.",
+        help="Exact installed plugin requirement expected in the default catalog.",
     )
     arguments = parser.parse_args()
     asyncio.run(_probe(set(arguments.requirement)))

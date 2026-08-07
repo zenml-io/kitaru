@@ -291,7 +291,7 @@ async def _get_or_create_plugin(
 
 
 async def register_default_plugins(repository: PluginRepository) -> None:
-    """Create default plugins declared by installed catalog packages.
+    """Create the configured default plugins.
 
     Args:
         repository: Plugin repository.

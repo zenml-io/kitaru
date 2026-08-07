@@ -27,6 +27,14 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Run `uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py`.
 - Run `just plugin-artifact-smoke` for default definitions, package metadata, pins, or release-path changes.
 - Use `plugins/docker-compose.candidate.yml` when a change needs a candidate-image rehearsal.
+- Commit the candidate Dockerfile and Compose configuration. Do not commit generated candidate wheels.
+- Do not change production release Dockerfiles to support local plugin wheels.
+
+## Development registration
+
+- Register a self-contained in-progress plugin with `--script` and an explicit entrypoint.
+- Use an exact package requirement when the test must cover wheel installation or package imports.
+- Remember that package registration stores metadata. It does not upload a wheel.
 
 ## Release safety
 
