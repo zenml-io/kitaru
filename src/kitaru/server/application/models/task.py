@@ -34,6 +34,27 @@ class ClaimedTask(NamedTuple):
     job_owner_id: uuid.UUID
 
 
+class TaskSettlementStats(FrozenModel):
+    """Task settlement stats."""
+
+    total: int = 0
+    non_terminal: int = 0
+    canceled: int = 0
+    counted_failures: int = 0
+    abort_failures: int = 0
+    first_failure_error: str | None = None
+    kinds: tuple[TaskKind, ...] = ()
+
+    @property
+    def drained(self) -> bool:
+        """Whether the job holds tasks and every one is terminal.
+
+        Returns:
+            Whether the job holds tasks and every one is terminal.
+        """
+        return self.total > 0 and self.non_terminal == 0
+
+
 class TaskFilter(ListFilter):
     """Task list filter."""
 

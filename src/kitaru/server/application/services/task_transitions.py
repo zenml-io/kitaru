@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.events import (
     EventDispatcher,
     JobsSettled,
@@ -27,27 +27,26 @@ from kitaru.server.application.events import (
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
+from kitaru.server.application.models.task import TaskSettlementStats
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
 
 
-def _settlement_outcome(tasks: list[Task]) -> tuple[JobStatus, str | None]:
+def _settlement_outcome(stats: TaskSettlementStats) -> tuple[JobStatus, str | None]:
     """Decide the terminal status of a drained job.
 
     Args:
-        tasks: Every task of the job, in creation order.
+        stats: Settlement stats over every task of the job.
 
     Returns:
         Terminal job status and the error of the first counted failure.
     """
-    for task in tasks:
-        if task.counted_hard_failure:
-            return JobStatus.FAILED, task.error
-    for task in tasks:
-        if task.status is TaskStatus.CANCELED:
-            return JobStatus.CANCELED, None
+    if stats.counted_failures:
+        return JobStatus.FAILED, stats.first_failure_error
+    if stats.canceled:
+        return JobStatus.CANCELED, None
     return JobStatus.COMPLETED, None
 
 
@@ -160,13 +159,15 @@ class TaskTransitions:
             Loaded job, settled if this call drained its tasks.
         """
         job = await self._jobs.get(job_id, exclusive=True)
-        # Read the tasks after the job row lock to prevent race conditions
+        # Count the tasks after the job row lock to prevent race conditions
         # during concurrent task settlements.
-        tasks = await self._tasks.list_by_job(job_id)
-        await self._request_cancel_on_abort(job, tasks)
-        return await self._settle_drained_job(job, tasks)
+        stats = await self._tasks.count_settlement_stats(job_id)
+        await self._request_cancel_on_abort(job, stats)
+        return await self._settle_drained_job(job, stats)
 
-    async def _request_cancel_on_abort(self, job: Job, tasks: list[Task]) -> None:
+    async def _request_cancel_on_abort(
+        self, job: Job, stats: TaskSettlementStats
+    ) -> None:
         """Stamp the job's cancel request when one of its aborting tasks failed.
 
         Locks no task row, so live siblings keep their status until the
@@ -174,39 +175,36 @@ class TaskTransitions:
 
         Args:
             job: Job loaded under its row lock.
-            tasks: Every task of the job.
+            stats: Settlement stats over every task of the job.
         """
         if job.settled or job.cancel_requested_at is not None:
             return
-        if not any(
-            task.counted_hard_failure and task.on_failure is TaskOnFailure.ABORT
-            for task in tasks
-        ):
+        if not stats.abort_failures:
             return
         job.request_cancel(datetime.now(UTC))
         await self._jobs.update(job)
 
-    async def _settle_drained_job(self, job: Job, tasks: list[Task]) -> Job:
+    async def _settle_drained_job(self, job: Job, stats: TaskSettlementStats) -> Job:
         """Settle a locked job once every one of its tasks is terminal.
 
         Args:
             job: Job loaded under its row lock.
-            tasks: Every task of the job, read after the job row lock.
+            stats: Settlement stats, counted after the job row lock.
 
         Returns:
             Job, settled if this call drained its tasks.
         """
         if job.settled:
             return job
-        if not tasks or not all(task.terminal for task in tasks):
+        if not stats.drained:
             return job
-        status, error = _settlement_outcome(tasks)
+        status, error = _settlement_outcome(stats)
         job.settle(status, error, datetime.now(UTC))
         if self._analytics is not None:
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.JOB_COMPLETED,
-                analytics_events.build_job_completed_properties(job, tasks),
+                analytics_events.build_job_completed_properties(job, stats),
             )
         settled = await self._jobs.update(job)
         await self._dispatcher.dispatch(JobsSettled(jobs=[settled]))
@@ -274,8 +272,8 @@ class TaskTransitions:
             Loaded job, settled if its tasks have drained.
         """
         job = await self._jobs.get(job_id, exclusive=True)
-        tasks = await self._tasks.list_by_job(job_id)
-        return await self._settle_drained_job(job, tasks)
+        stats = await self._tasks.count_settlement_stats(job_id)
+        return await self._settle_drained_job(job, stats)
 
     async def settle_jobs_if_drained(self, job_ids: Sequence[uuid.UUID]) -> None:
         """Settle every drained job among many in one bulk read and one bulk write.
@@ -290,22 +288,22 @@ class TaskTransitions:
         if not job_ids:
             return
         jobs = await self._jobs.get_many_locked(job_ids)
-        tasks_by_job = await self._tasks.list_by_jobs(job_ids)
+        stats_by_job = await self._tasks.count_settlement_stats_many(job_ids)
         settled: list[Job] = []
         for job_id in job_ids:
             job = jobs.get(job_id)
             if job is None or job.settled:
                 continue
-            tasks = tasks_by_job.get(job_id, [])
-            if not tasks or not all(task.terminal for task in tasks):
+            stats = stats_by_job.get(job_id, TaskSettlementStats())
+            if not stats.drained:
                 continue
-            status, error = _settlement_outcome(tasks)
+            status, error = _settlement_outcome(stats)
             job.settle(status, error, datetime.now(UTC))
             if self._analytics is not None:
                 self._analytics.track(
                     job.owner_id,
                     AnalyticsEvent.JOB_COMPLETED,
-                    analytics_events.build_job_completed_properties(job, tasks),
+                    analytics_events.build_job_completed_properties(job, stats),
                 )
             settled.append(job)
         if not settled:

@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from kitaru.analytics.events import AccountOrigin
+from kitaru.server.application.models.task import TaskSettlementStats
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
@@ -26,7 +27,7 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind, PluginSource
 from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
+from kitaru.server.domain.task import EvaluationTask, ImportTask
 
 
 def _duration_properties(
@@ -124,12 +125,14 @@ def build_evaluation_completed_properties(task: EvaluationTask) -> dict[str, Any
     }
 
 
-def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any]:
+def build_job_completed_properties(
+    job: Job, stats: TaskSettlementStats
+) -> dict[str, Any]:
     """Build the properties of a job's settlement to a terminal status.
 
     Args:
         job: Job that settled.
-        tasks: Every task of the job, in creation order.
+        stats: Settlement stats over every task of the job.
 
     Returns:
         Event properties.
@@ -137,8 +140,8 @@ def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any
     return {
         "kind": job.kind.value,
         "status": job.status.value,
-        "task_count": len(tasks),
-        "task_kinds": sorted({task.kind.value for task in tasks}),
+        "task_count": stats.total,
+        "task_kinds": sorted(kind.value for kind in stats.kinds),
         **_duration_properties(job.started_at, job.ended_at),
     }
 

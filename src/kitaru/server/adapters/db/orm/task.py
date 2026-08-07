@@ -41,6 +41,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     unique_constraint_name,
 )
 from kitaru.server.domain.task import (
+    HARD_FAILURE_TASK_STATUSES,
     TERMINAL_TASK_STATUSES,
     AgentTask,
     EvaluationTask,
@@ -74,6 +75,7 @@ TASK_PENDING_LABELS_INDEX = index_name("task", ["labels"])
 TASK_STALENESS_INDEX = index_name("task", ["heartbeat_at", "claimed_at"])
 
 TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
+HARD_FAILURE_STATUS_VALUES = [status.value for status in HARD_FAILURE_TASK_STATUSES]
 
 PENDING_PREDICATE = "status = 'pending'"
 IN_FLIGHT_PREDICATE = "status IN ('claimed', 'running')"

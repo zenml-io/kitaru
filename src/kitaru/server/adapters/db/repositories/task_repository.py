@@ -17,20 +17,22 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, func, not_, or_, select, update
+from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 
-from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import (
+    HARD_FAILURE_STATUS_VALUES,
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
     TERMINAL_STATUS_VALUES,
     TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
-from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.task import TaskFilter, TaskSettlementStats
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
@@ -231,6 +233,80 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         for row in rows:
             tasks_by_job.setdefault(row.job_id, []).append(row.to_domain())
         return tasks_by_job
+
+    async def count_settlement_stats(self, job_id: uuid.UUID) -> TaskSettlementStats:
+        """Count a job's tasks into the stats driving its settlement.
+
+        Args:
+            job_id: Id the tasks belong to.
+
+        Returns:
+            Task settlement stats, zero counts when the job has no tasks.
+        """
+        stats = await self.count_settlement_stats_many([job_id])
+        return stats.get(job_id, TaskSettlementStats())
+
+    async def count_settlement_stats_many(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskSettlementStats]:
+        """Bulk-count many jobs' tasks into the stats driving their settlement.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Task settlement stats keyed by job id, jobs without tasks
+            omitted.
+        """
+        if not job_ids:
+            return {}
+        hard_failure = TaskORM.status.in_(HARD_FAILURE_STATUS_VALUES)
+        counted_failure = and_(
+            hard_failure, TaskORM.on_failure != TaskOnFailure.IGNORE.value
+        )
+        statement = (
+            select(
+                TaskORM.job_id,
+                func.count(),
+                func.count().filter(TaskORM.status.not_in(TERMINAL_STATUS_VALUES)),
+                func.count().filter(TaskORM.status == TaskStatus.CANCELED.value),
+                func.count().filter(counted_failure),
+                func.count().filter(
+                    and_(
+                        hard_failure,
+                        TaskORM.on_failure == TaskOnFailure.ABORT.value,
+                    )
+                ),
+                func.array_agg(
+                    aggregate_order_by(TaskORM.error, TaskORM.id.asc())
+                ).filter(counted_failure),
+                func.array_agg(func.distinct(TaskORM.kind)),
+            )
+            .where(TaskORM.job_id.in_(list(job_ids)))
+            .group_by(TaskORM.job_id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return {
+            job_id: TaskSettlementStats(
+                total=total,
+                non_terminal=non_terminal,
+                canceled=canceled,
+                counted_failures=counted_failures,
+                abort_failures=abort_failures,
+                first_failure_error=(failure_errors or [None])[0],
+                kinds=tuple(TaskKind(kind) for kind in kinds),
+            )
+            for (
+                job_id,
+                total,
+                non_terminal,
+                canceled,
+                counted_failures,
+                abort_failures,
+                failure_errors,
+                kinds,
+            ) in rows
+        }
 
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.

@@ -99,7 +99,11 @@ from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
-from kitaru.server.application.models.task import TaskFilter, TaskPolicy
+from kitaru.server.application.models.task import (
+    TaskFilter,
+    TaskPolicy,
+    TaskSettlementStats,
+)
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.services.experiment_run_service import (
@@ -4949,6 +4953,46 @@ class FakeTaskRepository:
             if task.job_id in job_id_set:
                 tasks_by_job.setdefault(task.job_id, []).append(task.model_copy())
         return tasks_by_job
+
+    async def count_settlement_stats(self, job_id: uuid.UUID) -> TaskSettlementStats:
+        """Count a job's tasks into the stats driving its settlement.
+
+        Args:
+            job_id: Id the tasks belong to.
+
+        Returns:
+            Task settlement stats, zero counts when the job has no tasks.
+        """
+        stats = await self.count_settlement_stats_many([job_id])
+        return stats.get(job_id, TaskSettlementStats())
+
+    async def count_settlement_stats_many(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskSettlementStats]:
+        """Bulk-count many jobs' tasks into the stats driving their settlement.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Task settlement stats keyed by job id, jobs without tasks
+            omitted.
+        """
+        stats: dict[uuid.UUID, TaskSettlementStats] = {}
+        for job_id, tasks in (await self.list_by_jobs(job_ids)).items():
+            counted = [task for task in tasks if task.counted_hard_failure]
+            stats[job_id] = TaskSettlementStats(
+                total=len(tasks),
+                non_terminal=sum(1 for task in tasks if not task.terminal),
+                canceled=sum(1 for task in tasks if task.status is TaskStatus.CANCELED),
+                counted_failures=len(counted),
+                abort_failures=sum(
+                    1 for task in counted if task.on_failure is TaskOnFailure.ABORT
+                ),
+                first_failure_error=counted[0].error if counted else None,
+                kinds=tuple(dict.fromkeys(task.kind for task in tasks)),
+            )
+        return stats
 
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
