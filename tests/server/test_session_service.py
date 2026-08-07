@@ -67,6 +67,7 @@ from kitaru.server.domain.session import (
 from kitaru.server.domain.task import (
     AgentTask,
     Task,
+    TaskAttemptMismatch,
     TaskNotFound,
     TaskNotRunning,
     TaskResultSessionAlreadyLinked,
@@ -721,6 +722,33 @@ async def test_create_session_requires_the_principals_task_to_be_running(
         )
 
 
+async def test_create_session_rejects_a_stale_task_attempt(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A superseded attempt cannot claim the result session of a newer one."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    stale_actor = _task_principal(task.id, attempt=task.attempt)
+    task.requeue()
+    task = await _start(task_repository, task)
+    with pytest.raises(TaskAttemptMismatch):
+        await service.create_session(
+            SessionCreate(origin=SessionOrigin.RECORDED),
+            actor=stale_actor,
+        )
+    stored_task = await task_repository.get(task.id)
+    assert stored_task.result_session_id is None
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=_task_principal(task.id, attempt=task.attempt),
+    )
+    stored_task = await task_repository.get(task.id)
+    assert stored_task.result_session_id == session.id
+
+
 async def test_create_session_links_an_agent_tasks_result_session(
     service: SessionService,
     task_repository: FakeTaskRepository,
@@ -1005,7 +1033,9 @@ async def test_create_session_with_a_task_principal_binds_the_principals_task_id
 
 
 def _task_principal(
-    task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
+    task_id: uuid.UUID,
+    granted_session_id: uuid.UUID | None = None,
+    attempt: int = 1,
 ) -> AuthContext:
     """Build an auth context for a task principal owning the given task."""
     grants: dict[GrantKind, frozenset[uuid.UUID]] = {}
@@ -1015,7 +1045,7 @@ def _task_principal(
         account=Account(id=uuid.uuid4(), name="job-owner"),
         principal=TaskPrincipal(
             task_id=task_id,
-            attempt=1,
+            attempt=attempt,
             worker_id=uuid.uuid4(),
             job_id=uuid.uuid4(),
             grants=grants,
