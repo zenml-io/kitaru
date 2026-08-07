@@ -84,6 +84,7 @@ GROUP_DESCRIPTIONS = {
     "session": "Import and inspect sessions and their nodes.",
     "worker": "Run and inspect generic local workers.",
     "job": "Inspect, watch, and cancel jobs.",
+    "local": "Inspect the CLI-owned local Kitaru deployment.",
 }
 
 

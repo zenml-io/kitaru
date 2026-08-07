@@ -139,6 +139,6 @@ this FumaDocs reference app, and generated output).
 
 - Treat `KITARU_*` environment variables as the public configuration surface in docs and examples. Mention `ZENML_*` only as a compatibility note when needed.
 - Agent-facing CLI docs should describe the version-1 structured contract: success documents include `schema_version`, `command`, `ok`, `warnings`, `links`, and `next_actions`, plus `item` or `items`, `count`, and `page`; streaming commands emit JSONL events.
-- Login docs/guidance should treat `kitaru login SERVER` as managed or self-hosted login and `kitaru login --local` as targeting an already-running server at `http://localhost:8000`; login never starts a server.
+- Login docs/guidance should treat `kitaru login SERVER` as managed or self-hosted login and `kitaru login --local` as provisioning or reusing the CLI-owned Docker Compose deployment at `http://localhost:8000`.
 - Treat `src/kitaru/cli/app.py`, the offline `kitaru schema` output, and the generated OpenAPI document as the command and API authorities. Do not document v1 runtime commands such as `kitaru init`, `kitaru stack`, `kitaru model`, or `kitaru executions` unless they are reintroduced in v2 source and tests.
 - Native MCP documentation must match `tests/mcp/snapshots/metrics.json` and `src/kitaru/mcp/registry.py`. Do not copy tool counts into prose; run `just mcp-schema-check` and describe the tools present in the current snapshot. The native v2 MCP server does not expose stack or model-alias management.
