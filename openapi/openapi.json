@@ -822,7 +822,7 @@
                 "type": "null"
               }
             ],
-            "description": "JSON Pointer within the targeted payload.",
+            "description": "RFC 6901 JSON Pointer within the targeted payload.",
             "title": "Path"
           },
           "span": {
@@ -6058,6 +6058,18 @@
             "description": "Parameters passed to the model.",
             "title": "Model Params"
           },
+          "model_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model provider.",
+            "title": "Model Provider"
+          },
           "name": {
             "description": "Node name.",
             "title": "Name",
@@ -6094,18 +6106,6 @@
             ],
             "description": "Index of the parent node.",
             "title": "Parent Index"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Model provider.",
-            "title": "Provider"
           },
           "reasoning": {
             "anyOf": [
@@ -6355,6 +6355,18 @@
             "description": "Parameters passed to the model.",
             "title": "Model Params"
           },
+          "model_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model provider.",
+            "title": "Model Provider"
+          },
           "name": {
             "description": "Node name.",
             "title": "Name",
@@ -6404,18 +6416,6 @@
             ],
             "description": "Parent node index.",
             "title": "Parent Index"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Model provider.",
-            "title": "Provider"
           },
           "reasoning": {
             "anyOf": [

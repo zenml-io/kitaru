@@ -94,7 +94,7 @@ class SessionNodeCreateRequest(RequestModel):
         default=None, description="Model requested by the call."
     )
     model: str | None = Field(default=None, description="Model that served the call.")
-    provider: str | None = Field(default=None, description="Model provider.")
+    model_provider: str | None = Field(default=None, description="Model provider.")
     tokens: TokenUsage | None = Field(default=None, description="Token usage.")
     cost: Decimal | None = Field(default=None, description="Cost of the call.")
     model_params: dict[str, JsonValue] | None = Field(
@@ -200,7 +200,7 @@ class SessionNodeResponse(ResponseModel):
         default=None, description="Model requested by the call."
     )
     model: str | None = Field(default=None, description="Model that served the call.")
-    provider: str | None = Field(default=None, description="Model provider.")
+    model_provider: str | None = Field(default=None, description="Model provider.")
     tokens: TokenUsage | None = Field(default=None, description="Token usage.")
     cost: Decimal | None = Field(default=None, description="Cost of the call.")
     model_params: dict[str, JsonValue] | None = Field(
