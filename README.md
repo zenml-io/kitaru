@@ -57,7 +57,7 @@ it.
 ## 🔁 The loop
 
 ```bash
-pip install "kitaru[cli,pydantic-ai]"
+pip install "kitaru[cli,worker,pydantic-ai]"
 docker compose up -d          # server, from this repo — or your team's server
 export KITARU_API_URL=http://localhost:8000
 kitaru agent register support-agent --command "python support.py"
@@ -77,7 +77,7 @@ agent = Agent("openai:gpt-5.4", name="support-agent",
 def refund_payment(order_id: str) -> str:
     return payments.refund(order_id)  # your real API
 
-support = KitaruAgent(agent, agent_id=AGENT_ID)
+support = KitaruAgent(agent, agent_id=AGENT_ID)  # id printed by `kitaru agent register`
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
@@ -88,6 +88,7 @@ way):
 ```bash
 kitaru session import langfuse-export.jsonl \
   --importer langfuse@latest --agent support-agent \
+  --media-type application/x-ndjson \
   --tag imported-baseline --wait
 ```
 
