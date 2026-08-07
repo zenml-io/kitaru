@@ -80,13 +80,13 @@ support = KitaruAgent(agent, agent_id=AGENT_ID)  # id printed by `kitaru agent r
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-Already tracing elsewhere? Import instead of wrapping — same result. The
-Langfuse importer is built in (Braintrust and OpenTelemetry are on the
-way):
+Already tracing elsewhere? Import instead of wrapping — same result.
+Importers for Langfuse, LangSmith, Braintrust, and OpenTelemetry are
+built in:
 
 ```bash
 kitaru session import langfuse-export.jsonl \
-  --importer langfuse@latest --agent support-agent \
+  --importer kitaru/langfuse@latest --agent support-agent \
   --media-type application/x-ndjson \
   --tag imported-baseline --wait
 ```
