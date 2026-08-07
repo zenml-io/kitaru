@@ -18,9 +18,11 @@ from kitaru.worker.handlers.agent import AgentHandler
 from kitaru.worker.handlers.base import TaskHandler
 from kitaru.worker.handlers.evaluation import EvaluationHandler
 from kitaru.worker.handlers.imports import ImportHandler
+from kitaru.worker.handlers.trigger import TriggerHandler
 
 HANDLERS: dict[TaskKind, TaskHandler] = {
     TaskKind.AGENT: AgentHandler(),
+    TaskKind.TRIGGER: TriggerHandler(),
     TaskKind.EVALUATOR: EvaluationHandler(),
     TaskKind.IMPORTER: ImportHandler(),
 }

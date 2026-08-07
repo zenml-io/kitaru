@@ -55,7 +55,12 @@ def _digest(content: bytes) -> str:
 
 def test_handlers_registry_covers_every_kind() -> None:
     """HANDLERS carries one entry per task kind."""
-    assert set(HANDLERS) == {TaskKind.AGENT, TaskKind.EVALUATOR, TaskKind.IMPORTER}
+    assert set(HANDLERS) == {
+        TaskKind.AGENT,
+        TaskKind.TRIGGER,
+        TaskKind.EVALUATOR,
+        TaskKind.IMPORTER,
+    }
 
 
 async def test_agent_handler_builds_command_and_working_dir(tmp_path: Path) -> None:

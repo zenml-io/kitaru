@@ -27,6 +27,7 @@ from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
     SessionStatus,
+    SessionUpdateRequest,
     TokenUsage,
 )
 from kitaru.api_models.v1.session_node import (
@@ -364,6 +365,21 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                     )
                 )
                 continue
+            if session.status is SessionStatus.PENDING_IMPORT:
+                # Adoption copied outputs, error, and timestamps at create time
+                # and holds the session open until every node batch lands, so
+                # only the terminal status remains to be written here.
+                try:
+                    await client.sessions.update(
+                        session.id, SessionUpdateRequest(status=item.status)
+                    )
+                except APIError as exc:
+                    _record_failure(
+                        ImportFailure(
+                            line=line, external_id=item.external_id, error=str(exc)
+                        )
+                    )
+                    continue
             created += 1
     except SessionImportError as exc:
         _record_failure(ImportFailure(line=line + 1, external_id=None, error=str(exc)))

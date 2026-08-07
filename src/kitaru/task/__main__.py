@@ -11,14 +11,14 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Task process entry point: python -m kitaru.task <evaluate|import>."""
+"""Task process entry point: python -m kitaru.task <evaluate|import|trigger>."""
 
 import argparse
 import asyncio
 import sys
 
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.task import evaluator, importer
+from kitaru.task import evaluator, importer, trigger
 from kitaru.task.task_io import get_required_env
 
 
@@ -29,10 +29,10 @@ def _parse_kind(argv: list[str]) -> str:
         argv: Command-line arguments, excluding the program name.
 
     Returns:
-        Task kind, evaluate or import.
+        Task kind, evaluate, import, or trigger.
     """
     parser = argparse.ArgumentParser(prog="python -m kitaru.task")
-    parser.add_argument("kind", choices=["evaluate", "import"])
+    parser.add_argument("kind", choices=["evaluate", "import", "trigger"])
     return parser.parse_args(argv).kind
 
 
@@ -40,14 +40,16 @@ async def _run_flow(kind: str, client: KitaruAPIClient, task_id: str) -> None:
     """Dispatch to the flow matching the task kind.
 
     Args:
-        kind: Task kind, evaluate or import.
+        kind: Task kind, evaluate, import, or trigger.
         client: API client.
         task_id: Id of the task.
     """
     if kind == "evaluate":
         await evaluator.run(client, task_id)
-    else:
+    elif kind == "import":
         await importer.run(client, task_id)
+    else:
+        await trigger.run(client, task_id)
 
 
 def main() -> None:
