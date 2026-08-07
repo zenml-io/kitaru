@@ -220,6 +220,13 @@ publish.
 
 ## Claims that need verification before publish
 
+0. **Dead-until-merge links and commands** (from the Aug 7 neutral
+   review): `examples/canonical_example/`, `examples/v2/mcp/`,
+   `examples/integrations/pydantic_ai_v2`, and the repo-root
+   `docker-compose.yml` are all linked/used by the docs but exist only
+   on unmerged v2 branches — the `tree/develop/...` GitHub links 404
+   today. Verify every one after the release branch merges to develop.
+
 1. **Branch union** — mostly closed: as of Aug 5 13:36, `cli-620`
    carries the CLI, bundled plugins, adapter, and MCP server together
    (`23e7bed5` "Merge MCP into CLI" + `f0292be9`). Remaining spot-check
