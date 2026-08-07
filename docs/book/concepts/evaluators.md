@@ -61,13 +61,14 @@ is just an evaluator that calls a model inside `evaluate` — same contract,
 same rows. The walkthrough is in
 [Write an evaluator](../guides/write-an-evaluator.md).
 
-Three evaluators come **built in** — `cost`, `latency`, and
-`tool-call-patterns` (does the session repeat calls to the same tool?),
-seeded alongside the default Langfuse importer when the server is set
-up. They
-make no model calls; they're cheap signals for triaging which sessions
-deserve a closer look, available as `cost@latest` before you've written
-anything.
+A suite of evaluators comes **built in**, registered at server startup
+under the `kitaru/` namespace: three cheap signals — `kitaru/cost`,
+`kitaru/latency`, `kitaru/tool-call-patterns` — plus ten deterministic
+checks over the recording itself, from `kitaru/output-contract` and
+`kitaru/tool-health` to `kitaru/timing-profile` and
+`kitaru/workflow-conformance`. None of them make model calls; they're
+the triage layer, available as `kitaru/cost@latest` before you've
+written anything.
 
 ## The evaluation row
 
@@ -121,7 +122,7 @@ everything:
 
 ```bash
 kitaru session evaluate --tag imported-baseline \
-  --evaluator refund-check@latest --evaluator cost@latest \
+  --evaluator refund-check@latest --evaluator kitaru/cost@latest \
   --wait
 ```
 

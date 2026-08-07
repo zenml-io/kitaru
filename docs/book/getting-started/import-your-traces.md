@@ -22,17 +22,11 @@ infrastructure.
 
 ## 1. Register the agent the traces belong to
 
-The Langfuse importer is **built in** — registered into the server when
-it's set up, so there is no importer code to write for Langfuse exports.
-Braintrust and OpenTelemetry (OTLP) importers are in the works; until
-they land, other formats come in through a
+Importers for **Langfuse, LangSmith, Braintrust, OpenTelemetry, and a
+native JSONL format** are built in — registered at server startup under
+the `kitaru/` namespace, so there is no importer code to write for
+those. Anything else comes in through a
 [custom importer](../guides/import-langfuse-traces.md#writing-your-own-importer).
-
-<!-- TODO(v2-launch): default-plugin seeding moved from server startup to
-     scripts/seed_default_plugins.py (Aug 4) — confirm the shipped
-     mechanism and exact setup step before publish. Braintrust/OTLP
-     importers were descoped Aug 6 (codex/v2-importer-braintrust-otlp is
-     re-adding them) — re-check the shipped importer list. -->
 
 Register the agent these traces belong to, if you haven't:
 
@@ -49,7 +43,7 @@ ingestion-event records are all understood), start a
 
 ```bash
 kitaru session import langfuse-export.jsonl \
-  --importer langfuse@latest \
+  --importer kitaru/langfuse@latest \
   --agent support-agent \
   --tag imported-baseline \
   --media-type application/x-ndjson \

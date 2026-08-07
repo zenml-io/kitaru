@@ -130,11 +130,8 @@ publish.
   CLI + MCP now live on **`v2-spec-consolidated`** ("Restore CLI-only
   branch boundary"), which is effectively the mainline. `v2-importer`
   was rebuilt on top of it and now carries the plugins + adapter.
-- **Importer scope cut to Langfuse** — the Braintrust and OTLP
-  importers were deleted ("Focus initial importer scope");
-  `codex/v2-importer-braintrust-otlp` is re-adding them. Docs now claim
-  only the Langfuse importer as built in, with Braintrust/OTLP "in the
-  works" (import pages, adapters/README, workers, evaluators).
+- ~~Importer scope cut to Langfuse~~ — **superseded by #670 the next
+  day**; see the Aug 7 evening deltas.
 - **Plugins and the adapter moved OUT of the kitaru wheel**
   (`650ca1ca`, `37d73ccf`): importers/evaluators and the PydanticAI
   adapter now live in a repo-level `plugins/` tree, the wheel builds
@@ -230,6 +227,34 @@ publish.
   `deploy/docker.md` on the mainline's stale docs tree for #685 —
   expect merge overlap with our versions of those pages; ours carry the
   same facts minus the unverified "dashboard" claim.
+
+## Aug 7 evening deltas (docs updated Aug 7)
+
+- **Plugin story settled (#670)** — plugins are now proper packages
+  under `plugins/packages/` (`kitaru-langfuse-importer`,
+  `kitaru-langsmith-importer`, `kitaru-braintrust-importer`,
+  `kitaru-opentelemetry-importer`, `kitaru-jsonl-importer`,
+  `kitaru-evaluator`) with their own release workflow
+  (`release-plugins.yml`) and candidate wheels baked into the server
+  image. **Startup seeding is real now**: `DEFAULT_PLUGIN_DEFINITIONS`
+  is populated — five importers and thirteen evaluators register at
+  server startup under the **`kitaru/` namespace**
+  (`--importer kitaru/langfuse@latest`, `--evaluator
+  kitaru/cost@latest`). New built-ins: the **LangSmith** importer, a
+  native JSONL importer, and ten deterministic evaluators
+  (session-diagnostics, output-contract, trajectory-signals,
+  tool-health, timing-profile, resource-budget, tool-policy,
+  llm-call-signals, model-policy, workflow-conformance). Docs swept:
+  import pages, evaluators concept, quickstart, workers, adapters
+  overview, README — names namespaced, importer/evaluator lists
+  updated, the Aug 4 seeding TODO retired.
+- **Team wrote two new guides on the mainline docs tree** —
+  `guides/deterministic-evaluations.md` and
+  `guides/importing-sessions.md` (session-import JSONL contract).
+  Not ported here yet; reconcile or port at merge — our
+  `import-langfuse-traces.md` overlaps the latter.
+- **Adapter packaging blocker unchanged** — #670 did not restore a
+  `pydantic-ai` extra; the adapter still lives outside the wheel.
 
 ## Claims that need verification before publish
 

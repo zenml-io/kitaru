@@ -38,10 +38,10 @@ More adapters are on the way; the v1 line of Kitaru shipped six, and they
 are being ported to the v2 recording API. If your framework isn't covered
 yet, you have two options today:
 
-* **Import** — your framework already emits traces to Langfuse?
+* **Import** — your framework already emits traces to Langfuse,
+  LangSmith, Braintrust, or OpenTelemetry?
   [Import them](../getting-started/import-your-traces.md); sessions from
-  imports can be replayed and evaluated like any other. (Braintrust and
-  OpenTelemetry importers are in the works.)
+  imports can be replayed and evaluated like any other.
 * **Record directly** — the recording API is small: create a session,
   ingest nodes. `client.sessions.create(...)` and
   `client.sessions.ingest_nodes(...)` are all an adapter does, and they're

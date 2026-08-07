@@ -23,7 +23,7 @@ The CLI wraps the upload and the job in one command:
 
 ```bash
 kitaru session import langfuse-export.jsonl \
-  --importer langfuse@latest \
+  --importer kitaru/langfuse@latest \
   --agent support-agent \
   --params '{"source_instance": "my-langfuse-project"}' \
   --media-type application/x-ndjson \
@@ -55,11 +55,12 @@ up to 20 failure samples (line number, external id, error).
 
 ## The built-in importers
 
-Kitaru ships the `langfuse` importer as a default plugin — seeded into
-the server as part of setting it up, so `--importer langfuse@latest`
-always resolves — and it runs on your worker like any other importer;
-there is nothing to write. Braintrust and OpenTelemetry (OTLP)
-importers are in the works.
+Kitaru ships five importers as default plugins, registered at server
+startup under the `kitaru/` namespace — `kitaru/langfuse`,
+`kitaru/langsmith`, `kitaru/braintrust`, `kitaru/opentelemetry`, and
+`kitaru/kitaru-jsonl` (a native JSONL shape) — so
+`--importer kitaru/langfuse@latest` always resolves. They run on your
+worker like any other importer; there is nothing to write.
 
 The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per
 payload (the importer's own cap, separate from the server's

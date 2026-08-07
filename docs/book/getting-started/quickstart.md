@@ -148,10 +148,10 @@ kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
 
-(Three evaluators come built in — `cost`, `latency`, and
-`tool-call-patterns` — cheap signals for triaging sessions before you
-write anything. The one you just wrote is the kind that encodes *your*
-definition of good.)
+(A suite of `kitaru/` evaluators comes built in — from `kitaru/cost` to
+deterministic checks like `kitaru/output-contract` — cheap triage before
+you write anything. The one you just wrote is the kind that encodes
+*your* definition of good.)
 
 ## 5. Start a worker
 
