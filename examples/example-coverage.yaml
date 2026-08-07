@@ -961,3 +961,36 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
+  - id: worker-pool-supervisor
+    path: examples/features/worker_pool_supervisor/supervisor.py
+    public_docs: [examples/features/worker_pool_supervisor/README.md]
+    owner_area: bare-metal worker pool autoscaler driven by the stats endpoint
+    coverage:
+      deterministic_pytest:
+        status: missing
+        waiver:
+          reason: No deterministic pytest coverage exists for the worker pool
+            supervisor example yet.
+          reviewer_action: If this example changes, add pytest coverage for the
+            scaling arithmetic and child reap/shutdown logic, or record a release
+            waiver.
+      local_smoke:
+        status: manual_only
+        waiver:
+          reason: The supervisor is a long-running process that polls a live
+            Kitaru server and spawns or terminates worker subprocesses against a
+            real pool, so it is not safe as unattended local smoke.
+          reviewer_action: If this example changes, run supervisor.py against a
+            Kitaru server with a configured worker pool, confirm it spawns and
+            drains worker subprocesses as demand changes, then stop it with
+            Ctrl+C, or record a release waiver.
+        command: uv run python examples/features/worker_pool_supervisor/supervisor.py
+        requires_server: true
+        required_env: [KITARU_API_URL, KITARU_API_KEY, KITARU_SUPERVISOR_POOL]
+        timeout_seconds: 300
+      live_provider:
+        status: not_applicable
+        required: false
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
