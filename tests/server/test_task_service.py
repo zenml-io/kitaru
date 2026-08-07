@@ -333,6 +333,8 @@ async def test_backstop_stamps_live_siblings_and_cancels_pending_ones(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
+    while await services.task_service.settle_queued_jobs():
+        pass
 
     job = await services.jobs.get(job_id)
     assert job.cancel_requested_at is not None
@@ -376,6 +378,8 @@ async def test_heartbeat_stops_a_sibling_before_the_backstop_runs(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
+    while await services.task_service.settle_queued_jobs():
+        pass
 
     # The sibling's own row is still unstamped, the job carries the request.
     assert (await services.tasks.get(sibling.id)).cancel_requested_at is None
@@ -429,6 +433,8 @@ async def test_abandoned_aborting_task_stamps_its_job(
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
     await _sweep_stale(services)
+    while await services.task_service.settle_queued_jobs():
+        pass
 
     assert (await services.tasks.get(task.id)).status is TaskStatus.ABANDONED
     assert (await services.jobs.get(job_id)).cancel_requested_at is not None
@@ -505,6 +511,8 @@ async def test_sweep_stale_task_abandons_and_settles() -> None:
     now = datetime.now(UTC)
     assert await services.task_service.list_stale_task_ids(now) == [task.id]
     await services.task_service.sweep_stale_task(task.id, now)
+    while await services.task_service.settle_queued_jobs():
+        pass
 
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.ABANDONED
@@ -968,6 +976,8 @@ async def test_advance_job_settlement_tracks_job_completed() -> None:
     await _complete_task(
         transitions, evaluation_task, result=[{"name": "quality", "score": 1.0}]
     )
+    while await transitions.settle_queued_jobs(100):
+        pass
 
     job_events = [
         entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.JOB_COMPLETED
@@ -984,8 +994,8 @@ async def test_advance_job_settlement_tracks_job_completed() -> None:
 async def test_second_of_two_sibling_tasks_settles_the_job() -> None:
     """The job stays unsettled after one sibling completes and settles after the other.
 
-    Exactly one of the two completions elects itself the settler, the one
-    whose scan finds every task of the job terminal.
+    Each completion only enqueues a settlement check, draining the queue
+    after both complete is what actually settles the job.
     """
     transitions, tasks, jobs = _build_transitions(None)
     job = await create_job(jobs, ACTOR.account.id)
@@ -998,6 +1008,8 @@ async def test_second_of_two_sibling_tasks_settles_the_job() -> None:
     await _complete_task(
         transitions, second, result=[{"name": "quality", "score": 1.0}]
     )
+    while await transitions.settle_queued_jobs(100):
+        pass
     settled = await jobs.get(job.id)
     assert settled.status is JobStatus.COMPLETED
 

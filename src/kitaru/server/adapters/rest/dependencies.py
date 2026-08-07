@@ -436,6 +436,8 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         heartbeat_timeout_seconds=settings.TASK_HEARTBEAT_TIMEOUT_SECONDS,
         retry_limit=settings.TASK_RETRY_LIMIT,
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
+        settlement_batch_limit=settings.JOB_SETTLEMENT_BATCH_LIMIT,
+        settlement_grace_seconds=settings.JOB_SETTLEMENT_GRACE_SECONDS,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
         importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,

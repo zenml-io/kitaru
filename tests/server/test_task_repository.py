@@ -32,7 +32,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind
-from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -56,7 +56,7 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
-from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.task import TaskFilter, TaskSettlementStats
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
@@ -299,6 +299,108 @@ async def test_list_by_job_orders_by_id(setup: Setup) -> None:
     second = await setup.tasks.create(_agent_task(setup))
     tasks = await setup.tasks.list_by_job(setup.job_id)
     assert [task.id for task in tasks] == [first.id, second.id]
+
+
+async def test_count_settlement_stats_empty_job(setup: Setup) -> None:
+    """Omit an empty job from the bulk lookup and return zero stats for it alone."""
+    assert await setup.tasks.count_settlement_stats_many([setup.job_id]) == {}
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats == TaskSettlementStats()
+    assert stats.drained is False
+
+
+async def test_count_settlement_stats_mixed_job_not_drained(setup: Setup) -> None:
+    """Leave a mixed job of running and completed tasks undrained."""
+    running = _agent_task(setup)
+    running.claim(setup.worker_id, datetime.now(UTC))
+    running.start(datetime.now(UTC))
+    await setup.tasks.create(running)
+
+    completed = _agent_task(setup)
+    completed.claim(setup.worker_id, datetime.now(UTC))
+    completed.start(datetime.now(UTC))
+    completed.link_result_session(setup.session_id)
+    completed.complete(None, datetime.now(UTC))
+    await setup.tasks.create(completed)
+
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats.total == 2
+    assert stats.non_terminal == 1
+    assert stats.drained is False
+
+
+async def test_count_settlement_stats_ignored_failure_not_counted(
+    setup: Setup,
+) -> None:
+    """Exclude an ignored hard failure from counted_failures on a drained job."""
+    ignored = _agent_task(setup, on_failure=TaskOnFailure.IGNORE)
+    ignored.claim(setup.worker_id, datetime.now(UTC))
+    ignored.start(datetime.now(UTC))
+    ignored.fail("boom", None, datetime.now(UTC))
+    await setup.tasks.create(ignored)
+
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats.drained is True
+    assert stats.counted_failures == 0
+    assert stats.first_failure_error is None
+
+
+async def test_count_settlement_stats_first_failure_error_by_id_order(
+    setup: Setup,
+) -> None:
+    """Report the earliest counted failure's error in task id order."""
+    first = _agent_task(setup)
+    first.claim(setup.worker_id, datetime.now(UTC))
+    first.start(datetime.now(UTC))
+    first.fail("first error", None, datetime.now(UTC))
+    await setup.tasks.create(first)
+
+    second = _agent_task(setup)
+    second.claim(setup.worker_id, datetime.now(UTC))
+    second.start(datetime.now(UTC))
+    second.fail("second error", None, datetime.now(UTC))
+    await setup.tasks.create(second)
+
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats.counted_failures == 2
+    assert stats.first_failure_error == "first error"
+
+
+async def test_count_settlement_stats_abort_failures_only_abort(setup: Setup) -> None:
+    """Count only abort hard failures toward abort_failures."""
+    aborting = _agent_task(setup, on_failure=TaskOnFailure.ABORT)
+    aborting.claim(setup.worker_id, datetime.now(UTC))
+    aborting.start(datetime.now(UTC))
+    aborting.fail("abort error", None, datetime.now(UTC))
+    await setup.tasks.create(aborting)
+
+    continuing = _agent_task(setup, on_failure=TaskOnFailure.CONTINUE)
+    continuing.claim(setup.worker_id, datetime.now(UTC))
+    continuing.start(datetime.now(UTC))
+    continuing.fail("continue error", None, datetime.now(UTC))
+    await setup.tasks.create(continuing)
+
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats.counted_failures == 2
+    assert stats.abort_failures == 1
+
+
+async def test_count_settlement_stats_canceled_and_kinds(setup: Setup) -> None:
+    """Count canceled tasks and collect every distinct kind seen."""
+    await setup.tasks.create(_agent_task(setup))
+
+    canceled_import = ImportTask(
+        job_id=setup.job_id,
+        plugin_version_id=setup.plugin_version_id,
+        payload_blob_id=setup.payload_blob_id,
+        agent_id=setup.agent_id,
+    )
+    canceled_import.request_cancel(datetime.now(UTC))
+    await setup.tasks.create(canceled_import)
+
+    stats = await setup.tasks.count_settlement_stats(setup.job_id)
+    assert stats.canceled == 1
+    assert set(stats.kinds) == {TaskKind.AGENT, TaskKind.IMPORTER}
 
 
 async def test_query_filters(setup: Setup) -> None:

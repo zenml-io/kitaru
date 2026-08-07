@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.job import JobFilter
@@ -100,6 +101,44 @@ class JobRepository(Protocol):
 
         Returns:
             Ids of the canceling jobs in ascending order.
+        """
+        ...
+
+    async def enqueue_settlement_check(self, job_id: uuid.UUID) -> None:
+        """Queue a settlement check for a job.
+
+        Args:
+            job_id: Id of the job.
+        """
+        ...
+
+    async def claim_settlement_checks(self, limit: int) -> list[uuid.UUID]:
+        """Claim queued settlement checks and drop them from the queue.
+
+        A check another transaction holds is skipped and stays queued for it.
+
+        Args:
+            limit: Maximum number of queued checks to claim.
+
+        Returns:
+            Distinct job ids of the claimed checks, oldest first.
+        """
+        ...
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        A job without tasks, or one updated after the cutoff, is skipped.
+        Rows are read without locking.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
         """
         ...
 

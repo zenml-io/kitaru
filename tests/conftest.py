@@ -4584,6 +4584,7 @@ class FakeJobRepository:
         """
         self._jobs: dict[uuid.UUID, Job] = {}
         self._tasks = tasks
+        self._settlement_checks: list[uuid.UUID] = []
 
     async def create(self, job: Job) -> Job:
         """Persist a new job.
@@ -4659,6 +4660,52 @@ class FakeJobRepository:
             Locked jobs keyed by id.
         """
         return await self.get_many(job_ids)
+
+    async def enqueue_settlement_check(self, job_id: uuid.UUID) -> None:
+        """Queue a settlement check for a job.
+
+        Args:
+            job_id: Id of the job.
+        """
+        self._settlement_checks.append(job_id)
+
+    async def claim_settlement_checks(self, limit: int) -> list[uuid.UUID]:
+        """Claim queued settlement checks and drop them from the queue.
+
+        Args:
+            limit: Maximum number of queued checks to claim.
+
+        Returns:
+            Distinct job ids of the claimed checks, oldest first.
+        """
+        claimed = self._settlement_checks[:limit]
+        self._settlement_checks = self._settlement_checks[limit:]
+        return list(dict.fromkeys(claimed))
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
+        """
+        assert self._tasks is not None
+        drained: list[uuid.UUID] = []
+        for job in self._jobs.values():
+            if job.settled:
+                continue
+            if job.updated is not None and job.updated >= cutoff:
+                continue
+            tasks = await self._tasks.list_by_job(job.id)
+            if not tasks or not all(task.terminal for task in tasks):
+                continue
+            drained.append(job.id)
+        return sorted(drained)[:limit]
 
     async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.

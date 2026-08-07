@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end job and task lifecycle tests against PostgreSQL."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -21,6 +22,31 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 RUNTIME = {"platform": "bare"}
+
+
+async def _wait_until(
+    poll: httpx.AsyncClient, url: str, field: str, value: str, timeout: float = 10.0
+) -> dict[str, object]:
+    """Poll a resource until a field reaches a value, or fail after a timeout.
+
+    Args:
+        poll: HTTP client to poll with.
+        url: Resource URL.
+        field: Response field to check.
+        value: Expected value.
+        timeout: Seconds to poll before failing.
+
+    Returns:
+        The resource body once the field matches.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    body: dict[str, object] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        body = (await poll.get(url)).json()
+        if body[field] == value:
+            return body
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{url} never reached {field}={value!r}, last body: {body}")
 
 
 @pytest.fixture
@@ -110,9 +136,9 @@ async def test_session_run_lifecycle_completes_the_job(
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/jobs/{job['id']}")
-    body = response.json()
-    assert body["status"] == "completed"
+    # The job settles through the background settlement loop now, so poll
+    # for it instead of reading it inline.
+    body = await _wait_until(client, f"/v1/jobs/{job['id']}", "status", "completed")
     assert body["ended_at"] is not None
 
     response = await client.get(f"/v1/tasks/{task['id']}")

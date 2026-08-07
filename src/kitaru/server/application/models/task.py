@@ -92,6 +92,8 @@ class TaskPolicy(FrozenModel):
     heartbeat_timeout_seconds: int = 60
     retry_limit: int = 3
     sweep_batch_limit: int = 100
+    settlement_batch_limit: int = 100
+    settlement_grace_seconds: int = 30
     evaluator_timeout_seconds: int = 300
     importer_timeout_seconds: int = 600
     max_result_bytes: int = 1024 * 1024

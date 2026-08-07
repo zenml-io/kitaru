@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end replay pipeline tests against PostgreSQL."""
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator
 
@@ -23,6 +24,31 @@ from conftest import db_settings, lifespan_client
 from kitaru.cache_keys import compute_tool_cache_key
 
 RUNTIME = {"platform": "bare"}
+
+
+async def _wait_until(
+    poll: httpx.AsyncClient, url: str, field: str, value: str, timeout: float = 10.0
+) -> dict[str, object]:
+    """Poll a resource until a field reaches a value, or fail after a timeout.
+
+    Args:
+        poll: HTTP client to poll with.
+        url: Resource URL.
+        field: Response field to check.
+        value: Expected value.
+        timeout: Seconds to poll before failing.
+
+    Returns:
+        The resource body once the field matches.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    body: dict[str, object] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        body = (await poll.get(url)).json()
+        if body[field] == value:
+            return body
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{url} never reached {field}={value!r}, last body: {body}")
 
 
 @pytest.fixture
@@ -172,8 +198,9 @@ async def test_replay_pipeline_completes_through_the_api(
         headers=eval_task_headers,
     )
 
-    replay_final = (await client.get(f"/v1/replays/{replay['id']}")).json()
-    assert replay_final["status"] == "completed"
+    # The job settles through the background settlement loop now, so poll
+    # for the replay to follow it instead of reading it inline.
+    await _wait_until(client, f"/v1/replays/{replay['id']}", "status", "completed")
 
     filter_expression = {
         "field": "session_id",

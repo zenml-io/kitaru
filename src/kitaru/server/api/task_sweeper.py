@@ -76,8 +76,8 @@ async def _read_candidates(
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
-) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Read the stale task ids and the canceling job ids without locking.
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+    """Read the sweep candidate ids without locking.
 
     Args:
         database: Database service the read opens a session against.
@@ -86,7 +86,8 @@ async def _read_candidates(
         now: Current time.
 
     Returns:
-        Stale task ids and job ids owing a cancel propagation.
+        Stale task ids, job ids owing a cancel propagation, and drained job
+        ids owing a settlement.
     """
     async for session in database.get_async_session():
         try:
@@ -94,10 +95,11 @@ async def _read_candidates(
             service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
-            return task_ids, job_ids
+            drained_ids = await service.list_drained_unsettled_job_ids(now)
+            return task_ids, job_ids, drained_ids
         finally:
             await session.rollback()
-    return [], []
+    return [], [], []
 
 
 async def sweep_once(
@@ -116,7 +118,9 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
-    task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
+    task_ids, job_ids, drained_ids = await _read_candidates(
+        database, settings, analytics, now
+    )
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
     # canceling job whose stamp has not landed yet is requeued instead of
@@ -137,6 +141,14 @@ async def sweep_once(
             analytics,
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
+        )
+    for drained_id in drained_ids:
+        await _run_unit(
+            database,
+            settings,
+            analytics,
+            partial(TaskService.sweep_drained_job, job_id=drained_id),
+            f"drained job {drained_id}",
         )
 
 

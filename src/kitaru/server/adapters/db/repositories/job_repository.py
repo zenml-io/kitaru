@@ -15,25 +15,28 @@
 
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
-from sqlalchemy import not_, or_, select
+from sqlalchemy import delete, exists, not_, or_, select
 
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.job import (
+    TERMINAL_JOB_STATUS_VALUES,
+    JobORM,
+    JobSettlementCheckORM,
+)
 from kitaru.server.adapters.db.orm.task import TERMINAL_STATUS_VALUES, TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job, JobNotFound
+from kitaru.server.domain.job import Job, JobNotFound
 
 JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "kind": JobORM.kind,
     "status": JobORM.status,
 }
-
-TERMINAL_JOB_STATUS_VALUES = [status.value for status in TERMINAL_JOB_STATUSES]
 
 
 class SQLJobRepository(BaseSQLRepository[JobORM]):
@@ -153,6 +156,77 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
                 JobORM.cancel_requested_at.is_not(None),
                 not_(JobORM.status.in_(TERMINAL_JOB_STATUS_VALUES)),
                 owing.exists(),
+            )
+            .order_by(JobORM.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def enqueue_settlement_check(self, job_id: uuid.UUID) -> None:
+        """Queue a settlement check for a job.
+
+        Args:
+            job_id: Id of the job.
+        """
+        self._session.add(JobSettlementCheckORM(job_id=job_id))
+        await self._session.flush()
+
+    async def claim_settlement_checks(self, limit: int) -> list[uuid.UUID]:
+        """Claim queued settlement checks and drop them from the queue.
+
+        A check another transaction holds is skipped and stays queued for it.
+
+        Args:
+            limit: Maximum number of queued checks to claim.
+
+        Returns:
+            Distinct job ids of the claimed checks, oldest first.
+        """
+        statement = (
+            select(JobSettlementCheckORM.id, JobSettlementCheckORM.job_id)
+            .order_by(JobSettlementCheckORM.id.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = (await self._session.execute(statement)).all()
+        if not rows:
+            return []
+        await self._session.execute(
+            delete(JobSettlementCheckORM).where(
+                JobSettlementCheckORM.id.in_([check_id for check_id, _ in rows])
+            )
+        )
+        return list(dict.fromkeys(job_id for _, job_id in rows))
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        A job without tasks, or one updated after the cutoff, is skipped.
+        Rows are read without locking.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
+        """
+        has_task = exists(select(TaskORM.id).where(TaskORM.job_id == JobORM.id))
+        has_live_task = exists(
+            select(TaskORM.id).where(
+                TaskORM.job_id == JobORM.id,
+                not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
+            )
+        )
+        statement = (
+            select(JobORM.id)
+            .where(
+                not_(JobORM.status.in_(TERMINAL_JOB_STATUS_VALUES)),
+                JobORM.updated < cutoff,
+                has_task,
+                not_(has_live_task),
             )
             .order_by(JobORM.id.asc())
             .limit(limit)
