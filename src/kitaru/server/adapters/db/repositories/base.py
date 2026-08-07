@@ -69,8 +69,12 @@ class BaseSQLRepository(Generic[RowT]):
         Returns:
             Stored row.
         """
+        # Lock with FOR NO KEY UPDATE because child-row inserts take FOR KEY
+        # SHARE on the rows they reference and would queue behind FOR UPDATE.
         row = await self._session.get(
-            self.orm_class, entity_id, with_for_update=exclusive
+            self.orm_class,
+            entity_id,
+            with_for_update={"key_share": True} if exclusive else False,
         )
         if row is None:
             raise self._not_found(entity_id)
@@ -104,7 +108,9 @@ class BaseSQLRepository(Generic[RowT]):
                 *(defer(column) for column in deferred_columns)
             )
         if exclusive:
-            statement = statement.order_by(self.orm_class.id.asc()).with_for_update()
+            statement = statement.order_by(self.orm_class.id.asc()).with_for_update(
+                key_share=True
+            )
         rows = (await self._session.scalars(statement)).all()
         return {row.id: row for row in rows}
 

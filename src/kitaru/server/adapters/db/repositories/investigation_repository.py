@@ -132,7 +132,9 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             Stored investigation session row.
         """
         row = await self._session.get(
-            InvestigationSessionORM, investigation_session_id, with_for_update=exclusive
+            InvestigationSessionORM,
+            investigation_session_id,
+            with_for_update={"key_share": True} if exclusive else False,
         )
         if row is None:
             raise InvestigationSessionNotFound(investigation_session_id)
@@ -287,7 +289,7 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             InvestigationSessionORM.session_id == session_id,
         )
         if exclusive:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update(key_share=True)
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
             raise InvestigationSessionNotFound(session_id)

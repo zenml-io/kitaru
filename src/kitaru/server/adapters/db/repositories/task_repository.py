@@ -270,7 +270,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             )
             .order_by(TaskORM.id.asc())
             .limit(limit)
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, key_share=True)
         )
         rows = (await self._session.scalars(statement)).all()
         if not rows:
@@ -304,7 +304,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
                 cutoff > _LAST_SEEN,
             )
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, key_share=True)
         )
         row = (await self._session.scalars(statement)).one_or_none()
         return row.to_domain() if row is not None else None
@@ -374,7 +374,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             select(TaskORM.id)
             .where(TaskORM.id.in_(candidate_ids), *candidate_filter)
             .order_by(TaskORM.id.asc())
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, key_share=True)
         )
         statement = (
             update(TaskORM)
@@ -415,7 +415,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update(nowait=nowait)
+            .with_for_update(nowait=nowait, key_share=True)
         )
         await self._session.execute(statement)
 
@@ -440,7 +440,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.cancel_requested_at.is_(None),
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update()
+            .with_for_update(key_share=True)
         )
         statement = (
             update(TaskORM)
@@ -474,7 +474,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.status == TaskStatus.PENDING.value,
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update()
+            .with_for_update(key_share=True)
         )
         statement = (
             update(TaskORM)
