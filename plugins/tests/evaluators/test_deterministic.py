@@ -676,6 +676,25 @@ def test_resource_budget_reconciles_rollups_and_uses_inclusive_ceilings() -> Non
     )
 
 
+def test_resource_budget_does_not_require_cost_on_tool_calls() -> None:
+    """Reconcile cost when tool calls structurally omit cost metadata."""
+    llm = _node(
+        0,
+        node_type=NodeType.LLM_CALL,
+        outputs={},
+        cost=Decimal("1.25"),
+    )
+    tool = _node(1, tool_name="get_weather", outputs={})
+    result = _by_name(
+        evaluators.resource_budget(
+            _view([llm, tool], cost=Decimal("1.25")),
+            max_cost=2,
+        )
+    )["cost_budget"]
+
+    assert result.passed is True
+
+
 def test_resource_budget_matches_all_node_rollups_and_decimal_context() -> None:
     """Include recorded span resources and sum costs without ambient rounding."""
     llm = _node(
@@ -796,6 +815,22 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
     assert policy["allowed_models"].passed is True
     assert policy["allowed_providers"].passed is False
     assert policy["requested_model_match"].passed is False
+
+
+def test_model_policy_holds_without_llm_calls() -> None:
+    """Do not treat missing LLM evidence as proof of policy compliance."""
+    policy = _by_name(
+        evaluators.model_policy(
+            _view([]),
+            allowed_models=["model"],
+            allowed_providers=["provider"],
+            require_requested_model_match=True,
+        )
+    )
+
+    assert policy["allowed_models"].passed is None
+    assert policy["allowed_providers"].passed is None
+    assert policy["requested_model_match"].passed is None
 
 
 @pytest.mark.parametrize(

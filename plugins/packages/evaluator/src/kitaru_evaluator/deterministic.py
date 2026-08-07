@@ -1035,8 +1035,7 @@ def _sum_cost(nodes: list[SessionNodeResponse]) -> tuple[Decimal | None, bool]:
     relevant = [
         node
         for node in nodes
-        if node.node_type in {NodeType.LLM_CALL, NodeType.TOOL_CALL}
-        or node.cost is not None
+        if node.node_type is NodeType.LLM_CALL or node.cost is not None
     ]
     complete = all(
         node.cost is not None and _is_nonnegative_decimal(node.cost)
@@ -1453,13 +1452,14 @@ def model_policy(
     results = _base_results(session, config)
     calls = _llm_calls(session)
     terminal = _is_terminal(session)
+    can_pass = terminal and bool(calls)
     if models is not None:
         violations = [
             {"index": node.index, "model": node.model}
             for node in calls
             if node.model is not None and node.model not in models
         ]
-        complete = terminal and all(node.model is not None for node in calls)
+        complete = can_pass and all(node.model is not None for node in calls)
         results.append(
             _json_result(
                 "allowed_models",
@@ -1474,7 +1474,7 @@ def model_policy(
             for node in calls
             if node.provider is not None and node.provider not in providers
         ]
-        complete = terminal and all(node.provider is not None for node in calls)
+        complete = can_pass and all(node.provider is not None for node in calls)
         results.append(
             _json_result(
                 "allowed_providers",
@@ -1495,7 +1495,7 @@ def model_policy(
             and node.model is not None
             and node.requested_model != node.model
         ]
-        complete = terminal and all(
+        complete = can_pass and all(
             node.requested_model is not None and node.model is not None
             for node in calls
         )

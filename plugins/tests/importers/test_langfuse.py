@@ -536,6 +536,35 @@ def test_maps_openai_agents_function_span_as_tool() -> None:
     }
 
 
+def test_maps_flattened_openai_agents_function_span_as_tool() -> None:
+    """Recognize function names from flattened Langfuse metadata."""
+    session = sessions(
+        jsonl(
+            observation("root", "trace-1", input_={"message": "weather"}),
+            observation(
+                "function",
+                "trace-1",
+                parent_id="root",
+                observation_type="SPAN",
+                input_={"city": "Delft"},
+                output="18 C",
+                name="Function: get_weather",
+                metadata={
+                    "name": "unrelated-metadata-name",
+                    "attributes.name": "get_weather",
+                    "attributes.gen_ai.system": "openai",
+                },
+            ),
+        )
+    )[0]
+
+    nodes = {node.external_id: node for node in flatten(session.nodes)}
+    tool = nodes["trace-1:function"]
+    assert tool.node_type is NodeType.TOOL_CALL
+    assert tool.tool_name == "get_weather"
+    assert tool.provider == "openai"
+
+
 def test_maps_model_provider_cost_and_bounded_metadata() -> None:
     """Map model evidence without retaining raw provider payloads."""
     session = sessions(

@@ -696,8 +696,7 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
             "operationName",
             "operation_name",
         )
-        or attributes.get("gen_ai.operation.name")
-        or metadata.get("gen_ai.operation.name")
+        or _metadata_value(record, "gen_ai.operation.name")
         or ""
     ).lower()
     explicit_tool = observation_type == "TOOL" or operation in {
@@ -707,16 +706,17 @@ def _node_type(record: dict[str, Any]) -> tuple[NodeType, str | None]:
     }
     tool_name = _first(record, "toolName", "tool_name")
     if tool_name is None:
-        tool_name = attributes.get("gen_ai.tool.name") or metadata.get(
-            "gen_ai.tool.name"
-        )
+        tool_name = _metadata_value(record, "gen_ai.tool.name")
+    function_name = attributes.get("name")
+    if function_name in (None, ""):
+        function_name = metadata.get("attributes.name")
     function_span = (
         observation_type == "SPAN"
         and str(record.get("name") or "").startswith("Function:")
-        and attributes.get("name") not in (None, "")
+        and function_name is not None
     )
     if function_span:
-        tool_name = attributes["name"]
+        tool_name = function_name
     if explicit_tool or function_span:
         return NodeType.TOOL_CALL, str(tool_name or record.get("name") or "tool")
     if observation_type == "GENERATION":
