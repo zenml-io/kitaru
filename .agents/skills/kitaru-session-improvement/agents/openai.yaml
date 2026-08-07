@@ -1,4 +1,0 @@
-interface:
-  display_name: "Improve an Agent with Kitaru"
-  short_description: "Interview users and improve agents from traces"
-  default_prompt: "Use $kitaru-session-improvement to inspect my agent traces, interview me about the behavior that matters, and test an improvement."

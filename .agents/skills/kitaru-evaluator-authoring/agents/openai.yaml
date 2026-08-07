@@ -1,4 +1,0 @@
-interface:
-  display_name: "Author a Kitaru Evaluator"
-  short_description: "Turn reviewed behavior into a tested evaluator"
-  default_prompt: "Use $kitaru-evaluator-authoring to turn my reviewed agent behavior into a tested Kitaru evaluator."
