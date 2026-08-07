@@ -30,11 +30,14 @@ from typing import Any
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import (
-    ParsedNode,
-    ParsedSession,
+from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru_plugins.importers.normalization import (
     detect_framework,
-    populate_node_display_fields,
+    get_input_text,
+    get_output_text,
+    get_reasoning,
+    get_system_prompt,
+    get_tool_payload_text,
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
@@ -574,7 +577,22 @@ class BraintrustProjectLogImporter:
             )
         )
         nodes = [node for node, _ in nodes_with_parents]
-        system_prompt = populate_node_display_fields(nodes)
+        system_prompt = None
+        for node in nodes:
+            node.input_text = (
+                get_tool_payload_text(node.inputs)
+                if node.node_type is NodeType.TOOL_CALL
+                else get_input_text(node.inputs)
+            )
+            node.output_text = (
+                get_tool_payload_text(node.outputs)
+                if node.node_type is NodeType.TOOL_CALL
+                else get_output_text(node.outputs)
+            )
+            if node.node_type is NodeType.LLM_CALL:
+                node.system_prompt = get_system_prompt(node.inputs)
+                node.reasoning = get_reasoning(node.outputs) or get_reasoning(node.inputs)
+                system_prompt = node.system_prompt or system_prompt
         if missing_parent:
             warnings.append("One or more spans reference a missing parent")
         llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]

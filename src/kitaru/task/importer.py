@@ -13,8 +13,6 @@
 #  permissions and limitations under the License.
 """Importer plugin contract and the import flow."""
 
-import json
-import re
 import uuid
 from collections.abc import Callable, Iterator
 from decimal import Decimal
@@ -54,9 +52,7 @@ __all__ = [
     "Parser",
     "SessionImportError",
     "call_parser",
-    "detect_framework",
     "flatten_nodes",
-    "populate_node_display_fields",
     "run",
     "session_request",
 ]
@@ -64,17 +60,6 @@ __all__ = [
 NODE_BATCH_SIZE = 200
 
 _LABEL = "Importer"
-
-_FRAMEWORK_PATTERNS = (
-    (re.compile(r"pydantic[._ -]?ai", re.IGNORECASE), "pydantic-ai"),
-    (re.compile(r"langgraph", re.IGNORECASE), "langgraph"),
-    (re.compile(r"openai[._ -]?agents?", re.IGNORECASE), "openai-agents"),
-    (re.compile(r"google[._ -]?adk", re.IGNORECASE), "google-adk"),
-    (
-        re.compile(r"claude[._ -]?agent[._ -]?sdk|claudeagentsdk", re.IGNORECASE),
-        "claude-agent-sdk",
-    ),
-)
 
 
 class SessionImportError(Exception):
@@ -141,238 +126,6 @@ class ParsedSession(BaseModel):
 ParsedItem = ParsedSession | ImportFailure
 
 Parser = Callable[[bytes, dict[str, Any]], Iterator[ParsedItem]]
-
-
-def _role(value: dict[str, Any]) -> str | None:
-    """Return a normalized role from common message encodings."""
-    candidates = [value.get("role"), value.get("type"), value.get("part_kind")]
-    event_name = value.get("event.name")
-    if isinstance(event_name, str):
-        candidates.append(event_name.removeprefix("gen_ai.").removesuffix(".message"))
-    identifier = value.get("id")
-    if isinstance(identifier, list) and identifier:
-        candidates.append(identifier[-1])
-    for candidate in candidates:
-        if not isinstance(candidate, str):
-            continue
-        normalized = candidate.lower().replace("_", "-")
-        if normalized in {"user", "human", "humanmessage", "user-prompt"}:
-            return "user"
-        if normalized in {"system", "systemmessage", "system-prompt"}:
-            return "system"
-        if normalized in {"assistant", "ai", "aimessage", "model"}:
-            return "assistant"
-    return None
-
-
-def _content_text(value: Any, depth: int = 0) -> str | None:
-    """Return displayable text from a common content value."""
-    if depth > 8:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    if isinstance(value, list):
-        parts = [
-            text
-            for item in value
-            if (text := _content_text(item, depth + 1)) is not None
-        ]
-        return "\n".join(parts) or None
-    if not isinstance(value, dict):
-        return None
-    for key in ("text", "content"):
-        if key in value and (text := _content_text(value[key], depth + 1)):
-            return text
-    for key in ("parts", "kwargs", "data"):
-        if key in value and (text := _content_text(value[key], depth + 1)):
-            return text
-    return None
-
-
-def _message_texts(value: Any, target_role: str, depth: int = 0) -> list[str]:
-    """Collect text for one role from nested provider message data."""
-    if depth > 12:
-        return []
-    if isinstance(value, list):
-        return [
-            text
-            for item in value
-            for text in _message_texts(item, target_role, depth + 1)
-        ]
-    if not isinstance(value, dict):
-        return []
-    role = _role(value)
-    if role == target_role:
-        for key in ("content", "text", "parts", "kwargs", "data"):
-            if key in value and (text := _content_text(value[key], depth + 1)):
-                return [text]
-    texts: list[str] = []
-    for child in value.values():
-        texts.extend(_message_texts(child, target_role, depth + 1))
-    return texts
-
-
-def _json_text(value: Any) -> str | None:
-    """Serialize a structured tool value for display."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value.strip() or None
-    return json.dumps(
-        value,
-        default=str,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
-
-
-def _extract_input_text(value: Any) -> str | None:
-    """Extract the latest user input from provider data."""
-    messages = _message_texts(value, "user")
-    if messages:
-        return messages[-1]
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("prompt", "query", "question", "user_input", "message"):
-            if key in value and (text := _content_text(value[key])):
-                return text
-    return None
-
-
-def _extract_output_text(value: Any) -> str | None:
-    """Extract the latest assistant output from provider data."""
-    messages = _message_texts(value, "assistant")
-    if messages:
-        return messages[-1]
-    if isinstance(value, str):
-        return value.strip() or None
-    if isinstance(value, dict):
-        for key in ("answer", "result", "response", "output", "text", "content"):
-            if key in value and (text := _content_text(value[key])):
-                return text
-    return None
-
-
-def _extract_system_prompt(value: Any) -> str | None:
-    """Extract the latest system prompt from provider data."""
-    messages = _message_texts(value, "system")
-    if messages:
-        return messages[-1]
-    found: list[str] = []
-
-    def _collect(item: Any, depth: int = 0) -> None:
-        if depth > 12:
-            return
-        if isinstance(item, list):
-            for child in item:
-                _collect(child, depth + 1)
-            return
-        if not isinstance(item, dict):
-            return
-        for key in ("system_prompt", "system_instruction", "instructions"):
-            if key in item and (text := _content_text(item[key], depth + 1)):
-                found.append(text)
-        for child in item.values():
-            _collect(child, depth + 1)
-
-    _collect(value)
-    return found[-1] if found else None
-
-
-def _extract_reasoning(value: Any) -> str | None:
-    """Extract visible reasoning text from provider data."""
-    found: list[str] = []
-
-    def _collect(item: Any, depth: int = 0) -> None:
-        if depth > 12:
-            return
-        if isinstance(item, list):
-            for child in item:
-                _collect(child, depth + 1)
-            return
-        if not isinstance(item, dict):
-            return
-        kind_value = item.get("type") or item.get("part_kind")
-        kind = str(kind_value).lower().replace("_", "-") if kind_value else ""
-        if kind in {"reasoning", "reasoning-content", "thinking", "thought"}:
-            for key in ("text", "content", "summary"):
-                if key in item and (text := _content_text(item[key], depth + 1)):
-                    found.append(text)
-        for key in ("reasoning", "reasoning_content", "thinking", "thought"):
-            if key in item and (text := _content_text(item[key], depth + 1)):
-                found.append(text)
-        for child in item.values():
-            _collect(child, depth + 1)
-
-    _collect(value)
-    return found[-1] if found else None
-
-
-def detect_framework(value: Any) -> str | None:
-    """Detect one supported framework from provider metadata.
-
-    Args:
-        value: Provider metadata or attributes.
-
-    Returns:
-        Canonical framework name when the evidence identifies exactly one.
-    """
-    evidence: list[str] = []
-
-    def _collect(item: Any, depth: int = 0) -> None:
-        if depth > 8 or len(evidence) >= 500:
-            return
-        if isinstance(item, dict):
-            for key, child in item.items():
-                evidence.append(str(key))
-                _collect(child, depth + 1)
-        elif isinstance(item, list):
-            for child in item[:100]:
-                _collect(child, depth + 1)
-        elif isinstance(item, str):
-            evidence.append(item)
-
-    _collect(value)
-    joined = "\n".join(evidence)
-    matches = {
-        framework
-        for pattern, framework in _FRAMEWORK_PATTERNS
-        if pattern.search(joined)
-    }
-    return next(iter(matches)) if len(matches) == 1 else None
-
-
-def populate_node_display_fields(nodes: list[ParsedNode]) -> str | None:
-    """Populate node text projections and return the latest system prompt.
-
-    Args:
-        nodes: Nodes ordered by source time.
-
-    Returns:
-        System prompt from the latest model call that contains one.
-    """
-    session_system_prompt = None
-    for node in nodes:
-        if node.node_type is NodeType.TOOL_CALL:
-            node.input_text = _extract_input_text(node.inputs) or _json_text(
-                node.inputs
-            )
-            node.output_text = _extract_output_text(node.outputs) or _json_text(
-                node.outputs
-            )
-        else:
-            node.input_text = _extract_input_text(node.inputs)
-            node.output_text = _extract_output_text(node.outputs)
-        if node.node_type is NodeType.LLM_CALL:
-            node.system_prompt = _extract_system_prompt(node.inputs)
-            node.reasoning = _extract_reasoning(node.outputs) or _extract_reasoning(
-                node.inputs
-            )
-            session_system_prompt = node.system_prompt or session_system_prompt
-    return session_system_prompt
 
 
 def call_parser(
