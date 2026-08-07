@@ -17,7 +17,7 @@ Each imported session contains session fields and a list of nodes. A session is 
 |---|---|---|
 | `status` | `in_progress`, `completed`, or `failed` | Final source status. |
 | `name` | string or null | Display name. |
-| `system_prompt` | string or null | Most recently recorded system prompt. |
+| `system_prompt` | string or null | System prompt from the first recorded model call. |
 | `inputs` | any JSON value | Complete session input. Provider importers use a versioned `turns` object for multi-turn sessions. |
 | `outputs` | any JSON value | Final session output. |
 | `error` | string or null | Failure message. |
@@ -54,7 +54,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `attributes` | any JSON value | Span attributes retained for diagnostics. |
 | `metadata` | JSON object | Bounded source metadata. |
 
-Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means that the importer could not choose one text value without guessing. The session-level `system_prompt` remains a summary of the latest model call that supplied one.
+Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means that the importer could not choose one text value without guessing. The session-level `system_prompt` summarizes the first model call that supplied one.
 
 `reasoning` contains visible text only. Redacted, encrypted, or unavailable reasoning remains null, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
 

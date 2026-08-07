@@ -5816,7 +5816,7 @@
                 "type": "null"
               }
             ],
-            "description": "Most recently recorded system prompt.",
+            "description": "System prompt from the first recorded model call.",
             "title": "System Prompt"
           }
         },
@@ -6679,7 +6679,7 @@
                 "type": "null"
               }
             ],
-            "description": "Most recently recorded system prompt.",
+            "description": "System prompt from the first recorded model call.",
             "title": "System Prompt"
           },
           "task_id": {

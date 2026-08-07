@@ -626,7 +626,7 @@ class _KitaruCapability(AbstractCapability[Any]):
         input_text_selector = _input_text_selector(input_payload)
         system_prompt_selector = _system_prompt_selector(input_payload)
         system_prompt = _get_request_system_prompt(effective.messages)
-        state.system_prompt = system_prompt or state.system_prompt
+        state.system_prompt = state.system_prompt or system_prompt
         try:
             response = await handler(effective)
         except BaseException as error:

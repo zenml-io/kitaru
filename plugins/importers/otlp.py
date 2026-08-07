@@ -362,7 +362,7 @@ def _detect_framework(value: Any) -> str | None:
 
 
 def _populate_node_fields(nodes: list[ImportedNode]) -> str | None:
-    """Populate normalized node fields and return the latest system prompt."""
+    """Populate normalized node fields and return the first call's system prompt."""
     session_system_prompt = None
     for node in nodes:
         node.input_text_selector = _input_text_selector(node.inputs)
@@ -373,7 +373,7 @@ def _populate_node_fields(nodes: list[ImportedNode]) -> str | None:
                 system_prompt.selector if system_prompt is not None else None
             )
             node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
-            if system_prompt is not None:
+            if system_prompt is not None and session_system_prompt is None:
                 session_system_prompt = system_prompt.text
     return session_system_prompt
 

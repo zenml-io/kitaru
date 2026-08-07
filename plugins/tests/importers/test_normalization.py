@@ -30,14 +30,23 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
         },
         attributes={},
     )
+    later_node = ImportedNode(
+        node_type=NodeType.LLM_CALL,
+        name="later model request",
+        status=NodeStatus.COMPLETED,
+        inputs={"messages": [{"role": "system", "content": "New policy."}]},
+        outputs={"role": "assistant", "content": "Done."},
+        attributes={},
+    )
 
-    system_prompt = importer._populate_node_fields([node])
+    system_prompt = importer._populate_node_fields([node, later_node])
 
     assert system_prompt == "Follow policy."
     assert node.input_text_selector == '$["messages"][1]["content"]'
     assert node.output_text_selector == '$["messages"][0]["content"]'
     assert node.system_prompt_selector == '$["messages"][0]["content"]'
     assert node.reasoning == "The tracking event says shipped."
+    assert later_node.system_prompt_selector == '$["messages"][0]["content"]'
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
