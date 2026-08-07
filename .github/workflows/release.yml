@@ -273,6 +273,11 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+      - name: Build and test candidate plugin wheels
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --kitaru-wheel dist
+          --candidate-dir docker/candidate-wheels
       - name: Test clean base and MCP wheel installations
         run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
       - name: List build artifacts
@@ -531,11 +536,25 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Validate release Dockerfiles (dry run)
+      - name: Build release Docker images from candidate wheels (dry run)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
         run: |
-          docker build --check -f docker/release-client.Dockerfile .
-          docker build --check -f docker/release-server.Dockerfile .
+          docker build \
+            -f docker/release-client.Dockerfile \
+            --target client \
+            --build-arg KITARU_VERSION="$VERSION" \
+            --build-arg PACKAGE_SOURCE=candidates \
+            -t kitaru-release-dry-run .
+          docker build \
+            -f docker/release-server.Dockerfile \
+            --target server \
+            --build-arg KITARU_VERSION="$VERSION" \
+            --build-arg PACKAGE_SOURCE=candidates \
+            -t kitaru-server-release-dry-run .
+          docker run --rm kitaru-release-dry-run \
+            python -c "import kitaru"
+          docker run --rm kitaru-server-release-dry-run \
+            python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -629,9 +648,8 @@ jobs:
             ls dist/
             echo ""
             echo "### Docker image"
-            echo "Statically validated: docker/release-client.Dockerfile"
-            echo "Statically validated: docker/release-server.Dockerfile"
-            echo "Images require the published kitaru==$VERSION package and were not built."
+            echo "Built from candidate wheels: kitaru-release-dry-run"
+            echo "Built from candidate wheels: kitaru-server-release-dry-run"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""

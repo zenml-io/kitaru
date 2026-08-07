@@ -27,10 +27,20 @@ runs:
       uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2.1.6
       with:
         mask-password: 'true'
-    - name: Validate image Dockerfile
+    - name: Build managed image from candidate wheels
       if: inputs.dry-run == 'true'
       shell: bash
-      run: docker build --check -f docker/release-server.Dockerfile .
+      env:
+        IMAGE_VERSION: ${{ inputs.version }}
+      run: |
+        docker build \
+          -f docker/release-server.Dockerfile \
+          --target server \
+          --build-arg KITARU_VERSION="$IMAGE_VERSION" \
+          --build-arg PACKAGE_SOURCE=candidates \
+          -t kitaru-managed-release-dry-run .
+        docker run --rm kitaru-managed-release-dry-run \
+          python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
     - name: Build and publish image
       if: inputs.dry-run != 'true'
       uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0

@@ -42,6 +42,13 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - Keep subprocess tests bounded and assert structured receipts, exit behavior, and redaction.
 - Use the existing worker fakes rather than starting unrelated services.
 
+## Default Plugin Packages
+
+- Run `just plugin-artifact-smoke` after changing plugin package metadata, catalogs, default requirement pins, or release installation paths.
+- The smoke builds Kitaru and every selected plugin as wheels, installs them into a clean environment, loads each catalog entrypoint, and verifies idempotent default registration.
+- CI runs plugin distributions as a package matrix. Keep the matrix aligned with `plugins/packages/` and the choices in `.github/workflows/release-plugins.yml`.
+- Kitaru release dry-runs build client and server images from `docker/candidate-wheels`; publishing builds continue to install exact versions from PyPI.
+
 ## MCP Tests
 
 - Synchronize with `uv sync --frozen --extra mcp` and run `just test tests/mcp`.
@@ -94,7 +101,7 @@ Before dispatching:
 2. Confirm the intended release commits are on `develop` and identify the last immutable release tag.
 3. Review the `[Unreleased]` changelog and version classification.
 4. Confirm no other release run is active.
-5. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
+5. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
 6. Use the workflow's `dry-run` input when a non-publishing rehearsal is needed.
 
 The release workflow itself installs the CLI, MCP, and worker extras; checks lint, types, MCP schemas, base/CLI/MCP tests, clean CLI artifacts, migrations, UI wheel contents, and the installed MCP wheel contract; then handles versioning, tagging, PyPI, GitHub Release, public and managed images, Helm packaging, release branches, and `main` advancement.

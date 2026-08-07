@@ -25,6 +25,8 @@ dist/
 build/
 *.whl
 *.tar.gz
+!docker/candidate-wheels/
+!docker/candidate-wheels/*.whl
 
 # Local UI bundle cache used by Justfile helpers. Source Docker builds should
 # only receive the generated package UI files explicitly allow-listed below.

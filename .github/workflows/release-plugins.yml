@@ -37,7 +37,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          ref: develop
+          ref: ${{ inputs.dry-run && github.sha || 'develop' }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
@@ -83,6 +83,10 @@ jobs:
           uv sync --frozen --all-packages --extra server
           uv run pytest -q plugins/tests tests/server/test_default_plugins.py
           uv run python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
+      - name: Test installed package artifact
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --package "$PROJECT_DIR"
       - name: Build package
         run: uv build --project "$PROJECT_DIR" --out-dir "plugins/dist/$PACKAGE_NAME"
       - name: Publish package

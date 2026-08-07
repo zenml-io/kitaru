@@ -18,6 +18,12 @@ This exposes the same catalogs used by published wheels without requiring a PyPI
 uv build --project plugins/packages/langfuse-importer --out-dir plugins/dist
 ```
 
+Test every distribution through a clean wheel installation:
+
+```bash
+just plugin-artifact-smoke
+```
+
 ## Releases
 
 The `Release plugin` workflow accepts a package directory name and its committed version. It tests and publishes only that distribution, then creates a package-specific tag such as `langfuse-importer-v0.2.0`.
