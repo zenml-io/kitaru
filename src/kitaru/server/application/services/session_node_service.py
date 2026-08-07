@@ -163,7 +163,7 @@ class SessionNodeService:
                 outputs=item.outputs,
                 requested_model=item.requested_model,
                 model=item.model,
-                provider=item.provider,
+                model_provider=item.model_provider,
                 tokens=item.tokens,
                 cost=item.cost,
                 model_params=item.model_params,

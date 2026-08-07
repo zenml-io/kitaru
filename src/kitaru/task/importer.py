@@ -90,7 +90,7 @@ class ImportedNode(BaseModel):
     outputs: Any
     requested_model: str | None = None
     model: str | None = None
-    provider: str | None = None
+    model_provider: str | None = None
     tokens: TokenUsage | None = None
     cost: Decimal | None = None
     model_params: dict[str, Any] | None = None
@@ -220,7 +220,7 @@ def _node_request(
         outputs=node.outputs,
         requested_model=node.requested_model,
         model=node.model,
-        provider=node.provider,
+        model_provider=node.model_provider,
         tokens=node.tokens,
         cost=node.cost,
         model_params=node.model_params,

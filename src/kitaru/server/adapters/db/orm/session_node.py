@@ -111,7 +111,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     requested_model: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
-    provider: Mapped[str | None] = mapped_column(Text)
+    model_provider: Mapped[str | None] = mapped_column(Text)
     input_tokens: Mapped[int | None] = mapped_column(BigInteger)
     output_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cached_input_tokens: Mapped[int | None] = mapped_column(BigInteger)
@@ -175,7 +175,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.outputs = node.outputs
         self.requested_model = node.requested_model
         self.model = node.model
-        self.provider = node.provider
+        self.model_provider = node.model_provider
         self.input_tokens = tokens.input_tokens if tokens is not None else None
         self.output_tokens = tokens.output_tokens if tokens is not None else None
         self.cached_input_tokens = (
@@ -244,7 +244,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             outputs=self.outputs if include_payloads else None,
             requested_model=self.requested_model,
             model=self.model,
-            provider=self.provider,
+            model_provider=self.model_provider,
             tokens=tokens,
             cost=self.cost,
             model_params=self.model_params,
