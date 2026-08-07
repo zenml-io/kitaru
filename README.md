@@ -42,7 +42,7 @@ it.
 
 - **Every run is a recording.** Wrap your agent once, or import the
   traces you already collect — Langfuse stays your system of record.
-- **Replay is re-execution, not re-scoring.** An unchanged replay
+- **Replay is re-execution, not re-grading of old output.** An unchanged replay
   reproduces the original; that faithful baseline is what makes the diff
   of a fork trustworthy. Recorded tool calls are answered from the
   recording, so no card gets refunded twice.
