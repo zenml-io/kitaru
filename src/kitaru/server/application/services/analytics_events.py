@@ -16,6 +16,7 @@
 from datetime import datetime
 from typing import Any
 
+from kitaru.analytics.events import AccountSource
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
@@ -45,20 +46,23 @@ def _duration_properties(
     return {"duration_seconds": (ended_at - started_at).total_seconds()}
 
 
-def build_account_traits(account: Account) -> dict[str, Any]:
-    """Build the traits of an account, excluding its name and email.
+def build_account_traits(account: Account, source: AccountSource) -> dict[str, Any]:
+    """Build the traits of an account.
 
     Args:
         account: Account the traits describe.
+        source: Where the account was created.
 
     Returns:
         User traits.
     """
-    return {
-        "is_admin": account.is_admin,
+    traits: dict[str, Any] = {
         "is_service_account": account.is_service_account,
-        "active": account.active,
+        "source": source.value,
     }
+    if account.email is not None:
+        traits["email"] = account.email
+    return traits
 
 
 def build_session_completed_properties(session: Session) -> dict[str, Any]:

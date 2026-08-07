@@ -482,7 +482,7 @@ async def test_ensure_account_promotes_existing_non_admin(
 
 
 async def test_create_account_identifies_the_account() -> None:
-    """Identify a created account with its traits, excluding name and email."""
+    """Identify a created account with its email and source."""
     analytics = _RecordingAnalytics()
     service = AccountService(
         repository=FakeAccountRepository(),
@@ -503,14 +503,14 @@ async def test_create_account_identifies_the_account() -> None:
     user_id, traits = analytics.identified[0]
     assert user_id == account.id
     assert traits == {
-        "is_admin": False,
         "is_service_account": False,
-        "active": True,
+        "source": "api",
+        "email": "alice@example.com",
     }
 
 
-async def test_create_pending_account_identifies_the_account() -> None:
-    """Identify a password-less account as inactive."""
+async def test_create_account_without_email_omits_the_trait() -> None:
+    """Leave the email trait out when the account has no email."""
     analytics = _RecordingAnalytics()
     service = AccountService(
         repository=FakeAccountRepository(),
@@ -526,11 +526,7 @@ async def test_create_pending_account_identifies_the_account() -> None:
     assert len(analytics.identified) == 1
     user_id, traits = analytics.identified[0]
     assert user_id == account.id
-    assert traits == {
-        "is_admin": True,
-        "is_service_account": False,
-        "active": False,
-    }
+    assert traits == {"is_service_account": False, "source": "api"}
 
 
 async def test_create_account_without_analytics_tracker(

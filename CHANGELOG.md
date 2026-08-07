@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Server-side analytics now cover agent, agent version, investigation, and annotation creation. A created account is also identified with its admin, service account, and active flags. Account names and emails are never sent.
+- Server-side analytics now cover agent, agent version, investigation, and annotation creation. A created account is identified with its email, service account flag, and source, and an account mirrored from a control plane user is aliased to that user.
 - The `kitaru/` plugin name prefix is reserved for built-in default plugins, which are registered at server startup without an owner. Creating a plugin whose name starts with `kitaru/` via the API is rejected.
 - Sessions carry a per-agent sequential `number`, assigned at creation and returned in session responses. Numbers may skip when a create fails after its number was allocated.
 - CLI investigation and annotation commands, plus MCP commands for review workflows, evaluator registration, and starting bounded evaluations or experiment runs. The new operations use existing API and SDK resources, require exact IDs and evaluator versions, and return submitted workflows without polling.

@@ -18,6 +18,7 @@ from typing import Any
 
 from anyio import to_thread
 
+from kitaru.analytics.events import AccountSource
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
@@ -68,7 +69,9 @@ class AccountService:
         """
         if self._analytics is None:
             return
-        self._analytics.identify(account.id, build_account_traits(account))
+        self._analytics.identify(
+            account.id, build_account_traits(account, AccountSource.API)
+        )
 
     async def create_account(
         self,
@@ -95,6 +98,7 @@ class AccountService:
             Created account and its activation token when one was generated.
         """
         await self._permission_service.check(actor, ResourceType.ACCOUNT, Action.CREATE)
+        activation_token = None
         if password is not None:
             password_hash = await to_thread.run_sync(
                 self._password_hasher.hash, password
@@ -102,17 +106,15 @@ class AccountService:
             account = Account(
                 name=name, email=email, password_hash=password_hash, is_admin=is_admin
             )
-            account = await self._repository.create(account)
-            self._identify(account)
-            return account, None
-        activation_token = generate_secret()
-        account = Account(
-            name=name,
-            email=email,
-            active=False,
-            activation_token_hash=hash_secret(activation_token),
-            is_admin=is_admin,
-        )
+        else:
+            activation_token = generate_secret()
+            account = Account(
+                name=name,
+                email=email,
+                active=False,
+                activation_token_hash=hash_secret(activation_token),
+                is_admin=is_admin,
+            )
         account = await self._repository.create(account)
         self._identify(account)
         return account, activation_token

@@ -805,6 +805,7 @@ def get_auth_service(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     device_service: Annotated[DeviceService, Depends(get_device_service)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
@@ -812,6 +813,7 @@ def get_auth_service(
         request: Incoming request.
         session: Request-scoped database session.
         device_service: Device service for the current request.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Authentication service bound to the SQL repositories.
@@ -825,6 +827,7 @@ def get_auth_service(
             client=client,
             account_repository=account_repository,
             server_id=settings.SERVER_ID,
+            analytics=analytics,
         )
     return AuthService(
         settings=settings,

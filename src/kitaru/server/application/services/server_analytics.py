@@ -43,7 +43,15 @@ class _BufferedIdentify:
     traits: dict[str, Any]
 
 
-_BufferedMessage = _BufferedTrack | _BufferedIdentify
+@dataclass
+class _BufferedAlias:
+    """Buffered alias message."""
+
+    user_id: uuid.UUID
+    previous_id: uuid.UUID
+
+
+_BufferedMessage = _BufferedTrack | _BufferedIdentify | _BufferedAlias
 
 
 @dataclass
@@ -116,6 +124,19 @@ class ServerAnalytics:
             _BufferedIdentify(user_id=user_id, traits=self._merge(traits))
         )
 
+    def alias(self, user_id: uuid.UUID, previous_id: uuid.UUID) -> None:
+        """Buffer an alias message for delivery once the session commits.
+
+        Args:
+            user_id: User id the alias points to.
+            previous_id: User id the events were recorded under.
+        """
+        if not self._client.enabled:
+            return
+        self._get_buffer().messages.append(
+            _BufferedAlias(user_id=user_id, previous_id=previous_id)
+        )
+
     def _merge(self, values: dict[str, Any] | None) -> dict[str, Any]:
         """Merge the server id and version into a message's values.
 
@@ -156,8 +177,10 @@ def flush_analytics_buffer(session: Session) -> None:
     for message in buffer.messages:
         if isinstance(message, _BufferedTrack):
             buffer.client.track(message.user_id, message.event, message.properties)
-        else:
+        elif isinstance(message, _BufferedIdentify):
             buffer.client.identify(message.user_id, message.traits)
+        else:
+            buffer.client.alias(message.user_id, message.previous_id)
 
 
 def discard_analytics_buffer(session: Session) -> None:

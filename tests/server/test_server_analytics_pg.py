@@ -43,6 +43,7 @@ class _RecordingAnalyticsClient(AnalyticsClient):
         super().__init__(enabled=enabled)
         self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
         self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
+        self.aliased: list[tuple[uuid.UUID, uuid.UUID]] = []
 
     def track(
         self,
@@ -69,6 +70,15 @@ class _RecordingAnalyticsClient(AnalyticsClient):
             traits: User traits.
         """
         self.identified.append((user_id, traits or {}))
+
+    def alias(self, user_id: uuid.UUID, previous_id: uuid.UUID) -> None:
+        """Record an alias call instead of queuing it for delivery.
+
+        Args:
+            user_id: User id the alias points to.
+            previous_id: User id the events were recorded under.
+        """
+        self.aliased.append((user_id, previous_id))
 
 
 async def test_track_then_commit_delivers_to_client() -> None:
@@ -197,3 +207,37 @@ async def test_identify_and_track_deliver_in_order() -> None:
 
     assert len(client.identified) == 1
     assert len(client.tracked) == 1
+
+
+async def test_alias_then_commit_delivers_to_client() -> None:
+    """A buffered alias message reaches the client once the session commits."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    user_id = uuid.uuid4()
+    previous_id = uuid.uuid4()
+    async with pg_session() as session:
+        analytics = ServerAnalytics(
+            client=client, session=session, server_id=None, version="0.0.0"
+        )
+        analytics.alias(user_id, previous_id)
+        await session.commit()
+
+    assert client.aliased == [(user_id, previous_id)]
+
+
+async def test_alias_then_rollback_delivers_nothing() -> None:
+    """A buffered alias message is discarded when the session rolls back."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    async with pg_session() as session:
+        analytics = ServerAnalytics(
+            client=client, session=session, server_id=None, version="0.0.0"
+        )
+        analytics.alias(uuid.uuid4(), uuid.uuid4())
+        await session.rollback()
+
+    assert client.aliased == []

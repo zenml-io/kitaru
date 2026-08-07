@@ -33,3 +33,10 @@ class AnalyticsEvent(StrEnum):
     ANNOTATION_CREATED = "annotation_created"
     JOB_COMPLETED = "job_completed"
     PLUGIN_REGISTERED = "plugin_registered"
+
+
+class AccountSource(StrEnum):
+    """Account source."""
+
+    API = "api"
+    CONTROL_PLANE = "control_plane"

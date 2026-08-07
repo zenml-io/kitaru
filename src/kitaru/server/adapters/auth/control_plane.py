@@ -22,11 +22,14 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from kitaru.analytics.events import AccountSource
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.analytics_events import build_account_traits
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
@@ -232,6 +235,7 @@ class ControlPlaneAuthenticator:
         client: ControlPlaneClient,
         account_repository: AccountRepository,
         server_id: uuid.UUID,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Create a control plane authenticator.
 
@@ -239,10 +243,12 @@ class ControlPlaneAuthenticator:
             client: Control plane API client.
             account_repository: Account repository holding mirrored accounts.
             server_id: Server instance this API represents.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._client = client
         self._account_repository = account_repository
         self._server_id = server_id
+        self._analytics = analytics
 
     async def authenticate(self, credential: str) -> AuthContext:
         """Authorize a control plane credential and mirror its user.
@@ -284,7 +290,7 @@ class ControlPlaneAuthenticator:
     async def _create_account(self, user: ControlPlaneUser, name: str) -> Account:
         logger.info("Creating account mirroring control plane user %s.", user.id)
         try:
-            return await self._account_repository.create(
+            account = await self._account_repository.create(
                 Account(
                     is_service_account=user.is_service_account,
                     external_id=user.id,
@@ -294,6 +300,13 @@ class ControlPlaneAuthenticator:
             )
         except DuplicateAccountName as exc:
             raise ControlPlaneError(self._get_name_taken_message(name)) from exc
+        if self._analytics is not None:
+            self._analytics.identify(
+                account.id,
+                build_account_traits(account, AccountSource.CONTROL_PLANE),
+            )
+            self._analytics.alias(user_id=user.id, previous_id=account.id)
+        return account
 
     @staticmethod
     def _get_name_taken_message(name: str) -> str:

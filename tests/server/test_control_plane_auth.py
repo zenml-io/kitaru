@@ -35,9 +35,39 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 
 SERVER_ID = uuid.uuid4()
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
+        self.aliased: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    def identify(
+        self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
+    ) -> None:
+        """Record an identify call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            traits: User traits.
+        """
+        self.identified.append((user_id, traits or {}))
+
+    def alias(self, user_id: uuid.UUID, previous_id: uuid.UUID) -> None:
+        """Record an alias call instead of buffering it.
+
+        Args:
+            user_id: User id the alias points to.
+            previous_id: User id the events were recorded under.
+        """
+        self.aliased.append((user_id, previous_id))
 
 
 @pytest.fixture
@@ -74,19 +104,24 @@ def control_plane_user(
 def build_authenticator(
     account_repository: FakeAccountRepository,
     user: ControlPlaneUser | None,
+    analytics: ServerAnalytics | None = None,
 ) -> tuple[ControlPlaneAuthenticator, FakeControlPlaneClient]:
     """Build an authenticator wired to a fake control plane client.
 
     Args:
         account_repository: Fake account repository.
         user: Control plane user returned by the fake client.
+        analytics: Analytics tracker, None skips tracking.
 
     Returns:
         Authenticator under test and the fake client it calls.
     """
     client = FakeControlPlaneClient(user=user)
     authenticator = ControlPlaneAuthenticator(
-        client=client, account_repository=account_repository, server_id=SERVER_ID
+        client=client,
+        account_repository=account_repository,
+        server_id=SERVER_ID,
+        analytics=analytics,
     )
     return authenticator, client
 
@@ -382,3 +417,56 @@ async def test_authenticate_passes_server_id_to_client(
 
     assert client.received_server_id == SERVER_ID
     assert client.received_credentials == ["credential"]
+
+
+async def test_authenticate_new_account_identifies_and_aliases(
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Identify a mirrored account and alias it to the control plane user."""
+    analytics = _RecordingAnalytics()
+    user = control_plane_user()
+    authenticator, _ = build_authenticator(account_repository, user, analytics)
+
+    context = await authenticator.authenticate("credential")
+
+    assert len(analytics.identified) == 1
+    user_id, traits = analytics.identified[0]
+    assert user_id == context.account.id
+    assert traits == {
+        "is_service_account": False,
+        "source": "control_plane",
+        "email": user.email,
+    }
+    assert analytics.aliased == [(user.id, context.account.id)]
+
+
+async def test_authenticate_existing_account_does_not_identify(
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Skip identify and alias when the account already mirrors the user."""
+    analytics = _RecordingAnalytics()
+    external_id = uuid.uuid4()
+    await account_repository.create(
+        Account(external_id=external_id, name="alice", email="alice@example.com")
+    )
+    user = control_plane_user(user_id=external_id)
+    authenticator, _ = build_authenticator(account_repository, user, analytics)
+
+    await authenticator.authenticate("credential")
+
+    assert analytics.identified == []
+    assert analytics.aliased == []
+
+
+async def test_authenticate_service_account_identifies_the_flag(
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Carry the service account flag into the mirrored account's traits."""
+    analytics = _RecordingAnalytics()
+    user = control_plane_user(is_service_account=True)
+    authenticator, _ = build_authenticator(account_repository, user, analytics)
+
+    await authenticator.authenticate("credential")
+
+    _, traits = analytics.identified[0]
+    assert traits["is_service_account"] is True
