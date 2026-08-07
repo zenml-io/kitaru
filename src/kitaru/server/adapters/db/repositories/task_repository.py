@@ -17,8 +17,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, and_, func, not_, or_, select, update
-from sqlalchemy.dialects.postgresql import aggregate_order_by
+from sqlalchemy import ColumnElement, Text, and_, func, not_, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, aggregate_order_by
 
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import WorkerScope
@@ -31,7 +31,10 @@ from kitaru.server.adapters.db.orm.task import (
     TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
-from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
+from kitaru.server.adapters.db.repositories.base import (
+    EXCLUSIVE_ROW_LOCK,
+    BaseSQLRepository,
+)
 from kitaru.server.application.models.task import TaskFilter, TaskSettlementStats
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import (
@@ -278,8 +281,9 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                     )
                 ),
                 func.array_agg(
-                    aggregate_order_by(TaskORM.error, TaskORM.id.asc())
-                ).filter(counted_failure),
+                    aggregate_order_by(TaskORM.error, TaskORM.id.asc()),
+                    type_=ARRAY(Text),
+                ).filter(counted_failure)[1],
                 func.array_agg(func.distinct(TaskORM.kind)),
             )
             .where(TaskORM.job_id.in_(list(job_ids)))
@@ -293,7 +297,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 canceled=canceled,
                 counted_failures=counted_failures,
                 abort_failures=abort_failures,
-                first_failure_error=(failure_errors or [None])[0],
+                first_failure_error=first_failure_error,
                 kinds=tuple(TaskKind(kind) for kind in kinds),
             )
             for (
@@ -303,7 +307,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 canceled,
                 counted_failures,
                 abort_failures,
-                failure_errors,
+                first_failure_error,
                 kinds,
             ) in rows
         }
@@ -346,7 +350,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             )
             .order_by(TaskORM.id.asc())
             .limit(limit)
-            .with_for_update(skip_locked=True, key_share=True)
+            .with_for_update(skip_locked=True, **EXCLUSIVE_ROW_LOCK)
         )
         rows = (await self._session.scalars(statement)).all()
         if not rows:
@@ -380,7 +384,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES),
                 cutoff > _LAST_SEEN,
             )
-            .with_for_update(skip_locked=True, key_share=True)
+            .with_for_update(skip_locked=True, **EXCLUSIVE_ROW_LOCK)
         )
         row = (await self._session.scalars(statement)).one_or_none()
         return row.to_domain() if row is not None else None
@@ -450,7 +454,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             select(TaskORM.id)
             .where(TaskORM.id.in_(candidate_ids), *candidate_filter)
             .order_by(TaskORM.id.asc())
-            .with_for_update(skip_locked=True, key_share=True)
+            .with_for_update(skip_locked=True, **EXCLUSIVE_ROW_LOCK)
         )
         statement = (
             update(TaskORM)
@@ -491,7 +495,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update(nowait=nowait, key_share=True)
+            .with_for_update(nowait=nowait, **EXCLUSIVE_ROW_LOCK)
         )
         await self._session.execute(statement)
 
@@ -516,7 +520,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.cancel_requested_at.is_(None),
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update(key_share=True)
+            .with_for_update(**EXCLUSIVE_ROW_LOCK)
         )
         statement = (
             update(TaskORM)
@@ -550,7 +554,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
                 TaskORM.status == TaskStatus.PENDING.value,
             )
             .order_by(TaskORM.id.asc())
-            .with_for_update(key_share=True)
+            .with_for_update(**EXCLUSIVE_ROW_LOCK)
         )
         statement = (
             update(TaskORM)

@@ -40,7 +40,9 @@ JOB_CANCEL_REQUESTED_AT_INDEX = index_name("job", ["cancel_requested_at"])
 
 CANCEL_REQUESTED_PREDICATE = "cancel_requested_at IS NOT NULL"
 
-TERMINAL_JOB_STATUS_VALUES = [status.value for status in TERMINAL_JOB_STATUSES]
+NON_TERMINAL_JOB_STATUS_VALUES = [
+    status.value for status in JobStatus if status not in TERMINAL_JOB_STATUSES
+]
 
 JOB_SETTLEMENT_CHECK_JOB_ID_FOREIGN_KEY = foreign_key_name(
     "job_settlement_check", ["job_id"]

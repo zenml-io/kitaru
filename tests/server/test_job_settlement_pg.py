@@ -33,6 +33,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.job_settlement_queue import (
+    SQLJobSettlementQueue,
+)
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
@@ -52,6 +55,7 @@ def _build_transitions(session: AsyncSession) -> TaskTransitions:
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
+        settlement_queue=SQLJobSettlementQueue(session),
         dispatcher=EventDispatcher(),
     )
 

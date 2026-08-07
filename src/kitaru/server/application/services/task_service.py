@@ -376,7 +376,7 @@ class TaskService:
         Args:
             job_id: Id of the job.
         """
-        await self._transitions.settle_jobs_if_drained([job_id])
+        await self._transitions.advance_jobs([job_id])
 
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
@@ -403,7 +403,7 @@ class TaskService:
             DBAPIError: Another transaction holds one of the task rows.
         """
         await self._transitions.request_jobs_cancel([job_id], nowait=True)
-        await self._transitions.settle_job_if_drained(job_id)
+        await self._transitions.advance_jobs([job_id])
 
     async def _apply_status(
         self, task: Task, transition: Callable[[Task], None]

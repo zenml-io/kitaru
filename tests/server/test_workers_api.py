@@ -26,6 +26,7 @@ from conftest import (
     FakeAgentVersionRepository,
     FakeBlobRepository,
     FakeJobRepository,
+    FakeJobSettlementQueue,
     FakePluginRepository,
     FakeReplayRepository,
     FakeSecretRepository,
@@ -95,6 +96,7 @@ async def client(
     transitions = TaskTransitions(
         task_repository=task_repository,
         job_repository=job_repository,
+        settlement_queue=FakeJobSettlementQueue(),
         dispatcher=EventDispatcher(),
     )
     agents = FakeAgentRepository()

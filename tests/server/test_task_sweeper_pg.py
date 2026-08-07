@@ -13,40 +13,14 @@
 #  permissions and limitations under the License.
 """End-to-end tests for the background stale-task sweep loop against PostgreSQL."""
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
 
-from conftest import db_settings, lifespan_client
+from conftest import db_settings, lifespan_client, wait_until
 
 RUNTIME = {"platform": "bare"}
-
-
-async def _wait_until(
-    poll: httpx.AsyncClient, url: str, field: str, value: str, timeout: float = 10.0
-) -> dict[str, object]:
-    """Poll a resource until a field reaches a value, or fail after a timeout.
-
-    Args:
-        poll: HTTP client to poll with.
-        url: Resource URL.
-        field: Response field to check.
-        value: Expected value.
-        timeout: Seconds to poll before failing.
-
-    Returns:
-        The resource body once the field matches.
-    """
-    deadline = asyncio.get_running_loop().time() + timeout
-    body: dict[str, object] = {}
-    while asyncio.get_running_loop().time() < deadline:
-        body = (await poll.get(url)).json()
-        if body[field] == value:
-            return body
-        await asyncio.sleep(0.1)
-    raise AssertionError(f"{url} never reached {field}={value!r}, last body: {body}")
 
 
 @pytest.fixture
@@ -98,12 +72,12 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     task = claimed["tasks"][0]["task"]
     assert task["status"] == "claimed"
 
-    task_after = await _wait_until(
+    task_after = await wait_until(
         client, f"/v1/tasks/{task['id']}", "status", "abandoned"
     )
     assert task_after["attempt"] == 1
 
-    job_after = await _wait_until(client, f"/v1/jobs/{job['id']}", "status", "failed")
+    job_after = await wait_until(client, f"/v1/jobs/{job['id']}", "status", "failed")
     assert job_after["error"] is not None
 
 
@@ -177,7 +151,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     ).json()
     assert claimed["tasks"][0]["task"]["kind"] == "agent"
 
-    replay_after = await _wait_until(
+    replay_after = await wait_until(
         client, f"/v1/replays/{replay['id']}", "status", "failed"
     )
     assert replay_after["status"] == "failed"

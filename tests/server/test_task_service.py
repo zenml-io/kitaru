@@ -23,6 +23,7 @@ from pydantic import SecretStr
 
 from conftest import (
     FakeJobRepository,
+    FakeJobSettlementQueue,
     FakeTaskRepository,
     JobAndTaskServices,
     build_job_and_task_services,
@@ -39,6 +40,7 @@ from conftest import (
     create_secret,
     create_session,
     create_worker,
+    drain_settlements,
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
@@ -333,8 +335,7 @@ async def test_backstop_stamps_live_siblings_and_cancels_pending_ones(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
 
     job = await services.jobs.get(job_id)
     assert job.cancel_requested_at is not None
@@ -378,8 +379,7 @@ async def test_heartbeat_stops_a_sibling_before_the_backstop_runs(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
 
     # The sibling's own row is still unstamped, the job carries the request.
     assert (await services.tasks.get(sibling.id)).cancel_requested_at is None
@@ -433,8 +433,7 @@ async def test_abandoned_aborting_task_stamps_its_job(
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
     await _sweep_stale(services)
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
 
     assert (await services.tasks.get(task.id)).status is TaskStatus.ABANDONED
     assert (await services.jobs.get(job_id)).cancel_requested_at is not None
@@ -511,8 +510,7 @@ async def test_sweep_stale_task_abandons_and_settles() -> None:
     now = datetime.now(UTC)
     assert await services.task_service.list_stale_task_ids(now) == [task.id]
     await services.task_service.sweep_stale_task(task.id, now)
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
 
     stored = await services.tasks.get(task.id)
     assert stored.status is TaskStatus.ABANDONED
@@ -882,6 +880,7 @@ def _build_transitions(
     transitions = TaskTransitions(
         task_repository=tasks,
         job_repository=jobs,
+        settlement_queue=FakeJobSettlementQueue(),
         dispatcher=EventDispatcher(),
         analytics=analytics,
     )

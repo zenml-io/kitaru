@@ -179,7 +179,7 @@ class ExperimentRunService:
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
         job_ids = [replay.job_id for replay in replays if not replay.settled]
         await self._transitions.request_jobs_cancel(job_ids)
-        await self._transitions.settle_jobs_if_drained(job_ids)
+        await self._transitions.advance_jobs(job_ids)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts

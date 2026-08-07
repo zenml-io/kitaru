@@ -15,7 +15,7 @@
 
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Generic, NoReturn, TypeVar
+from typing import Any, Generic, NoReturn, TypedDict, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,17 @@ from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
 from kitaru.server.domain.base import DomainError, NotFoundError
 
 RowT = TypeVar("RowT", bound=UUIDPrimaryKeyMixin)
+
+
+class _ExclusiveRowLock(TypedDict):
+    """Exclusive row lock flags."""
+
+    key_share: bool
+
+
+# Exclusive reads lock with FOR NO KEY UPDATE because child-row inserts take
+# FOR KEY SHARE on the rows they reference and would queue behind FOR UPDATE.
+EXCLUSIVE_ROW_LOCK: _ExclusiveRowLock = {"key_share": True}
 
 ConstraintErrors = Mapping[str, Callable[[], DomainError]]
 
@@ -69,12 +80,10 @@ class BaseSQLRepository(Generic[RowT]):
         Returns:
             Stored row.
         """
-        # Lock with FOR NO KEY UPDATE because child-row inserts take FOR KEY
-        # SHARE on the rows they reference and would queue behind FOR UPDATE.
         row = await self._session.get(
             self.orm_class,
             entity_id,
-            with_for_update={"key_share": True} if exclusive else False,
+            with_for_update=dict(EXCLUSIVE_ROW_LOCK) if exclusive else False,
         )
         if row is None:
             raise self._not_found(entity_id)
@@ -109,7 +118,7 @@ class BaseSQLRepository(Generic[RowT]):
             )
         if exclusive:
             statement = statement.order_by(self.orm_class.id.asc()).with_for_update(
-                key_share=True
+                **EXCLUSIVE_ROW_LOCK
             )
         rows = (await self._session.scalars(statement)).all()
         return {row.id: row for row in rows}

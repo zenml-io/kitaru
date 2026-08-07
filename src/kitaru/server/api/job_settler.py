@@ -14,13 +14,17 @@
 """Background job settlement loop."""
 
 import asyncio
-import contextlib
 import logging
+from functools import partial
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.rest.dependencies import (
     get_server_analytics,
-    get_task_service,
+    get_task_transitions,
+)
+from kitaru.server.api.background_loop import (
+    start_background_loop,
+    stop_background_loop,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.database.service import DatabaseService
@@ -35,9 +39,9 @@ async def settle_once(
 ) -> None:
     """Drain the settlement check queue, one claimed batch per transaction.
 
-    Builds the task service the same way a request does, so a settlement
-    dispatches through the same event subscribers. A failing batch rolls
-    back, logs, and ends the drain until the next tick.
+    Builds the transition dispatch the same way a request does, so a
+    settlement dispatches through the same event subscribers. A failing
+    batch rolls back, logs, and ends the drain until the next tick.
 
     Args:
         database: Database service the batches open sessions against.
@@ -49,8 +53,10 @@ async def settle_once(
         async for session in database.get_async_session():
             try:
                 tracker = get_server_analytics(session, analytics)
-                service = get_task_service(session, database.engine, settings, tracker)
-                advanced = await service.settle_queued_jobs()
+                transitions = get_task_transitions(session, tracker)
+                advanced = await transitions.settle_queued_jobs(
+                    settings.JOB_SETTLEMENT_BATCH_LIMIT
+                )
                 await session.commit()
             except Exception as exc:
                 await session.rollback()
@@ -58,43 +64,6 @@ async def settle_once(
                 return
         if not advanced:
             return
-
-
-async def _run_settle_loop(
-    database: DatabaseService,
-    settings: APISettings,
-    analytics: AnalyticsClient,
-    interval_seconds: float,
-) -> None:
-    """Run settle_once on a fixed interval, logging and continuing on failure.
-
-    Args:
-        database: Database service the batches open sessions against.
-        settings: API settings for this process.
-        analytics: Analytics client for this process.
-        interval_seconds: Delay between drains.
-    """
-    while True:
-        try:
-            await settle_once(database, settings, analytics)
-        except Exception as exc:
-            logger.warning("Job settlement tick failed: %s", exc)
-        await asyncio.sleep(interval_seconds)
-
-
-def _log_settler_exit(task: asyncio.Task[None]) -> None:
-    """Log a settlement loop that stopped running.
-
-    Args:
-        task: Finished settlement task.
-    """
-    if task.cancelled():
-        return
-    exception = task.exception()
-    if exception is None:
-        logger.error("Job settlement loop exited without an error.")
-    else:
-        logger.error("Job settlement loop died: %s", exception, exc_info=exception)
 
 
 def start_job_settler(
@@ -113,18 +82,11 @@ def start_job_settler(
         Running settlement task, or ``None`` when the interval setting is
         zero.
     """
-    if settings.JOB_SETTLEMENT_INTERVAL_SECONDS <= 0:
-        return None
-    task = asyncio.create_task(
-        _run_settle_loop(
-            database,
-            settings,
-            analytics,
-            settings.JOB_SETTLEMENT_INTERVAL_SECONDS,
-        )
+    return start_background_loop(
+        partial(settle_once, database, settings, analytics),
+        settings.JOB_SETTLEMENT_INTERVAL_SECONDS,
+        "Job settlement",
     )
-    task.add_done_callback(_log_settler_exit)
-    return task
 
 
 async def stop_job_settler(task: asyncio.Task[None] | None) -> None:
@@ -134,8 +96,4 @@ async def stop_job_settler(task: asyncio.Task[None] | None) -> None:
         task: Running settlement task, or ``None`` when the settler was
             disabled.
     """
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    await stop_background_loop(task)

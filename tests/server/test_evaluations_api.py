@@ -26,6 +26,7 @@ from conftest import (
     FakeBlobRepository,
     FakeEvaluationRepository,
     FakeJobRepository,
+    FakeJobSettlementQueue,
     FakePluginRepository,
     FakeSessionRepository,
     FakeTaskRepository,
@@ -91,7 +92,10 @@ async def client(
     tasks = FakeTaskRepository(sessions=session_repository)
     jobs = FakeJobRepository(tasks=tasks)
     transitions = TaskTransitions(
-        task_repository=tasks, job_repository=jobs, dispatcher=EventDispatcher()
+        task_repository=tasks,
+        job_repository=jobs,
+        settlement_queue=FakeJobSettlementQueue(),
+        dispatcher=EventDispatcher(),
     )
     job_service = JobService(
         repository=jobs,

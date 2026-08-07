@@ -31,6 +31,7 @@ from conftest import (
     create_plugin,
     create_session,
     create_worker,
+    drain_settlements,
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -456,8 +457,7 @@ async def test_settlement_precedence_failed_over_canceled_over_completed(
         TaskUpdate(status=TaskStatus.FAILED, error="boom"),
         actor=build_task_actor(ACTOR.account, failing.id, 1, worker.id),
     )
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
     # The settlement pass stamps the job alone. It does not settle the job
     # until every task reaches a terminal status, and it leaves the sibling
     # row untouched for the sweep's propagation backstop.
@@ -483,8 +483,7 @@ async def test_settlement_precedence_failed_over_canceled_over_completed(
         TaskUpdate(status=TaskStatus.CANCELED),
         actor=build_task_actor(ACTOR.account, sibling.id, 1, worker.id),
     )
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
     job_after = await services.jobs.get(job.id)
     assert job_after.status is JobStatus.FAILED
     assert job_after.error == "boom"
@@ -539,8 +538,7 @@ async def test_ignore_failure_neither_cancels_nor_counts(
         TaskUpdate(status=TaskStatus.COMPLETED),
         actor=build_task_actor(ACTOR.account, sibling.id, 1, worker.id),
     )
-    while await services.task_service.settle_queued_jobs():
-        pass
+    await drain_settlements(services.task_service)
     job_after = await services.jobs.get(job.id)
     assert job_after.status is JobStatus.COMPLETED
 

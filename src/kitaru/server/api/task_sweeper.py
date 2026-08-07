@@ -14,7 +14,6 @@
 """Background stale-task and cancel-propagation sweep loop."""
 
 import asyncio
-import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -28,6 +27,10 @@ from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
     get_server_analytics,
     get_task_service,
+)
+from kitaru.server.api.background_loop import (
+    start_background_loop,
+    stop_background_loop,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.task_service import TaskService
@@ -152,43 +155,6 @@ async def sweep_once(
         )
 
 
-async def _run_sweep_loop(
-    database: DatabaseService,
-    settings: APISettings,
-    analytics: AnalyticsClient,
-    interval_seconds: int,
-) -> None:
-    """Run sweep_once on a fixed interval, logging and continuing on failure.
-
-    Args:
-        database: Database service the sweep opens sessions against.
-        settings: API settings for this process.
-        analytics: Analytics client for this process.
-        interval_seconds: Delay between sweeps.
-    """
-    while True:
-        try:
-            await sweep_once(database, settings, analytics)
-        except Exception as exc:
-            logger.warning("Stale task sweep tick failed: %s", exc)
-        await asyncio.sleep(interval_seconds)
-
-
-def _log_sweeper_exit(task: asyncio.Task[None]) -> None:
-    """Log a sweep loop that stopped running.
-
-    Args:
-        task: Finished sweep task.
-    """
-    if task.cancelled():
-        return
-    exception = task.exception()
-    if exception is None:
-        logger.error("Stale task sweep loop exited without an error.")
-    else:
-        logger.error("Stale task sweep loop died: %s", exception, exc_info=exception)
-
-
 def start_task_sweeper(
     database: DatabaseService,
     settings: APISettings,
@@ -204,15 +170,11 @@ def start_task_sweeper(
     Returns:
         Running sweep task, or ``None`` when the interval setting is zero.
     """
-    if settings.TASK_SWEEP_INTERVAL_SECONDS <= 0:
-        return None
-    task = asyncio.create_task(
-        _run_sweep_loop(
-            database, settings, analytics, settings.TASK_SWEEP_INTERVAL_SECONDS
-        )
+    return start_background_loop(
+        partial(sweep_once, database, settings, analytics),
+        settings.TASK_SWEEP_INTERVAL_SECONDS,
+        "Stale task sweep",
     )
-    task.add_done_callback(_log_sweeper_exit)
-    return task
 
 
 async def stop_task_sweeper(task: asyncio.Task[None] | None) -> None:
@@ -221,8 +183,4 @@ async def stop_task_sweeper(task: asyncio.Task[None] | None) -> None:
     Args:
         task: Running sweep task, or ``None`` when the sweeper was disabled.
     """
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    await stop_background_loop(task)

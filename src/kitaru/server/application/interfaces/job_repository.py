@@ -104,24 +104,17 @@ class JobRepository(Protocol):
         """
         ...
 
-    async def enqueue_settlement_check(self, job_id: uuid.UUID) -> None:
-        """Queue a settlement check for a job.
+    async def get_owner_id(self, job_id: uuid.UUID) -> uuid.UUID:
+        """Read a job's owner id without loading the row.
 
         Args:
             job_id: Id of the job.
-        """
-        ...
 
-    async def claim_settlement_checks(self, limit: int) -> list[uuid.UUID]:
-        """Claim queued settlement checks and drop them from the queue.
-
-        A check another transaction holds is skipped and stays queued for it.
-
-        Args:
-            limit: Maximum number of queued checks to claim.
+        Raises:
+            JobNotFound: No job has this id.
 
         Returns:
-            Distinct job ids of the claimed checks, oldest first.
+            Owner id of the job.
         """
         ...
 
