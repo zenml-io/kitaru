@@ -42,10 +42,10 @@ it.
 
 - **Every run is a recording.** Wrap your agent once, or import the
   traces you already collect — Langfuse stays your system of record.
-- **Replay is re-execution, not re-grading of old output.** An unchanged replay
-  reproduces the original; that faithful baseline is what makes the diff
-  of a fork trustworthy. Recorded tool calls are answered from the
-  recording, so no card gets refunded twice.
+- **Replay is re-execution.** An unchanged replay reproduces the
+  original; that faithful baseline is what makes the diff of a fork
+  trustworthy. Recorded tool calls are answered from the recording, so
+  no card gets refunded twice.
 - **Improvement is measured, not vibed.** Evaluators — compiled from your
   domain expert's criteria, calibrated against human labels — score both
   sides. Cohorts freeze the population. Experiments replay a cohort
@@ -157,14 +157,6 @@ imports, and evaluations run on **workers** in your own environment: your
 virtualenv, your credentials, your network. Workers hold your API key
 only long enough to trade it for short-lived scoped tokens. Traces don't
 leave your systems. Apache 2.0, no mandatory SaaS control plane.
-
-## 🌱 Where ZenML fits
-
-Kitaru is built by the team behind [ZenML](https://zenml.io) and is a
-ZenML sub-brand. The split is clean: **ZenML runs agents durably; Kitaru
-replays and improves them.** Durable execution, checkpointed pipelines,
-and orchestration live in ZenML. Kitaru assumes your agent already runs
-somewhere — its job is what the recordings can teach you.
 
 ## 📚 Learn more
 
