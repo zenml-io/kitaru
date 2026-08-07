@@ -45,6 +45,7 @@ async def create_experiment(
     client: Any,
     name: str,
     *,
+    agent: str,
     description: str | None,
     override: str | None,
     tool_policy: str | None,
@@ -52,7 +53,8 @@ async def create_experiment(
     evaluator_params: Sequence[str] | None,
 ) -> CommandResult:
     """Create an experiment with exact evaluator versions."""
-    fields: dict[str, Any] = {"name": name}
+    resolved_agent = await resolve_asset(client.agents, agent, "Agent")
+    fields: dict[str, Any] = {"name": name, "agent_id": resolved_agent.id}
     if description is not None:
         fields["description"] = description
     if override is not None:

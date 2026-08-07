@@ -155,7 +155,11 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
     experiment = (
         await client.post(
             "/v1/experiments",
-            json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
     await client.post(

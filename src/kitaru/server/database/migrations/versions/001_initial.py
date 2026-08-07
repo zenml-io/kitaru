@@ -96,6 +96,15 @@ def upgrade() -> None:
         batch_op.create_index("ix_secret_owner_id", ["owner_id"], unique=False)
 
     op.create_table(
+        "server_settings",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("singleton", sa.Boolean(), nullable=False),
+        sa.Column("server_id", sa.Uuid(), nullable=False),
+        sa.PrimaryKeyConstraint("singleton"),
+    )
+
+    op.create_table(
         "device",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
@@ -193,6 +202,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("provider", sa.String(length=255), nullable=True),
+        sa.Column("logo_url", sa.Text(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("latest_version", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(
@@ -342,7 +352,11 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("replay_config_id", sa.Uuid(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["agent_id"], ["agent.id"], name="fk_experiment_agent_id"
+        ),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_experiment_owner_id"
         ),
@@ -354,6 +368,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_experiment_name"),
     )
+    with op.batch_alter_table("experiment", schema=None) as batch_op:
+        batch_op.create_index("ix_experiment_agent_id", ["agent_id"], unique=False)
     op.create_table(
         "plugin_version",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
@@ -1053,6 +1069,9 @@ def downgrade() -> None:
 
     op.drop_table("tag_link")
     op.drop_table("plugin_version")
+    with op.batch_alter_table("experiment", schema=None) as batch_op:
+        batch_op.drop_index("ix_experiment_agent_id")
+
     op.drop_table("experiment")
     op.drop_table("cohort_version")
     op.drop_table("cohort")
@@ -1096,6 +1115,7 @@ def downgrade() -> None:
     with op.batch_alter_table("secret", schema=None) as batch_op:
         batch_op.drop_index("ix_secret_owner_id")
 
+    op.drop_table("server_settings")
     op.drop_table("secret")
     with op.batch_alter_table("api_key", schema=None) as batch_op:
         batch_op.drop_index("ix_api_key_owner_id")

@@ -86,7 +86,11 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
     experiment = (
         await client.post(
             "/v1/experiments",
-            json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "exp1",
+                "agent_id": agent["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
     return {

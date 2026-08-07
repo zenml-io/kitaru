@@ -64,6 +64,20 @@ class CohortVersionRepository(Protocol):
         """
         ...
 
+    async def get_agent_id(self, cohort_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version's cohort belongs to.
+
+        Args:
+            cohort_version_id: Id of the cohort version.
+
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        ...
+
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:
         """Load a cohort version by cohort id and version number.
 

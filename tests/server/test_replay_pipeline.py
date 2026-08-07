@@ -51,7 +51,11 @@ from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import AgentVersion, RunSpec
+from kitaru.server.domain.agent_version import (
+    AgentVersion,
+    AgentVersionAgentMismatch,
+    RunSpec,
+)
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
@@ -434,12 +438,14 @@ async def test_baseline_evaluator_failure_fails_the_replay(
 
 
 async def _create_experiment_with_evaluator(
-    services: ReplayServices, evaluator_name: str = "accuracy"
+    services: ReplayServices, agent_id: uuid.UUID, evaluator_name: str = "accuracy"
 ) -> tuple[uuid.UUID, uuid.UUID]:
     await _evaluator_version(services, evaluator_name)
     experiment, config = await services.experiment_service.create_experiment(
         ExperimentCreate(
-            name="exp1", evaluators=[EvaluatorConfigInput(evaluator=evaluator_name)]
+            name="exp1",
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfigInput(evaluator=evaluator_name)],
         ),
         actor=ACTOR,
     )
@@ -451,7 +457,9 @@ async def test_start_run_creates_one_replay_per_cohort_session(
 ) -> None:
     """A run fans out one replay per cohort session, each pointing at the config."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, config_id = await _create_experiment_with_evaluator(services)
+    experiment_id, config_id = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id for session in sessions]
@@ -489,7 +497,9 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
 ) -> None:
     """The batched fan-out gives each replay its own job holding one agent task."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id for session in sessions]
@@ -536,7 +546,9 @@ async def test_start_run_stamps_the_job_kind_replay(
 ) -> None:
     """A run's fanned-out replay jobs carry the replay kind."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id for session in sessions]
@@ -572,6 +584,7 @@ async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
     experiment, _ = await services.experiment_service.create_experiment(
         ExperimentCreate(
             name="exp1",
+            agent_id=agent_version.agent_id,
             evaluators=[
                 EvaluatorConfigInput(evaluator="accuracy"),
                 EvaluatorConfigInput(evaluator="tone"),
@@ -668,7 +681,9 @@ async def test_start_run_rejects_an_empty_cohort_version(
 ) -> None:
     """An empty cohort version rejects the run before any job is created."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     cohort_version = await _cohort_version(services, agent_version.agent_id)
     with pytest.raises(ValidationError, match="has no sessions"):
         await services.experiment_service.start_run(
@@ -683,7 +698,9 @@ async def test_start_run_rejects_an_empty_cohort_version(
 async def test_start_run_unknown_cohort_version(services: ReplayServices) -> None:
     """Starting a run with an unknown cohort version id raises not-found."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     with pytest.raises(CohortVersionIdNotFound):
         await services.experiment_service.start_run(
             experiment_id,
@@ -694,10 +711,62 @@ async def test_start_run_unknown_cohort_version(services: ReplayServices) -> Non
         )
 
 
+async def test_start_run_rejects_a_cohort_version_of_another_agent(
+    services: ReplayServices,
+) -> None:
+    """A cohort version of another agent's cohort rejects the run."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
+    other_agent = await create_agent(services.agents, ACTOR.account.id, name="other")
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(services, other_agent.id, [session.id])
+    with pytest.raises(ValidationError, match="does not belong to agent"):
+        await services.experiment_service.start_run(
+            experiment_id,
+            ExperimentRunCreate(
+                cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_start_run_rejects_an_agent_version_of_another_agent(
+    services: ReplayServices,
+) -> None:
+    """An agent version of another agent rejects the run."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    other_agent = await create_agent(services.agents, ACTOR.account.id, name="other")
+    other_version = await create_agent_version(
+        services.agent_versions,
+        agent_id=other_agent.id,
+        owner_id=ACTOR.account.id,
+        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+    )
+    with pytest.raises(AgentVersionAgentMismatch):
+        await services.experiment_service.start_run(
+            experiment_id,
+            ExperimentRunCreate(
+                cohort_version_id=cohort_version.id, agent_version_id=other_version.id
+            ),
+            actor=ACTOR,
+        )
+
+
 async def test_run_numbers_increment_per_experiment(services: ReplayServices) -> None:
     """Run numbers are assigned sequentially per experiment."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     session_a = await _baseline_session(services, agent_version)
     session_b = await _baseline_session(services, agent_version)
     cohort_version_a = await _cohort_version(
@@ -730,7 +799,9 @@ async def test_duplicate_replay_for_the_same_baseline_in_a_run_conflicts(
 ) -> None:
     """The unique (experiment_run_id, baseline_session_id) key backstops."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     session = await _baseline_session(services, agent_version)
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id]
@@ -774,7 +845,9 @@ async def test_run_cancel_pending_only_run_cancels_immediately(
 ) -> None:
     """A run with only pending tasks drains and cancels within the same call."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     sessions = [await _baseline_session(services, agent_version) for _ in range(2)]
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id for session in sessions]
@@ -801,7 +874,9 @@ async def test_marking_an_already_canceling_run_is_a_no_op(
 ) -> None:
     """Re-marking a canceling run leaves it alone so a retry can finish phase two."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     session = await _baseline_session(services, agent_version)
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id]
@@ -829,7 +904,9 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
 ) -> None:
     """A claimed task keeps its status through cancel and the run finalizes later."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     session = await _baseline_session(services, agent_version)
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id]
@@ -891,7 +968,9 @@ async def test_finalize_precedence_canceling_beats_failure(
 ) -> None:
     """Cancellation wins over a failed replay when the run was canceling."""
     agent_version = await _agent_version_with_run_spec(services)
-    experiment_id, _ = await _create_experiment_with_evaluator(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
     sessions = [await _baseline_session(services, agent_version) for _ in range(2)]
     cohort_version = await _cohort_version(
         services, agent_version.agent_id, [session.id for session in sessions]

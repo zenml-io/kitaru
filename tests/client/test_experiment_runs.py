@@ -104,24 +104,32 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
 
 
 @pytest.fixture
-async def run_request(services: ReplayServices) -> ExperimentRunCreateRequest:
+async def agent_id(services: ReplayServices) -> uuid.UUID:
+    """Provide an agent shared by the experiment and its runs."""
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    return agent.id
+
+
+@pytest.fixture
+async def run_request(
+    services: ReplayServices, agent_id: uuid.UUID
+) -> ExperimentRunCreateRequest:
     """Provide a run request naming a non-empty cohort version and a runnable
     version."""
-    agent = await create_agent(services.agents, ACCOUNT.id)
     version = await create_agent_version(
         services.agent_versions,
-        agent_id=agent.id,
+        agent_id=agent_id,
         owner_id=ACCOUNT.id,
         run_spec=RunSpec(command="run.sh"),
     )
     session = await create_session(
         services.sessions,
         ACCOUNT.id,
-        agent_id=agent.id,
+        agent_id=agent_id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
     )
-    cohort = await create_cohort(services.cohorts, ACCOUNT.id, agent.id)
+    cohort = await create_cohort(services.cohorts, ACCOUNT.id, agent_id)
     cohort_version = await create_cohort_version(
         services.cohort_versions, ACCOUNT.id, cohort.id, [session.id]
     )
@@ -132,7 +140,7 @@ async def run_request(services: ReplayServices) -> ExperimentRunCreateRequest:
 
 @pytest.fixture
 async def experiment_id(
-    api_client: KitaruAPIClient, services: ReplayServices
+    api_client: KitaruAPIClient, services: ReplayServices, agent_id: uuid.UUID
 ) -> uuid.UUID:
     """Provide the id of an experiment with a registered evaluator."""
     plugin = await create_plugin(
@@ -146,7 +154,9 @@ async def experiment_id(
     )
     experiment = await api_client.experiments.create(
         ExperimentCreateRequest(
-            name="exp1", evaluators=[EvaluatorConfig(evaluator="accuracy")]
+            name="exp1",
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfig(evaluator="accuracy")],
         )
     )
     return experiment.id

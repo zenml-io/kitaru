@@ -148,7 +148,7 @@ async def api_client(
         control_plane=ControlPlaneAuthenticator(
             client=authorizer,
             account_repository=account_repository,
-            server_id=settings.SERVER_ID,
+            server_id=settings.SERVER_ID or uuid.uuid4(),
         ),
     )
     app.dependency_overrides[get_auth_service] = lambda: service

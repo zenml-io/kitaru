@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
@@ -27,6 +28,7 @@ from conftest import (
     create_agent,
     create_session,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import InvestigationStatus, QuestionItem
@@ -38,6 +40,7 @@ from kitaru.server.application.models.annotation import (
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.annotation_service import AnnotationService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.annotation import AnnotationNotFound
 from kitaru.server.domain.base import ValidationError
@@ -52,6 +55,29 @@ from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -488,3 +514,81 @@ async def test_create_investigation_answer_second_answer_leaves_started_at(
     investigation = await investigation_repository.get(investigation_id)
     assert investigation.status is InvestigationStatus.IN_PROGRESS
     assert investigation.started_at == started_at
+
+
+async def test_create_manual_annotation_tracks_annotation_created(
+    annotation_repository: FakeAnnotationRepository,
+    investigation_repository: FakeInvestigationRepository,
+    session_repository: FakeSessionRepository,
+    session_node_repository: FakeSessionNodeRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Fire ANNOTATION_CREATED for an annotation outside any investigation."""
+    analytics = _RecordingAnalytics()
+    service = AnnotationService(
+        repository=annotation_repository,
+        investigation_repository=investigation_repository,
+        session_repository=session_repository,
+        session_node_repository=session_node_repository,
+        analytics=analytics,
+    )
+
+    await service.create_manual_annotation(
+        ManualAnnotationCreate(session_id=session_id, value="note"), actor=ACTOR
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.ANNOTATION_CREATED
+    assert properties == {"investigation_answer": False, "has_selector": False}
+
+
+async def test_create_investigation_answer_tracks_annotation_created(
+    annotation_repository: FakeAnnotationRepository,
+    investigation_repository: FakeInvestigationRepository,
+    session_repository: FakeSessionRepository,
+    session_node_repository: FakeSessionNodeRepository,
+    agent_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> None:
+    """Fire ANNOTATION_CREATED flagged as an investigation answer."""
+    analytics = _RecordingAnalytics()
+    service = AnnotationService(
+        repository=annotation_repository,
+        investigation_repository=investigation_repository,
+        session_repository=session_repository,
+        session_node_repository=session_node_repository,
+        analytics=analytics,
+    )
+    _, investigation_session_id = await _link_investigation_session(
+        investigation_repository,
+        agent_id,
+        session_id,
+        questions=[QuestionItem(key="root_cause", question="What caused it?")],
+    )
+
+    await service.create_investigation_answer(
+        InvestigationAnswerCreate(
+            investigation_session_id=investigation_session_id,
+            question_key="root_cause",
+            value="a retry loop",
+        ),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.ANNOTATION_CREATED
+    assert properties == {"investigation_answer": True, "has_selector": False}
+
+
+async def test_create_manual_annotation_without_analytics_tracker(
+    service: AnnotationService, session_id: uuid.UUID
+) -> None:
+    """Create an annotation normally when no analytics tracker is configured."""
+    annotation = await service.create_manual_annotation(
+        ManualAnnotationCreate(session_id=session_id, value="note"), actor=ACTOR
+    )
+    assert annotation.owner_id == ACTOR.account.id
