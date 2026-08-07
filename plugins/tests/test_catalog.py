@@ -33,8 +33,6 @@ def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     for entrypoint in entrypoints:
         module, attribute = parse_source_ref(entrypoint)
         assert callable(load_source_ref(f"{module}:{attribute}", "Plugin"))
-    assert len(requirements) == len(set(requirements))
-
     requirements_file = Path(__file__).parents[1] / "default-requirements.txt"
     bundled_requirements = {
         line for line in requirements_file.read_text().splitlines() if line

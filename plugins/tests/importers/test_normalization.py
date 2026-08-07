@@ -6,10 +6,10 @@ import pytest
 
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode
-from kitaru_importer_braintrust import importer as braintrust
-from kitaru_importer_langfuse import importer as langfuse
-from kitaru_importer_langsmith import importer as langsmith
-from kitaru_importer_opentelemetry import importer as otlp
+from kitaru_braintrust_importer import importer as braintrust
+from kitaru_langfuse_importer import importer as langfuse
+from kitaru_langsmith_importer import importer as langsmith
+from kitaru_opentelemetry_importer import importer as otlp
 
 IMPORTERS = (braintrust, langfuse, langsmith, otlp)
 

@@ -34,7 +34,7 @@ DEFINITIONS = (
         description="Test importer.",
         provider="langfuse",
         entrypoint="package.importer:parse",
-        requirement="kitaru-importer-langfuse==1.0.0",
+        requirement="kitaru-langfuse-importer==1.0.0",
         display_version="1.0.0",
     ),
     DefaultPluginDefinition(
@@ -43,7 +43,7 @@ DEFINITIONS = (
         description="Test evaluator.",
         provider=None,
         entrypoint="package.evaluator:evaluate",
-        requirement="kitaru-evaluator-cost==1.0.0",
+        requirement="kitaru-evaluator==1.0.0",
         display_version="1.0.0",
     ),
 )
@@ -116,7 +116,7 @@ async def test_register_creates_new_version_on_version_bump(
     bumped = tuple(
         definition.model_copy(
             update={
-                "requirement": "kitaru-importer-langfuse==1.1.0",
+                "requirement": "kitaru-langfuse-importer==1.1.0",
                 "display_version": "1.1.0",
             }
         )

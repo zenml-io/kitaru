@@ -9,12 +9,10 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, localcontext
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from evaluators import deterministic as evaluators
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import (
     SessionOrigin,
@@ -28,7 +26,8 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
 )
 from kitaru.task.evaluator import SessionView
-from kitaru.task.plugins import load_plugin_entrypoint
+from kitaru.task.plugins import load_source_ref
+from kitaru_evaluator import deterministic as evaluators
 
 NOW = datetime(2026, 8, 6, 12, tzinfo=UTC)
 SESSION_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -158,10 +157,11 @@ def test_public_entrypoints_have_exact_signatures() -> None:
             function(_view(), unknown=True)
 
 
-def test_seeded_source_loads_through_script_plugin_contract() -> None:
-    """Load the repository file the same way an evaluator worker loads its blob."""
-    source = Path(__file__).resolve().parents[2] / "evaluators/deterministic.py"
-    entrypoint = load_plugin_entrypoint(source, "session_diagnostics", "Evaluator")
+def test_entrypoint_loads_through_package_plugin_contract() -> None:
+    """Load a deterministic evaluator through its package source reference."""
+    entrypoint = load_source_ref(
+        "kitaru_evaluator.deterministic:session_diagnostics", "Evaluator"
+    )
 
     first = entrypoint(_view())
     repeated = entrypoint(_view())

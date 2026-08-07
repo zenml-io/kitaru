@@ -20,9 +20,7 @@ from typing import Any
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
-from kitaru_evaluator_cost.evaluator import evaluate as cost
-from kitaru_evaluator_latency.evaluator import evaluate as latency
-from kitaru_evaluator_tool_call_patterns.evaluator import evaluate as tool_call_patterns
+from kitaru_evaluator.basic import cost, latency, tool_call_patterns
 
 
 def _view(**session_fields: Any) -> SessionView:

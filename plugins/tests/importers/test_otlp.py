@@ -22,8 +22,8 @@ import pytest
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
 from kitaru.worker.process import parse_inline_dependencies
-from kitaru_importer_opentelemetry import importer as importer_module
-from kitaru_importer_opentelemetry.importer import (
+from kitaru_opentelemetry_importer import importer as importer_module
+from kitaru_opentelemetry_importer.importer import (
     InvalidImport,
     OTLPJSONImporter,
     parse,

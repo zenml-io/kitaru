@@ -145,14 +145,12 @@ convention = "google"
 known-first-party = [
     "adapters",
     "kitaru",
-    "kitaru_evaluator_cost",
-    "kitaru_evaluator_latency",
-    "kitaru_evaluator_tool_call_patterns",
-    "kitaru_importer_braintrust",
-    "kitaru_importer_kitaru_jsonl",
-    "kitaru_importer_langfuse",
-    "kitaru_importer_langsmith",
-    "kitaru_importer_opentelemetry",
+    "kitaru_evaluator",
+    "kitaru_braintrust_importer",
+    "kitaru_jsonl_importer",
+    "kitaru_langfuse_importer",
+    "kitaru_langsmith_importer",
+    "kitaru_opentelemetry_importer",
     "plugins",
 ]
 

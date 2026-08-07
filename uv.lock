@@ -13,14 +13,12 @@ exclude-newer-span = "P3D"
 [manifest]
 members = [
     "kitaru",
-    "kitaru-evaluator-cost",
-    "kitaru-evaluator-latency",
-    "kitaru-evaluator-tool-call-patterns",
-    "kitaru-importer-braintrust",
-    "kitaru-importer-kitaru-jsonl",
-    "kitaru-importer-langfuse",
-    "kitaru-importer-langsmith",
-    "kitaru-importer-opentelemetry",
+    "kitaru-braintrust-importer",
+    "kitaru-evaluator",
+    "kitaru-jsonl-importer",
+    "kitaru-langfuse-importer",
+    "kitaru-langsmith-importer",
+    "kitaru-opentelemetry-importer",
 ]
 
 [[package]]
@@ -1021,9 +1019,9 @@ dev = [
 ]
 
 [[package]]
-name = "kitaru-evaluator-cost"
+name = "kitaru-braintrust-importer"
 version = "0.1.0"
-source = { editable = "plugins/packages/evaluator-cost" }
+source = { editable = "plugins/packages/braintrust-importer" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1032,9 +1030,9 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
-name = "kitaru-evaluator-latency"
+name = "kitaru-evaluator"
 version = "0.1.0"
-source = { editable = "plugins/packages/evaluator-latency" }
+source = { editable = "plugins/packages/evaluator" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1043,9 +1041,9 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
-name = "kitaru-evaluator-tool-call-patterns"
+name = "kitaru-jsonl-importer"
 version = "0.1.0"
-source = { editable = "plugins/packages/evaluator-tool-call-patterns" }
+source = { editable = "plugins/packages/jsonl-importer" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1054,9 +1052,9 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
-name = "kitaru-importer-braintrust"
+name = "kitaru-langfuse-importer"
 version = "0.1.0"
-source = { editable = "plugins/packages/importer-braintrust" }
+source = { editable = "plugins/packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1065,9 +1063,9 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
-name = "kitaru-importer-kitaru-jsonl"
+name = "kitaru-langsmith-importer"
 version = "0.1.0"
-source = { editable = "plugins/packages/importer-kitaru-jsonl" }
+source = { editable = "plugins/packages/langsmith-importer" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1076,31 +1074,9 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
-name = "kitaru-importer-langfuse"
+name = "kitaru-opentelemetry-importer"
 version = "0.1.0"
-source = { editable = "plugins/packages/importer-langfuse" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "." }]
-
-[[package]]
-name = "kitaru-importer-langsmith"
-version = "0.1.0"
-source = { editable = "plugins/packages/importer-langsmith" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "." }]
-
-[[package]]
-name = "kitaru-importer-opentelemetry"
-version = "0.1.0"
-source = { editable = "plugins/packages/importer-opentelemetry" }
+source = { editable = "plugins/packages/opentelemetry-importer" }
 dependencies = [
     { name = "kitaru" },
 ]

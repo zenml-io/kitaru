@@ -8,14 +8,12 @@ on:
         required: true
         type: choice
         options:
-          - evaluator-cost
-          - evaluator-latency
-          - evaluator-tool-call-patterns
-          - importer-braintrust
-          - importer-kitaru-jsonl
-          - importer-langfuse
-          - importer-langsmith
-          - importer-opentelemetry
+          - braintrust-importer
+          - evaluator
+          - jsonl-importer
+          - langfuse-importer
+          - langsmith-importer
+          - opentelemetry-importer
       version:
         description: Package version already committed in its pyproject.toml.
         required: true
