@@ -5,72 +5,41 @@ description: Use for Kitaru docs.
 
 # Kitaru Documentation Workflow
 
-Use this when editing or reviewing Kitaru documentation, examples, generated
-reference docs, docs redirects, or docs CI behavior.
+Use this when editing or reviewing Kitaru documentation, examples, generated reference docs, docs redirects, or docs CI behavior.
 
 ## Documentation Surfaces
 
 Kitaru docs live on three surfaces:
 
-1. Hand-written docs are plain Markdown in `docs/book/`, published to
-   `docs.zenml.io/kitaru` via GitBook Git Sync. Edit these `.md` files directly.
-   Navigation is `docs/book/toc.md`, config is `docs/book/.gitbook.yaml`, and
-   authoring conventions live in `docs/book/AGENTS.md`.
-2. Generated SDK reference docs live in the FumaDocs app under `docs/`.
-   Generated output is `docs/content/docs/reference/python/`, served from
-   `sdkdocs.kitaru.ai`.
-3. `kitaru.ai/docs/*` redirects are handled by `docs/worker/redirect.mjs` and
-   `wrangler.redirect.toml`.
+1. Hand-written docs are plain Markdown in `docs/book/`, published to `docs.zenml.io/kitaru` through GitBook Git Sync. Navigation is `docs/book/toc.md`, configuration is `docs/book/.gitbook.yaml`, and authoring conventions live in `docs/book/AGENTS.md`.
+2. Generated SDK reference docs are intended to live in the FumaDocs app under `docs/`, with output under `docs/content/docs/reference/python/` served from `sdkdocs.kitaru.ai`. The v2 Python generator is currently absent, so reference generation and deployment are blocked. CLI reference publishing is deferred.
+3. `kitaru.ai/docs/*` redirects are handled by `docs/worker/redirect.mjs` and `wrangler.redirect.toml`.
 
-Do not add hand-written pages to the FumaDocs app under `docs/content/docs/`.
-The public changelog is owned by the changelog repo at `docs.zenml.io/changelog`.
-This repo may generate a gitignored `docs/content/docs/changelog.mdx` for local
-reference builds, but agents should not hand-edit or commit it.
+Do not add hand-written pages to `docs/content/docs/`. The public changelog is owned by the changelog repository at `docs.zenml.io/changelog`. This repository may generate a gitignored `docs/content/docs/changelog.mdx` for local reference builds, but agents should not hand-edit or commit it.
 
-The public marketing/runtime site for Kitaru lives in `zenml-io-v2`. If a task
-involves Astro pages, public site assets, marketing Cloudflare Pages deployment,
-or runtime web APIs such as waitlist/get-started/newsletter endpoints, switch
-to that repository instead of adding that code here.
+The public marketing/runtime site lives in `zenml-io-v2`. If a task involves Astro pages, public site assets, marketing Cloudflare deployment, or runtime website APIs, switch to that repository instead of adding the code here.
 
 ## Docs Content Rules
 
 - Only document shipped features; do not add "Coming Soon" sections.
-- Keep ZenML invisible to users. Use Kitaru terminology such as workflow,
-  checkpoint, stack, deployment, and storage. Avoid ZenML terms such as
-  orchestrator, artifact store, pipeline, and step in user docs.
-- Inside `docs/book/`, link to sibling pages with relative `.md` paths, such as
-  `../concepts/checkpoints.md` or `flows.md#runtime-options`.
+- Inside `docs/book/`, link to sibling pages with relative `.md` paths.
 - Link to SDK reference with `https://sdkdocs.kitaru.ai`.
 - Link to other ZenML docs with absolute `https://docs.zenml.io/...` URLs.
-- Link to diagrams with
-  `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
-- Do not commit temporary planning/review files such as `docs/plans/*`,
-  `docs/reviews/*`, or prompt exports unless the user explicitly asks for a
-  durable tracked document.
-- Only `kitaru.llm()` auto-resolves alias-linked secrets today. If documenting
-  non-LLM secret access, label it as the current low-level pattern instead of
-  implying there is a dedicated Kitaru secret getter.
-- CLI command contracts live under `src/kitaru/cli/` and are available offline through `kitaru schema`; CLI reference publishing is deferred.
-- Native MCP documentation must match `tests/mcp/snapshots/metrics.json`: 2 read-only tools, 5 standard tools, and 7 destructive tools. Keep third-party/provider MCP documentation separate and intact.
-- Current shipped stack-create types on the CLI are `local`, `kubernetes`, `vertex`, `sagemaker`, and `azureml`. The native v2 MCP server does not expose stack management.
-- Advanced CLI stack creation supports `--extra` plus the remote-only `--async` convenience flag.
-- Public Python SDK `kitaru.create_stack(...)` remains local-only; keep that
-  distinction explicit.
-- Document `KITARU_*` env vars as the public surface. Mention `ZENML_*` only as
-  a compatibility note when necessary for migration or interop.
-- `kitaru model register` still writes aliases to local config, but
-  submitted/replayed runs automatically receive a transported registry snapshot
-  via `KITARU_MODEL_REGISTRY`.
-- Describe `kitaru model list` as listing aliases available in the current
-  environment, not only aliases stored locally.
+- Link to diagrams with `https://assets.kitaru.ai/docs/diagrams/<slug>.png`.
+- Do not commit temporary planning/review files or prompt exports unless the user explicitly asks for a durable tracked document.
+- Treat `KITARU_*` variables as the public configuration surface.
+- CLI contracts live in `src/kitaru/cli/app.py` and are available offline through `kitaru schema`.
+- The generated OpenAPI document and `src/kitaru/api_models/` are the API contract authorities.
+- Native MCP documentation must match `src/kitaru/mcp/registry.py` and `tests/mcp/snapshots/metrics.json`. Run `just mcp-schema-check`; do not copy tool counts into prose.
+- The native v2 MCP server does not expose stack or model-alias management.
+- Do not document v1 runtime surfaces such as `kitaru init`, `kitaru stack`, `kitaru model`, `kitaru executions`, `kitaru.llm()`, or `kitaru.create_stack()` unless they are reintroduced in v2 source and tests.
+- Agent-facing CLI docs should preserve the structured JSON/JSONL, `--machine`, `--non-interactive`, and `--no-browser` contracts.
 - Every `.mdx` page needs `title` and `description` frontmatter.
+
+Do not run or advertise `just generate-docs` as healthy until `scripts/generate_sdk_docs.py` is restored for the v2 public SDK and the docs workflow passes.
 
 ## Example READMEs
 
-Example READMEs are user-facing. They should teach new users what Kitaru does
-and walk them through the specific example.
+Example READMEs are user-facing. They should teach new users what Kitaru does and walk them through the specific example.
 
-Do not add maintainer-oriented sections such as "Testing", CI-only credential
-setup, or notes about stubbed/mocked test runs. If a section would not help a
-first-time user understand Kitaru, it belongs in tests, contributor docs, or PR
-descriptions instead.
+Do not add maintainer-oriented sections such as "Testing", CI-only credential setup, or notes about stubbed or mocked runs. If a section would not help a first-time user understand Kitaru, it belongs in tests, contributor docs, or PR descriptions instead.

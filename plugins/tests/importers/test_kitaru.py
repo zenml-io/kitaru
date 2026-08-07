@@ -19,7 +19,7 @@ import pytest
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.task.importer import ParsedSession
+from kitaru.task.importer import ImportedSession
 from kitaru_importer_kitaru_jsonl.importer import InvalidImport, parse
 
 
@@ -47,11 +47,14 @@ def _session() -> dict[str, object]:
                 "node_type": "llm_call",
                 "name": "model request",
                 "status": "completed",
-                "input_text": "How is the weather?",
-                "output_text": "Sunny.",
-                "system_prompt": "Answer briefly.",
+                "input_text_selector": '$[1]["content"]',
+                "output_text_selector": '$[0]["content"]',
+                "system_prompt_selector": '$[0]["content"]',
                 "reasoning": "The source reports clear skies.",
-                "inputs": [{"role": "user", "content": "How is the weather?"}],
+                "inputs": [
+                    {"role": "system", "content": "Answer briefly."},
+                    {"role": "user", "content": "How is the weather?"},
+                ],
                 "outputs": [{"role": "assistant", "content": "Sunny."}],
                 "attributes": {},
                 "metadata": {},
@@ -68,12 +71,13 @@ def test_parses_one_complete_session_per_line() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.status is SessionStatus.COMPLETED
     assert session.framework == "pydantic-ai"
     assert session.system_prompt == "Answer briefly."
-    assert session.nodes[0].input_text == "How is the weather?"
-    assert session.nodes[0].output_text == "Sunny."
+    assert session.nodes[0].input_text_selector == '$[1]["content"]'
+    assert session.nodes[0].output_text_selector == '$[0]["content"]'
+    assert session.nodes[0].system_prompt_selector == '$[0]["content"]'
     assert session.nodes[0].reasoning == "The source reports clear skies."
 
 
@@ -84,7 +88,7 @@ def test_isolates_invalid_lines_and_forbids_unknown_fields() -> None:
 
     parsed = list(parse(content.encode(), {}))
 
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert isinstance(parsed[1], ImportFailure)
     assert parsed[1].line == 2
     assert isinstance(parsed[2], ImportFailure)

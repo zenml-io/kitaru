@@ -223,34 +223,68 @@ def _messages_json(messages: list[ModelMessage]) -> list[dict[str, Any]]:
     return ModelMessagesTypeAdapter.dump_python(messages, mode="json", fallback=str)
 
 
-def _display_text(value: Any) -> str | None:
-    """Convert a value to compact display text."""
-    if value is None:
-        return None
+def _child_selector(selector: str, key: str | int) -> str:
+    """Append a child segment to an RFC 9535 JSONPath."""
+    if isinstance(key, int):
+        return f"{selector}[{key}]"
+    return f"{selector}[{json.dumps(key, ensure_ascii=False)}]"
+
+
+def _part_selector(value: Any, part_kind: str, selector: str = "$") -> str | None:
+    """Select the last textual PydanticAI message part of one kind."""
+    matches: list[str] = []
+
+    def _collect(item: Any, path: str) -> None:
+        if isinstance(item, list):
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(path, index))
+            return
+        if not isinstance(item, dict):
+            return
+        if item.get("part_kind") == part_kind:
+            content = item.get("content")
+            if isinstance(content, str) and content.strip():
+                matches.append(_child_selector(path, "content"))
+        for key, child in item.items():
+            _collect(child, _child_selector(path, key))
+
+    _collect(value, selector)
+    return matches[-1] if matches else None
+
+
+def _payload_selector(value: Any, keys: tuple[str, ...]) -> str | None:
+    """Select text from a PydanticAI payload or common tool field."""
     if isinstance(value, str):
-        return value or None
-    return json.dumps(
-        _jsonable(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        return "$" if value.strip() else None
+    if not isinstance(value, dict):
+        return None
+    for key in keys:
+        if isinstance(value.get(key), str) and value[key].strip():
+            return _child_selector("$", key)
+    return None
+
+
+def _input_text_selector(value: Any) -> str | None:
+    """Select the primary user input from a PydanticAI payload."""
+    return _part_selector(value, "user-prompt") or _payload_selector(
+        value, ("prompt", "query", "question", "user_input", "message")
     )
 
 
-def _user_prompt_text(content: str | Sequence[UserContent]) -> str | None:
-    """Extract text from a PydanticAI user prompt."""
-    if isinstance(content, str):
-        return content or None
-    text = [
-        item if isinstance(item, str) else item.content
-        for item in content
-        if isinstance(item, (str, TextContent))
-    ]
-    return "\n".join(part for part in text if part) or None
+def _output_text_selector(value: Any) -> str | None:
+    """Select the primary model or tool output from a PydanticAI payload."""
+    return _part_selector(value, "text") or _payload_selector(
+        value, ("answer", "result", "response", "output", "text", "content")
+    )
 
 
-def _request_display_fields(
-    messages: list[ModelMessage],
-) -> tuple[str | None, str | None]:
-    """Extract the user input and system prompt from a model request."""
-    input_text: str | None = None
+def _system_prompt_selector(value: Any) -> str | None:
+    """Select the latest system prompt from serialized model inputs."""
+    return _part_selector(value, "system-prompt")
+
+
+def _get_request_system_prompt(messages: list[ModelMessage]) -> str | None:
+    """Extract the system prompt from a model request."""
     system_parts: list[str] = []
     for message in messages:
         if not isinstance(message, ModelRequest):
@@ -260,20 +294,15 @@ def _request_display_fields(
         for part in message.parts:
             if isinstance(part, SystemPromptPart) and part.content:
                 system_parts.append(part.content)
-            elif isinstance(part, UserPromptPart):
-                input_text = _user_prompt_text(part.content) or input_text
-    return input_text, "\n\n".join(system_parts) or None
+    return "\n\n".join(system_parts) or None
 
 
-def _response_display_fields(
-    response: ModelResponse,
-) -> tuple[str | None, str | None]:
-    """Extract assistant text and visible reasoning from a model response."""
-    output = [part.content for part in response.parts if isinstance(part, TextPart)]
+def _get_response_reasoning(response: ModelResponse) -> str | None:
+    """Extract visible reasoning from a model response."""
     reasoning = [
         part.content for part in response.parts if isinstance(part, ThinkingPart)
     ]
-    return "\n".join(output) or None, "\n".join(reasoning) or None
+    return "\n".join(reasoning) or None
 
 
 def _error_text(error: BaseException) -> str:
@@ -593,8 +622,11 @@ class _KitaruCapability(AbstractCapability[Any]):
 
         node_index = await self._allocate_node()
         started_at = datetime.now(UTC)
-        input_text, system_prompt = _request_display_fields(effective.messages)
-        state.system_prompt = system_prompt or state.system_prompt
+        input_payload = _messages_json(effective.messages)
+        input_text_selector = _input_text_selector(input_payload)
+        system_prompt_selector = _system_prompt_selector(input_payload)
+        system_prompt = _get_request_system_prompt(effective.messages)
+        state.system_prompt = state.system_prompt or system_prompt
         try:
             response = await handler(effective)
         except BaseException as error:
@@ -608,9 +640,9 @@ class _KitaruCapability(AbstractCapability[Any]):
                     error=_error_text(error),
                     started_at=started_at,
                     ended_at=datetime.now(UTC),
-                    input_text=input_text,
-                    system_prompt=system_prompt,
-                    inputs=_messages_json(effective.messages),
+                    input_text_selector=input_text_selector,
+                    system_prompt_selector=system_prompt_selector,
+                    inputs=input_payload,
                     outputs=None,
                     requested_model=requested_model,
                     model=_model_identifier(effective),
@@ -621,7 +653,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             raise
 
         unpaired_native_calls = _unpaired_native_calls(response)
-        output_text, reasoning = _response_display_fields(response)
+        output_payload = _jsonable(response)
         llm_node = SessionNodeCreateRequest(
             index=node_index,
             parent_index=0,
@@ -630,12 +662,12 @@ class _KitaruCapability(AbstractCapability[Any]):
             status=NodeStatus.COMPLETED,
             started_at=started_at,
             ended_at=datetime.now(UTC),
-            input_text=input_text,
-            output_text=output_text,
-            system_prompt=system_prompt,
-            reasoning=reasoning,
-            inputs=_messages_json(effective.messages),
-            outputs=_jsonable(response),
+            input_text_selector=input_text_selector,
+            output_text_selector=_output_text_selector(output_payload),
+            system_prompt_selector=system_prompt_selector,
+            reasoning=_get_response_reasoning(response),
+            inputs=input_payload,
+            outputs=output_payload,
             requested_model=requested_model,
             model=response.model_name or _model_identifier(effective),
             provider=response.provider_name,
@@ -850,6 +882,8 @@ class _KitaruCapability(AbstractCapability[Any]):
         external_id: str | None,
     ) -> None:
         """Buffer a terminal tool-call node."""
+        input_payload = _jsonable(arguments)
+        output_payload = _jsonable(result)
         await self._buffer_node(
             SessionNodeCreateRequest(
                 index=node_index,
@@ -861,10 +895,10 @@ class _KitaruCapability(AbstractCapability[Any]):
                 error=error,
                 started_at=started_at,
                 ended_at=datetime.now(UTC),
-                input_text=_display_text(arguments),
-                output_text=_display_text(result),
-                inputs=_jsonable(arguments),
-                outputs=_jsonable(result),
+                input_text_selector=_input_text_selector(input_payload),
+                output_text_selector=_output_text_selector(output_payload),
+                inputs=input_payload,
+                outputs=output_payload,
                 tool_name=tool_name,
                 attributes=attributes,
             )
@@ -909,6 +943,8 @@ class _KitaruCapability(AbstractCapability[Any]):
             return
         state.finished = True
         ended_at = datetime.now(UTC)
+        input_payload = _jsonable(state.effective_input)
+        output_payload = _jsonable(outputs)
         async with state.lock:
             state.buffer.append(
                 SessionNodeCreateRequest(
@@ -920,10 +956,10 @@ class _KitaruCapability(AbstractCapability[Any]):
                     error=error,
                     started_at=state.started_at,
                     ended_at=ended_at,
-                    input_text=_display_text(state.effective_input),
-                    output_text=_display_text(outputs),
-                    inputs=_jsonable(state.effective_input),
-                    outputs=_jsonable(outputs),
+                    input_text_selector=_input_text_selector(input_payload),
+                    output_text_selector=_output_text_selector(output_payload),
+                    inputs=input_payload,
+                    outputs=output_payload,
                     attributes={},
                 )
             )

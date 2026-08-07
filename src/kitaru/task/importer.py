@@ -46,9 +46,9 @@ __all__ = [
     "NODE_BATCH_SIZE",
     "ImportFailure",
     "ImportStats",
-    "ParsedItem",
-    "ParsedNode",
-    "ParsedSession",
+    "ImportedItem",
+    "ImportedNode",
+    "ImportedSession",
     "Parser",
     "SessionImportError",
     "call_parser",
@@ -66,8 +66,8 @@ class SessionImportError(Exception):
     """Raised when a parser fails while starting or advancing."""
 
 
-class ParsedNode(BaseModel):
-    """Parsed session node."""
+class ImportedNode(BaseModel):
+    """Provider data normalized for node ingestion."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -82,9 +82,9 @@ class ParsedNode(BaseModel):
     error: str | None = None
     started_at: AwareDatetime | None = None
     ended_at: AwareDatetime | None = None
-    input_text: str | None = None
-    output_text: str | None = None
-    system_prompt: str | None = None
+    input_text_selector: str | None = None
+    output_text_selector: str | None = None
+    system_prompt_selector: str | None = None
     reasoning: str | None = None
     inputs: Any
     outputs: Any
@@ -98,14 +98,14 @@ class ParsedNode(BaseModel):
     subagent_id: str | None = None
     attributes: Any
     metadata: dict[str, Any] = Field(default_factory=dict)
-    children: list["ParsedNode"] = Field(default_factory=list)
+    children: list["ImportedNode"] = Field(default_factory=list)
 
 
-ParsedNode.model_rebuild()
+ImportedNode.model_rebuild()
 
 
-class ParsedSession(BaseModel):
-    """Parsed session."""
+class ImportedSession(BaseModel):
+    """Provider data normalized for session ingestion."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -120,17 +120,17 @@ class ParsedSession(BaseModel):
     external_id: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     framework: str | None = None
-    nodes: list[ParsedNode]
+    nodes: list[ImportedNode]
 
 
-ParsedItem = ParsedSession | ImportFailure
+ImportedItem = ImportedSession | ImportFailure
 
-Parser = Callable[[bytes, dict[str, Any]], Iterator[ParsedItem]]
+Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedItem]]
 
 
 def call_parser(
     parser: Parser, payload: bytes, params: dict[str, Any]
-) -> Iterator[ParsedItem]:
+) -> Iterator[ImportedItem]:
     """Advance a parser one item at a time, wrapping any failure.
 
     Wrapping only the parser call would protect nothing, since a generator
@@ -144,10 +144,10 @@ def call_parser(
 
     Raises:
         SessionImportError: The parser raised while starting or advancing, or
-            yielded an item that is not a ParsedSession or ImportFailure.
+            yielded an item that is not an ImportedSession or ImportFailure.
 
     Yields:
-        Parsed items.
+        Imported items.
     """
     try:
         iterator = iter(parser(payload, params))
@@ -160,22 +160,22 @@ def call_parser(
             return
         except Exception as exc:
             raise SessionImportError(f"Parser raised an error: {exc}") from exc
-        if not isinstance(item, ParsedSession | ImportFailure):
+        if not isinstance(item, ImportedSession | ImportFailure):
             raise SessionImportError(
-                f"Parser yielded an item that is not a ParsedSession or "
+                f"Parser yielded an item that is not an ImportedSession or "
                 f"ImportFailure: {item!r}"
             )
         yield item
 
 
 def session_request(
-    importer: ImportTaskDetails, parsed: ParsedSession
+    importer: ImportTaskDetails, parsed: ImportedSession
 ) -> SessionCreateRequest:
     """Build a session create request for one parsed import item.
 
     Args:
         importer: Importer task details.
-        parsed: Parsed session.
+        parsed: Imported session.
 
     Returns:
         Session create request.
@@ -199,9 +199,9 @@ def session_request(
 
 
 def _node_request(
-    node: ParsedNode, *, index: int, parent_index: int | None
+    node: ImportedNode, *, index: int, parent_index: int | None
 ) -> SessionNodeCreateRequest:
-    """Convert a parsed node to an ingest request."""
+    """Convert an imported node to an ingest request."""
     return SessionNodeCreateRequest(
         index=index,
         parent_index=parent_index,
@@ -214,9 +214,9 @@ def _node_request(
         error=node.error,
         started_at=node.started_at,
         ended_at=node.ended_at,
-        input_text=node.input_text,
-        output_text=node.output_text,
-        system_prompt=node.system_prompt,
+        input_text_selector=node.input_text_selector,
+        output_text_selector=node.output_text_selector,
+        system_prompt_selector=node.system_prompt_selector,
         reasoning=node.reasoning,
         inputs=node.inputs,
         outputs=node.outputs,
@@ -233,11 +233,11 @@ def _node_request(
     )
 
 
-def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]:
-    """Flatten a parsed node tree into indexed ingest requests, depth-first.
+def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
+    """Flatten an imported node tree into indexed ingest requests, depth-first.
 
     Args:
-        nodes: Top-level parsed nodes.
+        nodes: Top-level imported nodes.
 
     Returns:
         Flat session node create requests in depth-first order.
@@ -246,7 +246,7 @@ def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]:
     if any(explicit_indexes):
         if not all(explicit_indexes) or any(node.children for node in nodes):
             raise SessionImportError(
-                "Indexed parsed nodes must all have indexes and cannot have children"
+                "Indexed imported nodes must all have indexes and cannot have children"
             )
         indexed_nodes = sorted(
             nodes, key=lambda node: node.index if node.index is not None else -1
@@ -264,7 +264,7 @@ def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]:
 
     flattened: list[SessionNodeCreateRequest] = []
 
-    def _walk(node: ParsedNode, parent_index: int | None) -> None:
+    def _walk(node: ImportedNode, parent_index: int | None) -> None:
         index = len(flattened)
         flattened.append(_node_request(node, index=index, parent_index=parent_index))
         for child in node.children:

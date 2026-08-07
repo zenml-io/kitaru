@@ -18,7 +18,14 @@ import hashlib
 import os
 import sys
 import uuid
-from collections.abc import AsyncGenerator, Callable, Iterable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -2354,22 +2361,32 @@ class FakeSessionNodeRepository:
         self._cohort_versions = cohort_versions
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
         """
         wanted = set(indexes)
-        return {
-            node.index: node.model_copy()
+        matches = [
+            node
             for node in self._nodes.values()
             if node.session_id == session_id and node.index in wanted
+        ]
+        if include_payloads:
+            return {node.index: node.model_copy() for node in matches}
+        return {
+            node.index: node.model_copy(
+                update={"inputs": None, "outputs": None, "attributes": None}
+            )
+            for node in matches
         }
 
     async def upsert_batch(
@@ -2429,19 +2446,39 @@ class FakeSessionNodeRepository:
                 )
         return result, next_cursor
 
-    async def get_index_by_id(self, session_id: uuid.UUID) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of every node in a session, keyed by node id.
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
 
         Args:
             session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Every node of the session.
         """
+        nodes = [node for node in self._nodes.values() if node.session_id == session_id]
+        return sorted(nodes, key=lambda node: node.index)
+
+    async def get_indexes_by_ids(
+        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Bulk-load the index of the named nodes of a session, keyed by node id.
+
+        Args:
+            session_id: Id of the owning session.
+            node_ids: Ids to look up.
+
+        Returns:
+            Each requested node id mapped to its index, missing ids omitted.
+        """
+        requested = set(node_ids)
         return {
             node.id: node.index
             for node in self._nodes.values()
-            if node.session_id == session_id
+            if node.session_id == session_id and node.id in requested
         }
 
     def _newest_match(self, candidates: list[SessionNode]) -> SessionNode | None:

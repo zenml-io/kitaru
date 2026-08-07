@@ -17,7 +17,7 @@ Each imported session contains session fields and a list of nodes. A session is 
 |---|---|---|
 | `status` | `in_progress`, `completed`, or `failed` | Final source status. |
 | `name` | string or null | Display name. |
-| `system_prompt` | string or null | Most recently recorded system prompt. |
+| `system_prompt` | string or null | System prompt from the first recorded model call. |
 | `inputs` | any JSON value | Complete session input. Provider importers use a versioned `turns` object for multi-turn sessions. |
 | `outputs` | any JSON value | Final session output. |
 | `error` | string or null | Failure message. |
@@ -41,9 +41,9 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `status` | `in_progress`, `completed`, or `failed` | Node status. |
 | `error` | string or null | Failure message. |
 | `started_at`, `ended_at` | ISO 8601 timestamp or null | Node time range. |
-| `input_text` | string or null | Primary human-readable input. Provider importers extract the latest user message or prompt here. |
-| `output_text` | string or null | Primary human-readable output. Provider importers extract the latest assistant message or result here. |
-| `system_prompt` | string or null | System prompt for this model call. |
+| `input_text_selector` | string or null | RFC 9535 JSONPath selecting the primary human-readable text inside `inputs`. |
+| `output_text_selector` | string or null | RFC 9535 JSONPath selecting the primary human-readable text inside `outputs`. |
+| `system_prompt_selector` | string or null | RFC 9535 JSONPath selecting the system prompt inside `inputs`. |
 | `reasoning` | string or null | Visible reasoning text when the source exports it. |
 | `inputs`, `outputs` | any JSON value | Complete source payloads. Importers preserve message history, tool arguments, multimodal parts, and provider-specific content here. |
 | `requested_model`, `model`, `provider` | string or null | Requested model, served model, and model provider. |
@@ -54,7 +54,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `attributes` | any JSON value | Span attributes retained for diagnostics. |
 | `metadata` | JSON object | Bounded source metadata. |
 
-`input_text` and `output_text` are display projections. Model calls expose the latest user and assistant text instead of the accumulated message history. Tool calls use compact JSON when their arguments or results have no text representation. `inputs` and `outputs` retain the complete source payloads for inspection and replay.
+Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 9535 JSONPath](https://www.rfc-editor.org/rfc/rfc9535.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means that the importer could not choose one text value without guessing. The session-level `system_prompt` summarizes the first model call that supplied one.
 
 `reasoning` contains visible text only. Redacted, encrypted, or unavailable reasoning remains null, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
 
@@ -88,9 +88,9 @@ The formatted object below represents one JSONL record. Serialize it onto one li
       "status": "completed",
       "started_at": "2026-07-22T10:00:00Z",
       "ended_at": "2026-07-22T10:00:01Z",
-      "input_text": "What is the weather in Delft?",
-      "output_text": "Delft is rainy and 18 C.",
-      "system_prompt": "Answer in one sentence.",
+      "input_text_selector": "$[1][\"content\"]",
+      "output_text_selector": "$[0][\"content\"]",
+      "system_prompt_selector": "$[0][\"content\"]",
       "reasoning": "The weather tool reports rain and a temperature of 18 C.",
       "inputs": [{"role": "system", "content": "Answer in one sentence."}, {"role": "user", "content": "What is the weather in Delft?"}],
       "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}],
@@ -158,7 +158,7 @@ Provider importers apply the same output contract to different source formats:
 | OpenTelemetry | OTLP collector envelopes, flattened OTLP JSONL, Arize JSONL, and Logfire JSONL | Standard conversation attributes, then trace ID |
 | Kitaru | One portable Kitaru session per JSONL line | No grouping; each line is one session |
 
-Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, `input_text`, `output_text`, `system_prompt`, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
+Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, `system_prompt`, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
 
 Framework detection only sets `framework` when trace metadata identifies one supported framework without conflict. Unknown or sparse traces keep the field null.
 

@@ -140,8 +140,8 @@ The evaluation flow makes no API writes at all, it only reads.
 Everything importing. The contract and the translation layer:
 
 ```python
-class ParsedNode(BaseModel): ...      # node fields, optional wire indexes, and children
-class ParsedSession(BaseModel):
+class ImportedNode(BaseModel): ...      # node fields, optional wire indexes, and children
+class ImportedSession(BaseModel):
     status: SessionStatus
     name: str | None
     system_prompt: str | None
@@ -153,16 +153,16 @@ class ParsedSession(BaseModel):
     external_id: str
     metadata: dict[str, Any]
     framework: str | None
-    nodes: list[ParsedNode]
+    nodes: list[ImportedNode]
 
-ParsedItem = ParsedSession | ImportFailure   # ImportFailure from api_models
-Parser = Callable[[bytes, dict[str, Any]], Iterator[ParsedItem]]
+ImportedItem = ImportedSession | ImportFailure   # ImportFailure from api_models
+Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedItem]]
 
 class SessionImportError(Exception): ...
 
-def call_parser(parser: Parser, payload: bytes, params: dict[str, Any]) -> Iterator[ParsedItem]: ...
-def session_request(importer: ImportTaskDetails, parsed: ParsedSession) -> SessionCreateRequest: ...
-def flatten_nodes(nodes: list[ParsedNode]) -> list[SessionNodeCreateRequest]: ...
+def call_parser(parser: Parser, payload: bytes, params: dict[str, Any]) -> Iterator[ImportedItem]: ...
+def session_request(importer: ImportTaskDetails, parsed: ImportedSession) -> SessionCreateRequest: ...
+def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]: ...
 ```
 
 `call_parser` is a wrapping generator: it advances the parser one `next()` at a time inside a try/except, converting any exception into `SessionImportError`. Wrapping only the parser call would protect nothing, a generator function runs no code until iterated. `session_request` builds the create request with `origin=imported`, the task id, the importer's `provider` as `imported_from`, its `agent_id`, and the parsed fields, so every imported session links to its importer task. `flatten_nodes` preserves an explicit flat indexed representation or walks a nested tree depth-first and assigns indexes and parent indexes.
@@ -187,7 +187,7 @@ Items are consumed one at a time so arbitrarily large payloads never require the
 What plugin authors write. The callable contracts:
 
 - **Evaluator**: a callable `def evaluate(session: SessionView, **params) -> EvaluationResult | list[EvaluationResult]`, each result becomes one evaluation row. `SessionView` and `EvaluationResult` are imported from `kitaru.task.evaluator`.
-- **Importer**: a callable `def parse(payload: bytes, params: dict) -> Iterator[ParsedSession | ImportFailure]`, yielding items lazily, with the types imported from `kitaru.task.importer`.
+- **Importer**: a callable `def parse(payload: bytes, params: dict) -> Iterator[ImportedSession | ImportFailure]`, yielding items lazily, with the types imported from `kitaru.task.importer`.
 
 Either callable ships in one of two source forms, registered through the registry:
 

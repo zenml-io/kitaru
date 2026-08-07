@@ -14,6 +14,7 @@
 """Session node DTO conversions."""
 
 import uuid
+from collections.abc import Sequence
 
 from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
@@ -49,9 +50,9 @@ def session_node_create_to_upsert(body: SessionNodeCreateRequest) -> SessionNode
         error=body.error,
         started_at=body.started_at,
         ended_at=body.ended_at,
-        input_text=body.input_text,
-        output_text=body.output_text,
-        system_prompt=body.system_prompt,
+        input_text_selector=body.input_text_selector,
+        output_text_selector=body.output_text_selector,
+        system_prompt_selector=body.system_prompt_selector,
         reasoning=body.reasoning,
         inputs=body.inputs,
         outputs=body.outputs,
@@ -80,6 +81,23 @@ def session_node_batch_to_upserts(
         Upsert commands, parent before child.
     """
     return [session_node_create_to_upsert(node) for node in batch.nodes]
+
+
+def referenced_parent_ids(nodes: Sequence[SessionNode]) -> set[uuid.UUID]:
+    """Collect the parent ids the given nodes point at.
+
+    Args:
+        nodes: Nodes about to be converted to responses.
+
+    Returns:
+        Ids of every primary and secondary parent the nodes name.
+    """
+    parent_ids: set[uuid.UUID] = set()
+    for node in nodes:
+        if node.parent_id is not None:
+            parent_ids.add(node.parent_id)
+        parent_ids.update(node.secondary_parent_ids)
+    return parent_ids
 
 
 def session_node_to_response(
@@ -116,10 +134,10 @@ def session_node_to_response(
         error=node.error,
         started_at=node.started_at,
         ended_at=node.ended_at,
-        input_text=node.input_text,
-        output_text=node.output_text,
-        system_prompt=node.system_prompt,
-        reasoning=node.reasoning,
+        input_text_selector=node.input_text_selector,
+        output_text_selector=node.output_text_selector,
+        system_prompt_selector=node.system_prompt_selector,
+        reasoning=node.reasoning if include_payloads else None,
         inputs=node.inputs if include_payloads else None,
         outputs=node.outputs if include_payloads else None,
         requested_model=node.requested_model,

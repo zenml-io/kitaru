@@ -5816,7 +5816,7 @@
                 "type": "null"
               }
             ],
-            "description": "Most recently recorded system prompt.",
+            "description": "System prompt from the first recorded model call.",
             "title": "System Prompt"
           }
         },
@@ -5933,7 +5933,7 @@
             "title": "Index",
             "type": "integer"
           },
-          "input_text": {
+          "input_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -5942,8 +5942,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable input to the node.",
-            "title": "Input Text"
+            "description": "RFC 9535 JSONPath selecting display text from node inputs.",
+            "title": "Input Text Selector"
           },
           "inputs": {
             "description": "Node inputs.",
@@ -5989,7 +5989,7 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
-          "output_text": {
+          "output_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -5998,8 +5998,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable output from the node.",
-            "title": "Output Text"
+            "description": "RFC 9535 JSONPath selecting display text from node outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Node outputs.",
@@ -6090,7 +6090,7 @@
             "description": "Subagent invoked.",
             "title": "Subagent Id"
           },
-          "system_prompt": {
+          "system_prompt_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6099,8 +6099,8 @@
                 "type": "null"
               }
             ],
-            "description": "System prompt used by the model call.",
-            "title": "System Prompt"
+            "description": "RFC 9535 JSONPath selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -6230,7 +6230,7 @@
             "title": "Index",
             "type": "integer"
           },
-          "input_text": {
+          "input_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6239,8 +6239,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable input to the node.",
-            "title": "Input Text"
+            "description": "RFC 9535 JSONPath selecting display text from node inputs.",
+            "title": "Input Text Selector"
           },
           "inputs": {
             "description": "Node inputs, null unless include_payloads.",
@@ -6286,7 +6286,7 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
-          "output_text": {
+          "output_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6295,8 +6295,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable output from the node.",
-            "title": "Output Text"
+            "description": "RFC 9535 JSONPath selecting display text from node outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Node outputs, null unless include_payloads.",
@@ -6348,7 +6348,7 @@
                 "type": "null"
               }
             ],
-            "description": "Visible reasoning produced by the model call.",
+            "description": "Visible reasoning, null unless payloads are included.",
             "title": "Reasoning"
           },
           "requested_model": {
@@ -6415,7 +6415,7 @@
             "description": "Subagent invoked.",
             "title": "Subagent Id"
           },
-          "system_prompt": {
+          "system_prompt_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6424,8 +6424,8 @@
                 "type": "null"
               }
             ],
-            "description": "System prompt used by the model call.",
-            "title": "System Prompt"
+            "description": "RFC 9535 JSONPath selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -6679,7 +6679,7 @@
                 "type": "null"
               }
             ],
-            "description": "Most recently recorded system prompt.",
+            "description": "System prompt from the first recorded model call.",
             "title": "System Prompt"
           },
           "task_id": {
@@ -6863,6 +6863,29 @@
           }
         },
         "title": "SessionUpdateRequest",
+        "type": "object"
+      },
+      "SessionWithNodesResponse": {
+        "description": "Session with nodes response.",
+        "properties": {
+          "nodes": {
+            "description": "Every node of the session, ordered by index ascending.",
+            "items": {
+              "$ref": "#/components/schemas/SessionNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "nodes"
+        ],
+        "title": "SessionWithNodesResponse",
         "type": "object"
       },
       "StaticCase": {
@@ -14615,6 +14638,50 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/full": {
+      "get": {
+        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by index.",
+        "operationId": "get_session_with_nodes_v1_sessions__session_id__full_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionWithNodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session With Nodes",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
     "/v1/sessions/{session_id}/nodes": {
       "get": {
         "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
@@ -14663,13 +14730,13 @@
             }
           },
           {
-            "description": "Include inputs, outputs, and attributes.",
+            "description": "Include reasoning, inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Include inputs, outputs, and attributes.",
+              "description": "Include reasoning, inputs, outputs, and attributes.",
               "title": "Include Payloads",
               "type": "boolean"
             }

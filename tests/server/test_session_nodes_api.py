@@ -132,11 +132,11 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
             "nodes": [
                 _node(
                     0,
-                    input_text="hi",
-                    output_text="hello",
-                    system_prompt="Follow policy.",
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
                     reasoning="The greeting matches the request.",
-                    inputs={"q": "hi"},
+                    inputs={"q": "hi", "system": "Follow policy."},
                 ),
                 _node(
                     1,
@@ -153,12 +153,12 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert len(items) == 2
     assert items[1]["parent_id"] == items[0]["id"]
     assert items[1]["cache_key"] is not None
-    assert items[0]["input_text"] == "hi"
-    assert items[0]["output_text"] == "hello"
-    assert items[0]["system_prompt"] == "Follow policy."
+    assert items[0]["input_text_selector"] == '$["q"]'
+    assert items[0]["output_text_selector"] == '$["answer"]'
+    assert items[0]["system_prompt_selector"] == '$["system"]'
     assert items[0]["reasoning"] == "The greeting matches the request."
     # Ingest responses populate payloads even without include_payloads.
-    assert items[0]["inputs"] == {"q": "hi"}
+    assert items[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
 async def test_ingest_nodes_unresolved_parent_index(
@@ -216,11 +216,11 @@ async def test_list_nodes_include_payloads_default_false(
             "nodes": [
                 _node(
                     0,
-                    input_text="hi",
-                    output_text="hello",
-                    system_prompt="Follow policy.",
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
                     reasoning="The greeting matches the request.",
-                    inputs={"q": "hi"},
+                    inputs={"q": "hi", "system": "Follow policy."},
                     attributes={"k": 1},
                 )
             ]
@@ -231,26 +231,42 @@ async def test_list_nodes_include_payloads_default_false(
     item = response.json()["items"][0]
     assert item["inputs"] is None
     assert item["attributes"] is None
-    assert item["input_text"] == "hi"
-    assert item["output_text"] == "hello"
-    assert item["system_prompt"] == "Follow policy."
-    assert item["reasoning"] == "The greeting matches the request."
+    assert item["input_text_selector"] == '$["q"]'
+    assert item["output_text_selector"] == '$["answer"]'
+    assert item["system_prompt_selector"] == '$["system"]'
+    assert item["reasoning"] is None
 
 
 async def test_list_nodes_include_payloads_true(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Populate inputs, outputs, and attributes when requested."""
+    """Populate reasoning, inputs, outputs, and attributes when requested."""
     await client.post(
         f"/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
+        json={
+            "nodes": [
+                _node(
+                    0,
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
+                    reasoning="Visible reasoning.",
+                    inputs={"q": "hi", "system": "Follow policy."},
+                    attributes={"k": 1},
+                )
+            ]
+        },
     )
     response = await client.get(
         f"/v1/sessions/{session_id}/nodes", params={"include_payloads": "true"}
     )
     assert response.status_code == 200
     item = response.json()["items"][0]
-    assert item["inputs"] == {"q": "hi"}
+    assert item["input_text_selector"] == '$["q"]'
+    assert item["output_text_selector"] == '$["answer"]'
+    assert item["system_prompt_selector"] == '$["system"]'
+    assert item["reasoning"] == "Visible reasoning."
+    assert item["inputs"] == {"q": "hi", "system": "Follow policy."}
     assert item["attributes"] == {"k": 1}
 
 
@@ -278,3 +294,63 @@ async def test_list_nodes_pagination_walks_pages(
             break
 
     assert collected == [0, 1, 2, 3, 4]
+
+
+async def test_get_session_with_nodes_returns_every_node_unpaginated(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Carry a whole session in one call, past the default page size."""
+    await client.post(
+        f"/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(index) for index in range(45)]},
+    )
+
+    response = await client.get(f"/v1/sessions/{session_id}/full")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["id"] == session_id
+    assert [node["index"] for node in body["nodes"]] == list(range(45))
+
+
+async def test_get_session_with_nodes_populates_payloads(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Populate inputs, outputs, and attributes without asking for them."""
+    await client.post(
+        f"/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
+    )
+
+    response = await client.get(f"/v1/sessions/{session_id}/full")
+
+    assert response.status_code == 200
+    node = response.json()["nodes"][0]
+    assert node["inputs"] == {"q": "hi"}
+    assert node["attributes"] == {"k": 1}
+
+
+async def test_get_session_with_nodes_resolves_parent_indexes(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Resolve parent ids to their indexes across the whole session."""
+    await client.post(
+        f"/v1/sessions/{session_id}/nodes",
+        json={"nodes": [_node(0), _node(1, parent_index=0)]},
+    )
+
+    response = await client.get(f"/v1/sessions/{session_id}/full")
+
+    assert response.status_code == 200
+    nodes = response.json()["nodes"]
+    assert nodes[0]["parent_index"] is None
+    assert nodes[1]["parent_index"] == 0
+
+
+async def test_get_session_with_nodes_session_not_found(
+    client: httpx.AsyncClient,
+) -> None:
+    """Report 404 for a session that does not exist."""
+    response = await client.get(f"/v1/sessions/{uuid.uuid4()}/full")
+
+    assert response.status_code == 404

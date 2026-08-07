@@ -103,9 +103,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    input_text: Mapped[str | None] = mapped_column(Text)
-    output_text: Mapped[str | None] = mapped_column(Text)
-    system_prompt: Mapped[str | None] = mapped_column(Text)
+    input_text_selector: Mapped[str | None] = mapped_column(Text)
+    output_text_selector: Mapped[str | None] = mapped_column(Text)
+    system_prompt_selector: Mapped[str | None] = mapped_column(Text)
     reasoning: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
@@ -167,9 +167,9 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.error = node.error
         self.started_at = node.started_at
         self.ended_at = node.ended_at
-        self.input_text = node.input_text
-        self.output_text = node.output_text
-        self.system_prompt = node.system_prompt
+        self.input_text_selector = node.input_text_selector
+        self.output_text_selector = node.output_text_selector
+        self.system_prompt_selector = node.system_prompt_selector
         self.reasoning = node.reasoning
         self.inputs = node.inputs
         self.outputs = node.outputs
@@ -236,10 +236,10 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
-            input_text=self.input_text,
-            output_text=self.output_text,
-            system_prompt=self.system_prompt,
-            reasoning=self.reasoning,
+            input_text_selector=self.input_text_selector,
+            output_text_selector=self.output_text_selector,
+            system_prompt_selector=self.system_prompt_selector,
+            reasoning=self.reasoning if include_payloads else None,
             inputs=self.inputs if include_payloads else None,
             outputs=self.outputs if include_payloads else None,
             requested_model=self.requested_model,

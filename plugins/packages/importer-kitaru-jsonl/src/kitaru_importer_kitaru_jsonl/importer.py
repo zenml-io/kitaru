@@ -22,7 +22,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from kitaru.api_models.v1.imports import ImportFailure
-from kitaru.task.importer import ParsedSession, SessionImportError, flatten_nodes
+from kitaru.task.importer import ImportedSession, SessionImportError, flatten_nodes
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
@@ -33,7 +33,7 @@ class InvalidImport(ValueError):
 
 def parse(
     content: bytes, params: dict[str, Any]
-) -> Iterator[ParsedSession | ImportFailure]:
+) -> Iterator[ImportedSession | ImportFailure]:
     """Parse one Kitaru session per JSONL record.
 
     Args:
@@ -66,7 +66,7 @@ def parse(
                 raise ValueError("record must be a JSON object")
             raw_external_id = value.get("external_id")
             external_id = str(raw_external_id) if raw_external_id is not None else None
-            session = ParsedSession.model_validate(value)
+            session = ImportedSession.model_validate(value)
             if any(node.index is None or node.children for node in session.nodes):
                 raise ValueError("nodes must use the flat indexed representation")
             flatten_nodes(session.nodes)

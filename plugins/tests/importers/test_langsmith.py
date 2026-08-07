@@ -23,7 +23,7 @@ import kitaru_importer_langsmith.importer as langsmith_module
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru_importer_langsmith.importer import (
     InvalidImport,
     LangSmithRunImporter,
@@ -74,12 +74,12 @@ def run(
 
 def sessions(
     content: bytes, params: dict[str, Any] | None = None
-) -> list[ParsedSession]:
-    """Return parsed sessions from one payload."""
+) -> list[ImportedSession]:
+    """Return imported sessions from one payload."""
     return [
         item
         for item in LangSmithRunImporter().parse(content, params or {})
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
 
@@ -94,8 +94,8 @@ def failures(
     ]
 
 
-def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
-    """Flatten parsed nodes depth-first."""
+def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten imported nodes depth-first."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
@@ -290,9 +290,9 @@ def test_isolates_trace_missing_selected_join_value() -> None:
         jsonl(valid, invalid), {"join_on": "extra.metadata.case_id"}
     )
 
-    assert [item.external_id for item in parsed if isinstance(item, ParsedSession)] == [
-        "project-1:case-1"
-    ]
+    assert [
+        item.external_id for item in parsed if isinstance(item, ImportedSession)
+    ] == ["project-1:case-1"]
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
     assert failure.external_id == "invalid-trace"
     assert "join_on path" in failure.error
@@ -393,11 +393,11 @@ def test_source_instance_override_supports_exports_without_project_id() -> None:
 
 
 def test_unified_parse_yields_worker_contract_models() -> None:
-    """Expose parsed sessions through the standard plugin entrypoint."""
+    """Expose imported sessions through the standard plugin entrypoint."""
     parsed = list(parse(jsonl(run("root", "trace", inputs="hello")), {}))
 
     assert len(parsed) == 1
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
 
 
 def test_rejects_oversized_payload(monkeypatch: pytest.MonkeyPatch) -> None:

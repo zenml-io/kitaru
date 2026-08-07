@@ -76,7 +76,7 @@ class SessionCreateRequest(RequestModel):
     )
     name: str | None = Field(default=None, description="Session name.")
     system_prompt: str | None = Field(
-        default=None, description="Most recently recorded system prompt."
+        default=None, description="System prompt from the first recorded model call."
     )
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
@@ -146,7 +146,7 @@ class SessionResponse(OwnedResponseModel):
     status: SessionStatus = Field(description="Session status.")
     name: str | None = Field(default=None, description="Session name.")
     system_prompt: str | None = Field(
-        default=None, description="Most recently recorded system prompt."
+        default=None, description="System prompt from the first recorded model call."
     )
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")

@@ -22,7 +22,7 @@ import pytest
 import kitaru_importer_braintrust.importer as braintrust_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
 from kitaru_importer_braintrust.importer import (
     BraintrustProjectLogImporter,
     InvalidImport,
@@ -43,19 +43,19 @@ def params(
 
 def sessions(
     content: bytes, importer_params: dict[str, Any] | None = None
-) -> list[ParsedSession]:
-    """Return successfully parsed sessions."""
+) -> list[ImportedSession]:
+    """Return successfully imported sessions."""
     return [
         item
         for item in BraintrustProjectLogImporter().parse(
             content, importer_params or params()
         )
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
 
-def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
-    """Flatten parsed nodes depth-first for assertions."""
+def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
@@ -143,7 +143,7 @@ def test_imports_full_project_log_with_hierarchy() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.external_id == "project-1:conversation-1"
     nodes = {node.external_id: node for node in flatten(session.nodes)}
     assert nodes["root:llm"].node_type is NodeType.LLM_CALL
@@ -173,7 +173,7 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     parsed = list(parse(json.dumps({"events": [root]}).encode(), {}))
 
     assert len(parsed) == 1
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
 
 
@@ -208,7 +208,7 @@ def test_unified_parse_isolates_invalid_token_metrics() -> None:
     parsed = list(parse(json.dumps({"events": [invalid, valid]}).encode(), {}))
 
     assert len(parsed) == 2
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:valid-session"
     assert isinstance(parsed[1], ImportFailure)
     assert "prompt_tokens" in parsed[1].error

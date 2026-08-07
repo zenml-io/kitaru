@@ -27,7 +27,7 @@ from kitaru.api_models.v1.base import (
     RequestModel,
     ResponseModel,
 )
-from kitaru.api_models.v1.session import TokenUsage
+from kitaru.api_models.v1.session import SessionResponse, TokenUsage
 
 
 class NodeType(StrEnum):
@@ -71,14 +71,17 @@ class SessionNodeCreateRequest(RequestModel):
     ended_at: AwareDatetime | None = Field(
         default=None, description="Time the node ended."
     )
-    input_text: str | None = Field(
-        default=None, description="Primary human-readable input to the node."
+    input_text_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting display text from node inputs.",
     )
-    output_text: str | None = Field(
-        default=None, description="Primary human-readable output from the node."
+    output_text_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting display text from node outputs.",
     )
-    system_prompt: str | None = Field(
-        default=None, description="System prompt used by the model call."
+    system_prompt_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting the system prompt from node inputs.",
     )
     reasoning: str | None = Field(
         default=None, description="Visible reasoning produced by the model call."
@@ -107,7 +110,8 @@ class SessionNodeListParams(CursorParams):
     """Session node list params."""
 
     include_payloads: bool = Field(
-        default=False, description="Include inputs, outputs, and attributes."
+        default=False,
+        description="Include reasoning, inputs, outputs, and attributes.",
     )
 
 
@@ -166,17 +170,21 @@ class SessionNodeResponse(ResponseModel):
         default=None, description="Time the node started."
     )
     ended_at: datetime | None = Field(default=None, description="Time the node ended.")
-    input_text: str | None = Field(
-        default=None, description="Primary human-readable input to the node."
+    input_text_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting display text from node inputs.",
     )
-    output_text: str | None = Field(
-        default=None, description="Primary human-readable output from the node."
+    output_text_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting display text from node outputs.",
     )
-    system_prompt: str | None = Field(
-        default=None, description="System prompt used by the model call."
+    system_prompt_selector: str | None = Field(
+        default=None,
+        description="RFC 9535 JSONPath selecting the system prompt from node inputs.",
     )
     reasoning: str | None = Field(
-        default=None, description="Visible reasoning produced by the model call."
+        default=None,
+        description="Visible reasoning, null unless payloads are included.",
     )
     inputs: Any = Field(
         default=None, description="Node inputs, null unless include_payloads."
@@ -204,3 +212,12 @@ class SessionNodeResponse(ResponseModel):
         description="Arbitrary span attributes, null unless include_payloads.",
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+
+
+class SessionWithNodesResponse(ResponseModel):
+    """Session with nodes response."""
+
+    session: SessionResponse = Field(description="Session.")
+    nodes: list[SessionNodeResponse] = Field(
+        description="Every node of the session, ordered by index ascending."
+    )
