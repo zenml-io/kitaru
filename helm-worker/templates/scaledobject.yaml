@@ -1,0 +1,27 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "kitaru-worker.fullname" . }}
+  labels:
+    {{- include "kitaru-worker.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "kitaru-worker.fullname" . }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  triggers:
+    - type: metrics-api
+      metadata:
+        url: "{{ .Values.kitaru.serverURL }}/v1/worker-pools/{{ .Values.pool.name }}/stats"
+        valueLocation: "pending_tasks"
+        targetValue: {{ .Values.keda.tasksPerReplica | quote }}
+        activationTargetValue: {{ .Values.keda.activationThreshold | quote }}
+        authMode: "bearer"
+      authenticationRef:
+        name: {{ include "kitaru-worker.fullname" . }}
+{{- end }}

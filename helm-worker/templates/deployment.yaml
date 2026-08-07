@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kitaru-worker.fullname" . }}
+  labels:
+    {{- include "kitaru-worker.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kitaru-worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      {{- with .Values.worker.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kitaru-worker.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.Version }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - kitaru
+            - worker
+            - start
+          env:
+            - name: KITARU_API_URL
+              value: {{ required "kitaru.serverURL is required" .Values.kitaru.serverURL | quote }}
+            - name: KITARU_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kitaru-worker.apiKeySecretName" . }}
+                  key: {{ include "kitaru-worker.apiKeySecretKey" . }}
+            - name: KITARU_WORKER_POOL
+              value: {{ required "pool.name is required" .Values.pool.name | quote }}
+            - name: KITARU_WORKER_CONCURRENCY
+              value: {{ .Values.worker.concurrency | quote }}
+            - name: KITARU_WORKER_DRAIN_TIMEOUT
+              value: {{ .Values.worker.drainTimeoutSeconds | quote }}
+            {{- with .Values.worker.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

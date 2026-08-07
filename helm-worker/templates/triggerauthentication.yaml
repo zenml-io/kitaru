@@ -1,0 +1,13 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "kitaru-worker.fullname" . }}
+  labels:
+    {{- include "kitaru-worker.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    - parameter: bearerToken
+      name: {{ include "kitaru-worker.apiKeySecretName" . }}
+      key: {{ include "kitaru-worker.apiKeySecretKey" . }}
+{{- end }}
