@@ -211,12 +211,25 @@ publish.
 - **Session `expected` field removed** — never documented; no impact.
 - **Perf hardening** (#683 lock contention, #686 node-read batching) —
   no docs impact. Agent-guidance refresh merged.
-- **In-flight branches to watch**: `codex/login-local-runtime`
-  (movement on open item 3, `kitaru login --local`),
-  `feat/built-in-deterministic-evaluators` (likely grows the built-in
-  evaluator set), `codex/surface-session-prompts`,
-  `codex/v2-importer-braintrust-otlp` (still cooking), and
-  `misc/improvements`.
+- **In-flight branches to watch**: `feat/built-in-deterministic-evaluators`
+  (likely grows the built-in evaluator set), `codex/surface-session-prompts`,
+  and `codex/v2-importer-braintrust-otlp` (still cooking).
+
+## Aug 7 afternoon deltas (docs updated Aug 7)
+
+- **`kitaru login --local` shipped (#685)** — see the resolved item 3
+  above; installation and Docker pages rewritten around it, which also
+  removes the getting-started dependency on cloning the repo for a
+  compose file.
+- **Worker Docker images (#691)** — release now publishes
+  `zenmldocker/kitaru-worker:<version>|latest`; mentioned in
+  `deploy/workers.md`.
+- **Misc (#690) / analytics naming** — API models gained minor fields;
+  no docs impact found.
+- The team edited `docs/book/getting-started/installation.md` and
+  `deploy/docker.md` on the mainline's stale docs tree for #685 —
+  expect merge overlap with our versions of those pages; ours carry the
+  same facts minus the unverified "dashboard" claim.
 
 ## Claims that need verification before publish
 
@@ -242,11 +255,16 @@ publish.
    whichever side is stale. Also: `helm/Chart.yaml` description still
    says "Durable execution for AI agents" — banned framing; fix in the
    chart repo-side.
-3. **`kitaru login --local`** — the command exists, but the canonical
-   example calls it work-in-progress and connects via `KITARU_API_URL`
-   only. Docs (installation, README) now use the env-var path for local
-   and `kitaru login <url>` for shared servers. Re-check login UX before
-   launch.
+3. ~~`kitaru login --local`~~ — **shipped Aug 7 (#685)**, Docker-backed:
+   provisions version-pinned server + Postgres via a bundled Compose
+   file, new `kitaru local logs` noun, `kitaru logout [--volumes]`
+   lifecycle, `--upgrade`, `KITARU_LOCAL_IMAGE` override. Docs
+   (installation, deploy/docker, README) now lead local setup with it.
+   Note: the team's copy says it "opens the dashboard" and links
+   **Kitaru Cloud (cloud.zenml.io) signup** — no dashboard-serving code
+   exists in the server; our docs say "opens http://localhost:8000"
+   without the dashboard claim, and the Cloud link feeds open
+   question c.
 4. **`kitaru evaluator test` / `importer test` exact flags** — commands
    exist with `--entrypoint` (+ `--payload` for importers); still not run
    end to end by us. The canonical example uses the same shapes.

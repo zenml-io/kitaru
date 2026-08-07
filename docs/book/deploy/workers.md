@@ -7,7 +7,8 @@ icon: gears
 
 [Workers](../concepts/workers.md) are where everything executes. In
 production you run them as ordinary long-lived processes — a systemd
-unit, a container, a Kubernetes Deployment — one per environment your
+unit, a container (the published `zenmldocker/kitaru-worker` image works
+out of the box), a Kubernetes Deployment — one per environment your
 agents' code needs.
 
 The rule of thumb: **a worker must be able to run what it claims.** An

@@ -41,30 +41,36 @@ API models — which is all a production service needs to record sessions.
 
 ## Start a local server
 
-The server is FastAPI + Postgres. For local use, the repository ships a
-Docker Compose file:
+The server is FastAPI + Postgres, and the CLI can run both for you —
+all it needs is Docker with the Compose v2 plugin:
 
 ```bash
-git clone https://github.com/zenml-io/kitaru.git
-cd kitaru
-docker compose up -d
+kitaru login --local
 ```
 
-The server listens on `http://localhost:8000`. For a shared deployment —
-your own Postgres, real auth, TLS — see
-[Run the Server](../deploy/README.md).
+This provisions a server and PostgreSQL pinned to your installed Kitaru
+version, waits for `http://localhost:8000` to become healthy, selects it
+as your active server, and opens it in your browser. The lifecycle is
+three commands:
+
+```bash
+kitaru local logs            # inspect (add --service server --follow)
+kitaru logout                # stop the containers; the database persists
+kitaru logout --volumes      # stop and delete the database — a clean reset
+```
+
+After upgrading the `kitaru` package, upgrade the local server to match
+with `kitaru login --local --upgrade` — a plain login deliberately never
+replaces the server image. Prefer to manage Docker yourself, or need a
+shared deployment with your own Postgres, real auth, and TLS? See
+[Docker](../deploy/docker.md) and [Run the Server](../deploy/README.md).
 
 ## Connect
 
-The local Compose server accepts local requests without a login, so
-pointing your environment at it is enough:
+`kitaru login --local` already connected you — `kitaru status` confirms
+it.
 
-```bash
-export KITARU_API_URL="http://localhost:8000"
-kitaru status
-```
-
-Against a shared server, log in instead — `kitaru login <url>` — or, for
+Against a shared server, log in — `kitaru login <url>` — or, for
 non-interactive use (CI, production services), create an API key and set
 two environment variables that the SDK, the CLI, and workers all read:
 

@@ -9,6 +9,27 @@ The server is one container plus Postgres. Compose runs both on a single
 host; for anything bigger, run the server container against a managed
 Postgres and keep the same environment variables.
 
+## CLI-managed local deployment
+
+For one local deployment per user, let the CLI own the lifecycle:
+
+```bash
+kitaru login --local
+```
+
+Requires Docker with the Compose v2 plugin. The CLI runs the
+version-matched `zenmldocker/kitaru-server` image with PostgreSQL kept
+private to the Compose network, stores generated runtime secrets in the
+Kitaru configuration directory, and opens `http://localhost:8000` once
+healthy. Existing images are reused without an automatic pull —
+`kitaru login --local --upgrade` is the explicit upgrade path, and
+`KITARU_LOCAL_IMAGE` points source builds at a locally built image.
+`kitaru local logs` inspects it; `kitaru logout` stops it (add
+`--volumes` to delete the database).
+
+The rest of this page covers manually managed deployments, which are
+separate from the CLI-owned one.
+
 ## Docker Compose
 
 The repository ships a Compose file that builds the server and starts
