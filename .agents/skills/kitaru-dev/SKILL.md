@@ -32,6 +32,7 @@ Use this when you need the command catalog beyond the daily loop in the root `AG
 - `just example-coverage-audit`: validate `examples/example-coverage.yaml` metadata and waivers
 - `just build`: build wheel and sdist locally
 - `just cli-artifact-smoke`: verify clean CLI wheel and source installations
+- `just plugin-artifact-smoke`: build every default-plugin wheel, load its configured entrypoints, and verify default registration
 - `just mcp-schema-check`: verify public MCP registry budgets and committed snapshots
 - `just mcp-wheel-smoke`: verify clean base and `[mcp]` installs from the wheel under `dist/`
 - `just migration-check`: compare Alembic migrations with the ORM schema; requires PostgreSQL
@@ -68,7 +69,7 @@ Agent-facing commands use the version-1 structured contract. Success documents i
 
 For agent-facing use, prefer `--output json --machine --non-interactive --no-browser`. A deliberate dashboard or device-login handoff is the exception.
 
-Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` targets an already-running server at `http://localhost:8000`; it never starts a local server.
+Document login consistently: `kitaru login SERVER` targets the full managed or self-hosted instance URL, while `kitaru login --local` provisions or reuses the CLI-owned Docker Compose deployment at `http://localhost:8000`. `kitaru logout` stops that deployment when it is selected, and `kitaru logout --volumes` also deletes its PostgreSQL data.
 
 `kitaru status` shows the selected server, provenance, credential state, compatibility, and live-worker count. `kitaru info` adds local package, Python, platform, and server details. `kitaru doctor` runs independent local, server, authentication, and tooling checks without stopping after the first failure. These commands never print secret values.
 

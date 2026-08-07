@@ -95,6 +95,10 @@ build:
 cli-artifact-smoke:
     uv run --no-sync python scripts/smoke_cli_artifacts.py
 
+# Verify default plugin discovery and registration from isolated wheels
+plugin-artifact-smoke:
+    uv run --no-sync python scripts/smoke_plugin_artifacts.py
+
 # Verify the measured MCP schemas and committed snapshots
 mcp-schema-check:
     uv run --extra mcp python scripts/report_mcp_schema.py --check

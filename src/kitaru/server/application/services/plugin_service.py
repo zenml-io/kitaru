@@ -27,7 +27,7 @@ from kitaru.server.application.models.plugin import (
 )
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
-from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
+from kitaru.server.domain.names import NAMESPACE_SEPARATOR, RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import (
     Plugin,
     PluginKind,
@@ -71,13 +71,12 @@ class PluginService:
         Raises:
             DuplicatePluginName: The (kind, name) pair is already registered.
             InvalidPluginProvider: The kind is evaluator and provider is set.
-            ReservedPluginName: The name starts with the reserved default-plugin
-                prefix.
+            ReservedPluginName: The name is under the reserved namespace.
 
         Returns:
             Created plugin.
         """
-        if command.name.startswith(RESERVED_PLUGIN_NAME_PREFIX):
+        if command.name.startswith(RESERVED_NAMESPACE + NAMESPACE_SEPARATOR):
             raise ReservedPluginName(command.name)
         plugin = Plugin(
             owner_id=actor.account.id,
@@ -192,8 +191,10 @@ class PluginService:
         if self._analytics is not None:
             self._analytics.track(
                 actor.account.id,
-                AnalyticsEvent.PLUGIN_REGISTERED,
-                analytics_events.build_plugin_registered_properties(self.kind, source),
+                AnalyticsEvent.PLUGIN_VERSION_REGISTERED,
+                analytics_events.build_plugin_version_registered_properties(
+                    self.kind, source
+                ),
             )
         return version
 

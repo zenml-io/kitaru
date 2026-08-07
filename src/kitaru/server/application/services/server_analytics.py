@@ -37,13 +37,20 @@ current_actor: ContextVar[Account | None] = ContextVar(
 
 
 def build_analytics_context(
-    server_id: uuid.UUID, auth_scheme: AuthScheme
+    server_id: uuid.UUID,
+    auth_scheme: AuthScheme,
+    organization_id: uuid.UUID | None = None,
+    organization_name: str = "",
+    workspace_name: str = "",
 ) -> dict[str, Any]:
     """Build the analytics context for this process.
 
     Args:
         server_id: Persisted server id.
         auth_scheme: Active authentication scheme.
+        organization_id: Control plane organization id.
+        organization_name: Control plane organization name.
+        workspace_name: Control plane workspace name.
 
     Returns:
         Context values merged into every message.
@@ -60,6 +67,12 @@ def build_analytics_context(
     # id assigned by the control plane.
     if auth_scheme is AuthScheme.CONTROL_PLANE:
         context["workspace_id"] = server_id
+        if organization_id:
+            context["organization_id"] = organization_id
+        if organization_name:
+            context["organization_name"] = organization_name
+        if workspace_name:
+            context["workspace_name"] = workspace_name
     return context
 
 

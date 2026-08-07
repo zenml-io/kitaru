@@ -68,6 +68,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "investigation",
         "job",
         "login",
+        "local",
         "logout",
         "schema",
         "session",
@@ -109,6 +110,11 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert any(
         parameter["name"] == "--api-key-stdin" for parameter in login["parameters"]
     )
+    assert any(parameter["name"] == "--upgrade" for parameter in login["parameters"])
+
+    [local_logs] = describe_schema(("local", "logs"))
+    assert local_logs["streams"] is True
+    assert local_logs["side_effects"]["executes_local_code"] is True
 
     [agent_register] = describe_schema(("agent", "register"))
     assert agent_register["mutating"] is True

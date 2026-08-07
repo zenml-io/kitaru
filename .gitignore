@@ -32,6 +32,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+plugins/candidate-wheels/*
+!plugins/candidate-wheels/.gitkeep
 downloads/
 eggs/
 .eggs/

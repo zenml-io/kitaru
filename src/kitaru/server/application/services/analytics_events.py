@@ -263,7 +263,7 @@ def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any
     }
 
 
-def build_plugin_registered_properties(
+def build_plugin_version_registered_properties(
     kind: PluginKind, source: PluginSource
 ) -> dict[str, Any]:
     """Build the properties of a plugin version registration.

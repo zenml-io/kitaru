@@ -593,6 +593,19 @@ async def test_update_session_omitted_outputs_unchanged(
     assert body["name"] == "renamed"
 
 
+async def test_update_session_rejects_system_prompt(
+    client: httpx.AsyncClient,
+) -> None:
+    """Reject system prompts on the session update API."""
+    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    response = await client.patch(
+        f"/v1/sessions/{created['id']}",
+        json={"system_prompt": "Replacement policy."},
+    )
+
+    assert response.status_code == 422
+
+
 async def test_update_session_status_cannot_be_cleared(
     client: httpx.AsyncClient,
 ) -> None:

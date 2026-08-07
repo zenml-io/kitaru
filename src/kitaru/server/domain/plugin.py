@@ -30,8 +30,8 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import (
-    RESERVED_PLUGIN_NAME_PREFIX,
-    PluginName,
+    RESERVED_NAMESPACE,
+    NamespacedName,
     VersionName,
 )
 from kitaru.source_refs import parse_source_ref
@@ -74,17 +74,16 @@ class DuplicatePluginName(ConflictError):
 
 
 class ReservedPluginName(ValidationError):
-    """Raised when a plugin name uses the reserved default-plugin prefix."""
+    """Raised when a plugin name uses the reserved namespace."""
 
     def __init__(self, name: str) -> None:
         """Initialize the error.
 
         Args:
-            name: Name that uses the reserved prefix.
+            name: Name that uses the reserved namespace.
         """
         super().__init__(
-            f"Plugin name '{name}' uses the reserved prefix "
-            f"'{RESERVED_PLUGIN_NAME_PREFIX}'"
+            f"Plugin name '{name}' uses the reserved namespace '{RESERVED_NAMESPACE}'"
         )
 
 
@@ -274,7 +273,7 @@ class Plugin(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID | None
     kind: PluginKind
-    name: PluginName
+    name: NamespacedName
     description: str | None = None
     provider: str | None = None
     logo_url: str | None = None
