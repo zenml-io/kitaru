@@ -129,3 +129,23 @@ async def test_send_failure_is_swallowed() -> None:
 
     client.track(uuid.uuid4(), "Test event")
     await client.aclose()
+
+
+async def test_set_context_merges_into_tracks_only() -> None:
+    """Merge the context into track properties and leave identify traits alone."""
+    client = AnalyticsClient()
+    requests = record_requests(client)
+    server_id = uuid.uuid4()
+
+    client.set_context({"server_id": server_id, "environment": "docker"})
+    client.track(uuid.uuid4(), "Test event", {"key": "value"})
+    client.identify(uuid.uuid4(), {"email": "alice@example.com"})
+    await client.aclose()
+
+    track, identify = json.loads(requests[0].content)
+    assert track["properties"] == {
+        "key": "value",
+        "server_id": str(server_id),
+        "environment": "docker",
+    }
+    assert identify["traits"] == {"email": "alice@example.com"}

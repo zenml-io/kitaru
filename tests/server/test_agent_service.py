@@ -14,6 +14,7 @@
 """Tests for agent use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -23,10 +24,12 @@ from conftest import (
     create_agent,
     create_agent_version,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentInUse, AgentNotFound, DuplicateAgentName
 from kitaru.server.domain.base import ValidationError
@@ -34,6 +37,29 @@ from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 FOREIGN_ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -230,3 +256,25 @@ async def test_delete_agent_in_use(
     )
     with pytest.raises(AgentInUse, match=f"Agent {created.id} has versions"):
         await service.delete_agent(created.id, actor=ACTOR)
+
+
+async def test_create_agent_tracks_agent_created(
+    repository: FakeAgentRepository,
+) -> None:
+    """Fire AGENT_CREATED with no properties beyond the commons."""
+    analytics = _RecordingAnalytics()
+    service = AgentService(repository=repository, analytics=analytics)
+
+    await service.create_agent(name="assistant", description=None, actor=ACTOR)
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.AGENT_CREATED
+    assert properties == {}
+
+
+async def test_create_agent_without_analytics_tracker(service: AgentService) -> None:
+    """Create an agent normally when no analytics tracker is configured."""
+    agent = await service.create_agent(name="assistant", description=None, actor=ACTOR)
+    assert agent.owner_id == ACTOR.account.id

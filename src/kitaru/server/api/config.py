@@ -22,9 +22,6 @@ from pydantic_settings import SettingsConfigDict
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.config import Settings
 
-# Sentinel meaning the server has not been enrolled with a control plane.
-UNSET_SERVER_ID = uuid.UUID(int=0)
-
 
 def _get_otel_alias(name: str) -> AliasChoices:
     """Get the alias choices for an OTEL settings field.
@@ -55,7 +52,7 @@ class APISettings(Settings):
 
     AUTH_SCHEME: AuthScheme = AuthScheme.NONE
 
-    SERVER_ID: uuid.UUID = UNSET_SERVER_ID
+    SERVER_ID: uuid.UUID | None = None
     SERVER_URL: str = ""
 
     CONTROL_PLANE_API_URL: str = ""
@@ -161,7 +158,7 @@ class APISettings(Settings):
         if self.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             if not self.CONTROL_PLANE_API_URL:
                 raise ValueError("Set KITARU_SERVER_CONTROL_PLANE_API_URL")
-            if self.SERVER_ID == UNSET_SERVER_ID:
+            if self.SERVER_ID is None:
                 raise ValueError("Set KITARU_SERVER_SERVER_ID")
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")

@@ -846,7 +846,9 @@
           "input",
           "output",
           "error",
-          "metadata"
+          "metadata",
+          "attributes",
+          "model_params"
         ],
         "title": "AnnotationSelectorPart",
         "type": "string"
@@ -2200,6 +2202,18 @@
             "description": "Evaluator description.",
             "title": "Description"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -2250,6 +2264,18 @@
             "title": "Latest Version",
             "type": "integer"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -2288,6 +2314,7 @@
           "id",
           "name",
           "description",
+          "logo_url",
           "metadata",
           "latest_version"
         ],
@@ -2309,6 +2336,18 @@
             ],
             "description": "New evaluator description.",
             "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
           },
           "metadata": {
             "anyOf": [
@@ -2469,6 +2508,12 @@
         "additionalProperties": false,
         "description": "Experiment create request.",
         "properties": {
+          "agent_id": {
+            "description": "Agent the experiment's runs belong to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
           "description": {
             "anyOf": [
               {
@@ -2520,6 +2565,7 @@
         },
         "required": [
           "name",
+          "agent_id",
           "evaluators"
         ],
         "title": "ExperimentCreateRequest",
@@ -2528,6 +2574,12 @@
       "ExperimentResponse": {
         "description": "Experiment response.",
         "properties": {
+          "agent_id": {
+            "description": "Agent the experiment's runs belong to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
           "created": {
             "description": "Creation time.",
             "format": "date-time",
@@ -2600,6 +2652,7 @@
           "id",
           "name",
           "description",
+          "agent_id",
           "override",
           "tool_policy",
           "evaluators"
@@ -3117,6 +3170,18 @@
             "description": "Importer description.",
             "title": "Description"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Importer logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -3179,6 +3244,18 @@
             "title": "Latest Version",
             "type": "integer"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Importer logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -3230,6 +3307,7 @@
           "name",
           "description",
           "provider",
+          "logo_url",
           "metadata",
           "latest_version"
         ],
@@ -3251,6 +3329,18 @@
             ],
             "description": "New importer description.",
             "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
           },
           "metadata": {
             "anyOf": [
@@ -12037,7 +12127,7 @@
         ]
       },
       "post": {
-        "description": "Create an experiment.\n\nClients observe HTTP 201 on success, 404 when an evaluator config names\nan unknown evaluator or version, 409 when the name is already\nregistered, and 422 on invalid input, including a duplicate resolved\nevaluator version.\n\nArgs:\n    body: Experiment create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment.",
+        "description": "Create an experiment.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist\nor an evaluator config names an unknown evaluator or version, 409 when\nthe name is already registered, and 422 on invalid input, including a\nduplicate resolved evaluator version.\n\nArgs:\n    body: Experiment create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment.",
         "operationId": "create_experiment_v1_experiments_post",
         "requestBody": {
           "content": {
@@ -12210,7 +12300,7 @@
     },
     "/v1/experiments/{experiment_id}/runs": {
       "post": {
-        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, and 422\nwhen the cohort version has no sessions or the resolved agent version\nhas no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
+        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, and 422\nwhen the cohort version has no sessions, the cohort version or agent\nversion belongs to another agent, or the resolved agent version has no\nrun spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
         "operationId": "start_run_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {

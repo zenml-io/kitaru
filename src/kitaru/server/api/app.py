@@ -39,6 +39,9 @@ from kitaru.server.adapters.db.repositories.account_repository import (
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
+from kitaru.server.adapters.db.repositories.server_settings_repository import (
+    SQLServerSettingsRepository,
+)
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -71,11 +74,16 @@ from kitaru.server.adapters.rest.routers.auth import TokenGrantError
 from kitaru.server.api import health
 from kitaru.server.api.bootstrap import (
     ensure_default_account,
+    ensure_server_id,
     register_default_plugins,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
+from kitaru.server.application.services.server_analytics import (
+    ServerAnalytics,
+    build_analytics_context,
+)
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -236,6 +244,16 @@ def create_app(settings: APISettings) -> FastAPI:
         app.state.database = database
         if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             app.state.control_plane_client = ControlPlaneClient(settings)
+        async for session in database.get_async_session():
+            server_id = await ensure_server_id(
+                SQLServerSettingsRepository(session), settings.SERVER_ID
+            )
+            await session.commit()
+            analytics.set_context(
+                build_analytics_context(
+                    server_id=server_id, auth_scheme=settings.AUTH_SCHEME
+                )
+            )
         # The control plane owns every account under its auth scheme, so there
         # is no local default account to fall back on.
         if settings.AUTH_SCHEME is not AuthScheme.CONTROL_PLANE:
@@ -244,6 +262,7 @@ def create_app(settings: APISettings) -> FastAPI:
                     SQLAccountRepository(session),
                     settings.DEFAULT_ACCOUNT_NAME,
                     settings.DEFAULT_ACCOUNT_PASSWORD,
+                    ServerAnalytics(client=analytics, session=session),
                 )
                 await session.commit()
         async for session in database.get_async_session():

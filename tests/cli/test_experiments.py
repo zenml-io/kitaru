@@ -56,6 +56,7 @@ class StubExperimentClient:
     """Protocol-shaped client recording experiment and evaluator SDK calls."""
 
     def __init__(self) -> None:
+        self.agent = StubModel(uuid.uuid4(), {"name": "assistant"})
         self.quality = SimpleNamespace(
             id=uuid.uuid4(), name="quality", latest_version=2
         )
@@ -75,6 +76,7 @@ class StubExperimentClient:
                 "evaluators": [{"evaluator": "quality", "version": 2, "params": {}}],
             },
         )
+        self.agent_lookups = 0
         self.evaluator_lookups = 0
         self.experiment_lookups = 0
         self.create_calls: list[ExperimentCreateRequest] = []
@@ -82,8 +84,27 @@ class StubExperimentClient:
         self.update_calls: list[tuple[uuid.UUID, ExperimentUpdateRequest]] = []
         self.deleted: list[uuid.UUID] = []
         self.update_error: Exception | None = None
+        self.agents = self._Agents(self)
         self.evaluators = self._Evaluators(self)
         self.experiments = self._Experiments(self)
+
+    class _Agents:
+        def __init__(self, owner: "StubExperimentClient") -> None:
+            self.owner = owner
+
+        async def get(self, agent_id: uuid.UUID) -> StubModel:
+            self.owner.agent_lookups += 1
+            assert agent_id == self.owner.agent.id
+            return self.owner.agent
+
+        async def iter(self):
+            self.owner.agent_lookups += 1
+            yield self.owner.agent
+
+        async def list(self, params: Any) -> Any:
+            assert params.size == 2
+            self.owner.agent_lookups += 1
+            return SimpleNamespace(items=[self.owner.agent], next_cursor=None)
 
     class _Evaluators:
         def __init__(self, owner: "StubExperimentClient") -> None:
@@ -152,6 +173,7 @@ async def test_create_parses_inline_config_and_pins_exact_evaluators() -> None:
     result = await experiments.create_experiment(
         client,
         "nightly",
+        agent=str(client.agent.id),
         description="Nightly regression",
         override='{"model":"gpt-5","model_params":{"temperature":0.1}}',
         tool_policy=(
@@ -166,6 +188,7 @@ async def test_create_parses_inline_config_and_pins_exact_evaluators() -> None:
     assert isinstance(request, ExperimentCreateRequest)
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "name": "nightly",
+        "agent_id": str(client.agent.id),
         "description": "Nightly regression",
         "override": {
             "model": "gpt-5",
@@ -198,6 +221,7 @@ async def test_create_omits_tool_policy_for_server_default() -> None:
     result = await experiments.create_experiment(
         client,
         "default-policy",
+        agent="assistant",
         description=None,
         override=None,
         tool_policy=None,
@@ -208,6 +232,7 @@ async def test_create_omits_tool_policy_for_server_default() -> None:
     [request] = client.create_calls
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "name": "default-policy",
+        "agent_id": str(client.agent.id),
         "evaluators": [{"evaluator": "quality", "version": 2, "params": {}}],
     }
     assert result.item["tool_policy"] == {
@@ -278,6 +303,7 @@ async def test_create_rejects_duplicate_selected_and_resolved_evaluators() -> No
         await experiments.create_experiment(
             client,
             "duplicate",
+            agent="assistant",
             description=None,
             override=None,
             tool_policy=None,
@@ -288,6 +314,7 @@ async def test_create_rejects_duplicate_selected_and_resolved_evaluators() -> No
         await experiments.create_experiment(
             client,
             "alias",
+            agent="assistant",
             description=None,
             override=None,
             tool_policy=None,
@@ -474,6 +501,8 @@ def test_public_experiment_argv_covers_all_crud_commands(
                 "experiment",
                 "create",
                 "nightly",
+                "--agent",
+                "assistant",
                 "--evaluator",
                 "quality@latest",
                 "--override",

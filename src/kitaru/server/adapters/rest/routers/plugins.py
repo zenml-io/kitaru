@@ -31,6 +31,7 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.importer import ImporterCreateRequest, ImporterUpdateRequest
 from kitaru.api_models.v1.plugin import PluginSource as WirePluginSource
 from kitaru.server.adapters.rest.mapping.plugins import (
+    plugin_create_to_command,
     plugin_list_params_to_filter,
     plugin_source_to_domain,
     plugin_to_response,
@@ -64,14 +65,7 @@ async def create_plugin(
     Returns:
         Created plugin response.
     """
-    provider = body.provider if isinstance(body, ImporterCreateRequest) else None
-    plugin = await service.create_plugin(
-        name=body.name,
-        description=body.description,
-        provider=provider,
-        metadata=body.metadata,
-        actor=actor,
-    )
+    plugin = await service.create_plugin(plugin_create_to_command(body), actor=actor)
     return plugin_to_response(plugin, response_class)
 
 

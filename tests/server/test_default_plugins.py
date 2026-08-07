@@ -33,6 +33,7 @@ DEFINITIONS = (
         name=f"{RESERVED_PLUGIN_NAME_PREFIX}importer",
         description="Test importer.",
         provider="langfuse",
+        logo_url="https://example.com/langfuse.svg",
         entrypoint="package.importer:parse",
         requirement="kitaru-langfuse-importer==1.0.0",
         display_version="1.0.0",
@@ -77,6 +78,7 @@ async def test_register_creates_default_plugins(
         assert plugin.owner_id is None
         assert plugin.description == definition.description
         assert plugin.provider == definition.provider
+        assert plugin.logo_url == definition.logo_url
         assert plugin.latest_version == 1
         version = await repository.get_version(plugin.id, 1)
         assert isinstance(version.source, PackagePluginSource)
