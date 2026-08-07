@@ -103,11 +103,15 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    input_text_selector: Mapped[str | None] = mapped_column(Text)
+    output_text_selector: Mapped[str | None] = mapped_column(Text)
+    system_prompt_selector: Mapped[str | None] = mapped_column(Text)
+    reasoning: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     requested_model: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
-    provider: Mapped[str | None] = mapped_column(Text)
+    model_provider: Mapped[str | None] = mapped_column(Text)
     input_tokens: Mapped[int | None] = mapped_column(BigInteger)
     output_tokens: Mapped[int | None] = mapped_column(BigInteger)
     cached_input_tokens: Mapped[int | None] = mapped_column(BigInteger)
@@ -163,11 +167,15 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.error = node.error
         self.started_at = node.started_at
         self.ended_at = node.ended_at
+        self.input_text_selector = node.input_text_selector
+        self.output_text_selector = node.output_text_selector
+        self.system_prompt_selector = node.system_prompt_selector
+        self.reasoning = node.reasoning
         self.inputs = node.inputs
         self.outputs = node.outputs
         self.requested_model = node.requested_model
         self.model = node.model
-        self.provider = node.provider
+        self.model_provider = node.model_provider
         self.input_tokens = tokens.input_tokens if tokens is not None else None
         self.output_tokens = tokens.output_tokens if tokens is not None else None
         self.cached_input_tokens = (
@@ -228,11 +236,15 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,
+            input_text_selector=self.input_text_selector,
+            output_text_selector=self.output_text_selector,
+            system_prompt_selector=self.system_prompt_selector,
+            reasoning=self.reasoning if include_payloads else None,
             inputs=self.inputs if include_payloads else None,
             outputs=self.outputs if include_payloads else None,
             requested_model=self.requested_model,
             model=self.model,
-            provider=self.provider,
+            model_provider=self.model_provider,
             tokens=tokens,
             cost=self.cost,
             model_params=self.model_params,

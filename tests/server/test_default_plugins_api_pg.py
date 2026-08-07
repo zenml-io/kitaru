@@ -18,7 +18,7 @@ import pytest
 from conftest import db_settings, lifespan_client
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import DefaultPluginDefinition
-from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
+from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import PluginKind
 
 
@@ -28,12 +28,12 @@ async def test_default_plugins_are_registered_at_startup(
     """List a catalog-declared default plugin with a null owner after startup."""
     definition = DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
+        name=f"{RESERVED_NAMESPACE}/evaluator",
         description="Test evaluator.",
         provider=None,
-        entrypoint="evaluate",
-        content=b"def evaluate(): ...",
-        version=1,
+        entrypoint="package.evaluator:evaluate",
+        requirement="kitaru-evaluator==1.0.0",
+        display_version="1.0.0",
     )
     monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", (definition,))
 

@@ -71,13 +71,30 @@ class SessionNodeCreateRequest(RequestModel):
     ended_at: AwareDatetime | None = Field(
         default=None, description="Time the node ended."
     )
+    input_text_selector: str | None = Field(
+        default=None,
+        description="RFC 6901 JSON Pointer selecting display text from node inputs.",
+    )
+    output_text_selector: str | None = Field(
+        default=None,
+        description="RFC 6901 JSON Pointer selecting display text from node outputs.",
+    )
+    system_prompt_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
+        ),
+    )
+    reasoning: str | None = Field(
+        default=None, description="Visible reasoning produced by the model call."
+    )
     inputs: Any = Field(description="Node inputs.")
     outputs: Any = Field(description="Node outputs.")
     requested_model: str | None = Field(
         default=None, description="Model requested by the call."
     )
     model: str | None = Field(default=None, description="Model that served the call.")
-    provider: str | None = Field(default=None, description="Model provider.")
+    model_provider: str | None = Field(default=None, description="Model provider.")
     tokens: TokenUsage | None = Field(default=None, description="Token usage.")
     cost: Decimal | None = Field(default=None, description="Cost of the call.")
     model_params: dict[str, JsonValue] | None = Field(
@@ -95,7 +112,8 @@ class SessionNodeListParams(CursorParams):
     """Session node list params."""
 
     include_payloads: bool = Field(
-        default=False, description="Include inputs, outputs, and attributes."
+        default=False,
+        description="Include reasoning, inputs, outputs, and attributes.",
     )
 
 
@@ -154,6 +172,24 @@ class SessionNodeResponse(ResponseModel):
         default=None, description="Time the node started."
     )
     ended_at: datetime | None = Field(default=None, description="Time the node ended.")
+    input_text_selector: str | None = Field(
+        default=None,
+        description="RFC 6901 JSON Pointer selecting display text from node inputs.",
+    )
+    output_text_selector: str | None = Field(
+        default=None,
+        description="RFC 6901 JSON Pointer selecting display text from node outputs.",
+    )
+    system_prompt_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting the system prompt from node inputs."
+        ),
+    )
+    reasoning: str | None = Field(
+        default=None,
+        description="Visible reasoning, null unless payloads are included.",
+    )
     inputs: Any = Field(
         default=None, description="Node inputs, null unless include_payloads."
     )
@@ -164,7 +200,7 @@ class SessionNodeResponse(ResponseModel):
         default=None, description="Model requested by the call."
     )
     model: str | None = Field(default=None, description="Model that served the call.")
-    provider: str | None = Field(default=None, description="Model provider.")
+    model_provider: str | None = Field(default=None, description="Model provider.")
     tokens: TokenUsage | None = Field(default=None, description="Token usage.")
     cost: Decimal | None = Field(default=None, description="Cost of the call.")
     model_params: dict[str, JsonValue] | None = Field(

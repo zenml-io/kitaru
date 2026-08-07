@@ -59,11 +59,15 @@ class SessionNode(DomainModel):
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    input_text_selector: str | None = None
+    output_text_selector: str | None = None
+    system_prompt_selector: str | None = None
+    reasoning: str | None = None
     inputs: Any = None
     outputs: Any = None
     requested_model: str | None = None
     model: str | None = None
-    provider: str | None = None
+    model_provider: str | None = None
     tokens: TokenUsage | None = None
     cost: Decimal | None = None
     model_params: dict[str, Any] | None = None

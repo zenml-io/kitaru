@@ -38,9 +38,11 @@ EVALUATION_ALLOWED_SEPARATORS = frozenset({"-", "_", "."})
 # separators alongside the default set.
 VERSION_ALLOWED_SEPARATORS = frozenset({"-", "_", ".", "+", "/"})
 
-# Default plugins ship under this prefix, reserved so no user-created plugin
-# can collide with one.
-RESERVED_PLUGIN_NAME_PREFIX = "kitaru/"
+# Built-in entities ship under this namespace, reserved so no user-created
+# name can collide with one.
+RESERVED_NAMESPACE = "kitaru"
+
+NAMESPACE_SEPARATOR = "/"
 
 MAX_NAME_LENGTH = 255
 
@@ -125,8 +127,8 @@ def validate_version_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
     return _validate(value, VERSION_ALLOWED_SEPARATORS, max_length)
 
 
-def validate_plugin_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
-    """Validate a plugin name, which allows the reserved default-plugin prefix.
+def validate_namespaced_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
+    """Validate a name with an optional namespace, allowing only the reserved one.
 
     Args:
         value: Name to validate.
@@ -138,15 +140,13 @@ def validate_plugin_name(value: str, max_length: int = MAX_NAME_LENGTH) -> str:
     Returns:
         Validated name.
     """
-    if value.startswith(RESERVED_PLUGIN_NAME_PREFIX):
-        remainder = value[len(RESERVED_PLUGIN_NAME_PREFIX) :]
-        _validate(
-            remainder,
-            DEFAULT_ALLOWED_SEPARATORS,
-            max_length - len(RESERVED_PLUGIN_NAME_PREFIX),
-        )
-        return value
-    return _validate(value, DEFAULT_ALLOWED_SEPARATORS, max_length)
+    namespace, separator, name = value.partition(NAMESPACE_SEPARATOR)
+    if not separator:
+        return _validate(value, DEFAULT_ALLOWED_SEPARATORS, max_length)
+    if namespace != RESERVED_NAMESPACE:
+        raise InvalidName(f"Unknown namespace '{namespace}'")
+    _validate(name, DEFAULT_ALLOWED_SEPARATORS, max_length - len(namespace) - 1)
+    return value
 
 
 def _validate(value: str, allowed_separators: frozenset[str], max_length: int) -> str:
@@ -182,4 +182,4 @@ Name = Annotated[str, AfterValidator(validate_name)]
 AccountName = Annotated[str, AfterValidator(validate_account_name)]
 EvaluationName = Annotated[str, AfterValidator(validate_evaluation_name)]
 VersionName = Annotated[str, AfterValidator(validate_version_name)]
-PluginName = Annotated[str, AfterValidator(validate_plugin_name)]
+NamespacedName = Annotated[str, AfterValidator(validate_namespaced_name)]

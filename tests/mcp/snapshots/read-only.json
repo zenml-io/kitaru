@@ -3132,6 +3132,19 @@
               "title": "Index",
               "type": "integer"
             },
+            "input_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from node inputs.",
+              "title": "Input Text Selector"
+            },
             "inputs": {
               "default": null,
               "description": "Node inputs, null unless include_payloads.",
@@ -3170,6 +3183,19 @@
               "description": "Parameters passed to the model.",
               "title": "Model Params"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model provider.",
+              "title": "Model Provider"
+            },
             "name": {
               "description": "Node name.",
               "title": "Name",
@@ -3178,6 +3204,19 @@
             "node_type": {
               "$ref": "#/$defs/NodeType",
               "description": "Kind of work the node records."
+            },
+            "output_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from node outputs.",
+              "title": "Output Text Selector"
             },
             "outputs": {
               "default": null,
@@ -3210,7 +3249,7 @@
               "description": "Parent node index.",
               "title": "Parent Index"
             },
-            "provider": {
+            "reasoning": {
               "anyOf": [
                 {
                   "type": "string"
@@ -3220,8 +3259,8 @@
                 }
               ],
               "default": null,
-              "description": "Model provider.",
-              "title": "Provider"
+              "description": "Visible reasoning, null unless payloads are included.",
+              "title": "Reasoning"
             },
             "requested_model": {
               "anyOf": [
@@ -3289,6 +3328,19 @@
               "default": null,
               "description": "Subagent invoked.",
               "title": "Subagent Id"
+            },
+            "system_prompt_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting the system prompt from node inputs.",
+              "title": "System Prompt Selector"
             },
             "tokens": {
               "anyOf": [
@@ -4793,7 +4845,7 @@
                 }
               ],
               "default": null,
-              "description": "JSON Pointer within the targeted payload.",
+              "description": "RFC 6901 JSON Pointer within the targeted payload.",
               "title": "Path"
             },
             "span": {

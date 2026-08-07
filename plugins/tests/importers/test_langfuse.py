@@ -19,11 +19,15 @@ from typing import Any
 
 import pytest
 
-import importers.langfuse as langfuse_module
-from importers.langfuse import InvalidImport, LangfuseJSONLImporter, parse
+import kitaru_langfuse_importer.importer as langfuse_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
+from kitaru_langfuse_importer.importer import (
+    InvalidImport,
+    LangfuseJSONLImporter,
+    parse,
+)
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:
@@ -38,12 +42,12 @@ def params(source_instance: str | None = None) -> dict[str, Any]:
 
 def sessions(
     content: bytes, importer_params: dict[str, Any] | None = None
-) -> list[ParsedSession]:
-    """Return successfully parsed sessions."""
+) -> list[ImportedSession]:
+    """Return successfully imported sessions."""
     return [
         item
         for item in LangfuseJSONLImporter().parse(content, importer_params or {})
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
 
@@ -58,8 +62,8 @@ def failures(
     ]
 
 
-def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
-    """Flatten parsed nodes depth-first for assertions."""
+def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
@@ -81,7 +85,7 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     )
 
     assert len(parsed) == 1
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
 
 
@@ -128,7 +132,7 @@ def test_unified_parse_preserves_node_trace_id() -> None:
         )
     )
 
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].nodes[0].trace_id == "trace-1"
 
 
@@ -205,7 +209,7 @@ def test_imports_multiturn_observations() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.external_id == "project-1:conversation-1"
     assert session.status is SessionStatus.COMPLETED
     assert session.inputs == {
@@ -231,11 +235,6 @@ def test_imports_multiturn_observations() -> None:
     assert nodes["trace-2:root-2"].node_type is NodeType.SPAN
     assert nodes["trace-2:tool-1"].node_type is NodeType.TOOL_CALL
     assert nodes["trace-2:tool-1"].tool_name == "weather"
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "ready"
-    assert readiness["tool_call_count"] == 1
-    assert readiness["replayable_tool_call_count"] == 1
 
 
 def test_trace_without_session_id_becomes_one_turn_session() -> None:
@@ -246,6 +245,63 @@ def test_trace_without_session_id_becomes_one_turn_session() -> None:
 
     assert parsed[0].metadata["langfuse.session_id"] == "trace-1"
     assert parsed[0].metadata["source_trace_count"] == 1
+
+
+def test_joins_traces_by_metadata_key_and_json_pointer() -> None:
+    """Join turns using a user-selected key inside a JSON position."""
+    parsed = LangfuseJSONLImporter().parse(
+        jsonl(
+            observation(
+                "root-1",
+                "trace-1",
+                session_id=None,
+                input_="first",
+                metadata={"customer": {"case_id": "case-42"}},
+            ),
+            observation(
+                "root-2",
+                "trace-2",
+                session_id=None,
+                input_="second",
+                start_time="2026-07-24T10:01:00Z",
+                metadata={"customer": {"case_id": "case-42"}},
+            ),
+        ),
+        {"join_path": "/metadata/customer", "join_key": "case_id"},
+    )
+
+    assert len(parsed) == 1
+    session = parsed[0]
+    assert isinstance(session, ImportedSession)
+    assert session.external_id == "project-1:case-42"
+    assert session.metadata["source_trace_count"] == 2
+    assert session.metadata["langfuse.join_paths"] == ["/metadata/customer/case_id"]
+    assert [turn["source_trace_id"] for turn in session.inputs["turns"]] == [
+        "trace-1",
+        "trace-2",
+    ]
+
+
+def test_isolates_trace_missing_selected_join_value() -> None:
+    """Report a missing explicit join value without fragmenting the session."""
+    parsed = LangfuseJSONLImporter().parse(
+        jsonl(
+            observation(
+                "root-1",
+                "trace-1",
+                session_id=None,
+                metadata={"case_id": "case-42"},
+            ),
+            observation("root-2", "trace-2", session_id=None, metadata={}),
+        ),
+        {"join_on": "/metadata/case_id"},
+    )
+
+    assert len(parsed) == 2
+    assert isinstance(parsed[0], ImportedSession)
+    assert isinstance(parsed[1], ImportFailure)
+    assert parsed[1].external_id == "trace-2"
+    assert "join selector" in parsed[1].error
 
 
 def test_imports_nested_trace_rows() -> None:
@@ -280,6 +336,37 @@ def test_imports_nested_trace_rows() -> None:
     assert session.metadata["langfuse.environments"] == ["production"]
     assert session.metadata["langfuse.releases"] == ["release-1"]
     assert session.metadata["langfuse.versions"] == ["version-1"]
+
+
+def test_surfaces_flattened_model_metadata_and_terminal_output() -> None:
+    """Prefer public model fields and use the last node as session output."""
+    session = sessions(
+        jsonl(
+            observation("root", "trace-1", input_={"message": "hello"}),
+            observation(
+                "generation",
+                "trace-1",
+                parent_id="root",
+                observation_type="GENERATION",
+                input_={"messages": [{"role": "user", "content": "hello"}]},
+                output={"role": "assistant", "content": "hi"},
+                model="resolved-model",
+                modelId="internal-model-id",
+                metadata={
+                    "attributes.gen_ai.request.model": "requested-model",
+                    "attributes.gen_ai.provider.name": "openai",
+                },
+            ),
+        )
+    )[0]
+    generation = next(
+        node for node in flatten(session.nodes) if node.node_type is NodeType.LLM_CALL
+    )
+
+    assert session.outputs == {"role": "assistant", "content": "hi"}
+    assert generation.requested_model == "requested-model"
+    assert generation.model == "resolved-model"
+    assert generation.provider == "openai"
 
 
 def test_imports_legacy_ingestion_events() -> None:
@@ -374,8 +461,8 @@ def test_status_message_does_not_imply_failure() -> None:
     assert parsed[0].nodes[0].status is NodeStatus.COMPLETED
 
 
-def test_exact_normalized_content_has_stable_digest() -> None:
-    """Ignore JSONL row order when hashing normalized evidence."""
+def test_node_order_is_stable_across_upload_order() -> None:
+    """Ignore JSONL row order when ordering nodes."""
     first = observation("root", "trace-1", input_="hello")
     child = observation(
         "child",
@@ -388,12 +475,11 @@ def test_exact_normalized_content_has_stable_digest() -> None:
     forward = importer.parse(jsonl(first, child), {})[0]
     reversed_ = importer.parse(jsonl(child, first), {})[0]
 
-    assert isinstance(forward, ParsedSession)
-    assert isinstance(reversed_, ParsedSession)
-    assert (
-        forward.metadata["source_content_digest"]
-        == reversed_.metadata["source_content_digest"]
-    )
+    assert isinstance(forward, ImportedSession)
+    assert isinstance(reversed_, ImportedSession)
+    assert [node.external_id for node in forward.nodes] == [
+        node.external_id for node in reversed_.nodes
+    ]
 
 
 def test_rejects_mixed_row_shapes() -> None:
@@ -448,6 +534,35 @@ def test_maps_openai_agents_function_span_as_tool() -> None:
         "langfuse.name": "get_weather",
         "langfuse.service.name": "weather-agent",
     }
+
+
+def test_maps_flattened_openai_agents_function_span_as_tool() -> None:
+    """Recognize function names from flattened Langfuse metadata."""
+    session = sessions(
+        jsonl(
+            observation("root", "trace-1", input_={"message": "weather"}),
+            observation(
+                "function",
+                "trace-1",
+                parent_id="root",
+                observation_type="SPAN",
+                input_={"city": "Delft"},
+                output="18 C",
+                name="Function: get_weather",
+                metadata={
+                    "name": "unrelated-metadata-name",
+                    "attributes.name": "get_weather",
+                    "attributes.gen_ai.system": "openai",
+                },
+            ),
+        )
+    )[0]
+
+    nodes = {node.external_id: node for node in flatten(session.nodes)}
+    tool = nodes["trace-1:function"]
+    assert tool.node_type is NodeType.TOOL_CALL
+    assert tool.tool_name == "get_weather"
+    assert tool.provider == "openai"
 
 
 def test_maps_model_provider_cost_and_bounded_metadata() -> None:
@@ -530,6 +645,3 @@ def test_recovered_tool_failure_does_not_fail_session() -> None:
 
     assert session.status is SessionStatus.COMPLETED
     assert session.error is None
-    readiness = session.metadata["replay_readiness"]
-    assert isinstance(readiness, dict)
-    assert readiness["level"] == "partial"
