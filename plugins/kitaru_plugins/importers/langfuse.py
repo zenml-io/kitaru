@@ -251,6 +251,10 @@ def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
             value = source.get(key)
             if value not in (None, ""):
                 return value
+        for flattened_key in (f"attributes.{key}", f"resourceAttributes.{key}"):
+            value = metadata.get(flattened_key)
+            if value not in (None, ""):
+                return value
     return None
 
 
@@ -264,9 +268,15 @@ def _source_metadata(record: dict[str, Any]) -> dict[str, Any]:
         for key in _METADATA_KEYS:
             if key in source:
                 selected[f"langfuse.{key}"] = source[key]
+            flattened_key = f"attributes.{key}"
+            if flattened_key in metadata:
+                selected[f"langfuse.{key}"] = metadata[flattened_key]
     for key in _RESOURCE_METADATA_KEYS:
         if key in resource_attributes:
             selected[f"langfuse.{key}"] = resource_attributes[key]
+        flattened_key = f"resourceAttributes.{key}"
+        if flattened_key in metadata:
+            selected[f"langfuse.{key}"] = metadata[flattened_key]
     for source_field, target_field in _TRACE_CONTEXT_FIELDS.items():
         if source_field in record:
             selected[f"langfuse.trace.{target_field}"] = record[source_field]
@@ -558,6 +568,9 @@ class LangfuseJSONLImporter:
             shape = _TRACE_SHAPE
         if shape == _TRACE_SHAPE:
             records = _trace_rows_to_observations(records)
+        file_framework = detect_framework(
+            [record.get("metadata") for record in records]
+        )
 
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for record in records:
@@ -601,6 +614,7 @@ class LangfuseJSONLImporter:
                         params,
                         join_paths=join_paths[source_id],
                         trace_fallback=source_id in fallback_sessions,
+                        file_framework=file_framework,
                     )
                 )
             except InvalidImport as exc:
@@ -621,6 +635,7 @@ class LangfuseJSONLImporter:
         *,
         join_paths: set[str],
         trace_fallback: bool,
+        file_framework: str | None,
     ) -> ParsedSession:
         """Parse one grouped Langfuse session."""
         project_ids = {
@@ -764,21 +779,18 @@ class LangfuseJSONLImporter:
                         inputs=_decode_json(record.get("input")),
                         outputs=_decode_json(record.get("output")),
                         requested_model=(
-                            _first_nonempty(
+                            _metadata_value(record, "gen_ai.request.model")
+                            or _first_nonempty(
                                 record,
                                 "providedModelName",
                                 "provided_model_name",
                                 "model",
                             )
-                            or _metadata_value(record, "gen_ai.request.model")
                         ),
                         model=(
-                            _first_nonempty(record, "modelId", "model_id", "model")
-                            or _metadata_value(
-                                record,
-                                "gen_ai.response.model",
-                                "gen_ai.request.model",
-                            )
+                            _metadata_value(record, "gen_ai.response.model")
+                            or _first_nonempty(record, "model", "modelId", "model_id")
+                            or _metadata_value(record, "gen_ai.request.model")
                         ),
                         provider=(
                             _first_nonempty(record, "modelProvider", "model_provider")
@@ -887,8 +899,12 @@ class LangfuseJSONLImporter:
             "source_completeness": "unknown",
             "normalization_warnings": warnings,
         }
-        framework = detect_framework(params.get("framework")) or detect_framework(
-            [record.get("metadata") for _, rows in traces for record in rows]
+        framework = (
+            detect_framework(params.get("framework"))
+            or detect_framework(
+                [record.get("metadata") for _, rows in traces for record in rows]
+            )
+            or file_framework
         )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
@@ -896,7 +912,18 @@ class LangfuseJSONLImporter:
             status=session_status,
             system_prompt=system_prompt,
             inputs=inputs,
-            outputs=turns[-1].outputs if turns else None,
+            outputs=(
+                turns[-1].outputs
+                if turns and turns[-1].outputs is not None
+                else next(
+                    (
+                        node.outputs
+                        for node in reversed(nodes)
+                        if node.outputs is not None
+                    ),
+                    None,
+                )
+            ),
             error=session_error,
             started_at=started_at,
             ended_at=ended_at,

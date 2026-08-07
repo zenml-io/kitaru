@@ -338,6 +338,37 @@ def test_imports_nested_trace_rows() -> None:
     assert session.metadata["langfuse.versions"] == ["version-1"]
 
 
+def test_surfaces_flattened_model_metadata_and_terminal_output() -> None:
+    """Prefer public model fields and use the last node as session output."""
+    session = sessions(
+        jsonl(
+            observation("root", "trace-1", input_={"message": "hello"}),
+            observation(
+                "generation",
+                "trace-1",
+                parent_id="root",
+                observation_type="GENERATION",
+                input_={"messages": [{"role": "user", "content": "hello"}]},
+                output={"role": "assistant", "content": "hi"},
+                model="resolved-model",
+                modelId="internal-model-id",
+                metadata={
+                    "attributes.gen_ai.request.model": "requested-model",
+                    "attributes.gen_ai.provider.name": "openai",
+                },
+            ),
+        )
+    )[0]
+    generation = next(
+        node for node in flatten(session.nodes) if node.node_type is NodeType.LLM_CALL
+    )
+
+    assert session.outputs == {"role": "assistant", "content": "hi"}
+    assert generation.requested_model == "requested-model"
+    assert generation.model == "resolved-model"
+    assert generation.provider == "openai"
+
+
 def test_imports_legacy_ingestion_events() -> None:
     """Detect ingestion-event JSONL and merge create and update events."""
     parsed = sessions(

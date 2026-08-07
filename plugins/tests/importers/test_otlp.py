@@ -253,6 +253,108 @@ def test_imports_flattened_otlp_jsonl_and_surfaces_prompts() -> None:
     }
 
 
+def test_decodes_nullable_snake_case_any_values() -> None:
+    """Read the populated member from generated snake-case AnyValue objects."""
+    encoded_value = {
+        "string_value": None,
+        "bool_value": None,
+        "int_value": 42,
+        "double_value": None,
+        "array_value": None,
+        "kvlist_value": None,
+        "bytes_value": None,
+    }
+    record = {
+        "trace_id": TRACE_1,
+        "span_id": ROOT,
+        "span_name": "chat model",
+        "start_timestamp": "2026-07-22T10:00:00Z",
+        "end_timestamp": "2026-07-22T10:00:01Z",
+        "attributes": [
+            {"key": "gen_ai.operation.name", "value": {"string_value": "chat"}},
+            {"key": "gen_ai.usage.input_tokens", "value": encoded_value},
+        ],
+    }
+
+    node = sessions(json.dumps(record).encode())[0].nodes[0]
+
+    assert node.tokens is not None
+    assert node.tokens.input_tokens == 42
+
+
+def test_imports_logfire_query_rows_as_one_session() -> None:
+    """Normalize query envelopes, stable sessions, model calls, and functions."""
+    common = {
+        "trace_id": TRACE_1,
+        "start_timestamp": "2026-07-22T10:00:00Z",
+        "end_timestamp": "2026-07-22T10:00:01Z",
+        "otel_status_code": "OK",
+    }
+    root = {
+        **common,
+        "span_id": ROOT,
+        "parent_span_id": None,
+        "span_name": "agent run",
+        "attributes": {
+            "session.id": "support-session",
+            "gen_ai.conversation.id": "agent-stage",
+            "input.value": {"question": "Where is order 42?"},
+        },
+    }
+    model = {
+        **common,
+        "span_id": CHILD,
+        "parent_span_id": ROOT,
+        "span_name": "chat model",
+        "attributes": {
+            "session.id": "support-session",
+            "gen_ai.conversation.id": "model-stage",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.request.model": "gpt-test",
+            "gen_ai.system_instructions": "Use order data only.",
+            "gen_ai.input.messages": [
+                {"role": "user", "content": "Where is order 42?"}
+            ],
+            "gen_ai.output.messages": [
+                {"role": "assistant", "content": "I will check."}
+            ],
+        },
+    }
+    tool = {
+        **common,
+        "span_id": "b7ad6b7169203333",
+        "parent_span_id": CHILD,
+        "span_name": "Function: lookup_order",
+        "attributes": {
+            "session.id": "support-session",
+            "gen_ai.conversation.id": "tool-stage",
+            "name": "lookup_order",
+            "input.value": {"order_id": "42"},
+            "output.value": {"status": "shipped"},
+        },
+    }
+    content = b"\n".join(
+        json.dumps(item).encode()
+        for item in (
+            {"type": "schema", "schema": {"fields": []}},
+            {"type": "data", "rows": [root, model, tool]},
+            {"type": "end", "row_count": 3},
+        )
+    )
+
+    [session] = sessions(content)
+    nodes = flatten(session.nodes)
+
+    assert session.external_id.endswith(":support-session")
+    assert session.system_prompt == "Use order data only."
+    assert session.outputs == {"status": "shipped"}
+    assert sum(node.node_type is NodeType.LLM_CALL for node in nodes) == 1
+    tool_node = next(node for node in nodes if node.node_type is NodeType.TOOL_CALL)
+    assert tool_node.tool_name == "lookup_order"
+    assert tool_node.inputs == {"order_id": "42"}
+    assert tool_node.outputs == {"status": "shipped"}
+
+
 def test_imports_arize_flat_span_jsonl() -> None:
     """Read Arize span ids from the nested context object."""
     record = {

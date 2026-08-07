@@ -88,6 +88,19 @@ def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _decode_json(value: Any) -> Any:
+    """Decode structured JSON strings while preserving ordinary strings."""
+    if not isinstance(value, str):
+        return value
+    candidate = value.strip()
+    if not candidate or candidate[0] not in '[{"':
+        return value
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        return value
+
+
 def _decimal(value: Any) -> Decimal | None:
     """Parse one provider decimal."""
     if value is None or value == "":
@@ -236,19 +249,20 @@ def _ended_at(record: dict[str, Any]) -> datetime | None:
 def _node_type(record: dict[str, Any], *, full_export: bool) -> NodeType:
     """Map a Braintrust span type conservatively."""
     span_type = str(_dict(record.get("span_attributes")).get("type") or "").lower()
-    if span_type == "llm":
-        return NodeType.LLM_CALL
-    if span_type == "tool":
+    metadata = _dict(record.get("metadata"))
+    metrics = _metrics(record)
+    if span_type == "tool" or metadata.get("tool.name"):
         return NodeType.TOOL_CALL
-    if not full_export:
-        metrics = _metrics(record)
-        metadata = _dict(record.get("metadata"))
-        if (
-            metadata.get("model")
-            or metrics.get("prompt_tokens") is not None
-            or metrics.get("completion_tokens") is not None
-        ):
+    if span_type == "llm":
+        openinference_kind = str(metadata.get("openinference.span.kind") or "").upper()
+        if openinference_kind in {"", "LLM"}:
             return NodeType.LLM_CALL
+    if not full_export and (
+        metadata.get("model")
+        or metrics.get("prompt_tokens") is not None
+        or metrics.get("completion_tokens") is not None
+    ):
+        return NodeType.LLM_CALL
     return NodeType.SPAN
 
 
@@ -366,6 +380,16 @@ class BraintrustProjectLogImporter:
     ) -> list[ParsedSession | ImportFailure]:
         """Parse a Braintrust project-log or UI export."""
         records, full_export = _parse_records(content)
+        file_framework = detect_framework(
+            [
+                {
+                    "metadata": record.get("metadata"),
+                    "span_attributes": record.get("span_attributes"),
+                    "name": record.get("name"),
+                }
+                for record in records
+            ]
+        )
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         sessions: list[ParsedSession] = []
         failures: list[ImportFailure] = []
@@ -390,6 +414,7 @@ class BraintrustProjectLogImporter:
                         source_id,
                         session_records,
                         full_export=full_export,
+                        file_framework=file_framework,
                     )
                 )
             except InvalidImport as exc:
@@ -409,6 +434,7 @@ class BraintrustProjectLogImporter:
         records: list[dict[str, Any]],
         *,
         full_export: bool,
+        file_framework: str | None,
     ) -> ParsedSession:
         """Parse one Braintrust session."""
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -436,8 +462,20 @@ class BraintrustProjectLogImporter:
             turns.append(
                 _Turn(
                     trace_id=trace_id,
-                    inputs=root.get("input"),
-                    outputs=root.get("output"),
+                    inputs=(
+                        root.get("input")
+                        if root.get("input") is not None
+                        else _decode_json(
+                            _dict(root.get("metadata")).get("input.value")
+                        )
+                    ),
+                    outputs=(
+                        root.get("output")
+                        if root.get("output") is not None
+                        else _decode_json(
+                            _dict(root.get("metadata")).get("output.value")
+                        )
+                    ),
                     started_at=min(
                         (value for row in ordered if (value := _started_at(row))),
                         default=None,
@@ -485,8 +523,16 @@ class BraintrustProjectLogImporter:
                             ),
                             started_at=_started_at(row),
                             ended_at=_ended_at(row),
-                            inputs=row.get("input"),
-                            outputs=row.get("output"),
+                            inputs=(
+                                row.get("input")
+                                if row.get("input") is not None
+                                else _decode_json(metadata.get("input.value"))
+                            ),
+                            outputs=(
+                                row.get("output")
+                                if row.get("output") is not None
+                                else _decode_json(metadata.get("output.value"))
+                            ),
                             requested_model=metadata.get("gen_ai.request.model")
                             or metadata.get("model"),
                             model=metadata.get("gen_ai.response.model")
@@ -496,7 +542,12 @@ class BraintrustProjectLogImporter:
                             tokens=_token_usage(row),
                             cost=_decimal(_metrics(row).get("estimated_cost")),
                             tool_name=(
-                                str(attributes.get("name") or row.get("name") or "tool")
+                                str(
+                                    metadata.get("tool.name")
+                                    or attributes.get("name")
+                                    or row.get("name")
+                                    or "tool"
+                                )
                                 if node_type is NodeType.TOOL_CALL
                                 else None
                             ),
@@ -581,15 +632,18 @@ class BraintrustProjectLogImporter:
             "source_completeness": "full" if full_export else "flat",
             "normalization_warnings": warnings,
         }
-        framework = detect_framework(
-            [
-                {
-                    "metadata": row.get("metadata"),
-                    "span_attributes": row.get("span_attributes"),
-                    "name": row.get("name"),
-                }
-                for row in records
-            ]
+        framework = (
+            detect_framework(
+                [
+                    {
+                        "metadata": row.get("metadata"),
+                        "span_attributes": row.get("span_attributes"),
+                        "name": row.get("name"),
+                    }
+                    for row in records
+                ]
+            )
+            or file_framework
         )
         return ParsedSession(
             external_id=f"{source_instance}:{source_id}",
@@ -601,7 +655,18 @@ class BraintrustProjectLogImporter:
             status=session_status,
             system_prompt=system_prompt,
             inputs=inputs,
-            outputs=turns[-1].outputs if turns else None,
+            outputs=(
+                turns[-1].outputs
+                if turns and turns[-1].outputs is not None
+                else next(
+                    (
+                        node.outputs
+                        for node in reversed(nodes)
+                        if node.outputs is not None
+                    ),
+                    None,
+                )
+            ),
             error=session_error,
             started_at=min(
                 (turn.started_at for turn in turns if turn.started_at),
