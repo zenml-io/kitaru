@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Tests for the evaluator contract and the evaluation flow."""
 
-import asyncio
 import json
 import uuid
 from collections.abc import AsyncGenerator
@@ -48,8 +47,8 @@ from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeBatchRequest,
     SessionNodeCreateRequest,
-    SessionNodeListParams,
     SessionNodeResponse,
+    SessionWithNodesResponse,
 )
 from kitaru.api_models.v1.task import EvaluationTaskDetails, PackagePluginSpec
 from kitaru.server.domain.agent_version import RunSpec
@@ -172,10 +171,10 @@ def test_call_evaluator_passes_params() -> None:
     assert received["threshold"] == 0.5
 
 
-async def test_run_fetches_session_and_nodes_concurrently(
+async def test_run_fetches_the_session_and_its_nodes_in_one_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Start the session and node fetches together instead of one after the other."""
+    """Read the input session and every node through a single request."""
     session_id = uuid.uuid4()
     task_id = uuid.uuid4()
     details = EvaluationTaskDetails(
@@ -190,15 +189,7 @@ async def test_run_fetches_session_and_nodes_concurrently(
     node = SessionNodeResponse.model_construct(
         id=uuid.uuid4(), session_id=session_id, index=0
     )
-    both_started = asyncio.Event()
-    release = asyncio.Event()
-    started: set[str] = set()
-
-    async def mark_started(name: str) -> None:
-        started.add(name)
-        if len(started) == 2:
-            both_started.set()
-        await release.wait()
+    calls: list[uuid.UUID] = []
 
     class Tasks:
         async def get_spec(self, requested_task_id: uuid.UUID) -> Any:
@@ -206,18 +197,11 @@ async def test_run_fetches_session_and_nodes_concurrently(
             return SimpleNamespace(details=details)
 
     class Sessions:
-        async def get(self, requested_id: uuid.UUID) -> SessionResponse:
-            assert requested_id == session_id
-            await mark_started("session")
-            return session
-
-        async def iter_nodes(
-            self, requested_id: uuid.UUID, params: SessionNodeListParams
-        ) -> AsyncGenerator[SessionNodeResponse, None]:
-            assert requested_id == session_id
-            assert params.include_payloads is True
-            await mark_started("nodes")
-            yield node
+        async def get_with_nodes(
+            self, requested_id: uuid.UUID
+        ) -> SessionWithNodesResponse:
+            calls.append(requested_id)
+            return SessionWithNodesResponse(session=session, nodes=[node])
 
     client: Any = SimpleNamespace(tasks=Tasks(), sessions=Sessions())
     captured: list[object] = []
@@ -233,11 +217,9 @@ async def test_run_fetches_session_and_nodes_concurrently(
     )
     monkeypatch.setattr(evaluator_module, "write_task_result", captured.append)
 
-    task = asyncio.create_task(evaluator_module.run(client, str(task_id)))
-    await asyncio.wait_for(both_started.wait(), timeout=1)
-    assert started == {"session", "nodes"}
-    release.set()
-    await task
+    await evaluator_module.run(client, str(task_id))
+
+    assert calls == [session_id]
     assert captured == [[EvaluationResult(name="quality", score=1.0)]]
 
 

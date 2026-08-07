@@ -6865,6 +6865,29 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
+      "SessionWithNodesResponse": {
+        "description": "Session with nodes response.",
+        "properties": {
+          "nodes": {
+            "description": "Every node of the session, ordered by index ascending.",
+            "items": {
+              "$ref": "#/components/schemas/SessionNodeResponse"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "nodes"
+        ],
+        "title": "SessionWithNodesResponse",
+        "type": "object"
+      },
       "StaticCase": {
         "additionalProperties": false,
         "description": "Static tool call case.",
@@ -14610,6 +14633,50 @@
           }
         },
         "summary": "Merge Session Evaluations",
+        "tags": [
+          "sessions"
+        ]
+      }
+    },
+    "/v1/sessions/{session_id}/full": {
+      "get": {
+        "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by index.",
+        "operationId": "get_session_with_nodes_v1_sessions__session_id__full_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionWithNodesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session With Nodes",
         "tags": [
           "sessions"
         ]

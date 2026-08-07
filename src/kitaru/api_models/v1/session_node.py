@@ -27,7 +27,7 @@ from kitaru.api_models.v1.base import (
     RequestModel,
     ResponseModel,
 )
-from kitaru.api_models.v1.session import TokenUsage
+from kitaru.api_models.v1.session import SessionResponse, TokenUsage
 
 
 class NodeType(StrEnum):
@@ -204,3 +204,12 @@ class SessionNodeResponse(ResponseModel):
         description="Arbitrary span attributes, null unless include_payloads.",
     )
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
+
+
+class SessionWithNodesResponse(ResponseModel):
+    """Session with nodes response."""
+
+    session: SessionResponse = Field(description="Session.")
+    nodes: list[SessionNodeResponse] = Field(
+        description="Every node of the session, ordered by index ascending."
+    )
