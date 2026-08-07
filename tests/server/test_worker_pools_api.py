@@ -141,6 +141,7 @@ async def test_get_worker_pool_stats_by_id(client: httpx.AsyncClient) -> None:
         "in_flight_tasks": 0,
         "oldest_pending_seconds": None,
         "live_workers": 0,
+        "capacity": 0,
     }
 
 

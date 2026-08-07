@@ -83,6 +83,7 @@ async def register_worker(
         name=body.name,
         scope=body.scope,
         runtime=body.runtime,
+        concurrency=body.concurrency,
         metadata=body.metadata,
         pool=body.pool,
         actor=actor,

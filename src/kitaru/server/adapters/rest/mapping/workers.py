@@ -43,6 +43,7 @@ def worker_to_response(
         pool_id=worker.pool_id,
         scope=worker.scope,
         runtime=worker.runtime,
+        concurrency=worker.concurrency,
         last_seen_at=worker.last_seen_at,
         live=worker.is_live(now, liveness_timeout_seconds),
         metadata=worker.metadata,

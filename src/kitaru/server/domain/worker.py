@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.base import FrozenModel
 from kitaru.server.domain.base import DomainModel, ForbiddenError, NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
@@ -65,6 +66,7 @@ class Worker(DomainModel):
     pool_id: uuid.UUID | None = None
     scope: WorkerScope
     runtime: WorkerRuntime
+    concurrency: int = 1
     last_seen_at: datetime
     metadata: dict[str, str] = Field(default_factory=dict)
     created: datetime | None = None
@@ -75,21 +77,24 @@ class Worker(DomainModel):
         pool_id: uuid.UUID | None,
         scope: WorkerScope,
         runtime: WorkerRuntime,
+        concurrency: int,
         metadata: dict[str, str],
         now: datetime,
     ) -> None:
-        """Replace the pool, scope, runtime, and metadata, and stamp last_seen_at.
+        """Replace pool, scope, runtime, concurrency, and metadata, stamp last_seen_at.
 
         Args:
             pool_id: New pool the worker joined, None to leave every pool.
             scope: New claim scope.
             runtime: New reported runtime.
+            concurrency: New reported concurrency.
             metadata: New metadata.
             now: Current time.
         """
         self.pool_id = pool_id
         self.scope = scope
         self.runtime = runtime
+        self.concurrency = concurrency
         self.metadata = metadata
         self.last_seen_at = now
 
@@ -104,3 +109,10 @@ class Worker(DomainModel):
             Whether the worker is considered alive.
         """
         return (now - self.last_seen_at).total_seconds() <= timeout_seconds
+
+
+class LiveWorkerStats(FrozenModel):
+    """Live worker stats."""
+
+    count: int
+    capacity: int

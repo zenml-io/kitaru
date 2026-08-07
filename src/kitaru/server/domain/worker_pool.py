@@ -128,3 +128,4 @@ class WorkerPoolStats(FrozenModel):
     in_flight_tasks: int
     oldest_pending_seconds: float | None
     live_workers: int
+    capacity: int

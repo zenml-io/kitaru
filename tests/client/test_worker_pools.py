@@ -123,9 +123,11 @@ async def test_stats(api_client: KitaruAPIClient) -> None:
     assert stats.in_flight_tasks == 0
     assert stats.oldest_pending_seconds is None
     assert stats.live_workers == 0
+    assert stats.capacity == 0
 
     stats = await api_client.worker_pools.stats("pool-1")
     assert stats.live_workers == 0
+    assert stats.capacity == 0
 
 
 async def test_stats_not_found(api_client: KitaruAPIClient) -> None:

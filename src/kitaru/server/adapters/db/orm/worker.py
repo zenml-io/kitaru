@@ -62,6 +62,7 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     pool_id: Mapped[uuid.UUID | None]
     scope: Mapped[dict] = mapped_column(JSONB)
     runtime: Mapped[dict] = mapped_column(JSONB)
+    concurrency: Mapped[int]
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, str]] = mapped_column("metadata", JSONB)
 
@@ -85,6 +86,7 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "pool_id": worker.pool_id,
             "scope": worker.scope.model_dump(mode="json"),
             "runtime": worker.runtime.model_dump(mode="json"),
+            "concurrency": worker.concurrency,
             "last_seen_at": worker.last_seen_at,
             "metadata_": worker.metadata,
         }
@@ -114,6 +116,7 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             pool_id=self.pool_id,
             scope=WorkerScope.model_validate(self.scope),
             runtime=WorkerRuntime.model_validate(self.runtime),
+            concurrency=self.concurrency,
             last_seen_at=self.last_seen_at,
             metadata=self.metadata_,
             created=self.created,

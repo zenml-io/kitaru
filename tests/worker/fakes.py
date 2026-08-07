@@ -219,6 +219,7 @@ def make_worker_response(**overrides: Any) -> WorkerResponse:
         "name": "worker-1",
         "scope": WorkerScope(),
         "runtime": WorkerRuntime(platform="bare"),
+        "concurrency": 1,
         "last_seen_at": _now(),
         "live": True,
         "metadata": {},

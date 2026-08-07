@@ -132,8 +132,10 @@ async def test_stats_reflects_registered_worker_and_pending_task(
     assert body["in_flight_tasks"] == 0
     assert body["oldest_pending_seconds"] >= 0
     assert body["live_workers"] == 1
+    assert body["capacity"] == 1
 
     by_name = await client.get(f"/v1/worker-pools/{pool['name']}/stats")
     assert by_name.status_code == 200
     assert by_name.json()["pending_tasks"] == 1
     assert by_name.json()["live_workers"] == 1
+    assert by_name.json()["capacity"] == 1

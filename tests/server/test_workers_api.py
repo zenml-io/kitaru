@@ -153,6 +153,7 @@ async def test_register_worker(client: httpx.AsyncClient, account: Account) -> N
             "name": "worker-1",
             "scope": {},
             "runtime": RUNTIME,
+            "concurrency": 3,
             "metadata": {"region": "eu"},
         },
     )
@@ -160,6 +161,7 @@ async def test_register_worker(client: httpx.AsyncClient, account: Account) -> N
     body = response.json()
     assert body["worker"]["name"] == "worker-1"
     assert body["worker"]["owner_id"] == str(account.id)
+    assert body["worker"]["concurrency"] == 3
     assert body["worker"]["metadata"] == {"region": "eu"}
     assert body["worker"]["live"] is True
     assert uuid.UUID(body["worker"]["id"])
@@ -205,6 +207,21 @@ async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/v1/workers",
         json={"name": "in valid", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+    )
+    assert response.status_code == 422
+
+
+async def test_register_worker_invalid_concurrency(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 422 for a concurrency below one."""
+    response = await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "scope": {},
+            "runtime": RUNTIME,
+            "concurrency": 0,
+            "metadata": {},
+        },
     )
     assert response.status_code == 422
 

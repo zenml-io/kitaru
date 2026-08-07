@@ -55,6 +55,7 @@ class WorkerService:
         name: str,
         scope: WorkerScope,
         runtime: WorkerRuntime,
+        concurrency: int,
         metadata: dict[str, str],
         pool: str | None,
         actor: AuthContext,
@@ -65,6 +66,7 @@ class WorkerService:
             name: Worker name.
             scope: Claim scope the worker reports.
             runtime: Runtime the worker reports.
+            concurrency: Concurrent task capacity the worker reports.
             metadata: Arbitrary metadata.
             pool: Pool the worker joins by name, None for an ad-hoc scope.
             actor: Caller context.
@@ -84,6 +86,7 @@ class WorkerService:
             pool_id=pool_id,
             scope=scope,
             runtime=runtime,
+            concurrency=concurrency,
             metadata=metadata,
             last_seen_at=datetime.now(UTC),
         )

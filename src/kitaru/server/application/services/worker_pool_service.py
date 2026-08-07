@@ -120,12 +120,13 @@ class WorkerPoolService:
             else None
         )
         cutoff = now - timedelta(seconds=self._liveness_timeout_seconds)
-        live_workers = await self._workers.count_live_by_pool(worker_pool.id, cutoff)
+        live = await self._workers.count_live_by_pool(worker_pool.id, cutoff)
         stats = WorkerPoolStats(
             pending_tasks=queue_stats.pending,
             in_flight_tasks=queue_stats.in_flight,
             oldest_pending_seconds=oldest_pending_seconds,
-            live_workers=live_workers,
+            live_workers=live.count,
+            capacity=live.capacity,
         )
         return worker_pool, stats
 

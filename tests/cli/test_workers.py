@@ -98,6 +98,7 @@ def _response(name: str, *, live: bool) -> WorkerResponse:
         name=name,
         scope={},
         runtime=WorkerRuntime(platform="bare"),
+        concurrency=1,
         last_seen_at=datetime.now(UTC),
         live=live,
         metadata={},

@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.worker import WorkerFilter
-from kitaru.server.domain.worker import Worker
+from kitaru.server.domain.worker import LiveWorkerStats, Worker
 
 
 class WorkerRepository(Protocol):
@@ -74,15 +74,17 @@ class WorkerRepository(Protocol):
         """
         ...
 
-    async def count_live_by_pool(self, pool_id: uuid.UUID, cutoff: datetime) -> int:
-        """Count the pool's workers last seen at or after a cutoff.
+    async def count_live_by_pool(
+        self, pool_id: uuid.UUID, cutoff: datetime
+    ) -> LiveWorkerStats:
+        """Count the pool's live workers and sum their concurrency.
 
         Args:
             pool_id: Id of the worker pool.
             cutoff: Bound the last heartbeat must be at or after.
 
         Returns:
-            Count of live workers in the pool.
+            Live worker count and summed concurrency in the pool.
         """
         ...
 

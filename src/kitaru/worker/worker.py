@@ -164,6 +164,7 @@ class Worker:
             pool=self._config.pool,
             scope=self._config.scope,
             runtime=detect_runtime(),
+            concurrency=self._config.concurrency,
             metadata=self._config.metadata,
         )
         async with KitaruAPIClient() as registration_client:

@@ -213,6 +213,7 @@ def _referencing_worker(
     owner_id: uuid.UUID,
     pool_id: uuid.UUID,
     name: str = "worker-1",
+    concurrency: int = 1,
     last_seen_at: datetime | None = None,
 ) -> Worker:
     """Build a worker joined to a pool for repository tests.
@@ -221,6 +222,7 @@ def _referencing_worker(
         owner_id: Id of the owning account.
         pool_id: Pool the worker joins.
         name: Worker name.
+        concurrency: Concurrent task capacity the worker reports.
         last_seen_at: Time of the worker's last heartbeat.
 
     Returns:
@@ -232,6 +234,7 @@ def _referencing_worker(
         pool_id=pool_id,
         scope=WorkerScope(),
         runtime=WorkerRuntime(platform="bare"),
+        concurrency=concurrency,
         last_seen_at=last_seen_at if last_seen_at is not None else datetime.now(UTC),
     )
 
@@ -473,34 +476,42 @@ async def test_get_queue_stats_oldest_created(task_setup: TaskSetup) -> None:
 
 
 async def test_count_live_by_pool(worker_setup: WorkerSetup) -> None:
-    """Count only the pool's workers seen at or after the cutoff."""
+    """Count the pool's live workers and sum their concurrency."""
     repository, worker_repository, owner_id = worker_setup
     pool = await repository.create(_worker_pool(owner_id))
     other_pool = await repository.create(_worker_pool(owner_id, name="pool-2"))
     now = datetime.now(UTC)
     await worker_repository.register(
-        _referencing_worker(owner_id, pool.id, name="live", last_seen_at=now)
-    )
-    await worker_repository.register(
         _referencing_worker(
-            owner_id, pool.id, name="stale", last_seen_at=now - timedelta(hours=1)
+            owner_id, pool.id, name="live", concurrency=4, last_seen_at=now
         )
     )
     await worker_repository.register(
         _referencing_worker(
-            owner_id, other_pool.id, name="other-pool", last_seen_at=now
+            owner_id,
+            pool.id,
+            name="stale",
+            concurrency=8,
+            last_seen_at=now - timedelta(hours=1),
+        )
+    )
+    await worker_repository.register(
+        _referencing_worker(
+            owner_id, other_pool.id, name="other-pool", concurrency=2, last_seen_at=now
         )
     )
 
     live = await worker_repository.count_live_by_pool(
         pool.id, now - timedelta(minutes=1)
     )
-    assert live == 1
+    assert live.count == 1
+    assert live.capacity == 4
 
 
 async def test_count_live_by_pool_empty(worker_setup: WorkerSetup) -> None:
-    """Report zero for a pool with no workers."""
+    """Report zero count and capacity for a pool with no workers."""
     repository, worker_repository, owner_id = worker_setup
     pool = await repository.create(_worker_pool(owner_id))
     live = await worker_repository.count_live_by_pool(pool.id, datetime.now(UTC))
-    assert live == 0
+    assert live.count == 0
+    assert live.capacity == 0

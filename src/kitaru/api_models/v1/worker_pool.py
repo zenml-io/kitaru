@@ -61,3 +61,4 @@ class WorkerPoolStatsResponse(ResponseModel):
         default=None, description="Age of the oldest matching pending task."
     )
     live_workers: int = Field(description="Pool workers inside the liveness window.")
+    capacity: int = Field(description="Summed concurrency of the live pool workers.")

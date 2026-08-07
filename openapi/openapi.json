@@ -7989,6 +7989,13 @@
         "additionalProperties": false,
         "description": "Worker create request.",
         "properties": {
+          "concurrency": {
+            "default": 1,
+            "description": "Concurrent task capacity the worker reports.",
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "type": "integer"
+          },
           "metadata": {
             "additionalProperties": {
               "type": "string"
@@ -8141,6 +8148,11 @@
       "WorkerPoolStatsResponse": {
         "description": "Worker pool stats response.",
         "properties": {
+          "capacity": {
+            "description": "Summed concurrency of the live pool workers.",
+            "title": "Capacity",
+            "type": "integer"
+          },
           "in_flight_tasks": {
             "description": "Claimed or running tasks the pool's scope matches.",
             "title": "In Flight Tasks",
@@ -8172,7 +8184,8 @@
         "required": [
           "pending_tasks",
           "in_flight_tasks",
-          "live_workers"
+          "live_workers",
+          "capacity"
         ],
         "title": "WorkerPoolStatsResponse",
         "type": "object"
@@ -8240,6 +8253,11 @@
       "WorkerResponse": {
         "description": "Worker response.",
         "properties": {
+          "concurrency": {
+            "description": "Concurrent task capacity the worker reports.",
+            "title": "Concurrency",
+            "type": "integer"
+          },
           "created": {
             "description": "Creation time.",
             "format": "date-time",
@@ -8318,6 +8336,7 @@
           "name",
           "scope",
           "runtime",
+          "concurrency",
           "last_seen_at",
           "live",
           "metadata"

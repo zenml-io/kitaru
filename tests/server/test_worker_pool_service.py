@@ -144,6 +144,7 @@ async def test_get_worker_pool_stats_empty_pool(service: WorkerPoolService) -> N
         in_flight_tasks=0,
         oldest_pending_seconds=None,
         live_workers=0,
+        capacity=0,
     )
 
 
@@ -215,7 +216,7 @@ async def test_get_worker_pool_stats_oldest_pending_seconds(
 async def test_get_worker_pool_stats_live_workers_honors_cutoff(
     service: WorkerPoolService, worker_repository: FakeWorkerRepository
 ) -> None:
-    """Count only live workers joined to the pool."""
+    """Count live workers joined to the pool and sum their concurrency."""
     created = await service.create_worker_pool(
         name="pool-1", scope=WorkerScope(), actor=ACTOR
     )
@@ -228,6 +229,7 @@ async def test_get_worker_pool_stats_live_workers_honors_cutoff(
         ACTOR.account.id,
         name="live",
         pool_id=created.id,
+        concurrency=4,
         last_seen_at=now,
     )
     await create_worker(
@@ -235,6 +237,7 @@ async def test_get_worker_pool_stats_live_workers_honors_cutoff(
         ACTOR.account.id,
         name="stale",
         pool_id=created.id,
+        concurrency=8,
         last_seen_at=now - timedelta(hours=1),
     )
     await create_worker(
@@ -242,11 +245,13 @@ async def test_get_worker_pool_stats_live_workers_honors_cutoff(
         ACTOR.account.id,
         name="other-pool",
         pool_id=other_pool.id,
+        concurrency=2,
         last_seen_at=now,
     )
 
     _, stats = await service.get_worker_pool_stats(created.id, actor=ACTOR)
     assert stats.live_workers == 1
+    assert stats.capacity == 4
 
 
 async def test_get_worker_pool_stats_resolves_by_name(

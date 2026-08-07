@@ -15,7 +15,7 @@
 
 Revision ID: 002_worker_pools
 Revises: 001_initial
-Create Date: 2026-08-07 22:02:16.798826
+Create Date: 2026-08-08 00:29:36.586379
 
 """
 
@@ -51,6 +51,14 @@ def upgrade() -> None:
 
     with op.batch_alter_table("worker", schema=None) as batch_op:
         batch_op.add_column(sa.Column("pool_id", sa.Uuid(), nullable=True))
+        # Backfill existing rows through a server default, then drop it so
+        # the column matches the ORM declaration.
+        batch_op.add_column(
+            sa.Column(
+                "concurrency", sa.Integer(), nullable=False, server_default=sa.text("1")
+            )
+        )
+        batch_op.alter_column("concurrency", server_default=None)
         batch_op.create_index("ix_worker_pool_id", ["pool_id"], unique=False)
         batch_op.create_foreign_key(
             "fk_worker_pool_id", "worker_pool", ["pool_id"], ["id"]
@@ -62,6 +70,7 @@ def downgrade() -> None:
     with op.batch_alter_table("worker", schema=None) as batch_op:
         batch_op.drop_constraint("fk_worker_pool_id", type_="foreignkey")
         batch_op.drop_index("ix_worker_pool_id")
+        batch_op.drop_column("concurrency")
         batch_op.drop_column("pool_id")
 
     with op.batch_alter_table("worker_pool", schema=None) as batch_op:

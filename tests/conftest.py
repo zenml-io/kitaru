@@ -224,7 +224,7 @@ from kitaru.server.domain.task import (
     Task,
     TaskNotFound,
 )
-from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker import LiveWorkerStats, Worker, WorkerNotFound
 from kitaru.server.domain.worker_pool import (
     DuplicateWorkerPoolName,
     WorkerPool,
@@ -3074,6 +3074,7 @@ class FakeWorkerRepository:
                     worker.pool_id,
                     worker.scope,
                     worker.runtime,
+                    worker.concurrency,
                     worker.metadata,
                     worker.last_seen_at,
                 )
@@ -3151,20 +3152,25 @@ class FakeWorkerRepository:
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
 
-    async def count_live_by_pool(self, pool_id: uuid.UUID, cutoff: datetime) -> int:
-        """Count the pool's workers last seen at or after a cutoff.
+    async def count_live_by_pool(
+        self, pool_id: uuid.UUID, cutoff: datetime
+    ) -> LiveWorkerStats:
+        """Count the pool's live workers and sum their concurrency.
 
         Args:
             pool_id: Id of the worker pool.
             cutoff: Bound the last heartbeat must be at or after.
 
         Returns:
-            Count of live workers in the pool.
+            Live worker count and summed concurrency in the pool.
         """
-        return sum(
-            1
+        live = [
+            worker
             for worker in self._workers.values()
             if worker.pool_id == pool_id and worker.last_seen_at >= cutoff
+        ]
+        return LiveWorkerStats(
+            count=len(live), capacity=sum(worker.concurrency for worker in live)
         )
 
     async def delete(self, worker_id: uuid.UUID) -> None:
@@ -3219,6 +3225,7 @@ async def create_worker(
     pool_id: uuid.UUID | None = None,
     scope: WorkerScope | None = None,
     runtime: WorkerRuntime | None = None,
+    concurrency: int = 1,
     metadata: dict[str, str] | None = None,
     last_seen_at: datetime | None = None,
 ) -> Worker:
@@ -3231,6 +3238,7 @@ async def create_worker(
         pool_id: Pool the worker joined.
         scope: Claim scope the worker reports.
         runtime: Runtime the worker reports.
+        concurrency: Concurrent task capacity the worker reports.
         metadata: Arbitrary metadata.
         last_seen_at: Time of the worker's last heartbeat.
 
@@ -3244,6 +3252,7 @@ async def create_worker(
             pool_id=pool_id,
             scope=scope if scope is not None else WorkerScope(),
             runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
+            concurrency=concurrency,
             metadata=metadata if metadata is not None else {},
             last_seen_at=last_seen_at
             if last_seen_at is not None

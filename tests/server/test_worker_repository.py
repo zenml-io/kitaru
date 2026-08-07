@@ -138,6 +138,7 @@ def _worker(
     name: str = "worker-1",
     scope: WorkerScope | None = None,
     runtime: WorkerRuntime | None = None,
+    concurrency: int = 1,
     metadata: dict[str, str] | None = None,
     last_seen_at: datetime | None = None,
 ) -> Worker:
@@ -148,6 +149,7 @@ def _worker(
         name: Worker name.
         scope: Claim scope the worker reports.
         runtime: Runtime the worker reports.
+        concurrency: Concurrent task capacity the worker reports.
         metadata: Arbitrary metadata.
         last_seen_at: Time of the worker's last heartbeat.
 
@@ -159,6 +161,7 @@ def _worker(
         name=name,
         scope=scope if scope is not None else WorkerScope(),
         runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
+        concurrency=concurrency,
         metadata=metadata if metadata is not None else {},
         last_seen_at=last_seen_at if last_seen_at is not None else datetime.now(UTC),
     )
@@ -243,6 +246,14 @@ async def test_register_upsert_refreshes_scope_runtime_and_metadata(
     assert second.scope == WorkerScope(kinds=["importer"])
     assert second.runtime == WorkerRuntime(platform="docker", hostname="worker-a")
     assert second.metadata == {"region": "us"}
+
+
+async def test_register_upsert_refreshes_concurrency(setup: Setup) -> None:
+    """Re-registering replaces the reported concurrency."""
+    repository, owner_id = setup
+    await repository.register(_worker(owner_id, concurrency=2))
+    second = await repository.register(_worker(owner_id, concurrency=4))
+    assert second.concurrency == 4
 
 
 async def test_register_upsert_distinct_names_coexist(setup: Setup) -> None:

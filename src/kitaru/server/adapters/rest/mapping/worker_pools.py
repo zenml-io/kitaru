@@ -62,6 +62,7 @@ def worker_pool_stats_to_response(stats: WorkerPoolStats) -> WorkerPoolStatsResp
         in_flight_tasks=stats.in_flight_tasks,
         oldest_pending_seconds=stats.oldest_pending_seconds,
         live_workers=stats.live_workers,
+        capacity=stats.capacity,
     )
 
 

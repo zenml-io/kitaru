@@ -104,6 +104,9 @@ class WorkerCreateRequest(RequestModel):
     pool: str | None = Field(default=None, description="Pool the worker joins.")
     scope: WorkerScope = Field(description="Tasks this worker is willing to claim.")
     runtime: WorkerRuntime = Field(description="Runtime the worker reports.")
+    concurrency: int = Field(
+        default=1, ge=1, description="Concurrent task capacity the worker reports."
+    )
     metadata: dict[str, str] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
@@ -151,6 +154,7 @@ class WorkerResponse(OwnedResponseModel):
     )
     scope: WorkerScope = Field(description="Tasks this worker is willing to claim.")
     runtime: WorkerRuntime = Field(description="Runtime the worker reports.")
+    concurrency: int = Field(description="Concurrent task capacity the worker reports.")
     last_seen_at: datetime = Field(description="Time of the worker's last heartbeat.")
     live: bool = Field(description="Whether the worker is considered alive.")
     metadata: dict[str, str] = Field(description="Arbitrary metadata.")
