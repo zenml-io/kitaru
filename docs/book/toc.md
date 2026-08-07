@@ -36,6 +36,7 @@
 * [Import Sessions](guides/importing-sessions.md)
 * [Replay and Overrides](guides/replay-and-overrides.md)
 * [Execution Management](guides/execution-management.md)
+* [Deterministic Evaluations](guides/deterministic-evaluations.md)
 * [Configuration](guides/configuration.md)
 * [Authentication](guides/authentication.md)
 * [Projects](guides/projects.md)
