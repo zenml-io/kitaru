@@ -18,8 +18,6 @@ redirects:
   guides/claude-agent-sdk-adapter: adapters/README.md
   guides/gemini-interactions-adapter: adapters/README.md
   guides/langgraph-adapter: adapters/README.md
-  concepts: concepts/README.md
-  adapters: adapters/README.md
   stacks: deploy/README.md
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md

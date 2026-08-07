@@ -105,7 +105,8 @@ async for evaluation in client.evaluations.iter(
 ```
 
 Numbers average, booleans count into pass rates, categorical labels diff as
-transitions, and free text gets read. Cost and token totals ride on each
+transitions, and free text gets read. Cost and token totals
+([tracked per model call](../guides/llm-calls.md)) ride on each
 result session, so "the cheaper model held on 18 of 20 tickets and cut cost
 41%" is two loops over stored rows. The end-to-end workflow — including
 gating CI on a frozen cohort version — is in

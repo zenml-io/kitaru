@@ -143,7 +143,9 @@ A replay settles `failed` when its pipeline can't produce the comparison:
 the agent process exited nonzero, a tool call missed under
 `on_miss="fail"`, or an evaluator crashed. The job's tasks carry the
 error and a log tail — `kitaru job get <job-id>` and
-`kitaru job watch` surface them. The common causes:
+`kitaru job watch` surface them, and
+[Troubleshooting](../getting-started/troubleshooting.md) walks the
+diagnosis. The common causes:
 
 * **No run spec** — the agent version must carry a run command; registering
   with `--command` is what makes a session replayable.

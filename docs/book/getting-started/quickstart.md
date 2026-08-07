@@ -16,7 +16,7 @@ You need a running server and a connection — two commands, covered in
 [Installation](installation.md). Already collecting traces in Langfuse or
 elsewhere? You can skip wrapping entirely and start from
 [Import your traces](import-your-traces.md) — everything from
-[step 4](#write-the-evaluator) on works the same.
+[step 4](#4-write-the-evaluator) on works the same.
 
 ## 1. Register the agent
 
@@ -261,4 +261,4 @@ and it's the loop that keeps a fixed failure fixed.
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Your existing Langfuse history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Your existing Langfuse history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Examples</strong></td><td>The canonical returns agent, end to end.</td><td><a href="examples.md">examples.md</a></td></tr></tbody></table>

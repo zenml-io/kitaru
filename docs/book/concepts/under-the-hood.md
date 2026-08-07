@@ -1,6 +1,6 @@
 ---
 description: The machinery behind the loop — a FastAPI server on Postgres, workers claiming tasks, and where Kitaru sits beside your observability stack.
-icon: gears
+icon: sitemap
 ---
 
 # Under the Hood
