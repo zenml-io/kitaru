@@ -67,14 +67,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         result["loaded"] = True
         if args.kind == "importer" and args.payload is not None:
             from kitaru.api_models.v1.imports import ImportFailure
-            from kitaru.task.importer import ParsedSession, call_parser
+            from kitaru.task.importer import ImportedSession, call_parser
 
             params = json.loads(args.params)
             sessions = 0
             failures = 0
             items = 0
             for item in call_parser(callable_, args.payload.read_bytes(), params):
-                sessions += isinstance(item, ParsedSession)
+                sessions += isinstance(item, ImportedSession)
                 failures += isinstance(item, ImportFailure)
                 items += 1
             result.update(

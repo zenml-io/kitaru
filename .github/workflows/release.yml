@@ -122,6 +122,14 @@ jobs:
         with:
           python-version: '3.12'
           enable-cache: false
+      - name: Validate default plugin packages are published
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          while read -r requirement; do
+            package=${requirement%%==*}
+            version=${requirement#*==}
+            curl -fsS "https://pypi.org/pypi/$package/$version/json" >/dev/null
+          done < plugins/default-requirements.txt
 
       # --- Bump version (dispatch only, skip in recovery mode) ---
       # In recovery mode (tag already exists) we checked out the tag itself,
@@ -265,6 +273,11 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+      - name: Build and test candidate plugin wheels
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --kitaru-wheel dist
+          --candidate-dir plugins/candidate-wheels
       - name: Test clean base and MCP wheel installations
         run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
       - name: List build artifacts
@@ -523,12 +536,32 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Validate release Dockerfiles (dry run)
+      - name: Build candidate Docker images from local wheels (dry run)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
         run: |
-          docker build --check -f docker/release-client.Dockerfile .
-          docker build --check -f docker/release-server.Dockerfile .
-          docker build --check -f docker/release-worker.Dockerfile .
+          docker build \
+            -f plugins/candidate.Dockerfile \
+            --target client \
+            --build-arg KITARU_VERSION="$VERSION" \
+            -t kitaru-candidate-client .
+          docker build \
+            -f plugins/candidate.Dockerfile \
+            --target server \
+            --build-arg KITARU_VERSION="$VERSION" \
+            --build-arg "KITARU_EXTRAS=--extra server --extra otel" \
+            -t kitaru-candidate-server .
+          docker build \
+            -f plugins/candidate.Dockerfile \
+            --target worker \
+            --build-arg KITARU_VERSION="$VERSION" \
+            --build-arg "KITARU_EXTRAS=--extra worker" \
+            -t kitaru-candidate-worker .
+          docker run --rm kitaru-candidate-client \
+            python -c "import kitaru"
+          docker run --rm kitaru-candidate-server \
+            python -c "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; assert DEFAULT_PLUGIN_DEFINITIONS"
+          docker run --rm kitaru-candidate-worker \
+            python -c "import kitaru"
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -641,10 +674,9 @@ jobs:
             ls dist/
             echo ""
             echo "### Docker image"
-            echo "Statically validated: docker/release-client.Dockerfile"
-            echo "Statically validated: docker/release-server.Dockerfile"
-            echo "Statically validated: docker/release-worker.Dockerfile"
-            echo "Images require the published kitaru==$VERSION package and were not built."
+            echo "Built from local wheels: kitaru-candidate-client"
+            echo "Built from local wheels: kitaru-candidate-server"
+            echo "Built from local wheels: kitaru-candidate-worker"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""

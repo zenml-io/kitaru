@@ -33,6 +33,7 @@ from kitaru.server.domain.session_node import SessionNode
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
 
 PAYLOAD_COLUMNS = (
+    SessionNodeORM.reasoning,
     SessionNodeORM.inputs,
     SessionNodeORM.outputs,
     SessionNodeORM.attributes,
@@ -52,8 +53,8 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
-            include_payloads: Whether to read the inputs, outputs, and
-                attributes.
+            include_payloads: Whether to read reasoning, inputs, outputs,
+                and attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
@@ -145,8 +146,8 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
 
         Args:
             session_id: Id of the owning session.
-            include_payloads: Whether to read the inputs, outputs, and
-                attributes.
+            include_payloads: Whether to read reasoning, inputs, outputs,
+                and attributes.
 
         Returns:
             Every node of the session.

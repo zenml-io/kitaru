@@ -219,6 +219,57 @@ jobs:
         run: |
           WHEEL=$(ls dist/*.whl)
           uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+  plugin-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - run: uv sync --project plugins --frozen --all-packages
+      - run: >-
+          uv run --project plugins ruff format
+          --config plugins/pyproject.toml --check plugins
+      - run: >-
+          uv run --project plugins ruff check
+          --config plugins/pyproject.toml plugins
+      - run: uv run --project plugins ty check --project plugins
+      - run: >-
+          uv run --project plugins pytest -q -c plugins/pyproject.toml
+          plugins/tests
+          tests/server/test_default_plugins.py
+      - run: >-
+          uv run --project plugins python -c
+          "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS;
+          assert DEFAULT_PLUGIN_DEFINITIONS"
+  plugin-package:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - braintrust-importer
+          - evaluator
+          - jsonl-importer
+          - langfuse-importer
+          - langsmith-importer
+          - opentelemetry-importer
+    name: plugin package (${{ matrix.package }})
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - name: Test installed package artifact
+        run: >-
+          uv run --no-project python scripts/smoke_plugin_artifacts.py
+          --package "plugins/packages/${{ matrix.package }}"
   mcp-wheel-contract:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

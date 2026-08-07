@@ -31,9 +31,9 @@ async def test_default_plugins_are_registered_at_startup(
         name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
         description="Test evaluator.",
         provider=None,
-        entrypoint="evaluate",
-        content=b"def evaluate(): ...",
-        version=1,
+        entrypoint="package.evaluator:evaluate",
+        requirement="kitaru-evaluator==1.0.0",
+        display_version="1.0.0",
     )
     monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", (definition,))
 
