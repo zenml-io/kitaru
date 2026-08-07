@@ -53,9 +53,6 @@ ARG PACKAGE_SOURCE
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
-COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
-COPY --chown=$USERNAME:$USER_GID \
-  plugins/default-requirements.txt ./plugins/default-requirements.txt
 COPY --chown=$USERNAME:$USER_GID docker/candidate-wheels ./candidate-wheels
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -68,14 +65,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 USER $USERNAME
 
 # Install the locked server and OpenTelemetry dependencies, then install the
-# matching Kitaru and default-plugin wheels without resolving their dependencies.
-# Keep a snapshot of the resulting environment for external inspection.
+# matching Kitaru wheel without resolving its dependencies. Keep a snapshot
+# of the resulting environment for external inspection.
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
   uv sync \
     --locked \
     --no-dev \
-    --no-install-workspace \
+    --no-install-project \
     --extra server \
     --extra otel && \
   if [ "$PACKAGE_SOURCE" = candidates ]; then \
@@ -84,23 +81,13 @@ RUN test -n "$KITARU_VERSION" && \
       --no-index \
       --find-links candidate-wheels \
       --only-binary=:all: \
-      "kitaru==$KITARU_VERSION" && \
-    uv pip install \
-      --no-deps \
-      --no-index \
-      --find-links candidate-wheels \
-      --only-binary=:all: \
-      --requirements plugins/default-requirements.txt; \
+      "kitaru==$KITARU_VERSION"; \
   else \
     test "$PACKAGE_SOURCE" = pypi && \
     uv pip install \
       --no-deps \
       --only-binary=:all: \
-      "kitaru==$KITARU_VERSION" && \
-    uv pip install \
-      --no-deps \
-      --only-binary=:all: \
-      --requirements plugins/default-requirements.txt; \
+      "kitaru==$KITARU_VERSION"; \
   fi && \
   uv pip check && \
   python -c \

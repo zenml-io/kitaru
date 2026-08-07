@@ -1,6 +1,6 @@
 # Plugin Guidelines
 
-Read `plugins/DEVELOPMENT.md` before you change package metadata, catalogs, default pins, artifact tests, or plugin release workflows.
+Read `plugins/DEVELOPMENT.md` before you change package metadata, default definitions, pins, artifact tests, or plugin release workflows.
 
 ## Package boundaries
 
@@ -8,20 +8,24 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, catalogs, defa
 - Release one importer distribution when only that provider changes.
 - Release `kitaru-evaluator` when any built-in evaluator changes.
 - Do not bump unrelated plugin distributions.
-- Keep each `kitaru.default_plugins` catalog aligned with its owning wheel.
+- Keep the definitions in `src/kitaru/server/api/bootstrap.py` aligned with their owning wheels.
 
 ## Required updates
 
-- Update the selected package version with `uv version --package DISTRIBUTION VERSION --no-sync`.
+- Update the selected package version with `uv version --project plugins --package DISTRIBUTION VERSION --no-sync`.
 - Update the same distribution pin in `plugins/default-requirements.txt`.
-- Commit the resulting `uv.lock` change.
+- Update the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+- Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
+- Commit the resulting `plugins/uv.lock` change.
 - Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.
 
 ## Required tests
 
 - Run the focused plugin tests for changed behavior.
-- Run `uv run pytest -q plugins/tests tests/server/test_default_plugins.py`.
-- Run `just plugin-artifact-smoke` for catalog, package metadata, pin, or release-path changes.
+- Run `uv run --project plugins ruff format --config plugins/pyproject.toml --check plugins` and `uv run --project plugins ruff check --config plugins/pyproject.toml plugins`.
+- Run `uv run --project plugins ty check --project plugins`.
+- Run `uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py`.
+- Run `just plugin-artifact-smoke` for default definitions, package metadata, pins, or release-path changes.
 - Use `plugins/docker-compose.candidate.yml` when a change needs a release-image rehearsal.
 
 ## Release safety

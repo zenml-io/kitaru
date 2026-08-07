@@ -6,7 +6,9 @@ This guide explains how to test and publish the plugin distributions in `plugins
 
 Each importer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution.
 
-Each distribution exposes a catalog through the `kitaru.default_plugins` entry-point group. Server startup reads these catalogs and stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint.
+The default catalog lives in `src/kitaru/server/api/bootstrap.py`. Server startup stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint. The server does not install or import the plugin package.
+
+The root `pyproject.toml` and `uv.lock` manage Kitaru. `plugins/pyproject.toml` and `plugins/uv.lock` form a separate workspace for the plugin distributions.
 
 Registration stores package metadata. It does not upload wheel bytes. A worker resolves the exact requirement when it executes a plugin task.
 
@@ -19,7 +21,8 @@ Registration stores package metadata. It does not upload wheel bytes. A worker r
 ```bash
 cd /path/to/kitaru
 git branch --show-current
-uv sync --frozen --all-packages --extra cli --extra worker --extra server --extra otel
+uv sync --frozen --extra cli --extra worker --extra server --extra otel
+uv sync --project plugins --frozen --all-packages
 ```
 
 ## Run the artifact test
@@ -43,8 +46,8 @@ The smoke test performs these actions:
 2. Build each selected plugin wheel.
 3. Install the wheels in a clean environment.
 4. Run `uv pip check`.
-5. Load each catalog and package entrypoint.
-6. Register every discovered definition twice.
+5. Load each configured package entrypoint.
+6. Register every selected default definition twice.
 7. Verify registration idempotency.
 
 ## Build candidate wheels
@@ -76,13 +79,13 @@ docker build \
   .
 ```
 
-The Dockerfile installs Kitaru and the default plugin requirements from `docker/candidate-wheels`. It does not use PyPI for those packages.
+The Dockerfile installs Kitaru from `docker/candidate-wheels`. Plugin wheels remain separate and are resolved by workers when tasks execute.
 
-Confirm catalog discovery inside the image:
+Confirm the default catalog inside the image:
 
 ```bash
 docker run --rm kitaru-plugin-e2e:local \
-  python -c 'from kitaru.server.api.bootstrap import _load_default_plugin_definitions; definitions = _load_default_plugin_definitions(); print(f"definitions={len(definitions)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in definitions]'
+  python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
 The current catalog contains five importers and thirteen evaluators.
@@ -234,32 +237,37 @@ The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 1. Update the selected workspace package version and lockfile.
 
 ```bash
-uv version --package kitaru-langfuse-importer 0.2.0 --no-sync
+uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
 2. Change the matching line in `plugins/default-requirements.txt` to `kitaru-langfuse-importer==0.2.0`.
-3. Add or update focused tests and catalog definitions.
-4. Verify that no unrelated plugin package version changed.
+3. Change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+4. Add or update focused tests.
+5. Verify that no unrelated plugin package version changed.
 
 ```bash
 git diff -- \
   plugins/packages/langfuse-importer/pyproject.toml \
   plugins/default-requirements.txt \
-  uv.lock
+  plugins/uv.lock \
+  src/kitaru/server/api/bootstrap.py
 ```
 
-5. Run the release gates.
+6. Run the release gates.
 
 ```bash
-uv sync --frozen --all-packages --extra server
-uv run pytest -q plugins/tests tests/server/test_default_plugins.py
+uv sync --project plugins --frozen --all-packages
+uv run --project plugins ruff format --config plugins/pyproject.toml --check plugins
+uv run --project plugins ruff check --config plugins/pyproject.toml plugins
+uv run --project plugins ty check --project plugins
+uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py
 uv run --no-sync python scripts/smoke_plugin_artifacts.py \
   --package plugins/packages/langfuse-importer
 just plugin-artifact-smoke
 ```
 
-6. Run the candidate server procedure when the change affects catalogs, package installation, registration, or task execution.
-7. Commit the version, pin, lockfile, implementation, and tests in the same pull request.
+7. Run the candidate server procedure when the change affects default definitions, package installation, registration, or task execution.
+8. Commit the version, pins, plugin lockfile, implementation, and tests in the same pull request.
 
 ## Configure the first PyPI release
 
@@ -305,7 +313,7 @@ Select the new run ID and watch it:
 gh run watch RUN_ID --repo zenml-io/kitaru --exit-status
 ```
 
-Every manual dispatch is a dry-run. It checks out the selected branch SHA, validates the requested version, tests catalog integration, installs the selected wheel in a clean environment, and builds the distribution. It does not publish or create a tag.
+Every manual dispatch is a dry-run. It checks out the selected branch SHA, validates the requested version, tests default-definition integration, installs the selected wheel in a clean environment, and builds the distribution. It does not publish or create a tag.
 
 ## Publish a plugin
 

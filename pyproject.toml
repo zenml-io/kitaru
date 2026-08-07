@@ -99,12 +99,9 @@ packages = ["src/kitaru"]
 [tool.uv]
 exclude-newer = "3 days"
 
-[tool.uv.workspace]
-members = ["plugins/packages/*"]
-
 [dependency-groups]
 dev = [
-    "pydantic-ai-slim[openai]>=2.14.1,<3",
+    "pydantic-ai-slim[openai]>=2.14.1,<2.23",
     "ruff>=0.11",
     "ty>=0.0.1a7",
     "yamlfix",
@@ -115,12 +112,13 @@ dev = [
 
 [tool.ruff]
 target-version = "py311"
-src = ["src", "scripts", "tests", "plugins"]
+src = ["src", "scripts", "tests"]
 line-length = 88
 exclude = [
     ".git",
     ".ruff_cache",
     ".venv",
+    "plugins",
 ]
 
 [tool.ruff.lint]
@@ -143,28 +141,22 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "adapters",
     "kitaru",
-    "kitaru_evaluator",
-    "kitaru_braintrust_importer",
-    "kitaru_jsonl_importer",
-    "kitaru_langfuse_importer",
-    "kitaru_langsmith_importer",
-    "kitaru_opentelemetry_importer",
     "plugins",
 ]
 
 [tool.ty.src]
+include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
 # TODO: Re-enable once the examples are migrated to the v2 SDK.
 exclude = ["examples/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
-root = ["src", "scripts", "tests", "plugins"]
+root = ["src", "scripts", "tests"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "plugins/tests"]
-pythonpath = [".", "plugins"]
+testpaths = ["tests"]
+pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 

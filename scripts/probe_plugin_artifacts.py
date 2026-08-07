@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Validate installed default-plugin catalogs and registration."""
+"""Validate installed default-plugin entrypoints and registration."""
 
 import argparse
 import asyncio
 import uuid
 from typing import cast
 
+from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
-    _load_default_plugin_definitions,
+    DEFAULT_PLUGIN_DEFINITIONS,
     register_default_plugins,
 )
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
@@ -78,13 +79,15 @@ class _MemoryPluginRepository:
 
 
 async def _probe(expected_requirements: set[str]) -> None:
-    definitions = _load_default_plugin_definitions()
-    if not definitions:
-        raise RuntimeError("No default plugin definitions were discovered")
+    definitions = tuple(
+        definition
+        for definition in DEFAULT_PLUGIN_DEFINITIONS
+        if definition.requirement in expected_requirements
+    )
     actual_requirements = {definition.requirement for definition in definitions}
     if actual_requirements != expected_requirements:
         raise RuntimeError(
-            "Discovered requirements differ from installed artifacts: "
+            "Default requirements differ from installed artifacts: "
             f"expected={sorted(expected_requirements)!r}, "
             f"actual={sorted(actual_requirements)!r}"
         )
@@ -97,8 +100,13 @@ async def _probe(expected_requirements: set[str]) -> None:
 
     repository = _MemoryPluginRepository()
     plugin_repository = cast(PluginRepository, repository)
-    await register_default_plugins(plugin_repository)
-    await register_default_plugins(plugin_repository)
+    original_definitions = bootstrap.DEFAULT_PLUGIN_DEFINITIONS
+    bootstrap.DEFAULT_PLUGIN_DEFINITIONS = definitions
+    try:
+        await register_default_plugins(plugin_repository)
+        await register_default_plugins(plugin_repository)
+    finally:
+        bootstrap.DEFAULT_PLUGIN_DEFINITIONS = original_definitions
     if len(repository.plugins) != len(definitions):
         raise RuntimeError("Default registration did not create one row per definition")
     if len(repository.versions) != len(definitions):
@@ -123,7 +131,7 @@ async def _probe(expected_requirements: set[str]) -> None:
 
 
 def main() -> int:
-    """Validate installed catalogs and their stored plugin sources."""
+    """Validate installed entrypoints and their stored plugin sources."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--requirement",

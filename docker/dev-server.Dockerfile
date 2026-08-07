@@ -68,7 +68,6 @@ ARG INSTALL_DEBUG_TOOLS
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
-COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -84,7 +83,7 @@ USER $USERNAME
 RUN uv sync \
   --locked \
   --no-dev \
-  --no-install-workspace \
+  --no-install-project \
   --extra server \
   --extra otel
 
@@ -109,7 +108,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Keep the project editable so a source bind mount is immediately visible to
 # the reload process while retaining installed package metadata.
-RUN uv sync --locked --all-packages --no-dev --extra server --extra otel && \
+RUN uv sync --locked --no-dev --extra server --extra otel && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \
@@ -145,7 +144,6 @@ COPY --chown=$USERNAME:$USER_GID src ./src
 # Install the repository project non-editably for the production-style image.
 RUN uv sync \
   --locked \
-  --all-packages \
   --no-dev \
   --no-editable \
   --extra server \

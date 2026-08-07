@@ -15,14 +15,14 @@
 
 from pathlib import Path
 
-from kitaru.server.api.bootstrap import _load_default_plugin_definitions
+from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS
 from kitaru.source_refs import parse_source_ref
 from kitaru.task.plugins import load_source_ref
 
 
 def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     """Expose one callable package entrypoint for each reserved plugin name."""
-    definitions = _load_default_plugin_definitions()
+    definitions = DEFAULT_PLUGIN_DEFINITIONS
     names = [definition.name for definition in definitions]
     entrypoints = [definition.entrypoint for definition in definitions]
     requirements = [definition.requirement for definition in definitions]

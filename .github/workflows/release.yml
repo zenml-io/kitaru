@@ -560,7 +560,7 @@ jobs:
           docker run --rm kitaru-release-dry-run \
             python -c "import kitaru"
           docker run --rm kitaru-server-release-dry-run \
-            python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
+            python -c "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; assert DEFAULT_PLUGIN_DEFINITIONS"
           docker run --rm kitaru-worker-release-dry-run \
             python -c "import kitaru"
       - name: Build and publish public client Docker image

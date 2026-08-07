@@ -15,7 +15,6 @@
 
 import logging
 import uuid
-from importlib.metadata import entry_points
 
 from kitaru.base import FrozenModel
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
@@ -36,8 +35,6 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     PluginNotFound,
 )
-
-_DEFAULT_PLUGIN_ENTRY_POINT_GROUP = "kitaru.default_plugins"
 
 logger = logging.getLogger(__name__)
 
@@ -93,45 +90,170 @@ class DefaultPluginDefinition(FrozenModel):
     display_version: str
 
 
-def _load_default_plugin_definitions() -> tuple[DefaultPluginDefinition, ...]:
-    """Load plugin definitions from installed catalog packages."""
-    definitions: list[DefaultPluginDefinition] = []
-    names: set[tuple[PluginKind, str]] = set()
-    for catalog_entrypoint in entry_points(group=_DEFAULT_PLUGIN_ENTRY_POINT_GROUP):
-        distribution = catalog_entrypoint.dist
-        if distribution is None:
-            raise RuntimeError(
-                f"Plugin catalog '{catalog_entrypoint.name}' has no distribution"
-            )
-        distribution_name = distribution.metadata["Name"]
-        display_version = distribution.version
-        requirement = f"{distribution_name}=={display_version}"
-        catalog = catalog_entrypoint.load()
-        if not callable(catalog):
-            raise RuntimeError(
-                f"Plugin catalog '{catalog_entrypoint.name}' is not callable"
-            )
-        values = catalog()
-        if not isinstance(values, list | tuple):
-            raise RuntimeError(
-                f"Plugin catalog '{catalog_entrypoint.name}' must return a list"
-            )
-        for value in values:
-            definition = DefaultPluginDefinition.model_validate(
-                {
-                    **value,
-                    "requirement": requirement,
-                    "display_version": display_version,
-                }
-            )
-            identity = (definition.kind, definition.name)
-            if identity in names:
-                raise RuntimeError(
-                    f"Default plugin '{definition.name}' is defined more than once"
-                )
-            names.add(identity)
-            definitions.append(definition)
-    return tuple(definitions)
+DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name="kitaru/braintrust",
+        description="Import Braintrust project-log and UI exports.",
+        provider="braintrust",
+        entrypoint="kitaru_braintrust_importer.importer:parse",
+        requirement="kitaru-braintrust-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name="kitaru/kitaru-jsonl",
+        description="Import sessions matching the Kitaru JSONL contract.",
+        provider="kitaru-jsonl",
+        entrypoint="kitaru_jsonl_importer.importer:parse",
+        requirement="kitaru-jsonl-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name="kitaru/langfuse",
+        description="Import Langfuse JSON and JSONL trace exports.",
+        provider="langfuse",
+        entrypoint="kitaru_langfuse_importer.importer:parse",
+        requirement="kitaru-langfuse-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name="kitaru/langsmith",
+        description="Import LangSmith run-query and bulk-export records.",
+        provider="langsmith",
+        entrypoint="kitaru_langsmith_importer.importer:parse",
+        requirement="kitaru-langsmith-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name="kitaru/opentelemetry",
+        description="Import OpenTelemetry, Arize, and Logfire JSON exports.",
+        provider="opentelemetry",
+        entrypoint="kitaru_opentelemetry_importer.importer:parse",
+        requirement="kitaru-opentelemetry-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/cost",
+        description="Report the total recorded session cost.",
+        provider=None,
+        entrypoint="kitaru_evaluator.basic:cost",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/latency",
+        description="Measure session wall-clock duration.",
+        provider=None,
+        entrypoint="kitaru_evaluator.basic:latency",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/tool-call-patterns",
+        description="Count repeated calls to the same tool.",
+        provider=None,
+        entrypoint="kitaru_evaluator.basic:tool_call_patterns",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/session-diagnostics",
+        description="Check session completeness and internal consistency.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:session_diagnostics",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/output-contract",
+        description="Check output against exact and structural rules.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:output_contract",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/trajectory-signals",
+        description="Report repetition, failed retries, and short tool cycles.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:trajectory_signals",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/tool-health",
+        description="Report recorded tool failures and result anomalies.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:tool_health",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/timing-profile",
+        description="Report recorded wall-clock and node timing.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:timing_profile",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/resource-budget",
+        description="Apply configured ceilings to recorded resource use.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:resource_budget",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/tool-policy",
+        description="Apply exact tool requirements, prohibitions, and limits.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:tool_policy",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/llm-call-signals",
+        description="Report LLM failures, repetition, and metadata coverage.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:llm_call_signals",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/model-policy",
+        description="Apply exact model and provider rules.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:model_policy",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/workflow-conformance",
+        description="Compare recorded tool order with a configured workflow.",
+        provider=None,
+        entrypoint="kitaru_evaluator.deterministic:workflow_conformance",
+        requirement="kitaru-evaluator==0.1.0",
+        display_version="0.1.0",
+    ),
+)
 
 
 async def _get_or_create_plugin(
@@ -174,7 +296,7 @@ async def register_default_plugins(repository: PluginRepository) -> None:
     Args:
         repository: Plugin repository.
     """
-    for definition in _load_default_plugin_definitions():
+    for definition in DEFAULT_PLUGIN_DEFINITIONS:
         plugin = await _get_or_create_plugin(repository, definition)
         source = PackagePluginSource(
             requirement=definition.requirement,

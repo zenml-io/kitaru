@@ -53,7 +53,6 @@ ARG PACKAGE_SOURCE
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
-COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
 COPY --chown=$USERNAME:$USER_GID docker/candidate-wheels ./candidate-wheels
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -70,7 +69,7 @@ USER $USERNAME
 # the resulting environment for inspection outside the container.
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
-  uv sync --locked --no-dev --no-install-workspace --extra worker && \
+  uv sync --locked --no-dev --no-install-project --extra worker && \
   if [ "$PACKAGE_SOURCE" = candidates ]; then \
     uv pip install \
       --no-deps \

@@ -2,7 +2,7 @@
 
 Each importer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
 
-Every distribution exposes one catalog through the `kitaru.default_plugins` entry-point group. At startup, Kitaru records the owning distribution and exact version as the package requirement for that plugin.
+Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At startup, the server records each exact distribution requirement and `module:callable` entrypoint without installing or importing the plugin package.
 
 ## Packages
 
@@ -27,4 +27,4 @@ Run the main package gate from the repository root:
 just plugin-artifact-smoke
 ```
 
-`default-requirements.txt` pins the plugin versions installed in Kitaru server images. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
+`default-requirements.txt` mirrors the exact package versions in Kitaru's default catalog. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.

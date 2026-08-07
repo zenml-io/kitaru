@@ -33,9 +33,8 @@ VARIANT = "baseline"
 
 def generate_trace(scenario_id: str = SCENARIO, variant_name: str = VARIANT) -> str:
     """Run the agent once with the Langfuse callback; return the trace id."""
-    from langfuse.langchain import CallbackHandler
-
     from langfuse import get_client
+    from langfuse.langchain import CallbackHandler
 
     scenario = {s.scenario_id: s for s in load_scenarios()}[scenario_id]
     variant = load_variant(variant_name)

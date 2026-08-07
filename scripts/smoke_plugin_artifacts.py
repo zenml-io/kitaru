@@ -218,7 +218,7 @@ def _smoke_candidate_wheels(
     requirements: list[str],
     environment: dict[str, str],
 ) -> None:
-    """Install candidate wheels and probe their catalogs in isolation."""
+    """Install candidate wheels and probe their configured entrypoints."""
     root.mkdir(parents=True, exist_ok=True)
     environment_path = root / "venv"
     _expect_success(
